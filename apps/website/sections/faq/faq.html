@@ -9,93 +9,244 @@
       <p class="section-head__index" aria-hidden="true">04 / 04</p>
       <p class="eyebrow">Perguntas frequentes</p>
       <h2 id="faq-titulo">O que mais perguntam</h2>
+      <p class="section-head__intro">
+        Hospedagem, validação em hardware, compatibilidade e licença. Cada
+        resposta vem dos documentos do repositório e aponta para eles.
+      </p>
     </header>
 
-    <div class="faq__list">
-      <details>
-        <summary>Já posso usar em produção?</summary>
-        <p>
-          Não. A Fase 0 está em andamento e a aceitação integrada ainda não foi
-          concluída. O projeto já tem autenticação, pareamento, inventário,
-          visão da farm, câmera e pausa assinada, atrás de flags e configuração
-          explícita, mas nada disso está comprovado em hardware físico.
-        </p>
-      </details>
-      <details>
-        <summary>Qual é a diferença entre simulador e hardware físico?</summary>
-        <p>
-          Os simuladores Klipper/Moonraker rodam em loopback e nunca se conectam
-          a impressoras físicas. “Simulada” em uma capacidade quer dizer que ela
-          foi exercitada nesses simuladores e em testes unitários. A aceitação
-          em hardware físico vem depois e é feita pelo proprietário; ainda não
-          aconteceu.
-        </p>
-      </details>
-      <details>
-        <summary>Funciona com a minha impressora?</summary>
-        <p>
-          O primeiro alvo é Klipper/Moonraker, com Spoolman para materiais. O
-          catálogo de compatibilidade cobre as famílias Klipper/Moonraker,
-          Creality, Anycubic e Bambu e marca cada capacidade como simulada,
-          documentada ou não comprovada. Nenhuma delas está comprovada em
-          hardware físico. Consulte o
-          <a href="{{repo}}/tree/main/docs/compatibility"
-            >catálogo de compatibilidade</a
-          >.
-        </p>
-      </details>
-      <details>
-        <summary>O que é o Connector?</summary>
-        <p>
-          É o aplicativo que conecta a farm às impressoras, instalado na sua
-          rede local. Ele valida identidade, assinatura, escopo, expiração e
-          revogação, e aplica as regras de segurança dos comandos, mesmo quando
-          o servidor está indisponível.
-        </p>
-      </details>
-      <details>
-        <summary>Posso comandar impressoras pela API?</summary>
-        <p>
-          Somente com um escopo concedido pelo proprietário, por envelopes
-          assinados pelo emissor e verificados pelo Connector, que recusa
-          comandos inseguros ou não autorizados e informa o motivo. Comandos do
-          navegador usam apenas WebRTC. Nenhum comando incerto é repetido
-          automaticamente, e os testes automatizados nunca comandam impressoras
-          físicas.
-        </p>
-      </details>
-      <details>
-        <summary>E a integração KobraLink com a Anycubic Kobra X?</summary>
-        <p>
-          Ela exibe telemetria somente leitura de impressoras Kobra X dentro da
-          interface do OpenFarm. O serviço KobraLink é instalado e operado
-          separadamente. Câmera e controles não fazem parte dessa integração.
-          Veja o
-          <a href="{{repo}}/blob/main/docs/KOBRALINK-SELF-HOSTING.md"
-            >guia de hospedagem do KobraLink</a
-          >.
-        </p>
-      </details>
-      <details>
-        <summary>Qual é a licença?</summary>
-        <p>
-          O código original usa a
-          <a href="{{repo}}/blob/main/LICENSE">licença MIT</a>. Dependências e
-          fontes de terceiros mantêm suas próprias licenças e avisos, listados
-          em <a href="{{repo}}/blob/main/THIRD_PARTY.md">THIRD_PARTY.md</a>.
-        </p>
-      </details>
-      <details>
-        <summary>Como contribuo?</summary>
-        <p>
-          Consulte as <a href="{{repo}}/issues">issues</a> e o
-          <a href="{{repo}}/blob/main/docs/PHASE-0.md">registro de aceitação</a
-          >. Relatos com passos para reproduzir, melhorias de acessibilidade e
-          testes em simuladores ajudam. Trabalhe em uma branch, execute
-          <code>npm run check:all</code> e abra um draft PR sem segredos nem
-          configuração de hospedagem.
-        </p>
-      </details>
+    <p class="callout faq__status">
+      <strong>Em desenvolvimento.</strong> A Fase 0 está em andamento e nada
+      está comprovado em hardware físico. Acompanhe o
+      <a href="{{repo}}/blob/main/docs/PHASE-0.md">registro de aceitação</a>.
+    </p>
+
+    <div class="faq__group">
+      <h3 class="faq__group-title" id="faq-estado-titulo">
+        Estado e validação
+      </h3>
+      <div class="faq__list" role="group" aria-labelledby="faq-estado-titulo">
+        <details>
+          <summary>Já posso usar em produção?</summary>
+          <p>
+            Não. A Fase 0 está em andamento e a aceitação integrada ainda não
+            foi concluída. O projeto já tem autenticação, pareamento,
+            inventário, visão da farm, câmera e pausa assinada, atrás de flags e
+            configuração explícita, mas nada disso está comprovado em hardware
+            físico. Não é uma versão pronta para operar uma farm em produção.
+          </p>
+        </details>
+        <details>
+          <summary>
+            Qual é a diferença entre simulador e hardware físico?
+          </summary>
+          <p>
+            Os simuladores Klipper/Moonraker rodam em loopback e nunca se
+            conectam a impressoras físicas. “Simulada” em uma capacidade quer
+            dizer que ela foi exercitada nesses simuladores e em testes
+            unitários. A aceitação em hardware físico vem depois da aceitação em
+            simuladores, é feita pelo proprietário e ainda não aconteceu.
+          </p>
+        </details>
+        <details>
+          <summary>O que já foi validado até agora?</summary>
+          <p>
+            Cada checkpoint do repositório comprova só o comportamento e a
+            revisão que ele nomeia. Há evidência de testes locais, de fixtures e
+            de simuladores, sempre separadas. Na execução combinada registrada
+            para o candidato <code>1e3a029</code>, linhas de navegador para
+            status e pausa falharam e fixtures opcionais de câmera e simulador
+            não estavam disponíveis, e por isso a Fase 0 continua incompleta. O
+            <a href="{{repo}}/blob/main/docs/PHASE-0.md">registro da Fase 0</a>
+            lista o que cada execução comprova e o que falta.
+          </p>
+        </details>
+      </div>
+    </div>
+
+    <div class="faq__group">
+      <h3 class="faq__group-title" id="faq-hospedagem-titulo">Hospedagem</h3>
+      <div
+        class="faq__list"
+        role="group"
+        aria-labelledby="faq-hospedagem-titulo"
+      >
+        <details>
+          <summary>Posso hospedar por conta própria?</summary>
+          <p>
+            Há um guia para a primeira instalação: uma aplicação e o seu banco
+            PostgreSQL dedicado, em uma VM Linux limpa com Docker Engine e o
+            plugin Compose, Node.js 22 para o inicializador, um nome DNS e um
+            proxy reverso com certificado TLS publicamente confiável. O guia usa
+            a imagem de release da aplicação e não expõe o PostgreSQL. Veja o
+            <a href="{{repo}}/blob/main/docs/SELF-HOSTING.md"
+              >guia de hospedagem própria</a
+            >
+            e, antes de atualizar, o
+            <a href="{{repo}}/blob/main/docs/SELF-HOSTING-UPGRADE.md"
+              >guia de atualização</a
+            >. Lembre que o projeto ainda não é uma versão pronta para produção.
+          </p>
+        </details>
+        <details>
+          <summary>Preciso de Docker?</summary>
+          <p>
+            Para abrir a interface de desenvolvimento, não: bastam Node.js e
+            npm. Docker Compose é necessário para a integração com simuladores e
+            para a hospedagem própria descrita no guia. Há também um caminho
+            para desktop, sem Docker e sem rede externa, que usa Node.js, npm,
+            Google Chrome e PostgreSQL 17+ (veja o
+            <a href="{{repo}}/blob/main/docs/DESKTOP.md">guia de desktop</a>).
+          </p>
+        </details>
+        <details>
+          <summary>O que vem ligado ao instalar?</summary>
+          <p>
+            Quase nada. A instalação inicial precisa só de autenticação e acesso
+            ao banco. Pareamento do Connector, telemetria, dispositivos do
+            navegador, atribuições de impressoras, APIs de integração,
+            autoridade de pausa, OIDC, redefinição de senha, armazenamento da
+            biblioteca e a nuvem da Bambu são opcionais e começam desabilitados.
+            Cada um exige sua própria configuração e credenciais de banco.
+          </p>
+        </details>
+        <details>
+          <summary>
+            O servidor precisa estar no ar para comandar a impressora?
+          </summary>
+          <p>
+            A validação e a aplicação dos comandos ficam sempre no Connector,
+            inclusive durante uma indisponibilidade do servidor. Perder a
+            conexão, por si só, não interrompe uma impressão em andamento. Sem
+            conexão direta pelo navegador, a experiência do navegador é somente
+            leitura.
+          </p>
+        </details>
+      </div>
+    </div>
+
+    <div class="faq__group">
+      <h3 class="faq__group-title" id="faq-compat-titulo">Compatibilidade</h3>
+      <div class="faq__list" role="group" aria-labelledby="faq-compat-titulo">
+        <details>
+          <summary>Funciona com a minha impressora?</summary>
+          <p>
+            O primeiro alvo é Klipper/Moonraker, com Spoolman para materiais. O
+            catálogo de compatibilidade cobre as famílias Klipper/Moonraker,
+            Creality, Anycubic e Bambu e marca cada capacidade como simulada,
+            documentada ou não comprovada. Nenhuma delas está comprovada em
+            hardware físico. Consulte o
+            <a href="{{repo}}/tree/main/docs/compatibility"
+              >catálogo de compatibilidade</a
+            >.
+          </p>
+        </details>
+        <details>
+          <summary>E Creality, Anycubic e Bambu?</summary>
+          <p>
+            Fora de Klipper/Moonraker, o suporte é experimental e somente de
+            leitura, e não está comprovado em hardware. A telemetria das
+            Creality de fábrica (WebSocket na LAN) e a das Anycubic (MQTT/TLS na
+            LAN) não envia comandos às impressoras. Os testes da Creality usam
+            fixtures sintéticas e um simulador em loopback, e modelos e
+            firmwares ainda exigem validação em hardware. O material sobre a
+            Bambu Lab é uma pesquisa documental, sem certificação física nem de
+            integração. A
+            <a href="{{repo}}/blob/main/docs/compatibility/fdm-matrix-final.md"
+              >matriz documental FDM</a
+            >
+            lista modelos candidatos, mas não comprova suporte a firmware nem a
+            hardware.
+          </p>
+        </details>
+        <details>
+          <summary>E o Spoolman?</summary>
+          <p>
+            Hoje há um inventário somente leitura na visão da farm. A integração
+            por farm e o registro do uso de filamento por trabalho estão em
+            desenvolvimento.
+          </p>
+        </details>
+        <details>
+          <summary>E a integração KobraLink com a Anycubic Kobra X?</summary>
+          <p>
+            Ela exibe telemetria somente leitura de impressoras Kobra X dentro
+            da interface do OpenFarm. O serviço KobraLink é instalado e operado
+            separadamente. Câmera e controles não fazem parte dessa integração.
+            Veja o
+            <a href="{{repo}}/blob/main/docs/KOBRALINK-SELF-HOSTING.md"
+              >guia de hospedagem do KobraLink</a
+            >
+            e o
+            <a href="{{repo}}/blob/main/docs/KOBRALINK-RTC-ACCEPTANCE.md"
+              >registro de aceitação RTC</a
+            >, que traz a evidência atual e seus limites.
+          </p>
+        </details>
+      </div>
+    </div>
+
+    <div class="faq__group">
+      <h3 class="faq__group-title" id="faq-comandos-titulo">Comandos</h3>
+      <div class="faq__list" role="group" aria-labelledby="faq-comandos-titulo">
+        <details>
+          <summary>O que é o Connector?</summary>
+          <p>
+            É o aplicativo que conecta a farm às impressoras, instalado na sua
+            rede local. Ele valida identidade, assinatura, escopo, expiração e
+            revogação, e aplica as regras de segurança dos comandos, mesmo
+            quando o servidor está indisponível.
+          </p>
+        </details>
+        <details>
+          <summary>Posso comandar impressoras pela API?</summary>
+          <p>
+            Somente com um escopo concedido pelo proprietário, por envelopes
+            assinados pelo emissor e verificados pelo Connector, que recusa
+            comandos inseguros ou não autorizados e informa o motivo. Comandos
+            do navegador usam apenas WebRTC, sem TURN e sem alternativa por
+            HTTP. Nenhum comando incerto é repetido automaticamente, e os testes
+            automatizados nunca comandam impressoras físicas. O guia de
+            hospedagem manda manter desabilitados os comandos de impressora
+            originados por API. Detalhes em
+            <a href="{{repo}}/blob/main/docs/COMMAND-SECURITY.md"
+              >segurança de comandos</a
+            >.
+          </p>
+        </details>
+      </div>
+    </div>
+
+    <div class="faq__group">
+      <h3 class="faq__group-title" id="faq-licenca-titulo">
+        Licença e contribuição
+      </h3>
+      <div class="faq__list" role="group" aria-labelledby="faq-licenca-titulo">
+        <details>
+          <summary>Qual é a licença?</summary>
+          <p>
+            O código original usa a
+            <a href="{{repo}}/blob/main/LICENSE">licença MIT</a>: você pode
+            usar, copiar, modificar, publicar, distribuir e vender cópias, desde
+            que mantenha o aviso de copyright e o texto da licença. O software é
+            oferecido “como está”, sem garantia. Dependências e fontes de
+            terceiros mantêm suas próprias licenças e avisos, listados em
+            <a href="{{repo}}/blob/main/THIRD_PARTY.md">THIRD_PARTY.md</a>.
+          </p>
+        </details>
+        <details>
+          <summary>Como contribuo?</summary>
+          <p>
+            Consulte as <a href="{{repo}}/issues">issues</a> e o
+            <a href="{{repo}}/blob/main/docs/PHASE-0.md"
+              >registro de aceitação</a
+            >. Relatos com passos para reproduzir, melhorias de acessibilidade e
+            testes em simuladores ajudam. Trabalhe em uma branch, execute
+            <code>npm run check:all</code> e abra um draft PR sem segredos nem
+            configuração de hospedagem.
+          </p>
+        </details>
+      </div>
     </div>
   </div>
 </section>

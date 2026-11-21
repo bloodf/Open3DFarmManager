@@ -128,6 +128,14 @@ const network = (canManage: boolean) => ({
 
 /** Mocks shared by every screen: the shell asks who is signed in and which farms exist. */
 async function baseMocks(page: Page, farms: string[] = [farm]) {
+  // The offline Docker network makes the browser report no connection; the
+  // pages must see the online state the user normally has.
+  await page.addInitScript(() =>
+    Object.defineProperty(navigator, 'onLine', {
+      configurable: true,
+      get: () => true,
+    }),
+  )
   // Anything not mocked below never leaves the test.
   await page.route(
     (url) => !['127.0.0.1', 'localhost'].includes(url.hostname),
@@ -413,7 +421,7 @@ const redeScenes: Scene[] = [
         discovered: [],
       }),
     ),
-    (page) => expect(page.getByText('Nenhum resultado.')).toBeVisible(),
+    (page) => expect(page.getByText('Mostrando 0 de 0 itens.')).toBeVisible(),
   ),
 ]
 
@@ -467,14 +475,17 @@ const provedoresScenes: Scene[] = [
     'provedores-offline',
     async (page) => {
       await page.addInitScript(() =>
-        Object.defineProperty(navigator, 'onLine', { get: () => false }),
+        Object.defineProperty(navigator, 'onLine', {
+          configurable: true,
+          get: () => false,
+        }),
       )
       await page.route('**/api/admin/sign-in-providers', (route) =>
         route.abort(),
       )
     },
     (page) =>
-      expect(page.getByRole('status')).toContainText(
+      expect(page.getByRole('main').getByRole('status')).toContainText(
         'Sem conexão com a internet',
       ),
   ),
@@ -570,8 +581,14 @@ async function open(
     .waitFor()
   // The pre-polish baseline is captured with the same steps but cannot show
   // text that only the polished pages have: it is photographed as it is.
-  if (lenient) await scene.ready(page).catch(() => undefined)
-  else await scene.ready(page)
+  if (lenient) {
+    const waiting = scene.ready(page)
+    waiting.catch(() => undefined)
+    await Promise.race([
+      waiting.catch(() => undefined),
+      new Promise((done) => setTimeout(done, 2500)),
+    ])
+  } else await scene.ready(page)
 }
 
 async function violations(page: Page) {
@@ -588,6 +605,19 @@ async function violations(page: Page) {
   }))
 }
 
+/** Elements that stick out of the viewport, so an overflow names its cause. */
+const overflowing = (page: Page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll('body *')]
+      .filter(
+        (node) => node.getBoundingClientRect().right > window.innerWidth + 1,
+      )
+      .slice(0, 8)
+      .map(
+        (node) =>
+          `${node.tagName.toLowerCase()}.${String(node.className).slice(0, 40)} ${Math.round(node.getBoundingClientRect().right)}`,
+      ),
+  )
 const fits = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
 
@@ -615,6 +645,7 @@ for (const scene of scenes)
       }) => {
         const problems = watchConsole(page)
         await open(page, scene, viewport, theme)
+        expect(await overflowing(page)).toEqual([])
         expect(await fits(page)).toBe(true)
         expect(await violations(page)).toEqual([])
         expect(problems).toEqual([])

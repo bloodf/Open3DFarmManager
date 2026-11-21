@@ -7,33 +7,46 @@
   <div class="container">
     <header class="section-head">
       <p class="section-head__index" aria-hidden="true">01 / 04</p>
-      <p class="eyebrow">Recursos</p>
-      <h2 id="recursos-titulo">Por que este projeto?</h2>
+      <p class="eyebrow">Recursos e compatibilidade</p>
+      <h2 id="recursos-titulo">O que o projeto propõe e o que já comprova</h2>
       <p class="section-head__intro">
         Administrar várias impressoras envolve mais do que abrir uma interface
         por máquina. O Open3DFarmManager está sendo construído para reunir a
         operação da farm sem tirar do Connector local a responsabilidade de
         validar o acesso e os comandos.
       </p>
+      <p class="callout features__notice" role="note">
+        <strong>Prévia de desenvolvimento.</strong> A Fase 0 está em andamento e
+        a aceitação integrada ainda não foi concluída. Nenhuma impressora está
+        comprovada em hardware físico, e o projeto ainda não é uma versão pronta
+        para operar uma farm em produção.
+        <a href="#compat-titulo">Ir para a compatibilidade</a>.
+      </p>
     </header>
 
-    <ul class="features__list">
+    <h3
+      class="features__subtitle features__subtitle--first"
+      id="propostas-titulo"
+    >
+      O que o projeto propõe
+    </h3>
+    <ul class="features__list" aria-labelledby="propostas-titulo">
       <li>
-        <h3>Uma visão da farm no navegador</h3>
+        <h4>Uma visão da farm no navegador</h4>
         <p>
           Cadastro de impressoras e Connectors separado do estado recebido de
           cada máquina, para não confundir uma aprovação com uma conexão ativa.
         </p>
       </li>
       <li>
-        <h3>Acesso que você pode administrar</h3>
+        <h4>Acesso que você pode administrar</h4>
         <p>
           Contas próprias, aprovação de Connectors e dispositivos do navegador,
           com revogação e recuperação de acesso.
         </p>
       </li>
       <li>
-        <h3>Conexão direta por WebRTC</h3>
+        <h4>Conexão direta por WebRTC</h4>
         <p>
           Estado ao vivo e câmera seguem pelo caminho direto entre o navegador e
           o Connector. Comandos do navegador usam somente WebRTC, sem TURN e sem
@@ -46,17 +59,78 @@
         </p>
       </li>
       <li>
-        <h3>Começando por Klipper/Moonraker e Spoolman</h3>
+        <h4>Começando por Klipper/Moonraker e Spoolman</h4>
         <p>A validação passa por simuladores antes de chegar ao hardware.</p>
       </li>
       <li>
-        <h3>Código aberto para acompanhar e contribuir</h3>
+        <h4>Código aberto para acompanhar e contribuir</h4>
         <p>
-          Implementação, testes e registros de aceitação ficam disponíveis no
-          repositório.
+          Código sob licença MIT. Implementação, testes e registros de aceitação
+          ficam disponíveis no
+          <a href="{{repo}}">repositório</a>.
         </p>
       </li>
     </ul>
+
+    <h3 class="features__subtitle" id="arquitetura-titulo">
+      Como as peças se conectam
+    </h3>
+    <figure class="features__diagram">
+      <div
+        class="features__flow"
+        role="group"
+        aria-labelledby="arquitetura-titulo"
+      >
+        <ol>
+          <li>
+            <span class="features__path">Pela aplicação</span>
+            <span class="features__node">Navegador</span>
+            <span class="features__edge"
+              ><span aria-hidden="true">⇄</span> Contas, cadastro e sinalização
+              <span aria-hidden="true">⇄</span></span
+            >
+            <span class="features__node">Aplicação Nuxt</span>
+            <span class="features__edge"
+              ><span aria-hidden="true">—</span> usa
+              <span aria-hidden="true">—</span></span
+            >
+            <span class="features__node">Banco próprio</span>
+          </li>
+          <li class="features__direct">
+            <span class="features__path">Direto, por WebRTC</span>
+            <span class="features__node">Navegador</span>
+            <span class="features__edge"
+              ><span aria-hidden="true">⇠⇢</span> Estado ao vivo e câmera
+              <span aria-hidden="true">⇠⇢</span></span
+            >
+            <span class="features__node"
+              >Connector <small>na rede local</small></span
+            >
+          </li>
+          <li>
+            <span class="features__path">Na rede local</span>
+            <span class="features__node">Connector</span>
+            <span class="features__edge"
+              ><span aria-hidden="true">—</span> conecta-se a
+              <span aria-hidden="true">—</span></span
+            >
+            <span class="features__node">Klipper/Moonraker</span>
+            <span class="features__edge"
+              ><span aria-hidden="true">—</span> conecta-se a
+              <span aria-hidden="true">—</span></span
+            >
+            <span class="features__node">Spoolman</span>
+          </li>
+        </ol>
+      </div>
+      <figcaption>
+        Diagrama explicativo, não é captura de tela. Representa a arquitetura do
+        projeto, incluindo integrações em andamento. O servidor cuida das
+        contas, da sinalização e das APIs de integração. A validação e a
+        aplicação dos comandos ficam sempre no Connector. Sem conexão direta
+        pelo navegador, a experiência do navegador é somente leitura.
+      </figcaption>
+    </figure>
 
     <h3 class="features__subtitle" id="evidencia-titulo">
       Três tipos de evidência
@@ -160,19 +234,200 @@
           registro de uso de filamento por trabalho em desenvolvimento.
         </dd>
       </div>
+    </dl>
+    <p class="muted features__more">
+      O
+      <a href="{{repo}}/blob/main/docs/PHASE-0.md"
+        >registro de aceitação da Fase 0</a
+      >
+      detalha o que cada execução comprova.
+    </p>
+
+    <h3 class="features__subtitle" id="compat-titulo">
+      Famílias de impressoras e limites de qualificação
+    </h3>
+    <p class="muted">
+      Informações do catálogo de compatibilidade do repositório, com corte de 13
+      de novembro de 2026 para a pesquisa documental. Um rótulo de capacidade
+      nunca concede autoridade nem habilita comandos.
+    </p>
+
+    <dl class="features__legend" aria-label="Significado dos rótulos">
       <div>
-        <dt>
-          Compatibilidade <span class="tag tag--pending">Não comprovada</span>
-        </dt>
+        <dt><span class="tag tag--wip">Simulado</span></dt>
         <dd>
-          Catálogo por família (Klipper/Moonraker, Creality, Anycubic e Bambu),
-          com capacidades marcadas como simuladas, documentadas ou não
-          comprovadas. Nenhuma delas está comprovada em hardware físico.
+          Exercitado contra simuladores em loopback e testes automatizados,
+          nunca contra hardware físico.
         </dd>
+      </div>
+      <div>
+        <dt><span class="tag tag--pending">Documentado</span></dt>
+        <dd>
+          Descrito em fonte pública ou código de terceiros consultado, sem teste
+          na impressora.
+        </dd>
+      </div>
+      <div>
+        <dt><span class="tag tag--pending">Desconhecido</span></dt>
+        <dd>Ausência de prova, não ausência do recurso.</dd>
       </div>
     </dl>
 
-    <h3 class="features__subtitle">A interface hoje</h3>
+    <div class="features__families">
+      <article class="features__family" aria-labelledby="fam-klipper">
+        <header>
+          <h4 id="fam-klipper">Klipper/Moonraker</h4>
+          <span class="tag tag--wip">Simulado</span>
+        </header>
+        <p>
+          Primeira família do projeto. A conexão usa a API HTTP e o WebSocket do
+          Moonraker na rede local; a autenticação depende da configuração de
+          quem administra a impressora.
+        </p>
+        <dl class="features__caps">
+          <div>
+            <dt>Telemetria</dt>
+            <dd><span class="tag tag--wip">Simulado</span></dd>
+          </div>
+          <div>
+            <dt>Câmera</dt>
+            <dd><span class="tag tag--wip">Simulado</span></dd>
+          </div>
+          <div>
+            <dt>Pausar, retomar e cancelar</dt>
+            <dd><span class="tag tag--wip">Simulado</span></dd>
+          </div>
+          <div>
+            <dt>Arquivos</dt>
+            <dd><span class="tag tag--pending">Desconhecido</span></dd>
+          </div>
+        </dl>
+        <p class="features__entries">
+          Entradas do catálogo: Klipper + Moonraker genérico, série K1 com
+          Moonraker via root, Voron 2.4, Voron Trident e Sovol SV08.
+        </p>
+        <ul class="features__limits">
+          <li>
+            Câmera depende das webcams configuradas no Moonraker; só a leitura
+            dessa lista é coberta.
+          </li>
+          <li>
+            Materiais dependem do espelho do Spoolman configurado e não estão
+            qualificados.
+          </li>
+          <li>
+            Fazer root em uma K1 pode afetar garantia e estabilidade. O projeto
+            não automatiza isso.
+          </li>
+        </ul>
+      </article>
+
+      <article class="features__family" aria-labelledby="fam-creality">
+        <header>
+          <h4 id="fam-creality">Creality (firmware de fábrica)</h4>
+          <span class="tag tag--pending">Experimental</span>
+        </header>
+        <p>
+          Leitura de telemetria pelo WebSocket de fábrica na porta 9999 de K1,
+          K1 Max, K1C, K2 e Hi. É somente leitura: o cliente não envia comandos
+          nem quadros de aplicação. Não há nuvem, alternativa por HTTP nem
+          integração com RTC ou coleta.
+        </p>
+        <ul class="features__limits">
+          <li>
+            <strong>Não comprovado em hardware.</strong> Os testes usam fixtures
+            sintéticas e um simulador em loopback.
+          </li>
+          <li>
+            Firmware que exige assinatura explícita de status ainda não está
+            qualificado.
+          </li>
+          <li>
+            Variantes de modelo e firmware e o mapeamento de estados exigem
+            validação em hardware.
+          </li>
+        </ul>
+      </article>
+
+      <article class="features__family" aria-labelledby="fam-anycubic">
+        <header>
+          <h4 id="fam-anycubic">Anycubic</h4>
+          <span class="tag tag--pending">Experimental</span>
+        </header>
+        <p>
+          Assinante MQTT/TLS experimental e somente leitura, que usa credenciais
+          de LAN já obtidas e exige validação de certificado ou pin SHA-256.
+          Nenhuma requisição é enviada à impressora, e não há alternativa por
+          HTTP.
+        </p>
+        <ul class="features__limits">
+          <li>
+            <strong>Não comprovado em hardware</strong> (Kobra 3, S1 e 4).
+            Firmware que exige consulta ativa pode não fornecer observações.
+          </li>
+          <li>
+            <strong>Kobra X, pelo KobraLink:</strong> telemetria somente leitura
+            dentro da interface do projeto, sem segundo painel. O KobraLink é
+            instalado e operado separadamente (<a
+              href="{{repo}}/blob/main/docs/KOBRALINK-SELF-HOSTING.md"
+              >guia de hospedagem</a
+            >). A aceitação usou uma impressora sintética e firmware
+            desconhecido.
+          </li>
+          <li>Câmera e controles não fazem parte dessa integração.</li>
+        </ul>
+      </article>
+
+      <article class="features__family" aria-labelledby="fam-bambu">
+        <header>
+          <h4 id="fam-bambu">Bambu Lab</h4>
+          <span class="tag tag--pending">Não comprovado</span>
+        </header>
+        <p>
+          Pesquisa documental sobre modelos recentes, como A2L, X2D, H2C e P2S:
+          não é certificação física nem de integração. O Connector tem um
+          controle de LAN opcional, desligado por padrão, que deixa a conexão
+          somente leitura e sem controles anunciados.
+        </p>
+        <ul class="features__limits">
+          <li>
+            Com o controle ligado, pausar, retomar e cancelar usam MQTT com TLS,
+            uma única requisição por comando assinado, sem fila nem repetição.
+            Validado só com simulador em loopback:
+            <strong>não comprovado em hardware</strong>.
+          </li>
+          <li>
+            Firmwares recentes exigem o modo somente LAN ou Developer para
+            comandos pela LAN, conforme modelo e firmware. O firmware instalado
+            de cada modelo é desconhecido.
+          </li>
+          <li>
+            A licença do SDK e a redistribuição do plugin proprietário não foram
+            verificadas.
+          </li>
+          <li>
+            Pela política documentada, a importação por conta Bambu cloud fica
+            desligada por padrão e, desligada, nenhum caminho de código deve
+            contatar a nuvem Bambu.
+          </li>
+        </ul>
+      </article>
+    </div>
+
+    <div class="callout features__matrix" role="note">
+      <p>
+        <strong>Matriz documental FDM.</strong> Lista 15 identidades candidatas,
+        cinco por marca (Bambu Lab, Anycubic e Creality). A ordem por recência
+        não está verificada, e a matriz não comprova suporte a firmware ou
+        hardware. Capacidades comerciais de uma impressora não demonstram uma
+        API para terceiros.
+        <a href="{{repo}}/blob/main/docs/compatibility/fdm-matrix-final.md"
+          >Ver a matriz</a
+        >.
+      </p>
+    </div>
+
+    <h3 class="features__subtitle" id="interface-titulo">A interface hoje</h3>
     <div class="features__shots">
       <figure class="shot">
         <div class="shot__frame">

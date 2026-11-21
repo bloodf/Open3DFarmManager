@@ -261,11 +261,14 @@ test(
                   },
                 ],
               }
-              assertReads = () =>
+              assertReads = () => {
                 assert.deepEqual(
-                  remote.requests.map((request) => request.command),
+                  remote.queries.map((request) => request.command),
                   ['get_version'],
                 )
+                // Reading the firmware never sends a printer command.
+                assert.deepEqual(remote.requests, [])
+              }
             } else if (vendor === 'creality') {
               const remote = await createCrealitySimulator(
                 { state: 1, printProgress: 25 },

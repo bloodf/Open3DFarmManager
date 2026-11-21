@@ -134,7 +134,12 @@ export async function startBambuSimulator({
       ? {}
       : { nozzle_diameter: nozzleDiameter }),
   }
+  // Commands that act on the printer (pause, resume, stop, gcode, ...), in arrival order.
   const requests: { command: string; sequence_id: string }[] = []
+  // Read-only queries (get_version). Kept apart from `requests`: the connector's telemetry
+  // transport asks for the version as soon as it subscribes, concurrently with the first report,
+  // so mixing it into `requests` makes "no command was sent" checks depend on socket timing.
+  const queries: { command: string; sequence_id: string }[] = []
 
   let brokerRef: MqttMockInstance | undefined
   let closed = false
@@ -203,7 +208,7 @@ export async function startBambuSimulator({
       if (msg.topic !== requestTopic) throw new Error('Invalid request topic')
       const value = JSON.parse(msg.payload.toString('utf8'))
       if (value?.info?.command === 'get_version') {
-        requests.push({
+        queries.push({
           command: 'get_version',
           sequence_id: value.info.sequence_id,
         })
@@ -408,6 +413,7 @@ export async function startBambuSimulator({
     syntheticTrust,
     reportTopic,
     requests,
+    queries,
     uploads,
     timelapse,
     gcodeLines,

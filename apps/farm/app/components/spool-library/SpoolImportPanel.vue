@@ -15,6 +15,7 @@ import type {
   ImportFormat,
   ImportReport,
 } from '../../utils/spool-library-types.ts'
+import { snapshotImportRequest } from '../../utils/spool-form-state.ts'
 
 const props = defineProps<{
   farmId: string
@@ -43,6 +44,7 @@ const problems = ref<BundleProblem[]>([])
 const report = ref<ImportReport | null>(null)
 const errorBox = ref<HTMLElement | null>(null)
 const resultBox = ref<HTMLElement | null>(null)
+const simulatedRequest = ref<Record<string, unknown> | null>(null)
 
 const formats: readonly { id: ImportFormat; label: string; hint: string }[] = [
   {
@@ -108,14 +110,21 @@ async function runImport(overrideDryRun?: boolean) {
   error.value = ''
   problems.value = []
   const dryRun = overrideDryRun !== undefined ? overrideDryRun : form.dryRun
-  const validated = validateImportForm({ ...form, dryRun })
-  // Never keep secrets in reactive component state after preparing the payload.
-  form.bearerToken = ''
-  if (!validated.ok) {
-    error.value = validated.error
-    await nextTick()
-    errorBox.value?.focus()
-    return
+  let payload: Record<string, unknown>
+  if (overrideDryRun === false) {
+    if (!simulatedRequest.value) return
+    payload = { ...simulatedRequest.value, dryRun: false }
+  } else {
+    const validated = validateImportForm({ ...form, dryRun })
+    if (!validated.ok) {
+      error.value = validated.error
+      await nextTick()
+      errorBox.value?.focus()
+      return
+    }
+    payload = snapshotImportRequest(validated.payload)
+    // Keep credentials only in the in-memory request snapshot for apply.
+    form.bearerToken = ''
   }
 
   running.value = true
@@ -136,7 +145,7 @@ async function runImport(overrideDryRun?: boolean) {
       `/api/farms/${props.farmId}/spool-library/import`,
       {
         method: 'POST',
-        body: validated.payload,
+        body: payload,
         retry: 0,
         timeout: 60_000,
       },
@@ -146,6 +155,7 @@ async function runImport(overrideDryRun?: boolean) {
       ? 'Simulação concluída.'
       : 'Importação concluída.'
     report.value = response.report
+    simulatedRequest.value = response.report.dryRun ? payload : null
     await nextTick()
     resultBox.value?.focus()
   } catch (cause) {

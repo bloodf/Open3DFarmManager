@@ -8,6 +8,13 @@ const require = createRequire(
 )
 const WebSocket = require('ws')
 
+async function waitFor(predicate: () => boolean, description: string) {
+  const deadline = Date.now() + 3000
+  while (!predicate() && Date.now() < deadline)
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  assert.ok(predicate(), `timed out waiting for ${description}`)
+}
+
 test('upload and start produce progress and completion, cancellation and failure', async () => {
   for (const outcome of ['complete', 'cancel', 'fail']) {
     const sim = await createCrealitySimulator(
@@ -26,13 +33,18 @@ test('upload and start produce progress and completion, cancellation and failure
         }),
       )
       ws.send(JSON.stringify({ method: 'start', params: {} }))
-      await new Promise((resolve) => setTimeout(resolve, 100))
+      await waitFor(
+        () =>
+          Number(sim.state.printProgress) > 0 && Number(sim.state.layer) > 0,
+        'simulator print progress',
+      )
       assert.equal(sim.state.state, 1)
-      assert.ok(Number(sim.state.printProgress) > 0)
-      assert.ok(Number(sim.state.layer) > 0)
       if (outcome === 'cancel')
         ws.send(JSON.stringify({ method: 'set', params: { stop: 1 } }))
-      await new Promise((resolve) => setTimeout(resolve, 250))
+      await waitFor(
+        () => sim.state.state === 0,
+        'print completion or cancellation',
+      )
       assert.equal(sim.state.state, 0)
       if (outcome === 'cancel') assert.ok(Number(sim.state.printProgress) < 100)
       else {

@@ -702,19 +702,25 @@ export async function runConnectorOutageScenarios(input: {
       // Database rows, not diagnostics: the diagnostic budget is bounded per run.
       const delivered = (await rows()).length - rowsBefore
       assert.ok(current.running, 'no crash while draining a full queue')
+      await current.stop()
+      assert.equal((await current.exited).code, 0)
+      // A resubscription can add a snapshot while the queue is still full,
+      // after the pre-drain inspection. Include those reported evictions.
+      const finalEvicted = current.diagnostics
+        .filter((d) => d.kind === 'loss' && d.phase === 'retention')
+        .reduce((n, d) => n + Number(d.capacity), 0)
+      assert.ok(finalEvicted >= evicted && finalEvicted < seeded.length)
       const first =
-        await admin`SELECT count(*)::int AS n FROM farm.telemetry_events WHERE agent_id=${agentId}::uuid AND event_id=${seeded[evicted]!}::uuid`
+        await admin`SELECT count(*)::int AS n FROM farm.telemetry_events WHERE agent_id=${agentId}::uuid AND event_id=${seeded[finalEvicted]!}::uuid`
       assert.equal(first[0]?.n, 1, 'oldest retained record delivered')
       const firstCommit = proxy.log
         .slice(logFrom)
         .find((e) => e.route === 'commit' && e.outcome === 200)
       assert.equal(
         firstCommit?.eventIds?.[0],
-        seeded[evicted],
+        seeded[finalEvicted],
         'oldest retained record is the first committed after restart',
       )
-      await current.stop()
-      assert.equal((await current.exited).code, 0)
       const drainRecordsPerSecond = Math.round(delivered / seconds)
       const backlogDrainEstimateS = Math.round(
         lines.length / Math.max(1, delivered / seconds),
@@ -726,7 +732,7 @@ export async function runConnectorOutageScenarios(input: {
         seededRecords: seededCount,
         queueBytes: fullBytes,
         reopenMs: openMs,
-        evicted,
+        evicted: finalEvicted,
         drainRecordsPerSecond,
         backlogDrainEstimateS,
       }

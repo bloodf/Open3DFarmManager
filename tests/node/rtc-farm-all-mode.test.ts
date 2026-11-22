@@ -14,7 +14,12 @@ test('all mode selects every registered RTC farm row, including opt-in resource 
   assert.ok(rows.includes('farm-page-simulator-inventory'))
   assert.ok(rows.includes('farm-page-printing-pause'))
   assert.equal(new Set(rows).size, rows.length)
-  assert.ok(!runnableAcceptanceRows().includes('farm-page-camera'))
+  assert.deepEqual(runnableAcceptanceRows({ OPENFARM_SIM: 'mock' }), rows)
+  assert.ok(
+    !runnableAcceptanceRows({ OPENFARM_SIM: 'docker' }).includes(
+      'farm-page-camera',
+    ),
+  )
 })
 
 test('summary binds row pass/fail results to the candidate commit', () => {

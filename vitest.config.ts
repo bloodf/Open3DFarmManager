@@ -26,7 +26,7 @@ export default defineConfig({
   tsconfig: './tsconfig.json',
   plugins: [rawImports],
   test: {
-    include: ['tests/unit/**/*.test.ts'],
+    include: ['tests/unit/**/*.test.ts', 'infra/sandbox/docs-drift.test.ts'],
     // Node entry points run separately from Vitest discovery.
     exclude: [
       'tests/unit/api-v1-contract.test.ts',

@@ -21,7 +21,7 @@ import {
 export type ActionTarget = {
   farmId: string
   agentId: string
-  controls: readonly string[]
+  controls: readonly string[] | null
 }
 export type StoredActionStatus = 'held' | 'submitted' | 'rejected' | 'expired'
 export interface NewAction {
@@ -246,7 +246,13 @@ export class IntegrationActionsService {
       printer,
     )
     if (!grant) return { ok: false, problem: 'not-found' }
-    if (!target.controls.includes(action.action))
+    // Telemetry may not contain the live capability list. Basic lifecycle
+    // commands still require the Connector's own capability and state checks.
+    if (
+      target.controls
+        ? !target.controls.includes(action.action)
+        : !CONTROL_BASIC.has(action.action)
+    )
       return { ok: false, problem: 'unsupported' }
     if (!grant.requiresApproval && !this.options.envelopes)
       return { ok: false, problem: 'service-unavailable' }

@@ -40,6 +40,8 @@ services:
   bambu:
     <<: *node
     command: [node, infra/sandbox/bambu.ts]
+    environment:
+      SANDBOX_BAMBU_ACCESS_CODE: ${SANDBOX_BAMBU_ACCESS_CODE:-}
     ports:
       - '127.0.0.1::9999'
   app:

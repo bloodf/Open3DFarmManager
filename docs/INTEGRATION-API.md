@@ -116,6 +116,15 @@ return the farm's storage mode. `POST /library` stores the file in that mode,
 and `PATCH /library/settings` (`library:write`) changes it. The Connector
 prints the stored file and refuses a printer the file does not fit.
 
+### Plate checks at dispatch
+
+For a signed start, the Connector checks its local collection journal before
+staging the file and again at the printer send boundary. A start refused with
+`wrong-state` may include `awaiting-collection` when a completed run still
+requires plate clearance, or `plate-state-uncertain` when the Connector cannot
+establish clearance from its journal. Resolve the plate state locally before
+submitting another start.
+
 ## Request actions
 
 `POST /printers/{printerId}/actions` also requires an `Idempotency-Key`.

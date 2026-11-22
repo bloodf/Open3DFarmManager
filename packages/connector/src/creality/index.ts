@@ -30,6 +30,11 @@ export function decodeCrealityStatus(
   frame: string | Buffer,
   maxFrameBytes = 65536,
 ): CrealityTelemetry | undefined {
+  const data = parseCrealityFrame(frame, maxFrameBytes)
+  if (data) return decodeCrealityFields(data)
+}
+
+function parseCrealityFrame(frame: string | Buffer, maxFrameBytes: number) {
   if (Buffer.byteLength(frame) > maxFrameBytes) return
   let value: unknown
   try {
@@ -38,7 +43,12 @@ export function decodeCrealityStatus(
     return
   }
   if (!value || typeof value !== 'object' || Array.isArray(value)) return
-  const data = value as Record<string, unknown>
+  return value as Record<string, unknown>
+}
+
+function decodeCrealityFields(
+  data: Record<string, unknown>,
+): CrealityTelemetry | undefined {
   const result: CrealityTelemetry = {}
   const states = ['idle', 'printing', 'paused'] as const
   if (typeof data.state === 'number' && states[data.state] !== undefined)
@@ -222,7 +232,7 @@ export function createCrealityTelemetryClient(options: {
     }
     if (stopped) return
     const host = options.host.includes(':') ? `[${options.host}]` : options.host
-    socket = new WebSocket(
+    const connection = new WebSocket(
       `${endpoint.secure ? 'wss' : 'ws'}://${host}:${endpoint.port}`,
       {
         ...(endpoint.ca ? { ca: endpoint.ca } : {}),
@@ -231,10 +241,23 @@ export function createCrealityTelemetryClient(options: {
         perMessageDeflate: false,
       },
     )
-    socket.on('error', () => {})
-    socket.on('message', (data, binary) => {
+    socket = connection
+    connection.on('error', () => {})
+    connection.on('message', (data, binary) => {
       if (stopped || binary) return
-      const report = decodeCrealityStatus(data.toString())
+      const frame = parseCrealityFrame(data.toString(), 65536)
+      if (!frame) return
+      // K1 LAN keepalive, source-read and hardware-unqualified.
+      // https://github.com/OrcaSlicer/OrcaSlicer/blob/07f38df2a4fd3439cffbf991ee41ee99ec71fbee/src/slic3r/Utils/CrealityPrint.cpp#L279-L284
+      // https://github.com/ChestnutLabs/printer-protocol-orchard/blob/fd5026ef9ec8b6b0f7b22884a2f2389e614c8fdf/protocols/creality.md#L46-L49
+      if (frame.ModeCode === 'heart_beat') {
+        if (connection.readyState === WebSocket.OPEN)
+          connection.send('ok', (error) => {
+            if (error) connection.terminate()
+          })
+        return
+      }
+      const report = decodeCrealityFields(frame)
       if (report) {
         try {
           options.onTelemetry(report)
@@ -243,7 +266,7 @@ export function createCrealityTelemetryClient(options: {
         }
       }
     })
-    socket.once('close', () => {
+    connection.once('close', () => {
       if (!stopped) options.onDisconnect?.()
       if (stopped) {
         resolveDone()

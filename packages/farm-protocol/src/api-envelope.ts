@@ -97,8 +97,8 @@ const common = {
   issued_at: time,
   expires_at: time,
   // Roll out Connector support before issuing these fields: older strict V1
-  // parsers reject them. New Connectors refuse legacy inbox commands without
-  // both claims; legacy envelopes remain parseable for compatibility.
+  // parsers reject them. Connectors use the authenticated inbox scope for
+  // legacy envelopes and require both signed claims when either is present.
   scope: z
     .enum(['jobs:start', 'jobs:write', 'control:basic', 'control:extended'])
     .optional(),

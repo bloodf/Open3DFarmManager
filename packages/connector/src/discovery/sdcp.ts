@@ -3,6 +3,7 @@ import { isIPv4 } from 'node:net'
 
 export type SdcpIdentity = {
   host: string
+  brandId: string
   mainboardId: string
   model: string
   protocolVersion: string
@@ -21,8 +22,11 @@ export function parseSdcpDiscovery(
 ): SdcpIdentity | undefined {
   if (packet.length > 8192 || !isIPv4(sender)) return
   try {
-    const data = JSON.parse(packet.toString()).Data
+    const message = JSON.parse(packet.toString())
+    const data = message.Data
     if (
+      typeof message.Id !== 'string' ||
+      !/^[A-Za-z0-9_-]{1,64}$/.test(message.Id) ||
       !data ||
       typeof data !== 'object' ||
       data.MainboardIP !== sender ||
@@ -30,13 +34,16 @@ export function parseSdcpDiscovery(
       typeof data.MachineName !== 'string' ||
       !models.has(data.MachineName.replace(/^elegoo\s+/i, '').toLowerCase()) ||
       typeof data.ProtocolVersion !== 'string' ||
+      !/^[\x20-\x7e]{1,64}$/.test(data.ProtocolVersion) ||
       typeof data.FirmwareVersion !== 'string' ||
+      !/^[\x20-\x7e]{1,64}$/.test(data.FirmwareVersion) ||
       typeof data.Name !== 'string' ||
-      data.Name.length > 128
+      !/^[\x20-\x7e]{1,128}$/.test(data.Name)
     )
       return
     return {
       host: sender,
+      brandId: message.Id,
       mainboardId: data.MainboardID,
       model: data.MachineName,
       protocolVersion: data.ProtocolVersion,

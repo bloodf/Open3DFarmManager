@@ -13,6 +13,18 @@ export async function startSdcpSimulator() {
     new Promise<void>((resolve) => udp.bind(0, '127.0.0.1', resolve)),
     new Promise<void>((resolve) => ws.once('listening', resolve)),
   ])
+  const requests: unknown[] = []
+  let response: unknown
+  ws.on('connection', (client) =>
+    client.on('message', (data) => {
+      try {
+        const message = JSON.parse(data.toString())
+        requests.push(message)
+        if (message.Data?.Cmd === 0 && response !== undefined)
+          client.send(JSON.stringify(response))
+      } catch {}
+    }),
+  )
   const discovery = {
     Id: 'fixture',
     Data: {
@@ -32,6 +44,10 @@ export async function startSdcpSimulator() {
     discoveryPort: udp.address().port,
     websocketPort: (ws.address() as { port: number }).port,
     discovery,
+    requests,
+    setStatus(value: unknown) {
+      response = value
+    },
     publish(message: unknown) {
       for (const client of ws.clients) client.send(JSON.stringify(message))
     },

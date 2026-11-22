@@ -48,18 +48,23 @@ export type RawPrinterObservation = Omit<
           creality: Readonly<Partial<Record<keyof PrinterState, number>>>
         }>
       | Readonly<{
+          sdcp: Readonly<Partial<Record<keyof PrinterState, number>>>
+        }>
+      | Readonly<{
           anycubic: Readonly<Partial<Record<keyof PrinterState, number>>>
         }>
   }
 
 function fieldTimes(timing: RawPrinterObservation['fieldObservedAtMonoMs']) {
-  return 'anycubic' in timing
-    ? timing.anycubic
-    : 'bambu' in timing
-      ? timing.bambu
-      : 'creality' in timing
-        ? timing.creality
-        : timing
+  return 'sdcp' in timing
+    ? timing.sdcp
+    : 'anycubic' in timing
+      ? timing.anycubic
+      : 'bambu' in timing
+        ? timing.bambu
+        : 'creality' in timing
+          ? timing.creality
+          : timing
 }
 
 const FRAME_LIMIT = 'Application frame limit'

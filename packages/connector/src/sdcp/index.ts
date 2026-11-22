@@ -1,4 +1,6 @@
 import WebSocket from 'ws'
+import { randomUUID } from 'node:crypto'
+import { isIPv4 } from 'node:net'
 import { isSupportedSdcpModel, type SdcpIdentity } from '../discovery/sdcp.ts'
 
 export type SdcpStatus = {
@@ -12,6 +14,12 @@ export function connectSdcp(
   identity: SdcpIdentity,
   options: { port?: number; staleAfterMs?: number; now?: () => number } = {},
 ) {
+  if (
+    !isIPv4(identity.host) ||
+    !/^[A-Za-z0-9_-]{1,64}$/.test(identity.mainboardId) ||
+    !/^[A-Za-z0-9_-]{1,64}$/.test(identity.brandId)
+  )
+    throw new Error('Invalid SDCP identity')
   if (!isSupportedSdcpModel(identity.model))
     throw new Error('Unsupported SDCP model')
   if (!/^V?3\.0\.0$/i.test(identity.protocolVersion))
@@ -24,10 +32,33 @@ export function connectSdcp(
     { maxPayload: 65536 },
   )
   let status: SdcpStatus | undefined
+  let timer: ReturnType<typeof setInterval> | undefined
+  const refresh = () => {
+    if (socket.readyState === WebSocket.OPEN)
+      socket.send(
+        JSON.stringify({
+          Id: identity.brandId,
+          Data: {
+            Cmd: 0,
+            Data: {},
+            RequestID: randomUUID().replaceAll('-', ''),
+            MainboardID: identity.mainboardId,
+            TimeStamp: Math.floor(Date.now() / 1000),
+            From: 0,
+          },
+          Topic: `sdcp/request/${identity.mainboardId}`,
+        }),
+      )
+  }
+  socket.on('open', () => {
+    refresh()
+    timer = setInterval(refresh, 2000)
+  })
   socket.on('error', () => {
     status = undefined
   })
   socket.on('close', () => {
+    clearInterval(timer)
     status = undefined
   })
   socket.on('message', (data) => {
@@ -95,6 +126,10 @@ export function connectSdcp(
       ok: false as const,
       reason: 'unsupported' as const,
     }),
-    close: () => socket.close(),
+    close: () => {
+      clearInterval(timer)
+      if (socket.readyState === WebSocket.CONNECTING) socket.terminate()
+      else socket.close()
+    },
   }
 }

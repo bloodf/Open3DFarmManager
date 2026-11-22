@@ -16,6 +16,8 @@ export function discoveryLabel(printer: Printer): string {
       return 'Anycubic'
     case 'kobra-x':
       return 'Anycubic Kobra X'
+    case 'sdcp':
+      return 'Elegoo SDCP'
     default: {
       const _exhaustive: never = printer.vendor
       return _exhaustive
@@ -50,6 +52,8 @@ export function discoveryPrefill(printer: Printer) {
         host: printer.host,
         label: printer.name ?? '',
       }
+    case 'sdcp':
+      return null
     case 'kobra-x':
       return {
         family: 'anycubic-kobra-x' as const,

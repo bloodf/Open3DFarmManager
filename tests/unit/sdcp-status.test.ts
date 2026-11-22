@@ -5,7 +5,11 @@ import {
 } from '../../packages/connector/src/discovery/sdcp.ts'
 import { connectSdcp } from '../../packages/connector/src/sdcp/index.ts'
 import { startSdcpSimulator } from '../../packages/sim-tools/src/sdcp-simulator.ts'
-import { status } from '../fixtures/sdcp/messages.ts'
+import {
+  discovery,
+  incompatibleDiscovery,
+  status,
+} from '../fixtures/sdcp/messages.ts'
 
 describe('SDCP read-only status', () => {
   it('discovers, rejects incompatible versions and exposes only fresh progress', async () => {
@@ -17,6 +21,16 @@ describe('SDCP read-only status', () => {
         timeoutMs: 50,
       })
       expect(identity).toBeDefined()
+      expect(
+        parseSdcpDiscovery(Buffer.from(JSON.stringify(discovery)), '127.0.0.1'),
+      ).toEqual(identity)
+      const incompatible = parseSdcpDiscovery(
+        Buffer.from(JSON.stringify(incompatibleDiscovery)),
+        '127.0.0.1',
+      )
+      expect(() => connectSdcp(incompatible!)).toThrow(
+        'Unsupported SDCP protocol version: V2.0.0',
+      )
       expect(
         parseSdcpDiscovery(
           Buffer.from(

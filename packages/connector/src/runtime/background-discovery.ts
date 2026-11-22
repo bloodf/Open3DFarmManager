@@ -62,6 +62,16 @@ export function discoveryBindings(
           host,
         })),
       ]
+    case 6:
+      return [
+        ...moonraker,
+        ...collection.sdcp.printers.map(({ host, mainboardId }) => ({
+          vendor: 'sdcp' as const,
+          host,
+          serial: mainboardId,
+          port: 3030,
+        })),
+      ]
     case 5:
       return [
         ...moonraker,

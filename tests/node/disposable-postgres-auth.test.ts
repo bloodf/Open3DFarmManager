@@ -9,7 +9,10 @@ import {
   findPostgresBin,
   getFreePort,
 } from '../helpers/disposable-postgres.ts'
-import { startLocalPostgres } from '../helpers/connector-outage-local-postgres.ts'
+import {
+  hasLocalPostgres,
+  startLocalPostgres,
+} from '../helpers/connector-outage-local-postgres.ts'
 
 function hasPostgres(): boolean {
   try {
@@ -75,7 +78,7 @@ test(
 
 test(
   'outage PostgreSQL refuses password-less TCP superuser access',
-  { skip: !hasPostgres() },
+  { skip: !(await hasLocalPostgres()) },
   async () => {
     const workDir = await mkdtemp(join(tmpdir(), 'o3dfm-auth-'))
     let fixture: Awaited<ReturnType<typeof startLocalPostgres>> | undefined

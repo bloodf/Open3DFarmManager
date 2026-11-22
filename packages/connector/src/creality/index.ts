@@ -173,7 +173,8 @@ export function decodeCrealityStatus(
 
 export function createCrealityTelemetryClient(options: {
   host: string
-  port?: number
+  port?: number | undefined
+  transport?: 'ws' | 'wss' | undefined
   httpsPort?: number | undefined
   caFile?: string | undefined
   onError?: (reason: string) => void

@@ -2,12 +2,11 @@
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { createServer } from 'node:net'
 import { randomUUID } from 'node:crypto'
 import { provisionCrealityPrinter } from '../../packages/connector/src/control/printer-binding.ts'
 import { openFixedCrealityControl } from '../../packages/connector/src/creality/control-driver.ts'
 import { join } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createCrealitySimulator } from '../../packages/sim-tools/src/creality-simulator.ts'
 import {
   probeCreality,
@@ -194,19 +193,18 @@ describe('Creality advertised secure endpoint', () => {
     }
   })
 
-  it('retains the configured legacy WebSocket port when HTTPS is unavailable', async () => {
+  it('retains the configured legacy WebSocket port with an explicit legacy binding in a fresh process', async () => {
     const sim = await createCrealitySimulator({ state: 0 })
     try {
-      const server = createServer()
-      await new Promise<void>((resolve) =>
-        server.listen(0, '127.0.0.1', resolve),
-      )
-      const closedPort = (server.address() as { port: number }).port
-      await new Promise<void>((resolve) => server.close(() => resolve()))
+      vi.resetModules()
+      const { resolveCrealityEndpoint } =
+        await import('../../packages/connector/src/discovery/creality.ts')
+      const { createCrealityTelemetryClient } =
+        await import('../../packages/connector/src/creality/index.ts')
       const endpoint = await resolveCrealityEndpoint({
         host: '127.0.0.1',
         port: sim.port,
-        httpsPort: closedPort,
+        transport: 'ws',
       })
       expect(endpoint).toMatchObject({ secure: false, port: sim.port })
       let client: ReturnType<typeof createCrealityTelemetryClient> | undefined
@@ -219,7 +217,7 @@ describe('Creality advertised secure endpoint', () => {
           client = createCrealityTelemetryClient({
             host: '127.0.0.1',
             port: sim.port,
-            httpsPort: closedPort,
+            transport: 'ws',
             onError: reject,
             onTelemetry: (value) => {
               clearTimeout(timer)

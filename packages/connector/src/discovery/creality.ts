@@ -4,7 +4,7 @@ import { isIPv4 } from 'node:net'
 import type { Printer } from './index.ts'
 import { readFileSync } from 'node:fs'
 
-const secureHosts = new Set<string>()
+const secureHosts = new Map<string, number>()
 
 const service = '_services._dns-sd._udp.local'
 export function crealityQuery(): Buffer {
@@ -179,11 +179,7 @@ export async function probeCreality(
 ): Promise<Printer | undefined> {
   if (!isIPv4(host)) return
   // An explicitly shared HTTP/HTTPS probe port denotes a legacy-only scan.
-  if (
-    ports.https === ports.http &&
-    !ports.caFile &&
-    !secureHosts.has(`${host}:${ports.https}`)
-  )
+  if (ports.https === ports.http && !ports.caFile && !secureHosts.has(host))
     return probe(host, ports.http, false)
   const discovered = await probe(
     host,
@@ -192,10 +188,10 @@ export async function probeCreality(
     ports.caFile ? readFileSync(ports.caFile, 'utf8') : undefined,
     true,
     true,
-    !ports.caFile && !secureHosts.has(`${host}:${ports.https}`),
+    !ports.caFile && !secureHosts.has(host),
   )
   if (discovered) {
-    secureHosts.add(`${host}:${ports.https}`)
+    secureHosts.set(host, ports.https)
     return discovered
   }
   return probe(host, ports.http, false)
@@ -205,26 +201,34 @@ export async function probeCreality(
 export async function resolveCrealityEndpoint(input: {
   host: string
   port?: number | undefined
+  transport?: 'ws' | 'wss' | undefined
   httpsPort?: number | undefined
   caFile?: string | undefined
 }) {
-  const ca = input.caFile ? readFileSync(input.caFile, 'utf8') : undefined
-  const discovered = await probe(
-    input.host,
-    input.httpsPort ?? 443,
-    true,
-    ca,
-    true,
-    true,
-    !input.caFile &&
-      !secureHosts.has(`${input.host}:${input.httpsPort ?? 443}`) &&
-      input.port !== undefined,
+  const hostKey = input.host.toLowerCase()
+  const knownHttpsPort = secureHosts.get(hostKey)
+  // A configured WebSocket port alone is the existing legacy binding format.
+  const legacy =
+    input.transport === 'ws' ||
+    (input.transport === undefined && input.port !== undefined)
+  if (
+    legacy &&
+    input.caFile === undefined &&
+    input.httpsPort === undefined &&
+    knownHttpsPort === undefined
   )
-  if (discovered) secureHosts.add(`${input.host}:${input.httpsPort ?? 443}`)
+    return { host: input.host, port: input.port ?? 9999, secure: false }
+
+  const ca = input.caFile ? readFileSync(input.caFile, 'utf8') : undefined
+  const httpsPort = input.httpsPort ?? knownHttpsPort ?? 443
+  const discovered = await probe(input.host, httpsPort, true, ca, true)
+  if (discovered?.port === undefined)
+    throw new Error('Creality HTTPS discovery did not return a WebSocket port')
+  secureHosts.set(hostKey, httpsPort)
   return {
     host: input.host,
-    port: discovered?.port ?? input.port ?? 9999,
-    secure: discovered?.transport === 'wss',
+    port: discovered.port,
+    secure: true,
     ca,
   }
 }

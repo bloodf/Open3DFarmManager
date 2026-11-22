@@ -99,7 +99,7 @@ function paint() {
   )
 }
 onMounted(paint)
-watch([rows, bounds, view], paint)
+watch([rows, bounds, view], paint, { flush: 'post' })
 
 function rotate(dYaw: number, dPitch: number) {
   view.value = rotateView(view.value, dYaw, dPitch)

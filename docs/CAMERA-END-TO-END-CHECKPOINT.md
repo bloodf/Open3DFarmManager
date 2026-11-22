@@ -32,7 +32,7 @@ Media requires a camera-purpose V3 statement signed by both ends, after both RTC
 | Session lifetime           | Equal to the RTC binding, at most 30 s; renewal is a new RTC session     |
 | Concurrent camera sessions | `camera.maxSessions`, 1–4 per Connector (default 1); one camera per peer |
 | Access unit                | 256 KiB; Annex B; strictly increasing timestamps                         |
-| Rate                       | 30 access units/s and 1 MiB/s (about 8 Mbit/s); 64 MiB per session       |
+| Rate                       | 30 access units/s and 1 MiB/s (about 8 Mbit/s)                           |
 | Helper                     | 2 s per access unit, 30 s lease, 16 MiB per lease, 16 KiB stderr         |
 | Browser loading            | 10 s (`CAMERA_LOADING_TIMEOUT_MS`), then error and detach                |
 | Camera proof frame         | 8 KiB canonical JSON; one offer and one answer per peer                  |
@@ -64,7 +64,7 @@ The camera section is absent by default. When it is absent, the Connector adds n
     {
       "cameraId": "cam-1",
       "assignmentId": "<runtime assignment uuid>",
-      "source": { "address": "192.0.2.10", "port": 8554, "path": "/stream" }
+      "source": { "address": "127.0.0.1", "port": 8554, "path": "/stream" }
     }
   ]
 }

@@ -1,6 +1,6 @@
 # Command authorization prototype
 
-This branch implements a library boundary, not a printer-control feature. No driver or WebRTC transport invokes it yet. The authenticated Connector context and key distribution remain unimplemented.
+The command verifier is called by the Connector pause dispatcher (`packages/connector/src/control/pause-dispatcher.ts`) for browser-originated pause commands through `verifyCommandV2`. This does not mean the verifier is wired to a printer driver or authorizes physical dispatch; it validates a command before the dispatch boundary. The authenticated Connector context and key distribution remain integration requirements.
 
 The browser generates a nonextractable ECDSA P-256 key with WebCrypto. Each signature covers canonical JSON, including farm, Connector, printer, user, key and session IDs, action, timestamps, random command ID and a 128-bit nonce. The Connector verifies the P1363 signature with Node crypto. Wire JSON must be canonical: duplicate fields, padding and alternate representations are rejected. Frames are limited to 8 KiB. Only pause, resume, cancel and emergency stop are represented; arbitrary G-code is excluded.
 

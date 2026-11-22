@@ -2,7 +2,12 @@ import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite'
 import { mkdirSync, lstatSync, openSync, closeSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { SignedCommand } from '@open3dfarmmanager/farm-protocol'
-import type { ClaimResult, ReplayStore } from './verify.ts'
+
+export type ClaimResult =
+  'accepted' | 'replay' | 'capacity' | 'clock-regressed' | 'rate-limited'
+export interface ReplayStore {
+  claim(command: SignedCommand, now: number): ClaimResult
+}
 
 const originalEmitWarning = process.emitWarning.bind(process)
 process.emitWarning = ((warning: string | Error, ...args: unknown[]) => {

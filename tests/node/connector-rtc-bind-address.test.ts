@@ -14,7 +14,6 @@ import { readAgentRuntimeConfig } from '../../packages/connector/src/config/runt
 import { ConnectorIdentity } from '../../packages/connector/src/identity/store.ts'
 import { ReadonlyConnectorPeer } from '../../packages/connector/src/webrtc/readonly-peer.ts'
 import { PauseConnectorPeer } from '../../packages/connector/src/webrtc/pause-control-peer.ts'
-import { SyntheticConnectorPeer } from '../../packages/connector/src/webrtc/synthetic-peer.ts'
 
 test('the RTC bind address accepts only literal IPv4/IPv6 addresses and defaults to loopback', () => {
   assert.equal(DEFAULT_RTC_BIND_ADDRESS, '127.0.0.1')
@@ -185,31 +184,6 @@ for (const bindAddress of [undefined, CONFIGURED]) {
       assert.deepEqual([...new Set(found)], [expected])
     } finally {
       peer.close()
-    }
-  })
-  test(`synthetic peer gathers only on ${expected}`, { skip }, async () => {
-    const keys = await crypto.subtle.generateKey('Ed25519', false, [
-      'sign',
-      'verify',
-    ])
-    const peer = new SyntheticConnectorPeer({
-      ...(bindAddress ? { bindAddress } : {}),
-      scope: {
-        session: randomUUID(),
-        browserNonce: 'a'.repeat(64),
-        connectorNonce: 'b'.repeat(64),
-        browserSpki: 'c'.repeat(64),
-        connectorSpki: 'd'.repeat(64),
-      },
-      privateKey: keys.privateKey,
-      remotePublicKey: keys.publicKey,
-    })
-    try {
-      const found = candidates((await peer.offer()).sdp)
-      assert.ok(found.length > 0)
-      assert.deepEqual([...new Set(found)], [expected])
-    } finally {
-      peer.peer.close()
     }
   })
 }

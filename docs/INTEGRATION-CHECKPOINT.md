@@ -37,6 +37,8 @@ Local HTTP tests use synthetic loopback servers; no physical printer or external
 
 ## Review limits and remaining acceptance
 
+> Historical record: the v1 signed-command verifier described here was removed in #609; commands use the v2 dispatcher path (see [command security](COMMAND-SECURITY.md)).
+
 The signed-command verifier still requires externally authenticated identities, roles, scope and authorization freshness. Its sixty-second authorization lease remains an explicitly provisional prototype setting; the product's offline revocation policy is unresolved. Emergency stop bypasses only the rate cap, not signature, freshness, replay or storage checks. No physical command dispatcher is wired to the verifier.
 
 The telemetry queue and identity store retain their fail-closed recovery limits after interrupted initialization or a stale lock. Atomic file publication, replay transactions and shared-directory coexistence are covered by local tests, not power-loss fault injection or an independent security audit. Filesystem guarantees assume trusted ancestors and no hostile process sharing the OS account.

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { createRequire } from 'node:module'
+import https from 'node:https'
 import { FaultController } from './mocks/faults.ts'
 import { startHttpMock } from './mocks/http-mock.ts'
 import { ScenarioController, type ScenarioStep } from './mocks/scenario.ts'
@@ -11,6 +12,9 @@ const require = createRequire(
 const { WebSocketServer } = require('ws') as any
 
 export interface CrealitySimulatorOptions {
+  /** Spec-derived, not captured: https://github.com/CrealityOfficial/CrealityPrint/blob/6262848e302b8c0d593f2b341cd01310aa2f58a1/src/slic3r/GUI/print_manage/AppUtils.cpp#L349-L352 */
+  secure?:
+    { key: string; cert: string; info?: Record<string, unknown> } | undefined
   durationMs?: number | undefined
   totalLayers?: number | undefined
   fail?: boolean | undefined
@@ -285,6 +289,42 @@ export async function createCrealitySimulator(
     },
   })
 
+  const secureServer =
+    options.secure &&
+    https.createServer(
+      { key: options.secure.key, cert: options.secure.cert },
+      (req, res) => {
+        if (req.method !== 'GET' || req.url !== '/info') {
+          res.writeHead(404).end()
+          return
+        }
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(
+          JSON.stringify({
+            model: 'Simulator',
+            mac: 'AA:BB:CC:00:00:01',
+            wssPort: securePort,
+            videoPort: 8000,
+            ...options.secure?.info,
+          }),
+        )
+      },
+    )
+  let securePort: number | undefined
+  let secureConnections = 0
+  if (secureServer) {
+    secureServer.on('upgrade', (req, socket, head) => {
+      secureConnections++
+      wss.handleUpgrade(req, socket, head, (ws: unknown) =>
+        wss.emit('connection', ws, req),
+      )
+    })
+    await new Promise<void>((resolve) =>
+      secureServer.listen(0, '127.0.0.1', resolve),
+    )
+    securePort = (secureServer.address() as { port: number }).port
+  }
+
   // Stock HTTP upload: POST /upload/<name> with a multipart body. The body is
   // drained and counted, never parsed or kept.
   const uploadHttp = await startHttpMock({
@@ -346,6 +386,10 @@ export async function createCrealitySimulator(
 
   return {
     port: wsHttp.ports.default,
+    securePort,
+    get secureConnections() {
+      return secureConnections
+    },
     /** Loopback port of the stock HTTP upload endpoint. */
     httpPort: uploadHttp.ports.default,
     origin: wsHttp.origin.replace(/^http:/, 'ws:'),
@@ -395,7 +439,17 @@ export async function createCrealitySimulator(
         await new Promise<void>((resolve, reject) =>
           wss.close((error: unknown) => (error ? reject(error) : resolve())),
         )
-        await Promise.all([wsHttp.close(), uploadHttp.close()])
+        await Promise.all([
+          wsHttp.close(),
+          uploadHttp.close(),
+          ...(secureServer
+            ? [
+                new Promise<void>((resolve) =>
+                  secureServer.close(() => resolve()),
+                ),
+              ]
+            : []),
+        ])
       })()
       return closing
     },

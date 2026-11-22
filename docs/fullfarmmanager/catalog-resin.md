@@ -40,4 +40,4 @@ Scope: the 26 `kind: resin` entries in the snapshot’s `fleet/fleet.yaml`, chec
 
 ## Driver coverage
 
-FullFarmManager lists these models and simulates resin readings. It has no real resin driver in the snapshot. OpenFarm's existing FDM adapters do not qualify any of these resin models. The [review](REVIEW.md) scopes new integration work to read-only SDCP and PreForm, with other brands retained as catalog entries. No printer was contacted.
+FullFarmManager lists these models and simulates resin readings. It has no real resin driver in the snapshot. OpenFarm's existing FDM adapters do not qualify any of these resin models. The [driver matrix](REVIEW.md#driver-matrix) records existing SDCP and PreForm status, documented control candidates and evidence gaps for each model. No printer was contacted.

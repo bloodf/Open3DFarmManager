@@ -5,6 +5,7 @@ import {
 } from '../utils/integration-auth-runtime.ts'
 import { PostgresWebhooks } from '../storage/webhook-postgres.ts'
 import { deliverNextWebhook } from '../services/webhook-worker.ts'
+import { credentialKeyring } from '../utils/sealed-credential-key.ts'
 
 export default defineNitroPlugin((nitro) => {
   let stopped = false
@@ -20,7 +21,10 @@ export default defineNitroPlugin((nitro) => {
     let worked = false
     try {
       worked = await deliverNextWebhook(
-        new PostgresWebhooks(integrationAuthPool()),
+        new PostgresWebhooks(
+          integrationAuthPool(),
+          credentialKeyring(useRuntimeConfig().auth),
+        ),
       )
     } catch {
       // The lease makes an interrupted delivery available again.

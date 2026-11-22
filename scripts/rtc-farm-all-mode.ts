@@ -19,6 +19,40 @@ export type AcceptanceSummary = {
   result: 'passed' | 'failed'
   rows: AcceptanceRow[]
 }
+export type AcceptanceRunOptions = {
+  /** Skip browser RTC, build and outage suites; run only Docker network-fault profiles. */
+  networkFaultOnly?: boolean
+}
+
+export const NETWORK_FAULT_PROFILES = ['nat', 'netem', 'udp-block'] as const
+
+export const HARDWARE_ACCEPTANCE_DEFERRED = {
+  suite: 'hardware',
+  row: 'E13.1-owner-hardware-acceptance',
+  detail:
+    'Manual physical-printer checklist in docs/HARDWARE-ACCEPTANCE-CHECKLIST.md',
+} as const
+
+/**
+ * Env-stable deferrals for network-fault profiles and the owner hardware row.
+ * Full-mode RTC resource deferrals are decided at run time from
+ * `runnableAcceptanceRows` and are not listed here.
+ */
+export function deferredAcceptanceRows(
+  env: NodeJS.ProcessEnv = process.env,
+): Omit<AcceptanceRow, 'passed'>[] {
+  const deferred: Omit<AcceptanceRow, 'passed'>[] = []
+  const dockerSim = env.OPENFARM_SIM?.trim().toLowerCase() === 'docker'
+  if (!dockerSim)
+    for (const profile of NETWORK_FAULT_PROFILES)
+      deferred.push({
+        suite: 'network-fault',
+        row: profile,
+        detail: 'Docker mode only (OPENFARM_SIM=docker)',
+      })
+  deferred.push({ ...HARDWARE_ACCEPTANCE_DEFERRED })
+  return deferred
+}
 
 export function allAcceptanceRows(env: NodeJS.ProcessEnv = process.env) {
   return [
@@ -103,11 +137,15 @@ export function parseLastJson(output: string): unknown {
   return undefined
 }
 
-export async function runAllAcceptance(checkout: string) {
+export async function runAllAcceptance(
+  checkout: string,
+  options: AcceptanceRunOptions = {},
+) {
   const env = process.env
   const rows: AcceptanceRow[] = []
   const deferred: Omit<AcceptanceRow, 'passed'>[] = []
   const dockerSim = isDockerSim()
+  const networkFaultOnly = options.networkFaultOnly === true
   const evidenceRoot =
     env.RTC_FARM_TEST_ALL_EVIDENCE ??
     join(homedir(), '.local/state/o3dfm/rtc-farm-all')
@@ -155,103 +193,106 @@ export async function runAllAcceptance(checkout: string) {
     }
   }
 
-  // The RTC runner shares one sealed Nitro build and PostgreSQL cluster across
-  // every registered row. Explicit names include camera and simulator rows.
-  const rtcRows = allAcceptanceRows(env)
-  const runnableRows = runnableAcceptanceRows(env)
-  const rtc = await execute(
-    'rtc-farm',
-    process.execPath,
-    [join(checkout, 'scripts/test-rtc-farm-acceptance.ts')],
-    { RTC_FARM_TEST_SCENARIOS: runnableRows.join(',') },
-  )
-  const rtcReport = parseLastJson(rtc.output) as
-    { results?: { scenario: string; passed: boolean }[] } | undefined
-  const rtcResults = rtcReport?.results?.map((entry) => ({
-    row: entry.scenario,
-    passed: entry.passed,
-  }))
-  for (const row of rtcRows) {
-    if (!runnableRows.includes(row)) {
-      const missing =
-        row === 'farm-page-camera'
-          ? 'Pinned RTSP helper and port are required'
-          : row === 'farm-page-printing-pause'
-            ? 'SV06 printing simulator, Moonraker and Spoolman are required'
-            : 'Simulator Moonraker and Spoolman origins are required'
-      if (dockerSim)
-        rows.push({ suite: 'rtc-farm', row, passed: false, detail: missing })
-      else deferred.push({ suite: 'rtc-farm', row, detail: missing })
-      continue
-    }
-    const passed = rowPassed(rtcResults, row)
-    rows.push({
-      suite: 'rtc-farm',
-      row,
-      passed: passed === true,
-      ...(passed === undefined
-        ? { detail: 'No row result in runner output' }
-        : {}),
-    })
-  }
-  if (
-    rtc.code !== 0 &&
-    rtcResults?.length &&
-    rtcResults.every((entry) => entry.passed)
-  )
-    rows.push({
-      suite: 'rtc-farm',
-      row: 'runner-cleanup',
-      passed: false,
-      detail: 'Suite exited nonzero after every selected row passed',
-    })
-
-  const flagRemoval = await execute('farmview-flag-removed', process.execPath, [
-    '--test',
-    'tests/node/no-farmview-flag.test.ts',
-  ])
-  rows.push({
-    suite: 'source-contract',
-    row: 'farmview-flag-removed',
-    passed: flagRemoval.code === 0,
-  })
-
-  // Outage acceptance consumes the same checkout's built farm artifact. Build
-  // once here so the outage runner never silently uses a stale .output tree.
-  const build = await execute('farm-build', 'npm', [
-    'run',
-    'build',
-    '-w',
-    '@open3dfarmmanager/farm',
-  ])
-  rows.push({ suite: 'build', row: 'apps/farm', passed: build.code === 0 })
-  const outage = await execute('connector-outage', process.execPath, [
-    join(checkout, 'scripts/test-connector-outage-recovery.ts'),
-  ])
-  const outageReport = parseLastJson(outage.output) as
-    | {
-        result?: string
-        scenarios?: { name: string; result: string }[]
+  if (!networkFaultOnly) {
+    // The RTC runner shares one sealed Nitro build and PostgreSQL cluster across
+    // every registered row. Explicit names include camera and simulator rows.
+    const rtcRows = allAcceptanceRows(env)
+    const runnableRows = runnableAcceptanceRows(env)
+    const rtc = await execute(
+      'rtc-farm',
+      process.execPath,
+      [join(checkout, 'scripts/test-rtc-farm-acceptance.ts')],
+      { RTC_FARM_TEST_SCENARIOS: runnableRows.join(',') },
+    )
+    const rtcReport = parseLastJson(rtc.output) as
+      { results?: { scenario: string; passed: boolean }[] } | undefined
+    const rtcResults = rtcReport?.results?.map((entry) => ({
+      row: entry.scenario,
+      passed: entry.passed,
+    }))
+    for (const row of rtcRows) {
+      if (!runnableRows.includes(row)) {
+        const missing =
+          row === 'farm-page-camera'
+            ? 'Pinned RTSP helper and port are required'
+            : row === 'farm-page-printing-pause'
+              ? 'SV06 printing simulator, Moonraker and Spoolman are required'
+              : 'Simulator Moonraker and Spoolman origins are required'
+        if (dockerSim)
+          rows.push({ suite: 'rtc-farm', row, passed: false, detail: missing })
+        else deferred.push({ suite: 'rtc-farm', row, detail: missing })
+        continue
       }
-    | undefined
-  const outageRows = outageReport?.scenarios ?? []
-  if (outageRows.length)
-    for (const row of outageRows)
+      const passed = rowPassed(rtcResults, row)
+      rows.push({
+        suite: 'rtc-farm',
+        row,
+        passed: passed === true,
+        ...(passed === undefined
+          ? { detail: 'No row result in runner output' }
+          : {}),
+      })
+    }
+    if (
+      rtc.code !== 0 &&
+      rtcResults?.length &&
+      rtcResults.every((entry) => entry.passed)
+    )
+      rows.push({
+        suite: 'rtc-farm',
+        row: 'runner-cleanup',
+        passed: false,
+        detail: 'Suite exited nonzero after every selected row passed',
+      })
+
+    const flagRemoval = await execute(
+      'farmview-flag-removed',
+      process.execPath,
+      ['--test', 'tests/node/no-farmview-flag.test.ts'],
+    )
+    rows.push({
+      suite: 'source-contract',
+      row: 'farmview-flag-removed',
+      passed: flagRemoval.code === 0,
+    })
+
+    // Outage acceptance consumes the same checkout's built farm artifact. Build
+    // once here so the outage runner never silently uses a stale .output tree.
+    const build = await execute('farm-build', 'npm', [
+      'run',
+      'build',
+      '-w',
+      '@open3dfarmmanager/farm',
+    ])
+    rows.push({ suite: 'build', row: 'apps/farm', passed: build.code === 0 })
+    const outage = await execute('connector-outage', process.execPath, [
+      join(checkout, 'scripts/test-connector-outage-recovery.ts'),
+    ])
+    const outageReport = parseLastJson(outage.output) as
+      | {
+          result?: string
+          scenarios?: { name: string; result: string }[]
+        }
+      | undefined
+    const outageRows = outageReport?.scenarios ?? []
+    if (outageRows.length)
+      for (const row of outageRows)
+        rows.push({
+          suite: 'connector-outage',
+          row: row.name,
+          passed: row.result === 'passed' && outage.code === 0,
+        })
+    else
       rows.push({
         suite: 'connector-outage',
-        row: row.name,
-        passed: row.result === 'passed' && outage.code === 0,
+        row: 'suite',
+        passed: outage.code === 0 && outageReport?.result === 'passed',
+        detail: 'Runner did not emit scenario results',
       })
-  else
-    rows.push({
-      suite: 'connector-outage',
-      row: 'suite',
-      passed: outage.code === 0 && outageReport?.result === 'passed',
-      detail: 'Runner did not emit scenario results',
-    })
+  }
 
   // Each profile owns a fresh project and fully tears it down before the next.
-  for (const profile of ['nat', 'netem', 'udp-block']) {
+  for (const profile of NETWORK_FAULT_PROFILES) {
     if (!dockerSim) {
       deferred.push({
         suite: 'network-fault',
@@ -275,12 +316,7 @@ export async function runAllAcceptance(checkout: string) {
     })
   }
 
-  deferred.push({
-    suite: 'hardware',
-    row: 'E13.1-owner-hardware-acceptance',
-    detail:
-      'Manual physical-printer checklist in docs/HARDWARE-ACCEPTANCE-CHECKLIST.md',
-  })
+  deferred.push({ ...HARDWARE_ACCEPTANCE_DEFERRED })
   const summary = buildAcceptanceSummary(commit, rows)
   const summaryPath =
     env.RTC_FARM_TEST_ALL_SUMMARY ?? join(evidence, 'summary.json')

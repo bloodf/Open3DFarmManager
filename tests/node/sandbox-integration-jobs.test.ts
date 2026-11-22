@@ -78,12 +78,17 @@ test(
         ],
         { stdio: 'ignore' },
       )
-      await seedSandbox(
-        sql,
-        new URL(`postgres://fixture:fixture@127.0.0.1:${pg.port}/fixture`),
-        state,
-        { local: true, origin, moonraker: sim.origin },
-      )
+      const previousUmask = process.umask(0o022)
+      try {
+        await seedSandbox(
+          sql,
+          new URL(`postgres://fixture:fixture@127.0.0.1:${pg.port}/fixture`),
+          state,
+          { local: true, origin, moonraker: sim.origin },
+        )
+      } finally {
+        process.umask(previousUmask)
+      }
       const roles =
         await sql`SELECT r.rolname FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.roleid JOIN pg_roles u ON u.oid = m.member WHERE u.rolname = 'sandbox_jobs' ORDER BY r.rolname`
       assert.deepEqual(
@@ -99,6 +104,11 @@ test(
         0o600,
       )
       assert.equal((await stat(join(state, 'app.env'))).mode & 0o777, 0o600)
+      assert.equal((await stat(state)).mode & 0o777, 0o700)
+      assert.equal(
+        (await stat(join(state, 'connector-data'))).mode & 0o777,
+        0o700,
+      )
       const runtimePath = join(state, 'runtime.json')
       const runtime = JSON.parse(await readFile(runtimePath, 'utf8'))
       assert.equal(runtime.assignments.length, 2)

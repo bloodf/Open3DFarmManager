@@ -6,7 +6,7 @@ import {
   mutation,
   sealedSessionRecordId,
 } from '../../services/authenticated-session.ts'
-import { inventoryUuid } from '../../storage/postgres-connector-inventory.ts'
+import { inventoryUuid } from '../inventory-uuid.ts'
 import { authRuntime, type AuthRuntime } from '../auth/runtime.ts'
 import {
   scanForAuthority,

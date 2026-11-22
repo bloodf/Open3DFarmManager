@@ -154,18 +154,24 @@ async function stop(
   text: () => { stdout: string; stderr: string },
 ) {
   if (child.exitCode === null) child.kill('SIGTERM')
-  const code = await Promise.race([
-    closed,
-    new Promise<number | null>((_, reject) => {
-      setTimeout(
-        () =>
-          reject(
-            new Error(`SIGTERM did not exit. ${text().stderr.slice(-500)}`),
-          ),
-        20_000,
-      )
-    }),
-  ])
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let code: number | null
+  try {
+    code = await Promise.race([
+      closed,
+      new Promise<number | null>((_, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(
+              new Error(`SIGTERM did not exit. ${text().stderr.slice(-500)}`),
+            ),
+          20_000,
+        )
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
   return { code, ...text() }
 }
 

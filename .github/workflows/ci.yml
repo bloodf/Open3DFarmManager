@@ -57,6 +57,16 @@ jobs:
           node-version: '24.22.3'
       - run: npm ci --ignore-scripts
       - run: npx playwright install --with-deps chromium
+      - run: |
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --batch --yes --dearmor -o /usr/share/keyrings/postgresql-pgdg.gpg
+          echo "deb [signed-by=/usr/share/keyrings/postgresql-pgdg.gpg] https://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo "$VERSION_CODENAME")-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update -qq && sudo apt-get install -y postgresql-common
+          sudo sed -i 's/^#\? *create_main_cluster.*/create_main_cluster = false/' /etc/postgresql-common/createcluster.conf
+          sudo apt-get install -y postgresql-17
+      - run: npm run build -w @open3dfarmmanager/farm
+      - run: npm run test:e2e:auth-session
+        env:
+          OPENFARM_BROWSER: bundled
       - run: npm run test:e2e
         env:
           OPENFARM_BROWSER: bundled

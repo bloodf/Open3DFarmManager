@@ -1,6 +1,6 @@
 # Shell de operações
 
-Capturas com serviços locais desativados, idioma pt-BR e movimento reduzido; mostram o estado indisponível, não uma farm com dados simulados.
+Capturas com respostas locais determinísticas para uma farm, duas impressoras, uma bobina e um trabalho finalizado; pt-BR, relógio fixo e movimento reduzido. Outras integrações retornam indisponível.
 
 ## farm
 
@@ -16,4 +16,4 @@ Capturas com serviços locais desativados, idioma pt-BR e movimento reduzido; mo
 - mobile, light: [antes](shell-painel-before-mobile-light.png) · [depois](shell-painel-after-mobile-light.png)
 - mobile, dark: [antes](shell-painel-before-mobile-dark.png) · [depois](shell-painel-after-mobile-dark.png)
 
-O teste de captura verifica largura e axe nas duas telas, tamanhos e temas, além de abertura e Escape dos diálogos. A contenção e restauração de foco, contraste manual e zoom ainda precisam de verificação.
+O teste verifica largura e axe nas duas telas, tamanhos e temas, busca de impressora e bobina por teclado, abertura e Escape dos diálogos, contenção de Tab e retorno do foco no menu móvel. Axe verifica contraste detectável automaticamente; inspeção manual de contraste e zoom ainda está pendente. O resumo armazenado não inclui estimativa de conclusão, apresentada como não informada.

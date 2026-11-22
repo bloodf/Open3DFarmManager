@@ -6,14 +6,16 @@ import Dialog from '../components/ui/Dialog.vue'
 import { selectedFarm } from '../utils/farm-request-guard.ts'
 import { listenForAuthInvalidation } from '../utils/auth-invalidation'
 import { createShellShortcuts } from '../utils/shell-shortcuts'
-import { themeStyles } from '../utils/pre-hydration'
+import { themeScript, themeStyles } from '../utils/pre-hydration'
 import { useStatusSummary } from '../composables/useStatusSummary'
-
-const themeScript = `try { var t = localStorage.getItem('farm-theme') === 'light' ? 'light' : 'dark'; document.documentElement.dataset.theme = t; document.documentElement.classList.toggle('dark', t === 'dark'); document.documentElement.style.colorScheme = t; } catch (_) { document.documentElement.dataset.theme = 'dark'; }`
+import { useShellRecords } from '../composables/useShellRecords'
+import { spoolDisplayTitle } from '../utils/spool-library-format'
+import { jobHistoryRow } from '../utils/job-history-view'
 
 useHead({
   script: [{ innerHTML: themeScript }],
   style: [{ innerHTML: themeStyles }],
+  meta: [{ name: 'theme-color', content: 'var(--color-surface)' }],
 })
 const theme = ref('dark')
 function changeTheme() {
@@ -24,10 +26,20 @@ function changeTheme() {
   document.documentElement.dataset.theme = theme.value
   document.documentElement.classList.toggle('dark', theme.value === 'dark')
   document.documentElement.style.colorScheme = theme.value
+  const meta = document.querySelector<HTMLMetaElement>('meta[name=theme-color]')
+  if (meta)
+    meta.content = getComputedStyle(document.documentElement)
+      .getPropertyValue('--color-surface')
+      .trim()
 }
 onMounted(() => {
   theme.value =
     document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'
+  const meta = document.querySelector<HTMLMetaElement>('meta[name=theme-color]')
+  if (meta)
+    meta.content = getComputedStyle(document.documentElement)
+      .getPropertyValue('--color-surface')
+      .trim()
 })
 
 type FarmPage = { farms: { farmId: string }[] }
@@ -41,11 +53,10 @@ const search = ref(false)
 const help = ref(false)
 const query = ref('')
 const shortcutsEnabled = ref(true)
-const activeFarm = computed(() =>
-  route.path === '/farm'
-    ? (route.query.farm ??
-      (farms.value.length === 1 ? farms.value[0]?.farmId : ''))
-    : '',
+const activeFarm = computed(
+  () =>
+    route.query.farm ??
+    (farms.value.length === 1 ? farms.value[0]?.farmId : ''),
 )
 const selectedFarmId = computed(
   () => selectedFarm(farms.value, route.query.farm)?.farmId,
@@ -53,6 +64,21 @@ const selectedFarmId = computed(
 const { summary, failed } = useStatusSummary({
   farmId: () => selectedFarmId.value,
 })
+const summaryStale = computed(
+  () =>
+    failed.value ||
+    (!!summary.value &&
+      (Date.now() - summary.value.generatedAt > 30000 ||
+        summary.value.states.some(
+          (state) => Date.now() - state.observedAt > 30000,
+        ))),
+)
+const { spools, spoolState, spoolTruncated, latestJob, eventState } =
+  useShellRecords(
+    () => selectedFarmId.value,
+    () => search.value,
+    () => query.value,
+  )
 const authenticated = ref(false)
 const currentRole = ref<string | null>(null)
 const isOwner = computed(() => currentRole.value === 'owner')
@@ -142,17 +168,79 @@ const sectionLinks = computed(() => {
     : links.value
 })
 const sectionCollapsed = ref(false)
+onMounted(() => {
+  try {
+    sectionCollapsed.value =
+      localStorage.getItem('farm-shell-section-collapsed') === 'true'
+  } catch {}
+})
+watch(sectionCollapsed, (collapsed) => {
+  try {
+    localStorage.setItem('farm-shell-section-collapsed', String(collapsed))
+  } catch {}
+})
 const section = computed(() =>
   links.value.find(
     ({ to }) => to === route.path.split('/').slice(0, 2).join('/'),
   ),
 )
-const results = computed(() => {
-  const normalize = (value: string) =>
-    value.toLocaleLowerCase('pt-BR').normalize('NFD').replace(/\p{M}/gu, '')
+const normalize = (value: string) =>
+  value.toLocaleLowerCase('pt-BR').normalize('NFD').replace(/\p{M}/gu, '')
+const paletteGroups = computed(() => {
   const term = normalize(query.value.trim())
-  return links.value.filter(({ label }) => normalize(label).includes(term))
+  const matches = (value: string) => normalize(value).includes(term)
+  return [
+    {
+      label: 'Páginas',
+      items: links.value.filter(({ label }) => matches(label)),
+    },
+    {
+      label: 'Impressoras',
+      items: (summary.value?.states ?? [])
+        .filter((item) =>
+          matches(`${item.displayName ?? ''} ${item.printerKey}`),
+        )
+        .map((item) => ({
+          label: item.displayName || item.printerKey,
+          to: `/impressoras/${encodeURIComponent(item.printerKey)}?farm=${encodeURIComponent(selectedFarmId.value ?? '')}`,
+        })),
+    },
+    {
+      label: 'Bobinas',
+      items: spools.value
+        .filter((item) =>
+          matches(
+            `${spoolDisplayTitle(item)} ${item.id} ${item.filament.material ?? ''} ${item.filament.color_hex ?? ''}`,
+          ),
+        )
+        .map((item) => ({
+          label: `${spoolDisplayTitle(item)} · #${item.id}`,
+          to: `/bobinas?farm=${encodeURIComponent(selectedFarmId.value ?? '')}&q=${encodeURIComponent(String(item.id))}`,
+        })),
+    },
+  ]
 })
+const paletteItems = computed(() =>
+  paletteGroups.value.flatMap((group) => group.items),
+)
+const paletteIndex = ref(0)
+watch([query, paletteItems], () => {
+  paletteIndex.value = 0
+})
+function paletteKey(event: KeyboardEvent) {
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    if (!paletteItems.value.length) return
+    event.preventDefault()
+    const delta = event.key === 'ArrowDown' ? 1 : -1
+    paletteIndex.value =
+      (paletteIndex.value + delta + paletteItems.value.length) %
+      paletteItems.value.length
+  } else if (event.key === 'Enter' && paletteItems.value[paletteIndex.value]) {
+    event.preventDefault()
+    void router.push(paletteItems.value[paletteIndex.value]!.to)
+    search.value = false
+  }
+}
 const shortcuts = createShellShortcuts((shortcut) => {
   if (shortcut === 'search') search.value = true
   if (shortcut === 'help') help.value = true
@@ -286,12 +374,16 @@ async function refreshAccount() {
         {{ theme === 'dark' ? '☀ Claro' : '☾ Escuro' }}
       </Button>
       <details class="vitals">
-        <summary>Situação da farm</summary>
+        <summary>
+          Resumo armazenado<span v-if="summary">
+            · Imprimindo: {{ summary.counts.printing }} · Atenção:
+            {{ summary.counts.paused + summary.counts.error }}</span
+          ><span v-else> · Indisponível</span>
+          <span v-if="summaryStale"> · Desatualizado</span>
+        </summary>
         <p v-if="!summary">Situação indisponível</p>
         <template v-else>
-          <p v-if="failed || Date.now() - summary.generatedAt > 30000">
-            Dados desatualizados
-          </p>
+          <p v-if="summaryStale">Dados desatualizados</p>
           <p>
             Imprimindo: {{ summary.counts.printing }} · Atenção:
             {{ summary.counts.paused + summary.counts.error }} · Ociosas:
@@ -357,8 +449,25 @@ async function refreshAccount() {
       <slot />
     </div>
     <footer class="event-strip">
-      Último evento: indisponível ·
-      <NuxtLink to="/historico">Ver histórico</NuxtLink>
+      <template v-if="latestJob"
+        >Último trabalho: {{ jobHistoryRow(latestJob).outcome }} ·
+        {{ jobHistoryRow(latestJob).filename }} ·
+        {{ jobHistoryRow(latestJob).endedAt }}</template
+      >
+      <template v-else-if="eventState === 'ready'"
+        >Nenhum trabalho finalizado registrado</template
+      >
+      <template v-else-if="eventState === 'loading'"
+        >Consultando histórico…</template
+      >
+      <template v-else>Último evento indisponível</template> ·
+      <NuxtLink
+        :to="{
+          path: '/historico',
+          query: selectedFarmId ? { farm: selectedFarmId } : {},
+        }"
+        >Ver histórico</NuxtLink
+      >
     </footer>
     <Dialog v-model="drawer" class="drawer" title="Menu">
       <ShellNavigation
@@ -368,17 +477,35 @@ async function refreshAccount() {
       />
     </Dialog>
     <Dialog v-model="search" title="Buscar">
-      <label>
-        Nome da página
-        <input v-model="query" type="search" autofocus />
-      </label>
-      <p>Busca de impressoras e bobinas indisponível.</p>
-      <p v-if="!results.length" role="status">Nenhum resultado encontrado.</p>
-      <ShellNavigation
-        :links="results"
-        :path="route.path"
-        @navigate="search = false"
+      <label for="shell-search">Buscar páginas, impressoras e bobinas</label>
+      <input
+        id="shell-search"
+        v-model="query"
+        type="search"
+        autofocus
+        @keydown="paletteKey"
       />
+      <p v-if="spoolState === 'unavailable'">Busca de bobinas indisponível.</p>
+      <p v-if="spoolTruncated">
+        Há mais bobinas. Refine a busca para encontrá-las.
+      </p>
+      <p v-if="!summary">Busca de impressoras indisponível.</p>
+      <p v-if="!paletteItems.length" role="status">
+        Nenhum resultado encontrado.
+      </p>
+      <div v-for="group in paletteGroups" :key="group.label">
+        <h3 v-if="group.items.length">{{ group.label }}</h3>
+        <ul v-if="group.items.length" class="palette-list">
+          <li v-for="item in group.items" :key="item.to">
+            <NuxtLink
+              :to="item.to"
+              :class="{ selected: paletteItems[paletteIndex] === item }"
+              @click="search = false"
+              >{{ item.label }}</NuxtLink
+            >
+          </li>
+        </ul>
+      </div>
     </Dialog>
     <Dialog v-model="help" title="Atalhos de teclado">
       <label>
@@ -453,6 +580,19 @@ input {
   border-left: 3px solid var(--color-accent);
   background: var(--ops-canvas);
   font-weight: 700;
+}
+.palette-list {
+  list-style: none;
+  padding: 0;
+}
+.palette-list a {
+  display: block;
+  padding: var(--space-2);
+  min-height: 44px;
+}
+.palette-list a.selected {
+  background: var(--surface);
+  outline: 2px solid var(--color-focus-ring);
 }
 .vitals {
   color: var(--ops-text);

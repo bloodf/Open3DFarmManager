@@ -56,7 +56,11 @@ const loadingList = ref(false)
 const listError = ref('')
 const statusMessage = ref('')
 
-const filters = reactive<SpoolFilters>({ ...EMPTY_SPOOL_FILTERS })
+const route = useRoute()
+const filters = reactive<SpoolFilters>({
+  ...EMPTY_SPOOL_FILTERS,
+  q: typeof route.query.q === 'string' ? route.query.q : '',
+})
 
 const formOpen = ref(false)
 const editingSpool = ref<SpoolItem | null>(null)

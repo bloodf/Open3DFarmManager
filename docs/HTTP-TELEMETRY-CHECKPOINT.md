@@ -1,8 +1,6 @@
-> Historical record: the unauthenticated prototype was removed in #609. The Connector uses the authenticated telemetry client.
-
 # Bounded HTTP telemetry checkpoint
 
-The existing one-attempt drain now has a native-fetch adapter in the former unauthenticated telemetry adapter. It validates an outbound printer-state batch before sending and maps the internal ingestion result `{ ok: true, acceptedEventIds }` to the exact-ID confirmation expected by the drain. This is a prototype HTTP mapping. The maintained Connector agent instead uses `authenticated-http-telemetry.ts` and runs a scheduled drain against the application telemetry routes.
+The existing one-attempt drain now has a native-fetch adapter in `packages/connector/src/cloud/http-telemetry.ts`. It validates an outbound printer-state batch before sending and maps the internal ingestion result `{ ok: true, acceptedEventIds }` to the exact-ID confirmation expected by the drain. This is a prototype HTTP mapping. The maintained Connector agent instead uses `authenticated-http-telemetry.ts` and runs a scheduled drain against the application telemetry routes.
 
 The configured endpoint requires HTTPS by default, rejects URL credentials/query/fragment and disables redirects. Tests explicitly opt into HTTP only for loopback IP literals. That option must not be enabled in a production transport configuration. The adapter sends no credentials and does not authenticate an agent. The loopback test server is a test fixture, not an exposed Nuxt endpoint.
 

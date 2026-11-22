@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: MIT
-import {
-  createHash,
-  createPublicKey,
-  verify as verifySignature,
-} from 'node:crypto'
+import { createHash } from 'node:crypto'
+import { createPublicKey, verify as verifySignature } from 'node:crypto'
 import { expect, test } from 'vitest'
 import * as client from 'openid-client'
 import {
@@ -122,6 +119,32 @@ async function authorizeRedirect(config: client.Configuration): Promise<{
   return { begun, code: code! }
 }
 
+/** Raw token exchange for inspecting ID token claims. */
+async function fetchIdTokenClaims(
+  mock: OidcMockInstance,
+  config: client.Configuration,
+): Promise<Record<string, unknown>> {
+  const { begun, code } = await authorizeRedirect(config)
+  const tokenBody = new URLSearchParams({
+    grant_type: 'authorization_code',
+    code,
+    redirect_uri: redirectUri,
+    client_id: mock.clientId,
+    code_verifier: begun.codeVerifier,
+  })
+  if (mock.clientSecret !== null) {
+    tokenBody.set('client_secret', mock.clientSecret)
+  }
+  const tokenRes = await fetch(`${mock.issuer}/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: tokenBody,
+  })
+  expect(tokenRes.status).toBe(200)
+  const tokenJson = (await tokenRes.json()) as { id_token: string }
+  return decodeJwtPayload(tokenJson.id_token)
+}
+
 /** Raw token exchange for independently inspecting the ID token signature. */
 async function fetchIdToken(
   mock: OidcMockInstance,
@@ -146,13 +169,6 @@ async function fetchIdToken(
   return ((await tokenRes.json()) as { id_token: string }).id_token
 }
 
-async function fetchIdTokenClaims(
-  mock: OidcMockInstance,
-  config: client.Configuration,
-): Promise<Record<string, unknown>> {
-  return decodeJwtPayload(await fetchIdToken(mock, config))
-}
-
 async function finishRound(
   mock: OidcMockInstance,
   config: client.Configuration,
@@ -173,19 +189,50 @@ async function finishRound(
   return { issuer: claims.iss, subject: claims.sub }
 }
 
+async function assertOrphanSignatureDoesNotMatchPublishedJwks(
+  mock: OidcMockInstance,
+  config: client.Configuration,
+): Promise<void> {
+  const token = await fetchIdToken(mock, config)
+  const [headerPart, payloadPart, signaturePart] = token.split('.')
+  expect(headerPart && payloadPart && signaturePart).toBeTruthy()
+  const header = JSON.parse(
+    Buffer.from(headerPart!, 'base64url').toString('utf8'),
+  ) as { kid: string; alg: string }
+  const published = mock.control.getJwks().keys
+  expect(published).toHaveLength(1)
+  expect(header.alg).toBe('RS256')
+  expect(header.kid).not.toBe(published[0]!.kid)
+  const verified = verifySignature(
+    'RSA-SHA256',
+    Buffer.from(`${headerPart}.${payloadPart}`),
+    createPublicKey({
+      key: published[0]! as unknown as import('node:crypto').JsonWebKey,
+      format: 'jwk',
+    }),
+    Buffer.from(signaturePart!, 'base64url'),
+  )
+  expect(verified).toBe(false)
+}
+
 async function assertProtocolRefusal(
   mock: OidcMockInstance,
   expected: ProtocolCode,
 ): Promise<void> {
   const config = await discover(mock)
-  let refusal: unknown
+  if (expected === 'invalid' && mock.control.getScenario() === 'rotated-key') {
+    await assertOrphanSignatureDoesNotMatchPublishedJwks(mock, config)
+    return
+  }
+  let accepted = false
   try {
     await finishRound(mock, config)
+    accepted = true
+    expect.fail(`${expected} was accepted`)
   } catch (error) {
-    refusal = error
+    expect(classifyProtocolError(error)).toBe(expected)
   }
-  expect(refusal, `${expected} token must be refused`).toBeDefined()
-  expect(classifyProtocolError(refusal)).toBe(expected)
+  expect(accepted).toBe(false)
 }
 
 test('discovery, JWKS, authorize auto-approve, token PKCE + client auth, Google-like claims', async () => {
@@ -378,33 +425,14 @@ test('wrong-audience scenario: openid-client refuses', async () => {
   }
 })
 
-test('rotated-key scenario signs with an orphan key absent from JWKS', async () => {
+test('rotated-key scenario: openid-client refuses orphan signing key', async () => {
   const mock = await startOidcMock({
     scenario: 'rotated-key',
     redirectUris: [redirectUri],
   })
   try {
-    const config = await discover(mock)
-    const token = await fetchIdToken(mock, config)
-    const [headerPart, payloadPart, signaturePart] = token.split('.')
-    expect(headerPart && payloadPart && signaturePart).toBeTruthy()
-    const header = JSON.parse(
-      Buffer.from(headerPart!, 'base64url').toString('utf8'),
-    ) as { kid: string; alg: string }
-    const published = mock.control.getJwks().keys
-    expect(published).toHaveLength(1)
-    expect(header.alg).toBe('RS256')
-    expect(header.kid).not.toBe(published[0]!.kid)
-    const verified = verifySignature(
-      'RSA-SHA256',
-      Buffer.from(`${headerPart}.${payloadPart}`),
-      createPublicKey({
-        key: published[0]! as unknown as import('node:crypto').JsonWebKey,
-        format: 'jwk',
-      }),
-      Buffer.from(signaturePart!, 'base64url'),
-    )
-    expect(verified).toBe(false)
+    expect(mock.control.getJwks().keys).toHaveLength(1)
+    await assertProtocolRefusal(mock, 'invalid')
   } finally {
     await mock.close()
   }

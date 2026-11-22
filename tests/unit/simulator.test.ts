@@ -1,4 +1,5 @@
-import { expect, test, vi } from 'vitest'
+import { expect, test } from 'vitest'
+import { vi } from 'vitest'
 import { simulatorUrl, probePrinter } from '@open3dfarmmanager/sim-tools'
 import { Effect } from 'effect'
 import { serveTestServer } from './serve.ts'

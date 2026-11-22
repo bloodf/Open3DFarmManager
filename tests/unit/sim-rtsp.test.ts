@@ -1,13 +1,29 @@
-import { createServer, type Socket } from 'node:net'
+import { createServer } from 'node:net'
+import type { Socket } from 'node:net'
 import type { AddressInfo } from 'node:net'
 import { describe, expect, it } from 'vitest'
+import { afterEach } from 'vitest'
 import { verifyRtsp } from '../../packages/sim-tools/src/rtsp.ts'
 
 const sdp = 'v=0\r\nm=video 0 RTP/AVP 96\r\na=control:trackID=0\r\n'
 
+const fixtureCleanup: Array<() => Promise<void>> = []
+afterEach(async () => {
+  for (const cleanup of fixtureCleanup.splice(0)) await cleanup()
+})
+
 function fakeRtsp(describeStatus = '200 OK', split = false, packets = 5) {
   const sockets = new Set<Socket>()
-  const timers = new Set<ReturnType<typeof setTimeout>>()
+  const timers = new Set<ReturnType<typeof globalThis.setTimeout>>()
+  const setTimeout = (callback: () => void, delayMs: number) => {
+    let timer: ReturnType<typeof globalThis.setTimeout>
+    timer = globalThis.setTimeout(() => {
+      timers.delete(timer)
+      callback()
+    }, delayMs)
+    timers.add(timer)
+    return timer
+  }
   const server = createServer((socket) => {
     sockets.add(socket)
     socket.once('close', () => sockets.delete(socket))
@@ -29,23 +45,27 @@ function fakeRtsp(describeStatus = '200 OK', split = false, packets = 5) {
         const bytes = Buffer.concat(Array.from({ length: packets }, () => rtp))
         if (split) {
           socket.write(bytes.subarray(0, 2))
-          timers.add(setTimeout(() => socket.write(bytes.subarray(2, 9)), 20))
-          timers.add(setTimeout(() => socket.write(bytes.subarray(9)), 40))
+          setTimeout(() => socket.write(bytes.subarray(2, 9)), 20)
+          setTimeout(() => socket.write(bytes.subarray(9)), 40)
         } else socket.write(bytes)
       }
     })
   })
-  return new Promise<{ url: string; close: () => Promise<void> }>((resolve) =>
+  const closed = new Promise<void>((resolve) => server.once('close', resolve))
+  server.once('listening', () => {
+    fixtureCleanup.push(async () => {
+      for (const timer of timers) clearTimeout(timer)
+      timers.clear()
+      for (const socket of sockets) socket.destroy()
+      if (server.listening) server.close()
+      await closed
+    })
+  })
+  return new Promise<{ url: string; close: () => void }>((resolve) =>
     server.listen(0, '127.0.0.1', () =>
       resolve({
         url: `rtsp://127.0.0.1:${(server.address() as AddressInfo).port}/test`,
-        close: () =>
-          new Promise<void>((resolve, reject) => {
-            for (const timer of timers) clearTimeout(timer)
-            timers.clear()
-            for (const socket of sockets) socket.destroy()
-            server.close((error) => (error ? reject(error) : resolve()))
-          }),
+        close: () => server.close(),
       }),
     ),
   )
@@ -54,21 +74,15 @@ function fakeRtsp(describeStatus = '200 OK', split = false, packets = 5) {
 describe('verifyRtsp', () => {
   it('reassembles $ frames split across TCP chunks', async () => {
     const rtsp = await fakeRtsp('200 OK', true)
-    try {
-      await expect(verifyRtsp(rtsp.url, { minPackets: 5 })).resolves.toBe(5)
-    } finally {
-      await rtsp.close()
-    }
+    await expect(verifyRtsp(rtsp.url, { minPackets: 5 })).resolves.toBe(5)
+    rtsp.close()
   })
   it('times out when too few packets arrive', async () => {
     const rtsp = await fakeRtsp('200 OK', false, 2)
-    try {
-      await expect(
-        verifyRtsp(rtsp.url, { minPackets: 5, timeoutMs: 300 }),
-      ).rejects.toThrow('2 packets')
-    } finally {
-      await rtsp.close()
-    }
+    await expect(
+      verifyRtsp(rtsp.url, { minPackets: 5, timeoutMs: 300 }),
+    ).rejects.toThrow('2 packets')
+    rtsp.close()
   })
   it('rejects URLs with credentials', async () => {
     await expect(verifyRtsp('rtsp://u:p@127.0.0.1/test')).rejects.toThrow(
@@ -77,19 +91,13 @@ describe('verifyRtsp', () => {
   })
   it('counts RTP packets over interleaved TCP', async () => {
     const rtsp = await fakeRtsp()
-    try {
-      await expect(verifyRtsp(rtsp.url, { minPackets: 5 })).resolves.toBe(5)
-    } finally {
-      await rtsp.close()
-    }
+    await expect(verifyRtsp(rtsp.url, { minPackets: 5 })).resolves.toBe(5)
+    rtsp.close()
   })
   it('rejects a failed DESCRIBE', async () => {
     const rtsp = await fakeRtsp('404 Not Found')
-    try {
-      await expect(verifyRtsp(rtsp.url)).rejects.toThrow('describe failed')
-    } finally {
-      await rtsp.close()
-    }
+    await expect(verifyRtsp(rtsp.url)).rejects.toThrow('describe failed')
+    rtsp.close()
   })
   it('rejects non-loopback hosts', async () => {
     await expect(verifyRtsp('rtsp://example.com/test')).rejects.toThrow(

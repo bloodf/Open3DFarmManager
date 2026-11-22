@@ -43,7 +43,12 @@ describe('webhook signing secret at rest', () => {
       .slice(1)
       .find((value) => typeof value === 'string' && value.startsWith('O3W1.'))
     expect(secretBinding).toBeTypeOf('string')
-    const delivery = openWebhookSecret(String(secretBinding), master)
+    const persistedDelivery = openWebhookSecret(String(secretBinding), master)
+    expect(persistedDelivery.secret).toBe(returnedSecret)
+
+    const sealed = sealWebhookSecret(returnedSecret, master)
+    expect(sealed).not.toContain(returnedSecret)
+    const delivery = openWebhookSecret(sealed, master)
     expect(delivery.secret).toBe(returnedSecret)
     const timestamp = '123'
     const body = '{}'
@@ -56,5 +61,11 @@ describe('webhook signing secret at rest', () => {
     expect(timingSafeEqual(Buffer.from(expected), Buffer.from(actual))).toBe(
       true,
     )
+    const persistedActual = createHmac('sha256', persistedDelivery.secret)
+      .update(`${timestamp}.${body}`)
+      .digest('hex')
+    expect(
+      timingSafeEqual(Buffer.from(expected), Buffer.from(persistedActual)),
+    ).toBe(true)
   })
 })

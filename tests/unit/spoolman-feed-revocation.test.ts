@@ -116,6 +116,21 @@ test('revoking a credential closes its open feeds and leaves sibling feeds open'
 
 test('process-wide bus closes feeds when a legacy credential is revoked', async () => {
   const issued = issueLegacyToken()
+  const active = new Map([[issued.credentialId, FARM]])
+  const hooks = createSpoolFeedHooks({
+    storage: async () => mockStorage(active),
+    bus: spoolFeedBus,
+  })
+  const feed = await openFeed(hooks, issued.token, '/api/v1/')
+  expect(feed.closed).toEqual([])
+
+  // Same call site postgres revoke uses after a successful tombstone write.
+  spoolFeedBus.closeCredential(issued.credentialId)
+  expect(feed.closed).toEqual([{ code: 4401, reason: 'Unauthorized' }])
+})
+
+test('Postgres storage revocation closes only the revoked process-wide feed', async () => {
+  const issued = issueLegacyToken()
   const sibling = issueLegacyToken()
   const active = new Map([
     [issued.credentialId, FARM],

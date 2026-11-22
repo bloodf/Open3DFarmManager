@@ -203,36 +203,23 @@ function launch(args: string[], auditPath?: string) {
     // fails at once with the CLI's output.
     async until(predicate: (text: string) => boolean) {
       while (!predicate(output)) {
-        if (child.exitCode !== null || child.signalCode !== null) {
-          // Output written just before close may still be buffered in the pipe.
+        if (child.signalCode !== null) {
+          // A signal leaves exitCode null, but close still drains the output.
           await stdout
           if (predicate(output)) return
           throw new Error(
-            `CLI exited before the fixture condition: exit=${child.exitCode}, signal=${child.signalCode}, output=${output.slice(-2000)}`,
+            `CLI exited before the fixture condition: signal=${child.signalCode}, output=${output.slice(-2000)}`,
           )
         }
-        await new Promise<void>((resolve, reject) => {
-          const settle = () => {
-            clearTimeout(timer)
-            child.stdout.off('data', onData)
-            child.off('close', onClose)
-            child.off('error', onError)
-            resolve()
-          }
-          const onData = () => settle()
-          const onClose = () => settle()
-          const onError = (error: Error) => {
-            clearTimeout(timer)
-            child.stdout.off('data', onData)
-            child.off('close', onClose)
-            child.off('error', onError)
-            reject(error)
-          }
-          const timer = setTimeout(settle, 10)
-          child.stdout.once('data', onData)
-          child.once('close', onClose)
-          child.once('error', onError)
-        })
+        if (child.exitCode !== null) {
+          // Output written just before exit may still be in the pipe.
+          await stdout
+          if (predicate(output)) return
+          throw new Error(
+            `CLI exited before the fixture condition: exit=${child.exitCode}, output=${output.slice(-2000)}`,
+          )
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10))
       }
     },
     finish,

@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { Browser, BrowserContext, Page } from '@playwright/test'
+import type { Browser, Page } from '@playwright/test'
 import { build } from 'esbuild'
 import {
   compileScript,
@@ -336,79 +336,47 @@ export async function createPageHarness(
         res.end(JSON.stringify(answer.body ?? {}))
       },
     })
-    let context: BrowserContext | undefined
-    let closePromise: Promise<void> | undefined
-    const closeResources = () => {
-      if (closePromise) return closePromise
-      closePromise = (async () => {
-        const attempt = (close: () => Promise<void>) =>
-          Promise.resolve().then(close)
-        const results = await Promise.allSettled([
-          attempt(() => (context ? context.close() : Promise.resolve())),
-          attempt(() => server.close()),
-        ])
-        const failures = results.flatMap((result) =>
-          result.status === 'rejected' ? [result.reason] : [],
-        )
-        if (failures.length)
-          throw new AggregateError(failures, 'Page harness cleanup failed')
-      })()
-      return closePromise
-    }
-
-    try {
-      context = await browser.newContext({
-        viewport: { width: options.width ?? 1280, height: 900 },
-      })
-      await context.route('**/*', (route) => {
-        const url = new URL(route.request().url())
-        if (url.origin !== server.origin) return route.abort()
-        if (url.pathname === '/app.js')
-          return route.fulfill({
-            contentType: 'text/javascript',
-            body: assets.js,
-          })
-        if (url.pathname === '/app.css')
-          return route.fulfill({ contentType: 'text/css', body: assets.css })
-        return route.continue()
-      })
-      if (options.init) await context.addInitScript(options.init)
-      const page = await context.newPage()
-      if (options.clock) await page.clock.install()
-      await page.goto(server.origin)
-      await page.evaluate(
-        ([name, route]) =>
-          (
-            window as unknown as { __mount: (n: string, r: unknown) => void }
-          ).__mount(name, route),
-        [pageName, options.route ?? {}] as const,
-      )
-      return {
-        page,
-        calls: (method, fragment) =>
-          server.calls.all.filter(
-            (c) => c.method === method && c.url.includes(fragment),
-          ).length,
-        navigated: () =>
-          page.evaluate(() =>
-            (
-              window as unknown as { __navigated: () => unknown[] }
-            ).__navigated(),
-          ),
-        setRoutes: (next) => void (table = next),
-        close: closeResources,
-      }
-    } catch (error) {
-      try {
-        await closeResources()
-      } catch (cleanupError) {
-        throw new AggregateError(
-          [error, cleanupError],
-          'Page harness setup and rollback failed',
-          { cause: error },
-        )
-      }
-      throw error
+    const context = await browser.newContext({
+      viewport: { width: options.width ?? 1280, height: 900 },
+    })
+    await context.route('**/*', (route) => {
+      const url = new URL(route.request().url())
+      if (url.origin !== server.origin) return route.abort()
+      if (url.pathname === '/app.js')
+        return route.fulfill({
+          contentType: 'text/javascript',
+          body: assets.js,
+        })
+      if (url.pathname === '/app.css')
+        return route.fulfill({ contentType: 'text/css', body: assets.css })
+      return route.continue()
+    })
+    if (options.init) await context.addInitScript(options.init)
+    const page = await context.newPage()
+    if (options.clock) await page.clock.install()
+    await page.goto(server.origin)
+    await page.evaluate(
+      ([name, route]) =>
+        (
+          window as unknown as { __mount: (n: string, r: unknown) => void }
+        ).__mount(name, route),
+      [pageName, options.route ?? {}] as const,
+    )
+    return {
+      page,
+      calls: (method, fragment) =>
+        server.calls.all.filter(
+          (c) => c.method === method && c.url.includes(fragment),
+        ).length,
+      navigated: () =>
+        page.evaluate(() =>
+          (window as unknown as { __navigated: () => unknown[] }).__navigated(),
+        ),
+      setRoutes: (next) => void (table = next),
+      close: async () => {
+        await context.close()
+        await server.close()
+      },
     }
   }
   return {

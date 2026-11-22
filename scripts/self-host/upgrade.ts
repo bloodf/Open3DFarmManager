@@ -1,3 +1,8 @@
+import { spawn } from 'node:child_process'
+import { open, rm, statfs } from 'node:fs/promises'
+import { dirname } from 'node:path'
+import { parseArgs } from 'node:util'
+
 export type Runner = (args: string[], output?: string) => Promise<string>
 export interface Options {
   version: string
@@ -73,6 +78,8 @@ export async function upgrade(
   o: Options,
   run: Runner,
   freeBytes: () => Promise<number>,
+  removeBackup: (path: string) => Promise<void> = (path) =>
+    rm(path, { force: true }),
 ) {
   const steps = plan(o)
   if (o.dryRun) return steps.join('\n')
@@ -90,18 +97,23 @@ export async function upgrade(
     const before = volumes(config)
     if ((await freeBytes()) < 1024 ** 3)
       throw new Error('Insufficient backup disk space')
-    await run(
-      [
-        ...base,
-        'exec',
-        '-T',
-        'postgres',
-        'sh',
-        '-c',
-        'exec pg_dump -Fc -U "$POSTGRES_USER" -d "$POSTGRES_DB"',
-      ],
-      o.backup,
-    )
+    try {
+      await run(
+        [
+          ...base,
+          'exec',
+          '-T',
+          'postgres',
+          'sh',
+          '-c',
+          'exec pg_dump -Fc -U "$POSTGRES_USER" -d "$POSTGRES_DB"',
+        ],
+        o.backup,
+      )
+    } catch (error) {
+      await removeBackup(o.backup)
+      throw error
+    }
     backedUp = true
     const after = volumes(
       JSON.parse(await run([...base, 'config', '--format', 'json'])),
@@ -114,9 +126,91 @@ export async function upgrade(
         return 'Upgrade ready; backup retained'
     }
     throw new Error('Readiness timeout')
-  } catch {
+  } catch (error) {
     throw new Error(
       `Upgrade stopped. ${backedUp ? 'Backup completed.' : 'Backup not confirmed; do not pull.'} Restore: stop application writers; select the previous release; restore the backup with pg_restore into the dedicated database; start the previous release and verify /readyz. Preserve all volumes and Connector configuration.`,
+      { cause: error },
     )
+  }
+}
+
+async function main(argv: string[]) {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      version: { type: 'string' },
+      compose: { type: 'string' },
+      backup: { type: 'string' },
+      ready: { type: 'string', default: 'http://127.0.0.1:3000/readyz' },
+      'dry-run': { type: 'boolean' },
+    },
+  })
+  process.env.O3DFM_VERSION = values.version
+  process.env.NUXT_DATABASE_MIGRATIONS = 'apply'
+  const createdBackups = new Set<string>()
+  console.log(
+    await upgrade(
+      {
+        version: values.version ?? '',
+        compose: values.compose ?? '',
+        backup: values.backup ?? '',
+        ready: values.ready!,
+        ...(values['dry-run'] === undefined
+          ? {}
+          : { dryRun: values['dry-run'] }),
+      },
+      async (args, output) => {
+        if (args[0] === 'ready') {
+          try {
+            const response = await fetch(args[1]!, {
+              signal: AbortSignal.timeout(2000),
+            })
+            if (response.ok) return 'ok'
+          } catch {
+            // Readiness is polled until ready or until the bounded retry count ends.
+          }
+          await new Promise((resolve) => setTimeout(resolve, 2000))
+          return ''
+        }
+        if (args.includes('down') || args.includes('-v'))
+          throw new Error('Destructive command refused')
+        const file = output ? await open(output, 'wx', 0o600) : undefined
+        if (output) createdBackups.add(output)
+        try {
+          return await new Promise<string>((resolve, reject) => {
+            const child = spawn('docker', args, {
+              stdio: ['ignore', file ? file.fd : 'pipe', 'ignore'],
+            })
+            let data = ''
+            child.stdout?.on('data', (chunk) => {
+              data += chunk
+            })
+            child.on('error', reject)
+            child.on('close', (code) =>
+              code === 0 ? resolve(data) : reject(new Error('Command failed')),
+            )
+          })
+        } finally {
+          await file?.close()
+        }
+      },
+      async () => {
+        const s = await statfs(dirname(values.backup!))
+        return s.bavail * s.bsize
+      },
+      async (path) => {
+        if (!createdBackups.delete(path)) return
+        await rm(path, { force: true })
+      },
+    ),
+  )
+}
+
+if (import.meta.main) {
+  try {
+    await main(process.argv.slice(2))
+  } catch (error) {
+    console.error((error as Error).message)
+    process.exitCode = 1
   }
 }

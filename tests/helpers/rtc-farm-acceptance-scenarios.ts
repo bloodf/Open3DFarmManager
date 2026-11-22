@@ -1,5 +1,9 @@
 import { rtcRejectionScenarios } from './rtc-farm-rejections.ts'
-import { simulatorRtcFarmScenarios } from './rtc-farm-acceptance-sim-scenarios.ts'
+import { isMockSim } from '../../packages/sim-tools/src/mocks/env.ts'
+import {
+  mockSimulatorRtcFarmScenarios,
+  simulatorRtcFarmScenarios,
+} from './rtc-farm-acceptance-sim-scenarios.ts'
 
 /**
  * Composable rows for scripts/test-rtc-farm-acceptance.ts. Each row is one fresh
@@ -16,7 +20,9 @@ export type RtcFarmScenario = {
    * Task-owned resources the runner starts once for every row that needs them.
    * Rows with resources are opt-in: they run only when named explicitly.
    */
-  resources?: readonly ('rtsp-camera' | 'printing-simulator')[]
+  resources?: readonly (
+    'rtsp-camera' | 'printing-simulator' | 'mock-simulator'
+  )[]
 }
 
 const farmPage = {
@@ -58,6 +64,7 @@ export const RTC_FARM_SCENARIOS: Readonly<Record<string, RtcFarmScenario>> =
         ...farmPage,
         SIGNALLING_HTTPS_RTC_CLOSURE: 'disconnect',
         SIGNALLING_HTTPS_FARM_PAUSE: 'yes',
+        ...(isMockSim() ? { SIGNALLING_HTTPS_MOCK_SIMULATOR: 'sv06' } : {}),
       },
       expect: [
         'PASS real generated Nitro HTTPS/WSS farm page signed pause over WebRTC to synthetic Moonraker',
@@ -82,7 +89,9 @@ export const RTC_FARM_SCENARIOS: Readonly<Record<string, RtcFarmScenario>> =
     },
     ...rtcRejectionScenarios(),
     // Opt-in genuine-simulator row; absent unless its origins are set.
-    ...simulatorRtcFarmScenarios(),
+    ...(isMockSim()
+      ? mockSimulatorRtcFarmScenarios
+      : simulatorRtcFarmScenarios()),
   })
 
 export function selectRtcFarmScenarios(list: string | undefined) {

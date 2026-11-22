@@ -5,10 +5,15 @@ O comando requer Docker Compose local com suporte a `!override` e OpenSSL.
 Ele compila o aplicativo e o Connector quando os artefatos ainda não existem,
 inicia Klipper e Bambu simulados e imprime as variáveis de ambiente para consultar a API em HTTPS. As portas do
 host são efêmeras e vinculadas a `127.0.0.1`. Após alterar o código, execute
-`npm run build` antes de reiniciar o sandbox.
+`npx nuxt build infra/sandbox` e `npm run build -w @open3dfarmmanager/connector` antes de reiniciar o sandbox.
 
-As credenciais OAuth têm os escopos `printers:read` e `inventory:read` na
-fazenda de sandbox. Use o certificado local indicado na saída para validar
+As credenciais OAuth incluem leitura de impressoras, estoque, arquivos e histórico,
+envio de trabalhos e ações de controle na fazenda de sandbox. O Connector
+simulado recebe envelopes assinados por uma chave criada para esse sandbox;
+os comandos continuam sujeitos às verificações de segurança do Connector.
+O sandbox usa arquivos e impressoras simulados; o Klipper e o Bambu aceitam
+trabalhos e cancelamentos, e o histórico registra a duração das impressões.
+Use o certificado local indicado na saída para validar
 a conexão TLS. Guarde a saída do comando em um local privado.
 
 Para testar o cliente de referência, aplique as variáveis impressas e execute:
@@ -18,6 +23,8 @@ OPENFARM_INTEGRATION_E2E=1 node --test --test-force-exit tests/node/integration-
 ```
 
 `node scripts/sandbox.ts stop` interrompe os serviços e conserva a fazenda.
+A mudança na configuração inicial exige `node scripts/sandbox.ts down` e uma
+nova execução para recriar uma fazenda de sandbox anterior.
 A credencial inicial do Connector vale uma hora. Quando ela expirar, execute
 `node scripts/sandbox.ts down` para descartar a fazenda local e depois execute
 `node scripts/sandbox.ts` para criar outra.

@@ -33,6 +33,7 @@ export function allAcceptanceRows(env: NodeJS.ProcessEnv = process.env) {
 
 export function runnableAcceptanceRows(env: NodeJS.ProcessEnv = process.env) {
   return allAcceptanceRows(env).filter((row) => {
+    if (env.OPENFARM_SIM?.trim().toLowerCase() !== 'docker') return true
     if (row === 'farm-page-camera')
       return Boolean(
         env.RTC_FARM_TEST_RTSP_HELPER && env.RTC_FARM_TEST_RTSP_PORT,
@@ -68,7 +69,8 @@ export function rowPassed(
   rows: { row: string; passed: boolean }[] | undefined,
   row: string,
 ) {
-  return rows?.find((entry) => entry.row === row)?.passed
+  const attempts = rows?.filter((entry) => entry.row === row)
+  return attempts?.length ? attempts.every((entry) => entry.passed) : undefined
 }
 
 export function parseLastJson(output: string): unknown {
@@ -204,6 +206,16 @@ export async function runAllAcceptance(checkout: string) {
       detail: 'Suite exited nonzero after every selected row passed',
     })
 
+  const flagRemoval = await execute('farmview-flag-removed', process.execPath, [
+    '--test',
+    'tests/node/no-farmview-flag.test.ts',
+  ])
+  rows.push({
+    suite: 'source-contract',
+    row: 'farmview-flag-removed',
+    passed: flagRemoval.code === 0,
+  })
+
   // Outage acceptance consumes the same checkout's built farm artifact. Build
   // once here so the outage runner never silently uses a stale .output tree.
   const build = await execute('farm-build', 'npm', [
@@ -263,6 +275,12 @@ export async function runAllAcceptance(checkout: string) {
     })
   }
 
+  deferred.push({
+    suite: 'hardware',
+    row: 'E13.1-owner-hardware-acceptance',
+    detail:
+      'Manual physical-printer checklist in docs/HARDWARE-ACCEPTANCE-CHECKLIST.md',
+  })
   const summary = buildAcceptanceSummary(commit, rows)
   const summaryPath =
     env.RTC_FARM_TEST_ALL_SUMMARY ?? join(evidence, 'summary.json')

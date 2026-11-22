@@ -83,10 +83,13 @@ export async function testAuthenticatedFarmPage(input: {
     await expect(
       row.getByText('Conexão direta autenticada', { exact: true }),
     ).toBeVisible()
-    await expect(row.getByRole('progressbar')).toHaveAttribute('value', '0.25')
-    const pauseButton = row.getByRole('button', {
-      name: 'Pausar impressão',
+    const progress = row.getByRole('progressbar', {
+      name: 'Progresso informado da impressão',
       exact: true,
+    })
+    await expect(progress).toHaveAttribute('aria-valuenow', '25')
+    const pauseButton = row.getByRole('button', {
+      name: /^Pausar(?: impressão)?$/,
     })
     if (farmPause) await expect(pauseButton).toBeEnabled()
     else await expect(pauseButton).toBeDisabled()
@@ -94,11 +97,9 @@ export async function testAuthenticatedFarmPage(input: {
       row.getByText('Horário da observação não confirmado', { exact: true }),
     ).toBeVisible()
     await input.advance()
-    await expect(row.getByRole('progressbar')).toHaveAttribute(
-      'value',
-      '0.75',
-      { timeout: 3000 },
-    )
+    await expect(progress).toHaveAttribute('aria-valuenow', '75', {
+      timeout: 3000,
+    })
     const camera = input.camera
       ? await assertCameraPlaying({
           page,
@@ -134,7 +135,7 @@ export async function testAuthenticatedFarmPage(input: {
       await input.note('farm-page-pause-stale-disabled-with-reason')
     }
     await page.waitForTimeout(250)
-    await expect(row.getByRole('progressbar')).toHaveAttribute('value', '0.75')
+    await expect(progress).toHaveAttribute('aria-valuenow', '75')
     await expect(
       row.getByText('Conexão direta autenticada', { exact: true }),
     ).toHaveCount(0)
@@ -149,11 +150,9 @@ export async function testAuthenticatedFarmPage(input: {
       )
       // Recovery must carry new data, not only the retained observation.
       await input.advance()
-      await expect(row.getByRole('progressbar')).toHaveAttribute(
-        'value',
-        '0.9',
-        { timeout: 3000 },
-      )
+      await expect(progress).toHaveAttribute('aria-valuenow', '90', {
+        timeout: 3000,
+      })
       if (farmPause)
         await testFarmPagePause({
           fixture,
@@ -351,9 +350,9 @@ async function testConfirmedPause(input: {
   await input.closeButton.click()
   await expect(dialog).toBeHidden()
   await expect(pauseButton).toBeFocused()
-  await expect(row.getByText('Pausada', { exact: true })).toBeVisible({
-    timeout: 5000,
-  })
+  await expect(
+    row.locator('dt:text-is("Último estado informado") + dd'),
+  ).toHaveText('Pausada', { timeout: 5000 })
   await expect(pauseButton).toBeDisabled()
   await expect(pauseButton).toHaveAccessibleDescription(
     'Pausa indisponível. A impressora não está imprimindo.',

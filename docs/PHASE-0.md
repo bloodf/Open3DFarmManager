@@ -43,16 +43,16 @@ Publication does not establish deployment or complete Phase 0 acceptance.
 Source, packaged artifacts, database fixtures and native diagnostics retain
 their distinct scopes.
 
-| Gate                         | Verified evidence                                                                                                                                                                                                                                                                                                                                                        | Remaining scope                                                                                                                                                                                                                          |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Local application gate       | The source through `422e83f` passed 326 Bun tests, 383 Node tests and two runtime skips, lint, TypeScript and both builds. `10a3f92` subsequently recorded the rendered-page results in documentation.                                                                                                                                                                   | Repeat the complete gate after later implementation changes. Remote CI and publication of the local payload are not established.                                                                                                         |
-| Login, pairing and inventory | Historical real-handler HTTPS flows cover enrollment, pairing, recovery and revocation. The newer rendered-page fixture uses real independent login, approved IndexedDB key, issued Connector credential, current assignment readback and official journal through 0019. Three actual restricted-role session tests cover lock-wait touch, expiry and clock regression.  | Full current-head negative coverage, production TLS and all concurrent session/inventory transitions remain distinct gates.                                                                                                              |
-| Assignment-bound RTC         | The generated HTTPS fixture at `40e1a63` passed actual browser/Connector peers, v2 assignment commitments, DTLS checks, mutual proofs and status, with separate disconnect and revocation cases. The official 0019 authorization and privilege/down-up suite passed at `ea741f5`.                                                                                        | Migration 0019 restart, cross-network behavior, native provenance/buffering and control/media authorization are not established by read-only transport.                                                                                  |
-| Packaged Connector runtime   | The fixed package at `17b4ac4` passed actual CLI collection, authenticated signalling and RTC status against the maintained application and a loopback Moonraker protocol fixture. Native loading remains lazy and the package notice/output manifest is recorded.                                                                                                       | Genuine pinned Moonraker/Klipper and standalone distribution remain pending. The [Connector provenance record](../packages/connector/THIRD_PARTY.md) documents the native checksum gate and pending embedded-component review.           |
-| Rendered farm view           | At `422e83f`, separate actual `/farm` disconnect and revocation runs passed. The page uses its production composable, existing IndexedDB key and genuine feed. It displays progress changes, then unavailable with the previous observation; pause stays disabled. No application API or RTC interception is used.                                                       | This uses synthetic Moonraker protocol data, not a simulator process. Camera and signed pause remain unavailable. Browser fixture TLS ignores certificate errors and does not prove production deployment.                               |
-| Pause authority and safety   | The maintained 0018 issuer preparation passed twenty named PostgreSQL checks at `b21df2b`, followed by actual database restart and three fresh-process checks. The journal, dispatcher and fixed pause driver also have scoped tests.                                                                                                                                    | Actual browser control peer, issuer HTTP/runtime composition, driver integration and printing-simulator pause are not accepted. Restart replay used a new synthetic issuer key.                                                          |
-| Simulators and camera        | Historical pinned Spoolman service runs passed the read-only adapter. The latest ARM64 pacing diagnostic observed 542 consecutive ready samples over about 71 s, but rejected its pacing summary. RTSP parser/helper and finite native moving-video results remain separate checkpoints.                                                                                 | SV06 and four-tool scenarios, genuine Connector data, restart/network faults, actual bounded RTSP helper execution, MediaMTX and authenticated camera must be connected and validated. A ready sample or finite fixture is insufficient. |
-| Full Phase 0                 | At candidate `1e3a029`, `pnpm run test:rtc-farm:all` wrote a commit-pinned summary: app build passed; 6/9 runnable RTC rows passed; all 10 outage rows and all 3 network-fault profiles passed. Three browser status/pause rows failed; the camera and two simulator rows were unavailable because their opt-in fixtures were not supplied. Hardware rows were excluded. | Incomplete until every required simulator and browser row passes on one candidate.                                                                                                                                                       |
+| Gate                         | Verified evidence                                                                                                                                                                                                                                                                                                                                                       | Remaining scope                                                                                                                                                                                                                          |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Local application gate       | The source through `422e83f` passed 326 Bun tests, 383 Node tests and two runtime skips, lint, TypeScript and both builds. `10a3f92` subsequently recorded the rendered-page results in documentation.                                                                                                                                                                  | Repeat the complete gate after later implementation changes. Remote CI and publication of the local payload are not established.                                                                                                         |
+| Login, pairing and inventory | Historical real-handler HTTPS flows cover enrollment, pairing, recovery and revocation. The newer rendered-page fixture uses real independent login, approved IndexedDB key, issued Connector credential, current assignment readback and official journal through 0019. Three actual restricted-role session tests cover lock-wait touch, expiry and clock regression. | Full current-head negative coverage, production TLS and all concurrent session/inventory transitions remain distinct gates.                                                                                                              |
+| Assignment-bound RTC         | The generated HTTPS fixture at `40e1a63` passed actual browser/Connector peers, v2 assignment commitments, DTLS checks, mutual proofs and status, with separate disconnect and revocation cases. The official 0019 authorization and privilege/down-up suite passed at `ea741f5`.                                                                                       | Migration 0019 restart, cross-network behavior, native provenance/buffering and control/media authorization are not established by read-only transport.                                                                                  |
+| Packaged Connector runtime   | The fixed package at `17b4ac4` passed actual CLI collection, authenticated signalling and RTC status against the maintained application and a loopback Moonraker protocol fixture. Native loading remains lazy and the package notice/output manifest is recorded.                                                                                                      | Genuine pinned Moonraker/Klipper and standalone distribution remain pending. The [Connector provenance record](../packages/connector/THIRD_PARTY.md) documents the native checksum gate and pending embedded-component review.           |
+| Rendered farm view           | At `422e83f`, separate actual `/farm` disconnect and revocation runs passed. The page uses its production composable, existing IndexedDB key and genuine feed. It displays progress changes, then unavailable with the previous observation; pause stays disabled. No application API or RTC interception is used.                                                      | This uses synthetic Moonraker protocol data, not a simulator process. Camera and signed pause remain unavailable. Browser fixture TLS ignores certificate errors and does not prove production deployment.                               |
+| Pause authority and safety   | The maintained 0018 issuer preparation passed twenty named PostgreSQL checks at `b21df2b`, followed by actual database restart and three fresh-process checks. The journal, dispatcher and fixed pause driver also have scoped tests.                                                                                                                                   | Actual browser control peer, issuer HTTP/runtime composition, driver integration and printing-simulator pause are not accepted. Restart replay used a new synthetic issuer key.                                                          |
+| Simulators and camera        | Historical pinned Spoolman service runs passed the read-only adapter. The latest ARM64 pacing diagnostic observed 542 consecutive ready samples over about 71 s, but rejected its pacing summary. RTSP parser/helper and finite native moving-video results remain separate checkpoints.                                                                                | SV06 and four-tool scenarios, genuine Connector data, restart/network faults, actual bounded RTSP helper execution, MediaMTX and authenticated camera must be connected and validated. A ready sample or finite fixture is insufficient. |
+| Issue #9 loopback acceptance | At candidate `37ddf77b`, `npm run test:rtc-farm:all` passed all 12 built RTC rows, all 10 outage rows, the farm build and the flag-removal check. The loopback ledger below records the browser and simulator results.                                                                                                                                                  | The Docker topology, remote integration CI and owner hardware gates remain open.                                                                                                                                                         |
 
 The dispatch-only simulator profile matrix has one complete successful run on
 both native amd64 and arm64 runners at
@@ -68,36 +68,60 @@ Detailed artifacts, limitations and historical failures remain in the
 [native session result](SIMULATOR-ARM64-NATIVE-SESSION-RESULT.md) and
 [Spoolman service validation](SPOOLMAN-ACTUAL-API-VALIDATION.md).
 
-This ledger does not pin a head; the current migration catalog and toolchain are
-recorded in the [implementation queue](IMPLEMENTATION-QUEUE.md). The combined
-acceptance command has now run on candidate `1e3a029`; its summary is retained
-with local task evidence outside the repository. The result validates outage
-recovery and the three network-fault profiles, while the failed and unavailable
-RTC rows above keep Phase 0 incomplete. The [implementation queue](IMPLEMENTATION-QUEUE.md)
-lists the remaining work in dependency order. Historical counts and
-prepared-but-unrun tests are not current acceptance.
+The earlier full run at `1e3a029` passed six RTC rows, ten outage rows and the three Docker network-fault profiles. Three RTC browser rows failed and the camera and two simulator fixtures were unavailable. The earlier standalone loopback mock contract remains available via `node scripts/test-farm-mock-acceptance.ts`.
 
-## Loopback mock candidate
+## Issue #9 built loopback acceptance
 
-Issue #9 mock acceptance is `node scripts/test-farm-mock-acceptance.ts`.
-The runner refuses
-`OPENFARM_SIM=docker`. It drives one in-process Moonraker mock on
-`127.0.0.1` and writes one JSON ledger outside the repository, bound to
-`git rev-parse HEAD`. Covered rows are signed pause while printing,
-rejection of a tampered signature, replay, expiry, wrong farm, wrong
-assignment and a revoked capability, printer UI origin links, the tablet
-two-column rule at `48rem`, and removal of the farm-page feature-flag
-gate from application code and the README. The tablet check is that CSS
-source contract; the Playwright farm-view render was not run. Owner
-hardware acceptance and GitHub Actions remain open. This section does not
-mark Phase 0 or issue #9 complete. Historical Docker and PostgreSQL
-evidence, including candidate `1e3a029` and the printing-pause rows at
-`147b9bf`, stays as recorded.
+Run `npm run test:rtc-farm:all` from a clean checkout after `npm ci`.
+The default simulator mode is `OPENFARM_SIM=mock`. It uses a disposable
+PostgreSQL 17 cluster, Chromium and the Go RTSP ingest helper built from this
+checkout. Set `OPENFARM_PG_BIN` if PostgreSQL 17 is outside `PATH`. On Linux the local runner uses the selected PostgreSQL installation’s
+`pg_config --libdir` to locate its libraries independently of Chromium. Set `TMPDIR` to a writable directory outside the checkout.
 
-The separate pause transport subsequently passed five actual native cases at
-`579f377`, recorded in [the control RTC checkpoint](PAUSE-CONTROL-RTC-CHECKPOINT.md).
-Those cases use synthetic authority and execute no printer commands. They do
-not close the integrated issuer, signalling, driver and simulator gate below.
+Validated candidate `37ddf77bfc2cc0c2e47c8fcacc2e50169c0644fb`. The command exited 0. All 12 RTC rows and 10 outage rows passed, along with the farm build and flag-removal check. This run sourced PostgreSQL before Chromium, matching the gate environment.
+
+The run seals the Nitro build, provisions disposable
+accounts and assignments in PostgreSQL, and exercises the built pages and
+Connector over HTTPS, WSS and native WebRTC. The printing and inventory rows launch the packaged Connector CLI. Each mock listening socket binds
+to loopback. The runner writes a commit-pinned `summary.json` plus per-row
+receipts outside the repository.
+
+| Issue #9 gate | Runner row                          | Evidence                                                                                                                                                                                                                                    |
+| ------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| E5.1          | `farm-page-printing-pause`          | Uploaded and started a no-motion job on the owned SV06 mock. Observed `printing` before confirmation, then `paused` through Moonraker, the browser result and one applied Connector journal entry. Resumed with no duplicate journal entry. |
+| E5.2          | `command-rejected-tampered`         | Modified signature rejected over native WebRTC with the relay’s scope reason. Zero pause-driver calls or pauses.                                                                                                                            |
+| E5.2          | `command-rejected-replayed`         | Original applied once. Duplicate closed the control session and caused zero additional pause-driver calls or pauses.                                                                                                                        |
+| E5.2          | `command-rejected-expired`          | Expired signed command rejected. Zero pause-driver calls or pauses.                                                                                                                                                                         |
+| E5.2          | `command-rejected-wrong-farm`       | Signed command with the wrong farm rejected. Zero pause-driver calls or pauses.                                                                                                                                                             |
+| E5.2          | `command-rejected-wrong-assignment` | Signed command with the wrong assignment rejected. Zero pause-driver calls or pauses.                                                                                                                                                       |
+| E5.2          | `command-rejected-revoked-device`   | Revoked the browser device over HTTPS while the received command was held before dispatch. Releasing the command after the Connector closed caused zero pause-driver calls or pauses.                                                       |
+| E5.3          | `farm-page-disconnect`              | Rendered status changes, read-only degradation and recovery with a new observation.                                                                                                                                                         |
+| E5.3          | `farm-page-revocation`              | Rendered read-only degradation after Connector revocation and no reconnect for 31 seconds.                                                                                                                                                  |
+| E5.3          | `farm-page-pause`                   | Disabled control while degraded. After recovery, one explicit signed pause, then disabled control after revocation. The server received authority and signalling traffic only.                                                              |
+| E5.3          | `farm-page-camera`                  | Browser decoded advancing RTSP video frames over WebRTC, stopped and restarted playback, then detached the video and stopped the helper after revocation.                                                                                   |
+| E5.3          | `farm-page-simulator-inventory`     | Four-tool profile, live idle state and temperatures, six seeded Spoolman rows, then read-only degradation.                                                                                                                                  |
+| E9.3          | `farm-page-simulator-inventory`     | `farm-page-printer-ui-origin-link` verified the link derives the printer UI origin from the observed Moonraker origin.                                                                                                                      |
+| E9.4          | `farm-page-simulator-inventory`     | `farm-page-tablet-grid` and `printers-page-tablet-grid` verified one rendered column at 767 CSS px and two at 768 on both pages.                                                                                                            |
+| E9.6          | `farmview-flag-removed`             | The built farm route rendered with the normal authenticated setup. Source checks verified the application and README contain no `farmView` feature gate.                                                                                    |
+| E13.1         | Owner hardware run                  | Pending. Follow the [hardware acceptance checklist](HARDWARE-ACCEPTANCE-CHECKLIST.md).                                                                                                                                                      |
+
+The outage runner passed these rows.
+
+- `1-server-process-down`
+- `5-network-blip-shorter-than-backoff`
+- `2-database-unavailable-and-startup-gate-503`
+- `3-connector-sigkill-after-commit-before-ack`
+- `exactly-once-and-order-summary`
+- `4-queue-cap-during-long-outage`
+- `6-credential-renewal-across-outage`
+- `7-pause-authority-expires-during-server-outage`
+- `8-pause-authority-recovers-after-confirmation`
+- `9-pause-authority-audit-survives-restart-in-order`
+
+The loopback run leaves the Docker NAT, netem and UDP-block topology profiles,
+containerized Klipper, Spoolman and MediaMTX, and remote integration CI for
+separate runs. The owner-run checklist covers physical printer operation,
+physical camera and LAN checks, and supervised pause and recovery.
 
 ## Acceptance scope still required
 

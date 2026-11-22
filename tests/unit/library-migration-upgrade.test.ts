@@ -5,6 +5,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, expect, test } from 'vitest'
@@ -36,10 +37,64 @@ describe('0080 library migration', () => {
       'integration_audit_resource_type_check',
     ]) {
       expect(migration.up).toContain(`DROP CONSTRAINT IF EXISTS ${name}`)
+      expect(
+        migration.up.indexOf(`DROP CONSTRAINT IF EXISTS ${name}`),
+      ).toBeLessThan(migration.up.indexOf(`ADD CONSTRAINT ${name}`))
+      expect(
+        migration.up.match(
+          new RegExp(`DROP CONSTRAINT IF EXISTS ${name}`, 'g'),
+        ),
+      ).toHaveLength(1)
     }
+    expect(migration.up).toContain(
+      "CHECK (required_scope IN ('jobs:start', 'jobs:write', 'control:basic', 'control:extended'))",
+    )
+    expect(migration.up).toContain("'credential.event', 'library.changed'")
+    expect(migration.up).toContain("'subscription', 'credential', 'library'")
     expect(migration.up).toContain(
       "pg_get_constraintdef(c.oid) LIKE '%cardinality(events)%'",
     )
+    expect(migration.up).toContain(
+      'CHECK (cardinality(events) BETWEEN 1 AND 7)',
+    )
+    expect(migration.up).not.toMatch(
+      /pg_get_constraintdef\s*\([^)]*\)\s*LIKE\s+'%[^']*\s+IN%'/i,
+    )
+    expect(migration.up).not.toContain('LIKE ANY')
+    expect(migration.down).toContain(
+      'DROP CONSTRAINT integration_envelopes_required_scope_check',
+    )
+    expect(migration.down).toContain(
+      'DROP CONSTRAINT integration_audit_action_check',
+    )
+    expect(migration.down).toContain(
+      'DROP CONSTRAINT integration_audit_resource_type_check',
+    )
+    expect(
+      createHash('sha256')
+        .update(JSON.stringify([migration.id, migration.up, migration.down]))
+        .digest('hex'),
+    ).toBe(migration.checksum)
+    expect(migration.up).toContain(
+      'ADD CONSTRAINT integration_envelopes_required_scope_check',
+    )
+    expect(migration.up).toContain(
+      'ADD CONSTRAINT integration_audit_action_check',
+    )
+    expect(migration.up).toContain(
+      'ADD CONSTRAINT integration_audit_resource_type_check',
+    )
+    expect(migration.up).toContain(
+      'ADD CONSTRAINT integration_webhooks_events_check',
+    )
+    expect(
+      migration.up.match(/ADD CONSTRAINT integration_[a-z_]+_check/g),
+    ).toEqual([
+      'ADD CONSTRAINT integration_envelopes_required_scope_check',
+      'ADD CONSTRAINT integration_audit_action_check',
+      'ADD CONSTRAINT integration_audit_resource_type_check',
+      'ADD CONSTRAINT integration_webhooks_events_check',
+    ])
   })
 })
 
@@ -179,8 +234,9 @@ describe.skipIf(!postgresReady)('0080 upgrade on isolated PostgreSQL', () => {
       await expect(
         sql.begin(async (tx) => {
           await tx.unsafe(shipped.up).simple()
+          throw new Error('rollback successful 0080 execution probe')
         }),
-      ).rejects.toThrow(/integration_envelopes_required_scope_check/)
+      ).rejects.toThrow('rollback successful 0080 execution probe')
       expect(await constraintDefs(sql)).toEqual(before)
       expect(await columnPresent(sql)).toBe(false)
       expect(

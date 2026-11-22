@@ -271,85 +271,96 @@ export async function openV2Dispatch(
       : {}),
   })
   dispatcher.observe(printerBinding, observation())
-  const peer = dispatcher.createPeer(1)
-  const admission = dispatcher.beginAdmission({
-    binding: authority.binding,
-    printerBinding,
-    peer: peer.peer,
-  })
-  const bindingHash = await controlBindingHash(authority.binding)
-  const nonce = admission.challenge.admissionNonce
-  const capability: PauseCapabilityV1 = {
-    v: 1,
-    purpose: 'pause-authority',
-    capability_id: authority.ids.capability_id,
-    kid: 'issuer-1',
-    issuer: 'farm:issuer',
-    audience: authority.binding.audience,
-    origin: authority.binding.origin,
-    issued_at: wall,
-    expires_at: 30000,
-    account_id: authority.ids.account_id,
-    role: 'operator',
-    farm_id: authority.ids.farm_id,
-    agent_id: authority.ids.agent_id,
-    key_id: authority.ids.key_id,
-    assignment_id: authority.ids.assignment_id,
-    transport_id: authority.ids.transport_id,
-    browser_public_key: authority.publicKey,
-    browser_thumbprint: authority.thumbprint,
-    connector_fingerprint: authority.binding.connector_fingerprint,
-    credential_jti: authority.binding.credential_jti,
-    printer_key: authority.printerKey,
-    control_binding_sha256: bindingHash,
-    admission_nonce: nonce,
-    actions: ['pause'],
-    ...options.capability,
+  const abandon = () => {
+    dispatcher.close()
+    closeCommandJournal(journal)
+    if (owned) rmSync(directory, { recursive: true, force: true })
   }
-  const challenge: PauseAdmissionChallenge = {
-    v: 1,
-    purpose: 'pause-admission',
-    challenge_id: randomUUID(),
-    farm_id: authority.ids.farm_id,
-    agent_id: authority.ids.agent_id,
-    key_id: authority.ids.key_id,
-    assignment_id: authority.ids.assignment_id,
-    transport_id: authority.ids.transport_id,
-    account_id: authority.ids.account_id,
-    browser_thumbprint: authority.thumbprint,
-    origin: authority.binding.origin,
-    audience: authority.binding.audience,
-    control_binding_sha256: bindingHash,
-    admission_nonce: nonce,
-    issued_at: wall,
-    expires_at: wall + 8000,
-  }
-  const admitted = await dispatcher.admit(admission.token, {
-    capabilityWire: encodePauseCapability(
-      await signPauseCapability(capability, authority.issuer.privateKey),
-    ),
-    admissionProofWire: encodePauseAdmissionProof(
-      await authority.signer.signAdmissionProof(challenge),
-    ),
-    browserProofWire: encodeControlProof({
-      v: 1,
-      role: 'browser',
+  let admitted: Awaited<ReturnType<typeof dispatcher.admit>>
+  try {
+    const peer = dispatcher.createPeer(1)
+    const admission = dispatcher.beginAdmission({
       binding: authority.binding,
-      signature: await authority.signer.signControlProof(authority.binding),
-    }),
-    connectorProofWire: encodeControlProof({
+      printerBinding,
+      peer: peer.peer,
+    })
+    const bindingHash = await controlBindingHash(authority.binding)
+    const nonce = admission.challenge.admissionNonce
+    const capability: PauseCapabilityV1 = {
       v: 1,
-      role: 'connector',
-      binding: authority.binding,
-      signature: await signControlSessionProof(
-        authority.binding,
-        'connector',
-        authority.connector.privateKey,
+      purpose: 'pause-authority',
+      capability_id: authority.ids.capability_id,
+      kid: 'issuer-1',
+      issuer: 'farm:issuer',
+      audience: authority.binding.audience,
+      origin: authority.binding.origin,
+      issued_at: wall,
+      expires_at: 30000,
+      account_id: authority.ids.account_id,
+      role: 'operator',
+      farm_id: authority.ids.farm_id,
+      agent_id: authority.ids.agent_id,
+      key_id: authority.ids.key_id,
+      assignment_id: authority.ids.assignment_id,
+      transport_id: authority.ids.transport_id,
+      browser_public_key: authority.publicKey,
+      browser_thumbprint: authority.thumbprint,
+      connector_fingerprint: authority.binding.connector_fingerprint,
+      credential_jti: authority.binding.credential_jti,
+      printer_key: authority.printerKey,
+      control_binding_sha256: bindingHash,
+      admission_nonce: nonce,
+      actions: ['pause'],
+      ...options.capability,
+    }
+    const challenge: PauseAdmissionChallenge = {
+      v: 1,
+      purpose: 'pause-admission',
+      challenge_id: randomUUID(),
+      farm_id: authority.ids.farm_id,
+      agent_id: authority.ids.agent_id,
+      key_id: authority.ids.key_id,
+      assignment_id: authority.ids.assignment_id,
+      transport_id: authority.ids.transport_id,
+      account_id: authority.ids.account_id,
+      browser_thumbprint: authority.thumbprint,
+      origin: authority.binding.origin,
+      audience: authority.binding.audience,
+      control_binding_sha256: bindingHash,
+      admission_nonce: nonce,
+      issued_at: wall,
+      expires_at: wall + 8000,
+    }
+    admitted = await dispatcher.admit(admission.token, {
+      capabilityWire: encodePauseCapability(
+        await signPauseCapability(capability, authority.issuer.privateKey),
       ),
-    }),
-  })
-  if (!admitted.ok)
-    throw new Error(`Capability admission failed: ${admitted.reason}`)
+      admissionProofWire: encodePauseAdmissionProof(
+        await authority.signer.signAdmissionProof(challenge),
+      ),
+      browserProofWire: encodeControlProof({
+        v: 1,
+        role: 'browser',
+        binding: authority.binding,
+        signature: await authority.signer.signControlProof(authority.binding),
+      }),
+      connectorProofWire: encodeControlProof({
+        v: 1,
+        role: 'connector',
+        binding: authority.binding,
+        signature: await signControlSessionProof(
+          authority.binding,
+          'connector',
+          authority.connector.privateKey,
+        ),
+      }),
+    })
+    if (!admitted.ok)
+      throw new Error(`Capability admission failed: ${admitted.reason}`)
+  } catch (error) {
+    abandon()
+    throw error
+  }
   let closed = false
   return {
     dispatcher,

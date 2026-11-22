@@ -17,7 +17,8 @@ const id = useId()
 <style scoped>
 progress {
   display: block;
+  inline-size: 100%;
   max-inline-size: 100%;
-  accent-color: var(--accent);
+  accent-color: var(--ops-action);
 }
 </style>

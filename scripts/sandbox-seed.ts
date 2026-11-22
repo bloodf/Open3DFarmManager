@@ -30,8 +30,24 @@ export async function seedSandbox(admin: Sql, databaseUrl: URL, state: string) {
     sandbox_owner: 'farm_printer_ownership',
     sandbox_telemetry: 'farm_connector_telemetry_writer',
     sandbox_integrations: 'farm_integration_apps',
+    sandbox_jobs: undefined,
     sandbox_verify: undefined,
   }
+  const envelopeKeys = await crypto.subtle.generateKey('Ed25519', true, [
+    'sign',
+    'verify',
+  ])
+  const envelopeSigningKey = Buffer.from(
+    await crypto.subtle.exportKey('pkcs8', envelopeKeys.privateKey),
+  ).toString('base64url')
+  const envelopeKid = randomBytes(16).toString('hex')
+  await write('integration-envelope.json', {
+    kid: envelopeKid,
+    privateKey: envelopeSigningKey,
+    publicKeySpki: Buffer.from(
+      await crypto.subtle.exportKey('spki', envelopeKeys.publicKey),
+    ).toString('base64url'),
+  })
   const urls = new Map<string, URL>()
   for (const [user, group] of Object.entries(groups)) {
     const url = new URL(databaseUrl)
@@ -42,6 +58,7 @@ export async function seedSandbox(admin: Sql, databaseUrl: URL, state: string) {
     if (group) await admin`GRANT ${admin(group)} TO ${admin(user)}`
     urls.set(user, url)
   }
+  await admin`GRANT farm_integration_jobs, farm_integration_approvals, farm_integration_delivery TO sandbox_jobs`
   await admin`GRANT SELECT ON public.open3dfarm_migrations TO sandbox_verify`
   const pool = (role: string) =>
     postgres(urls.get(role)!.href, { max: 1, ssl: false })
@@ -161,6 +178,9 @@ export async function seedSandbox(admin: Sql, databaseUrl: URL, state: string) {
           internalUrl('sandbox_integrations'),
         'NUXT_INTEGRATION_AUTH_SIGNING_KEY=' +
           randomBytes(32).toString('base64url'),
+        'NUXT_INTEGRATION_JOBS_DATABASE_URL=' + internalUrl('sandbox_jobs'),
+        'NUXT_INTEGRATION_JOBS_ENVELOPE_SIGNING_KEY=' + envelopeSigningKey,
+        'NUXT_INTEGRATION_JOBS_ENVELOPE_KID=' + envelopeKid,
       ].join('\n') + '\n',
     )
     await write('client.json', {

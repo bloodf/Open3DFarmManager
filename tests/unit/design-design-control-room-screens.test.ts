@@ -6,9 +6,8 @@ import { launchBrowser } from '../helpers/browser.ts'
 it('captures the control room and history in both themes', async () => {
   if (process.env.DESIGN_SCREENSHOTS !== '1') {
     const source = await readFile('apps/farm/app/pages/painel.vue', 'utf8')
-    expect(source).toContain('Precisam de atenção')
-    expect(source).toContain('Próximas 10 horas')
-    expect(source).toContain('Estoque baixo')
+    expect(source).toContain('PrinterKiosk')
+    expect(source).toContain('statusSummaryPath(farmId)')
     return
   }
   const browser = await launchBrowser()

@@ -1,6 +1,6 @@
 # Sala de controle e histórico
 
-Capturas em pt-BR, movimento reduzido, 1440 × 900 e 390 × 844. Os dados são simulados; o painel anterior é o mural de TV.
+Capturas da primeira proposta em pt-BR, movimento reduzido, 1440 × 900 e 390 × 844, com dados simulados. Após essas capturas, o mural de TV foi restaurado em `/painel` e a página inicial voltou a ser estática; as imagens não representam o estado atual.
 
 | Tela e tema               | Antes                                                    | Depois                                                   |
 | ------------------------- | -------------------------------------------------------- | -------------------------------------------------------- |
@@ -13,4 +13,4 @@ Capturas em pt-BR, movimento reduzido, 1440 × 900 e 390 × 844. Os dados são s
 | Histórico, mobile claro   | [Antes](control-room-historico-before-mobile-light.png)  | [Depois](control-room-historico-after-mobile-light.png)  |
 | Histórico, mobile escuro  | [Antes](control-room-historico-before-mobile-dark.png)   | [Depois](control-room-historico-after-mobile-dark.png)   |
 
-O teste de captura verificou axe no conteúdo e ausência de transbordamento horizontal em cada tamanho e tema. Uma análise da página inteira encontrou marcos `banner` duplicados no shell compartilhado, fora do escopo desta alteração. Os dados do resumo armazenado não incluem estimativas de término; o histórico de trabalhos não fornece intervalos de estado. Essas lacunas são indicadas na interface.
+O teste de captura verificou axe no conteúdo e ausência de transbordamento horizontal em cada tamanho e tema. Uma análise da página inteira encontrou marcos `banner` duplicados no shell compartilhado, fora do escopo desta alteração. Os dados do resumo armazenado não incluem estimativas de término; o histórico de trabalhos não fornece intervalos de estado.

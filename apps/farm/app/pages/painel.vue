@@ -1,239 +1,217 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+definePageMeta({ layout: false })
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import PrinterKiosk from '../components/farm/PrinterKiosk.vue'
+import type { LastKnownState } from '../composables/useLastKnownStates-core.ts'
 import {
   parseStatusSummary,
   statusSummaryPath,
 } from '../utils/status-summary.ts'
-import { formatGrams } from '../utils/spool-features-format.ts'
-import type {
-  LowStockItem,
-  LowStockResponse,
-} from '../utils/spool-features-types.ts'
-import type { LastKnownState } from '../composables/useLastKnownStates-core.ts'
+import { themeScript, themeStyles } from '../utils/pre-hydration.ts'
+import {
+  KIOSK_PAGE_MS,
+  KIOSK_POLL_MS,
+  clampKioskPage,
+  kioskCapacity,
+  kioskPageCount,
+  kioskRemPx,
+} from '../utils/kiosk-wall.ts'
 
-const states = ref<LastKnownState[]>([])
-const stock = ref<LowStockItem[] | null>(null)
+// This page has no layout, so it applies the saved theme itself.
+useHead({
+  script: [{ innerHTML: themeScript }],
+  style: [{ innerHTML: themeStyles }],
+})
+
+// Read-only wall for a TV. It polls the farm status summary (works for any
+// member session, no browser-device enrollment) and renders no control.
+const route = useRoute()
+const states = shallowRef<readonly LastKnownState[]>([])
+const fetchedAt = ref<number | null>(null)
+const failed = ref(false)
 const problem = ref('')
-const loading = ref(true)
-const observed = ref<number | null>(null)
-let controller: AbortController | undefined
-let timer: ReturnType<typeof setInterval> | undefined
-const attention = computed(() =>
-  states.value
-    .filter((item) => ['error', 'paused', 'offline'].includes(item.state))
-    .sort((a, b) => {
-      const rank = { error: 0, paused: 1, offline: 2, printing: 3, idle: 4 }
-      return rank[a.state] - rank[b.state] || a.observedAt - b.observedAt
-    }),
+const noFarm = ref(false)
+const now = ref(0)
+const page = ref(0)
+const size = ref({ width: 1920, height: 1080 })
+const perPage = computed(() =>
+  kioskCapacity(size.value.width, size.value.height),
 )
-const labels = {
-  error: 'Erro',
-  paused: 'Pausada',
-  offline: 'Sem conexão',
-  printing: 'Imprimindo',
-  idle: 'Ociosa',
+const fontPx = computed(() => kioskRemPx(size.value.width))
+
+let farmId = ''
+let controller: AbortController | undefined
+let timers: ReturnType<typeof setInterval>[] = []
+let lock: WakeLockSentinel | null = null
+
+function status(cause: unknown) {
+  return typeof cause === 'object' && cause !== null && 'statusCode' in cause
+    ? cause.statusCode
+    : undefined
 }
-async function load() {
+
+async function poll() {
   controller?.abort()
-  const request = (controller = new AbortController())
+  const run = (controller = new AbortController())
   try {
-    const farms = await $fetch<{ farms: { farmId: string }[] }>('/api/farms', {
-      signal: request.signal,
-      retry: 0,
-      timeout: 10000,
-    })
-    const id = farms.farms[0]?.farmId
-    if (!id) {
-      problem.value = 'Nenhuma farm disponível.'
-      states.value = []
-      stock.value = null
-      return
+    if (!farmId) {
+      const body = await $fetch<{ farms?: { farmId: string }[] }>(
+        '/api/farms',
+        {
+          signal: run.signal,
+          retry: 0,
+          timeout: 10_000,
+          cache: 'no-store',
+        },
+      )
+      const farms = body.farms ?? []
+      const wanted =
+        typeof route.query.farm === 'string' ? route.query.farm : ''
+      farmId =
+        (farms.find((f) => f.farmId === wanted) ?? farms[0])?.farmId ?? ''
+      if (!farmId) {
+        noFarm.value = true
+        return
+      }
     }
-    const [summary, inventory] = await Promise.allSettled([
-      $fetch<unknown>(statusSummaryPath(id), {
-        signal: request.signal,
+    // `no-cache` revalidates with the route's ETag: an unchanged farm answers
+    // 304 and the 5 s poll stays cheap.
+    const parsed = parseStatusSummary(
+      await $fetch<unknown>(statusSummaryPath(farmId), {
+        signal: run.signal,
         retry: 0,
-        timeout: 10000,
+        timeout: 10_000,
+        cache: 'no-cache',
       }),
-      $fetch<LowStockResponse>(
-        `/api/farms/${encodeURIComponent(id)}/spool-library/low-stock`,
-        { signal: request.signal, retry: 0, timeout: 10000 },
-      ),
-    ])
-    if (request.signal.aborted) return
-    const parsed =
-      summary.status === 'fulfilled' ? parseStatusSummary(summary.value) : null
-    if (!parsed?.ok) {
-      states.value = []
-      observed.value = null
-      problem.value = 'Não foi possível consultar a situação das impressoras.'
-    } else {
-      states.value = parsed.summary.states
-      observed.value = parsed.summary.generatedAt
-      problem.value = parsed.summary.truncated
-        ? 'Lista de impressoras incompleta.'
+    )
+    if (run.signal.aborted) return
+    if (!parsed.ok) throw new Error('invalid-response')
+    states.value = parsed.summary.states
+    // Move the wall clock with the fetch so the first age is never negative,
+    // which would flash "Dados desatualizados" until the next tick.
+    now.value = fetchedAt.value = Date.now()
+    failed.value = false
+    noFarm.value = false
+    problem.value = ''
+  } catch (cause) {
+    if (run.signal.aborted) return
+    // Keep the previous states on screen; the age keeps growing and flags them.
+    failed.value = true
+    problem.value =
+      status(cause) === 401
+        ? 'Sessão indisponível. Entre novamente em outro dispositivo.'
         : ''
-    }
-    stock.value =
-      inventory.status === 'fulfilled' &&
-      Array.isArray(inventory.value.filaments)
-        ? inventory.value.filaments
-            .filter((item) => item.low)
-            .sort(
-              (a, b) =>
-                (a.remainingGrams ?? Infinity) - (b.remainingGrams ?? Infinity),
-            )
-        : null
-  } catch {
-    if (!request.signal.aborted) {
-      states.value = []
-      stock.value = null
-      observed.value = null
-      problem.value = 'Não foi possível consultar a farm.'
-    }
-  } finally {
-    if (!request.signal.aborted) loading.value = false
   }
 }
+
+async function acquireWakeLock() {
+  try {
+    if (document.visibilityState !== 'visible' || lock) return
+    const sentinel = (await navigator.wakeLock?.request('screen')) ?? null
+    sentinel?.addEventListener('release', () => (lock = null))
+    lock = sentinel
+  } catch {
+    // Wake Lock is optional: denied or unsupported just leaves the screen policy alone.
+  }
+}
+const measure = () => {
+  size.value = { width: window.innerWidth, height: window.innerHeight }
+}
+const onVisible = () => {
+  if (document.visibilityState === 'visible') {
+    void acquireWakeLock()
+    void poll()
+  }
+}
+
 onMounted(() => {
-  void load()
-  timer = setInterval(load, 30000)
+  now.value = Date.now()
+  measure()
+  void poll()
+  void acquireWakeLock()
+  timers = [
+    setInterval(poll, KIOSK_POLL_MS),
+    setInterval(() => (now.value = Date.now()), 1000),
+    setInterval(() => {
+      const count = kioskPageCount(states.value.length, perPage.value)
+      page.value =
+        count > 1
+          ? (clampKioskPage(page.value, states.value.length, perPage.value) +
+              1) %
+            count
+          : 0
+    }, KIOSK_PAGE_MS),
+  ]
+  window.addEventListener('resize', measure)
+  document.addEventListener('visibilitychange', onVisible)
 })
 onBeforeUnmount(() => {
   controller?.abort()
-  if (timer) clearInterval(timer)
+  timers.forEach(clearInterval)
+  window.removeEventListener('resize', measure)
+  document.removeEventListener('visibilitychange', onVisible)
+  void lock?.release().catch(() => {})
 })
 </script>
 
 <template>
-  <main id="conteudo" class="control-room">
-    <header role="presentation">
-      <p class="eyebrow">Open3DFarmManager</p>
-      <h1>Sala de controle</h1>
-      <p>Prioridades da farm em um só lugar.</p>
-    </header>
-    <p v-if="loading" role="status">Consultando a farm…</p>
-    <p v-if="problem" role="alert">
+  <main id="conteudo" class="kiosk-root" :style="{ fontSize: `${fontPx}px` }">
+    <p
+      v-if="problem && fetchedAt !== null"
+      class="kiosk-root__problem"
+      role="alert"
+    >
       {{ problem }}
-      <button type="button" @click="load">Tentar novamente</button>
     </p>
-    <p v-if="observed !== null" class="notice">
-      Último resumo recebido:
-      {{
-        new Intl.DateTimeFormat('pt-BR', {
-          dateStyle: 'short',
-          timeStyle: 'short',
-          timeZone: 'America/Sao_Paulo',
-        }).format(observed)
-      }}. Dados armazenados, sem conexão direta.
-    </p>
-    <div class="grid">
-      <section aria-labelledby="attention">
-        <h2 id="attention">Precisam de atenção</h2>
-        <p>Erros, pausas e impressoras sem conexão, por prioridade.</p>
-        <ul v-if="attention.length">
-          <li v-for="item in attention" :key="item.assignmentId">
-            <a :href="`/impressoras/${encodeURIComponent(item.printerKey)}`">{{
-              item.displayName || item.printerKey
-            }}</a><strong>{{ labels[item.state] }}</strong>
-          </li>
-        </ul>
-        <p v-else>
-          {{
-            loading || problem
-              ? 'Situação indisponível.'
-              : 'Nenhuma impressora nesta lista.'
-          }}
-        </p>
-        <NuxtLink to="/impressoras">Ver impressoras</NuxtLink>
-      </section>
-      <section aria-labelledby="finishes">
-        <h2 id="finishes">Próximas 10 horas</h2>
-        <p>As estimativas de término não estão disponíveis neste resumo.</p>
-        <NuxtLink to="/farm">Ver situação da farm</NuxtLink>
-      </section>
-      <section aria-labelledby="stock">
-        <h2 id="stock">Estoque baixo</h2>
-        <p>Filamentos abaixo do limite, ordenados pela quantidade restante.</p>
-        <ul v-if="stock?.length">
-          <li v-for="item in stock" :key="item.filamentId">
-            <NuxtLink to="/bobinas/estoque">{{
-              item.name || `Filamento #${item.filamentId}`
-            }}</NuxtLink><strong>{{
-              item.remainingGrams === null
-                ? 'Não informado'
-                : formatGrams(item.remainingGrams)
-            }}</strong>
-          </li>
-        </ul>
-        <p v-else>
-          {{
-            stock === null
-              ? 'Estoque indisponível.'
-              : 'Nenhum filamento abaixo do limite.'
-          }}
-        </p>
-        <NuxtLink to="/bobinas/estoque">Ver estoque</NuxtLink>
-      </section>
-    </div>
+    <PrinterKiosk
+      :states="states"
+      :now-wall-ms="now"
+      :fetched-at="fetchedAt"
+      :failed="failed"
+      :no-farm="noFarm"
+      :problem="problem"
+      :page="page"
+      :per-page="perPage"
+    />
   </main>
 </template>
-<style scoped>
-.control-room {
-  display: grid;
-  gap: var(--space-4);
-  align-content: start;
-}
-header p,
-h1,
-h2,
-section p {
+
+<style>
+/* Keep the full-screen wall layout while following the saved app theme. */
+.kiosk-root {
+  position: fixed;
+  inset: 0;
+  max-width: none;
   margin: 0;
-}
-header {
-  display: grid;
-  gap: var(--space-2);
-}
-.eyebrow,
-.notice,
-section p {
-  color: var(--color-text-muted);
-}
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
-  gap: var(--space-4);
-  align-items: start;
-}
-section {
-  display: grid;
-  gap: var(--space-3);
-  min-width: 0;
-  padding: var(--space-4);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface-raised);
-}
-h2 {
-  font-size: var(--font-size-lg);
-}
-ul {
   padding: 0;
-  margin: 0;
-  list-style: none;
-}
-li {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: var(--space-2);
-  padding: var(--space-3) 0;
-  border-block-end: 1px solid var(--color-border);
-  overflow-wrap: anywhere;
+  flex-direction: column;
+  background: var(--color-surface);
+  color: var(--color-text);
 }
-a:focus-visible,
-button:focus-visible {
-  outline: var(--focus-ring-width) solid var(--color-focus-ring);
-  outline-offset: var(--focus-ring-offset);
+.kiosk-root > .kiosk {
+  flex: 1;
+  min-height: 0;
+}
+.kiosk-root__problem {
+  margin: 0;
+  max-width: none;
+  padding: 0.5rem 1rem;
+  border-block-end: 2px solid var(--state-error-color);
+  background: var(--color-surface-raised);
+  color: var(--state-error-color);
+  font-weight: 700;
+}
+.kiosk-root .kiosk__warn,
+.kiosk-root .kiosk__warn strong {
+  color: var(--state-paused-color);
+}
+.kiosk-root .kiosk__head .kiosk__warn.stale {
+  background: transparent;
+  border-color: var(--state-paused-color);
+}
+.kiosk-root .kiosk__card,
+.kiosk-root .ui-card {
+  background: var(--color-surface-raised);
 }
 </style>

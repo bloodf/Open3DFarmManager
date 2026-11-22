@@ -298,10 +298,6 @@ onBeforeUnmount(cancel)
           >
         </li>
       </ul>
-      <p class="count">
-        Intervalos de estado da impressora não estão disponíveis neste
-        histórico.
-      </p>
     </section>
     <div v-if="jobs.length && !rows.length" class="panel">
       <p>Nenhum trabalho carregado corresponde ao resultado selecionado.</p>

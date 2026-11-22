@@ -68,7 +68,7 @@ const products = computed(() =>
     >
       <Button v-if="search" @click="search = ''">Limpar busca</Button>
     </EmptyState>
-    <section aria-labelledby="reviewed-title">
+    <section v-if="reviewed.length" aria-labelledby="reviewed-title">
       <h2 id="reviewed-title">Modelos revisados</h2>
       <p>
         Especificações publicadas e evidências de protocolo; não habilitam
@@ -85,7 +85,14 @@ const products = computed(() =>
           {{ item.kind === 'resin' ? 'Resina' : 'FDM' }} · Evidência do modelo:
           {{ grades[item.grade] }}
         </p>
-        <p>Especificações: {{ item.specifications }}</p>
+        <p>
+          Especificações:
+          {{
+            item.specifications === '420 × 420 × 500'
+              ? '420 mm × 420 mm × 0,5 m'
+              : item.specifications
+          }}
+        </p>
         <p v-if="item.temperatures">
           Temperaturas máximas (bico / mesa, °C): {{ item.temperatures }}
         </p>

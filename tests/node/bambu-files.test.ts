@@ -60,7 +60,51 @@ test('parses regular Unix LIST files and resolves a recent date across New Year'
   )
 })
 
+test('keeps the current year for Unix LIST times ahead of UTC on leap day', () => {
+  assert.deepEqual(
+    parseBambuUnixListing(
+      '-rw-r--r-- 1 root root 42 Feb 29 08:30 local clock.gcode',
+      /\.gcode$/,
+      new Date('2024-02-29T00:30:00Z'),
+    ),
+    [
+      {
+        name: 'local clock.gcode',
+        size: 42,
+        modifiedAt: '2024-02-29T08:30:00.000Z',
+      },
+    ],
+  )
+})
+
+test('uses the previous year only beyond the 183-day Unix LIST cutoff', () => {
+  const listing = [
+    '-rw-r--r-- 1 root root 6 Jul 3 00:00 at cutoff.gcode',
+    '-rw-r--r-- 1 root root 7 Jul 3 00:01 beyond cutoff.gcode',
+    '-rw-r--r-- 1 root root 8 Feb 29 08:30 invalid leap day.gcode',
+  ].join('\r\n')
+  assert.deepEqual(
+    parseBambuUnixListing(listing, /\.gcode$/, new Date('2026-01-01T00:00Z')),
+    [
+      {
+        name: 'at cutoff.gcode',
+        size: 6,
+        modifiedAt: '2026-07-03T00:00:00.000Z',
+      },
+      {
+        name: 'beyond cutoff.gcode',
+        size: 7,
+        modifiedAt: '2025-07-03T00:01:00.000Z',
+      },
+    ],
+  )
+})
+
 test('lists print and timelapse files over TLS when the Bambu simulator rejects MLSD', async (t) => {
+  t.mock.timers.enable({
+    apis: ['Date'],
+    now: new Date('2026-11-18T08:41:23Z'),
+  })
   const host = '127.0.0.1'
   const accessCode = 'synthetic'
   const cert = readFileSync(
@@ -92,14 +136,19 @@ test('lists print and timelapse files over TLS when the Bambu simulator rejects 
         .update(new X509Certificate(cert).raw)
         .digest('hex'),
     },
-    signal: AbortSignal.timeout(3000),
+    signal: new AbortController().signal,
+    timeoutMs: 3000,
   }
 
-  simulator.setMlsdRejection(502)
-  const modifiedAt = '2026-11-18T00:00:00.000Z'
-  assert.deepEqual(await listBambuFiles(options), [
-    { name: 'part one.gcode.3mf', size: 42, modifiedAt },
-  ])
+  const modifiedAt = '2026-11-18T08:41:00.000Z'
+  for (const code of [500, 502, 504] as const) {
+    simulator.setMlsdRejection(code)
+    assert.deepEqual(
+      await listBambuFiles(options),
+      [{ name: 'part one.gcode.3mf', size: 42, modifiedAt }],
+      `MLSD reply ${code}`,
+    )
+  }
   assert.deepEqual(
     await bambuFtps(options, { op: 'list', folder: 'timelapse' }),
     {
@@ -107,16 +156,19 @@ test('lists print and timelapse files over TLS when the Bambu simulator rejects 
       files: [{ name: 'print.mp4', size: 12, modifiedAt }],
     },
   )
+  simulator.setMlsdRejection(550)
+  await assert.rejects(listBambuFiles(options), /FTPS request rejected/)
   assert.deepEqual(simulator.listingRequests, [
+    'MLSD',
+    'LIST',
+    'MLSD',
+    'LIST',
     'MLSD',
     'LIST',
     'MLSD /timelapse',
     'LIST /timelapse',
+    'MLSD',
   ])
-
-  simulator.setMlsdRejection(550)
-  await assert.rejects(listBambuFiles(options), /FTPS request rejected/)
-  assert.deepEqual(simulator.listingRequests.slice(4), ['MLSD'])
 })
 
 test('rejects invalid credentials against fixture', async () => {

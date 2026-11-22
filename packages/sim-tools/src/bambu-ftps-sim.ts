@@ -3,6 +3,7 @@ import { createServer } from 'node:tls'
 import type { TLSSocket } from 'node:tls'
 
 type TlsServer = ReturnType<typeof createServer>
+type MlsdRejection = 500 | 502 | 504 | 550
 
 export interface BambuFtpsSimOptions {
   host: string
@@ -18,6 +19,11 @@ export interface BambuFtpsSimOptions {
 export async function startBambuFtpsSim(options: BambuFtpsSimOptions) {
   const { host, accessCode, key, cert, uploads } = options
   const timelapse = options.timelapse ?? new Map<string, Buffer>()
+  const modifiedAt = new Date()
+  const iso = modifiedAt.toISOString()
+  const [, day, month] = modifiedAt.toUTCString().split(' ')
+  const mlsdDate = iso.slice(0, 19).replace(/[-T:]/g, '')
+  const listDate = `${month} ${Number(day)} ${iso.slice(11, 16)}`
   /** `/timelapse/x` or `/x`: the folder map and the bare name, or nothing. */
   const target = (path: string) => {
     const inFolder = path.startsWith('/timelapse/')
@@ -29,7 +35,7 @@ export async function startBambuFtpsSim(options: BambuFtpsSimOptions) {
   const sockets = new Set<TLSSocket>()
   const passiveServers = new Set<TlsServer>()
   const listingRequests: string[] = []
-  let mlsdRejection: 502 | 550 | undefined
+  let mlsdRejection: MlsdRejection | undefined
 
   function track(socket: TLSSocket) {
     sockets.add(socket)
@@ -96,8 +102,8 @@ export async function startBambuFtpsSim(options: BambuFtpsSimOptions) {
           ]
             .map(([name, data]) =>
               mlsd
-                ? `type=file;size=${data.length};modify=20261118000000; ${name}\r\n`
-                : `-rw-r--r-- 1 root root ${data.length} Nov 18 2026 ${name}\r\n`,
+                ? `type=file;size=${data.length};modify=${mlsdDate}; ${name}\r\n`
+                : `-rw-r--r-- 1 root root ${data.length} ${listDate} ${name}\r\n`,
             )
             .join('')
           socket.end(listing, () => {
@@ -174,7 +180,7 @@ export async function startBambuFtpsSim(options: BambuFtpsSimOptions) {
   return {
     port: address.port,
     listingRequests,
-    setMlsdRejection(code: 502 | 550) {
+    setMlsdRejection(code: MlsdRejection) {
       mlsdRejection = code
     },
     close() {

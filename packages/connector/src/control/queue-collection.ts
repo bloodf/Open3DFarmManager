@@ -17,7 +17,10 @@ export function observeCompletedAttempt(
   if (!attemptId) throw new Error('Attempt ID is required')
   if (state.attempts.some((attempt) => attempt.id === attemptId)) return state
   return {
-    attempts: [...state.attempts, { id: attemptId, status: 'awaiting-collection' }],
+    attempts: [
+      ...state.attempts,
+      { id: attemptId, status: 'awaiting-collection' },
+    ],
   }
 }
 
@@ -36,5 +39,7 @@ export function confirmCollection(
 }
 
 export function awaitsCollection(state: CollectionState): boolean {
-  return state.attempts.some((attempt) => attempt.status === 'awaiting-collection')
+  return state.attempts.some(
+    (attempt) => attempt.status === 'awaiting-collection',
+  )
 }

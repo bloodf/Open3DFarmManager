@@ -75,10 +75,8 @@ The earlier full run at `1e3a029` passed six RTC rows, ten outage rows and the t
 Run `npm run test:rtc-farm:all` from a clean checkout after `npm ci`.
 The default simulator mode is `OPENFARM_SIM=mock`. It uses a disposable
 PostgreSQL 17 cluster, Chromium and the Go RTSP ingest helper built from this
-checkout. Set `OPENFARM_PG_BIN` if PostgreSQL 17 is outside `PATH`. When
-using separately unpacked Chromium and PostgreSQL runtimes, load the
-Chromium environment first and append the PostgreSQL library directory to
-`LD_LIBRARY_PATH`. Set `TMPDIR` to a writable directory outside the checkout.
+checkout. Set `OPENFARM_PG_BIN` if PostgreSQL 17 is outside `PATH`. On Linux the local runner uses the selected PostgreSQL installation’s
+`pg_config --libdir` to locate its libraries independently of Chromium. Set `TMPDIR` to a writable directory outside the checkout.
 
 Validated candidate `ed952c3d24951ef162259f84dd450429494ed585`. The command exited 0. All 12 RTC rows and 10 outage rows passed, along with the farm build and flag-removal check.
 

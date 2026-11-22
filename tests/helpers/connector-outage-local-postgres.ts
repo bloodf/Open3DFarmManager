@@ -3,7 +3,7 @@
 // directory, removed with it. Stops exactly the postmaster it started.
 import { execFile, execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { delimiter, dirname, isAbsolute, join } from 'node:path'
 import { promisify } from 'node:util'
 
 const exec = promisify(execFile)
@@ -32,7 +32,24 @@ export async function startLocalPostgres(input: {
     'createdb',
     'postgres',
   ].map(binary) as [string, string, string, string]
-  const version = (await exec(postgresBin, ['--version'])).stdout
+  const env = { ...process.env }
+  // pg_config reports paths relative to the selected installation, including
+  // unpacked distributions whose libraries are outside the system search path.
+  const pgConfig = join(dirname(postgresBin), 'pg_config')
+  if (
+    process.platform === 'linux' &&
+    isAbsolute(pgConfig) &&
+    existsSync(pgConfig)
+  ) {
+    const libdir = (
+      await exec(pgConfig, ['--libdir'], { timeout: 5000 })
+    ).stdout.trim()
+    if (isAbsolute(libdir) && existsSync(libdir))
+      env.LD_LIBRARY_PATH = [libdir, env.LD_LIBRARY_PATH]
+        .filter(Boolean)
+        .join(delimiter)
+  }
+  const version = (await exec(postgresBin, ['--version'], { env })).stdout
   if (!/ 17\./.test(version))
     throw new Error(
       `PostgreSQL 17 required for the local cluster, got ${version.trim()}`,
@@ -42,7 +59,7 @@ export async function startLocalPostgres(input: {
   await exec(
     initdb,
     ['-D', data, '-U', 'fixture', '-A', 'trust', '-E', 'UTF8', '--no-sync'],
-    { timeout: 60000 },
+    { env, timeout: 60000 },
   )
   input.ledger({
     resource: 'local-postgres-data',
@@ -58,6 +75,7 @@ export async function startLocalPostgres(input: {
     pgCtl,
     ['-D', data, '-l', log, '-w', '-t', '60', '-o', options, 'start'],
     {
+      env,
       timeout: 90000,
     },
   )
@@ -67,6 +85,7 @@ export async function startLocalPostgres(input: {
       pgCtl,
       ['-D', data, '-m', 'immediate', '-w', '-t', '30', 'stop'],
       {
+        env,
         timeout: 60000,
       },
     )
@@ -76,7 +95,7 @@ export async function startLocalPostgres(input: {
     await exec(
       createdb,
       ['-h', '127.0.0.1', '-p', String(input.port), '-U', 'fixture', 'fixture'],
-      { timeout: 30000 },
+      { env, timeout: 30000 },
     )
   } catch (error) {
     await stop().catch(() => {})
@@ -86,7 +105,7 @@ export async function startLocalPostgres(input: {
     execFileSync(
       pgCtl,
       ['-D', data, '-m', 'immediate', '-w', '-t', '30', 'stop'],
-      { timeout: 35000 },
+      { env, timeout: 35000 },
     )
     input.ledger({ removed: 'local-postgres-process', data })
   }

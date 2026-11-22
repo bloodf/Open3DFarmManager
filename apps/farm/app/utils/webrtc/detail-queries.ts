@@ -22,7 +22,7 @@ const QUERIES: readonly (readonly [Capability, DetailQueryKind])[] = [
 ]
 /** Milliseconds before a kind is asked again; `Infinity` asks once. */
 const REFRESH_MS: Record<DetailQueryKind, number> = {
-  'temperature-store': Infinity,
+  'temperature-store': 60_000,
   'job-queue': 5000,
   timelapse: 5000,
   history: 30_000,

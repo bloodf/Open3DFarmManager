@@ -164,9 +164,13 @@ export function lastKnownStatesFailureReason(status: number | undefined) {
  * printer and its stored state must not be shown next to it.
  */
 export function liveAssignmentIds<
-  Live extends { assignment: { assignmentId: string } },
+  Live extends { assignment: { assignmentId: string }; connection?: string },
 >(liveRows: readonly Live[]): ReadonlySet<string> {
-  return new Set(liveRows.map((row) => row.assignment.assignmentId))
+  return new Set(
+    liveRows
+      .filter((row) => row.connection === 'authenticated')
+      .map((row) => row.assignment.assignmentId),
+  )
 }
 
 /**
@@ -178,7 +182,7 @@ export function liveAssignmentIds<
  * always one card.
  */
 export function offlineCards<
-  Live extends { assignment: { assignmentId: string } },
+  Live extends { assignment: { assignmentId: string }; connection?: string },
 >(
   liveRows: readonly Live[],
   storedStates: readonly LastKnownState[],

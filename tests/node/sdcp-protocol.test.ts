@@ -40,6 +40,11 @@ test('discovers Saturn and reads board-scoped v3 status with command 0', async (
     ),
     [0],
   )
+  assert.deepEqual(client.capabilities, {
+    status: true,
+    dispatch: false,
+    control: false,
+  })
   assert.deepEqual(client.command(320), { ok: false, reason: 'unsupported' })
   assert.equal(client.snapshot(), undefined)
   sim.publish(frame)
@@ -77,4 +82,59 @@ test('rejects legacy SDCP and unsupported models before opening a socket', () =>
     () => connectSdcp({ ...identity, model: centauri.Data.MachineName }),
     /Unsupported SDCP model/,
   )
+})
+
+test('ignores wrong status topics and expires stale status', async (t) => {
+  const sim = await startSdcpSimulator(saturn)
+  t.after(sim.close)
+  const identity = parseSdcpDiscovery(
+    Buffer.from(JSON.stringify(saturn)),
+    '127.0.0.1',
+  )!
+  let now = 100
+  const client = connectSdcp(identity, {
+    port: sim.websocketPort,
+    now: () => now,
+    staleAfterMs: 50,
+  })
+  t.after(client.close)
+  for (let i = 0; i < 100 && !sim.requests.length; i++) await setTimeout(10)
+  const frame = {
+    MainboardID: identity.mainboardId,
+    Topic: `sdcp/status/${identity.mainboardId}`,
+    Status: saturn.fixtureStatus,
+  }
+  sim.publish({ ...frame, Topic: 'sdcp/status/wrong' })
+  await setTimeout(30)
+  assert.equal(client.snapshot(), undefined)
+  sim.publish(frame)
+  for (let i = 0; i < 100 && !client.snapshot(); i++) await setTimeout(10)
+  assert.equal(client.snapshot()?.observedAt, 100)
+  now = 150
+  assert.equal(client.snapshot(), undefined)
+  assert.deepEqual(
+    sim.requests.map((r) => (r as { Data: { Cmd: number } }).Data.Cmd),
+    [0],
+  )
+})
+
+test('does not expose a status after a denied acknowledgement or no reply', async (t) => {
+  const sim = await startSdcpSimulator(saturn)
+  t.after(sim.close)
+  const identity = parseSdcpDiscovery(
+    Buffer.from(JSON.stringify(saturn)),
+    '127.0.0.1',
+  )!
+  const client = connectSdcp(identity, { port: sim.websocketPort })
+  t.after(client.close)
+  for (let i = 0; i < 100 && !sim.requests.length; i++) await setTimeout(10)
+  const request = sim.requests[0] as { Data: { RequestID: string } }
+  sim.publish({
+    MainboardID: identity.mainboardId,
+    Topic: `sdcp/response/${identity.mainboardId}`,
+    Data: { Cmd: 0, RequestID: request.Data.RequestID, Ack: 1 },
+  })
+  await setTimeout(100)
+  assert.equal(client.snapshot(), undefined)
+  assert.equal(sim.requests.length, 1)
 })

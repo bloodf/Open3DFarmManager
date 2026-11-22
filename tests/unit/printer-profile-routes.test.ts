@@ -142,11 +142,14 @@ function fixture(
       return role ? [{ role, revoked_at: null }] : []
     }
     if (statement.startsWith('SELECT id FROM farm.printer_assignments'))
+      expect(statement).toContain('revoked_at IS NULL')
+    if (statement.startsWith('SELECT id FROM farm.printer_assignments'))
       return args[1] !== undefined && active.includes(String(args[1]))
         ? [{ id: args[1] }]
         : []
     if (statement.includes('FROM farm.printer_assignments a LEFT JOIN')) {
       expect(args[0]).toBe(farmId)
+      expect(statement).toContain('a.revoked_at IS NULL')
       return rows(
         (args[1] as string | null) ?? null,
         (args[3] as string | null) ?? null,

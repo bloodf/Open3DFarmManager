@@ -919,6 +919,37 @@ test('raw complete query has one pending request and <=1s timeout before epoch i
   }
 }, 20000)
 
+test('complete query invalidation occurs before the longer request timeout', async () => {
+  const evidence: RawEvidence = { raw: [], rawUnavailable: [] }
+  const service = await fixture({
+    subscribe(socket, _connection, _later, request) {
+      if (request.id === 1) socket.send(snapshot())
+    },
+  })
+  try {
+    const events = await run(
+      service.origin,
+      {
+        requestTimeoutMs: 5000,
+        staleAfterMs: 5000,
+        reconnectMinMs: 3000,
+        reconnectMaxMs: 3000,
+      },
+      'raw',
+      undefined,
+      evidence,
+      { unavailable: 2, deadlineMs: 3500 },
+    )
+    expect(evidence.completedBy).toBe('unavailable')
+    expect(service.rpcs).toHaveLength(2)
+    expect(evidence.raw).toHaveLength(1)
+    expect(evidence.rawUnavailable).toHaveLength(1)
+    expect(events.some((event) => event.reason === 'stale')).toBe(true)
+  } finally {
+    await service.close()
+  }
+}, 20000)
+
 test.each([10.5, 11, 12])(
   'overlapping complete query at source time %s is discarded without regressing fields or stopping collection',
   async (queryTime) => {

@@ -132,6 +132,9 @@ describe('maintained Nuxt sealed-cookie session request behavior', () => {
         runtime,
       ),
     ).rejects.toMatchObject({ status: 403 })
+    await expect(
+      authenticatedSession(event('GET', { cookie: pair }), runtime),
+    ).resolves.toEqual({ accountId: 'account' })
     const req = event('POST', { cookie: pair, origin: runtime.origin })
     expect(await logout(req, runtime)).toEqual({ loggedOut: true })
     expect(req.res.headers.getSetCookie().join(';')).toContain('Max-Age=0')

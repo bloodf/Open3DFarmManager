@@ -23,17 +23,7 @@ function binary(name: string) {
   return name // PATH fallback; the version check below rejects a wrong major.
 }
 
-export async function startLocalPostgres(input: {
-  workDir: string
-  port: number
-  ledger: (value: object) => void
-}) {
-  const [initdb, pgCtl, createdb, postgresBin] = [
-    'initdb',
-    'pg_ctl',
-    'createdb',
-    'postgres',
-  ].map(binary) as [string, string, string, string]
+async function postgresEnv(postgresBin: string) {
   const env = { ...process.env }
   // pg_config reports paths relative to the selected installation, including
   // unpacked distributions whose libraries are outside the system search path.
@@ -51,8 +41,42 @@ export async function startLocalPostgres(input: {
         .filter(Boolean)
         .join(delimiter)
   }
+  return env
+}
+
+const isRequiredVersion = (version: string) => / 17\./.test(version)
+
+/** Whether the binaries selected by this helper are available for a v17 cluster. */
+export async function hasLocalPostgres(): Promise<boolean> {
+  try {
+    const postgresBin = binary('postgres')
+    const env = await postgresEnv(postgresBin)
+    const version = (
+      await exec(postgresBin, ['--version'], { env, timeout: 5000 })
+    ).stdout
+    if (!isRequiredVersion(version)) return false
+    for (const name of ['initdb', 'pg_ctl', 'createdb'])
+      await exec(binary(name), ['--version'], { env, timeout: 5000 })
+    return true
+  } catch {
+    return false
+  }
+}
+
+export async function startLocalPostgres(input: {
+  workDir: string
+  port: number
+  ledger: (value: object) => void
+}) {
+  const [initdb, pgCtl, createdb, postgresBin] = [
+    'initdb',
+    'pg_ctl',
+    'createdb',
+    'postgres',
+  ].map(binary) as [string, string, string, string]
+  const env = await postgresEnv(postgresBin)
   const version = (await exec(postgresBin, ['--version'], { env })).stdout
-  if (!/ 17\./.test(version))
+  if (!isRequiredVersion(version))
     throw new Error(
       `PostgreSQL 17 required for the local cluster, got ${version.trim()}`,
     )

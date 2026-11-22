@@ -6,34 +6,29 @@ import Dialog from '../components/ui/Dialog.vue'
 import { selectedFarm } from '../utils/farm-request-guard.ts'
 import { listenForAuthInvalidation } from '../utils/auth-invalidation'
 import { createShellShortcuts } from '../utils/shell-shortcuts'
-import { themeScript, themeStyles } from '../utils/pre-hydration'
+import { themeStyles } from '../utils/pre-hydration'
+import { useStatusSummary } from '../composables/useStatusSummary'
+
+const themeScript = `try { var t = localStorage.getItem('farm-theme') === 'light' ? 'light' : 'dark'; document.documentElement.dataset.theme = t; document.documentElement.classList.toggle('dark', t === 'dark'); document.documentElement.style.colorScheme = t; } catch (_) { document.documentElement.dataset.theme = 'dark'; }`
 
 useHead({
   script: [{ innerHTML: themeScript }],
   style: [{ innerHTML: themeStyles }],
 })
-const theme = ref('system')
-let media: MediaQueryList | undefined
-function applyTheme() {
-  document.documentElement.dataset.theme =
-    theme.value === 'system' ? (media?.matches ? 'dark' : 'light') : theme.value
-}
+const theme = ref('dark')
 function changeTheme() {
+  theme.value = theme.value === 'dark' ? 'light' : 'dark'
   try {
     localStorage.setItem('farm-theme', theme.value)
   } catch {}
-  applyTheme()
+  document.documentElement.dataset.theme = theme.value
+  document.documentElement.classList.toggle('dark', theme.value === 'dark')
+  document.documentElement.style.colorScheme = theme.value
 }
 onMounted(() => {
-  try {
-    const saved = localStorage.getItem('farm-theme')
-    if (saved === 'light' || saved === 'dark') theme.value = saved
-  } catch {}
-  media = matchMedia('(prefers-color-scheme: dark)')
-  media.addEventListener('change', applyTheme)
-  applyTheme()
+  theme.value =
+    document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'
 })
-onUnmounted(() => media?.removeEventListener('change', applyTheme))
 
 type FarmPage = { farms: { farmId: string }[] }
 type BrowserDevicePage = { currentRole: string }
@@ -52,6 +47,12 @@ const activeFarm = computed(() =>
       (farms.value.length === 1 ? farms.value[0]?.farmId : ''))
     : '',
 )
+const selectedFarmId = computed(
+  () => selectedFarm(farms.value, route.query.farm)?.farmId,
+)
+const { summary, failed } = useStatusSummary({
+  farmId: () => selectedFarmId.value,
+})
 const authenticated = ref(false)
 const currentRole = ref<string | null>(null)
 const isOwner = computed(() => currentRole.value === 'owner')
@@ -99,6 +100,48 @@ const links = computed(() => [
     : [{ to: '/entrar', label: 'Entrar' }]),
 ])
 
+const modules = [
+  {
+    to: '/farm',
+    label: 'Farm',
+    icon: '▦',
+    paths: ['/farm', '/impressoras', '/painel'],
+  },
+  {
+    to: '/bobinas',
+    label: 'Estoque',
+    icon: '◉',
+    paths: ['/bobinas', '/spoolman'],
+  },
+  { to: '/historico', label: 'Cuidado', icon: '◇', paths: ['/historico'] },
+  {
+    to: '/biblioteca',
+    label: 'Criar',
+    icon: '▤',
+    paths: ['/biblioteca', '/arquivos'],
+  },
+  {
+    to: '/conta',
+    label: 'Sistema',
+    icon: '⚙',
+    paths: ['/conta', '/connectors', '/rede', '/dispositivos', '/integracoes'],
+  },
+]
+
+const activeModule = computed(() =>
+  modules.find((item) =>
+    item.paths.some(
+      (path) => route.path === path || route.path.startsWith(path + '/'),
+    ),
+  ),
+)
+const sectionLinks = computed(() => {
+  const paths = activeModule.value?.paths
+  return paths
+    ? links.value.filter((link) => paths.includes(link.to))
+    : links.value
+})
+const sectionCollapsed = ref(false)
 const section = computed(() =>
   links.value.find(
     ({ to }) => to === route.path.split('/').slice(0, 2).join('/'),
@@ -131,6 +174,15 @@ function switchFarm(event: Event) {
 }
 
 function handleKeydown(event: KeyboardEvent) {
+  if (
+    (event.ctrlKey || event.metaKey) &&
+    event.key.toLowerCase() === 'k' &&
+    !event.isComposing
+  ) {
+    event.preventDefault()
+    search.value = true
+    return
+  }
   if (shortcutsEnabled.value) shortcuts(event)
 }
 let stopAuthListener: (() => void) | undefined
@@ -209,9 +261,9 @@ async function refreshAccount() {
       >
       <Button
         aria-haspopup="dialog"
-        aria-keyshortcuts="/"
+        aria-keyshortcuts="Control+K Meta+K /"
         @click="search = true"
-        >Buscar páginas</Button
+        >Buscar (Ctrl/⌘ K)</Button
       >
       <Button aria-haspopup="dialog" aria-keyshortcuts="?" @click="help = true"
         >Atalhos</Button
@@ -225,29 +277,68 @@ async function refreshAccount() {
           </option>
         </select>
       </label>
-      <label>
-        Tema
-        <select v-model="theme" @change="changeTheme">
-          <option value="system">Sistema</option>
-          <option value="light">Claro</option>
-          <option value="dark">Escuro</option>
-        </select>
-      </label>
+      <Button
+        :aria-label="
+          theme === 'dark' ? 'Ativar tema claro' : 'Ativar tema escuro'
+        "
+        @click="changeTheme"
+      >
+        {{ theme === 'dark' ? '☀ Claro' : '☾ Escuro' }}
+      </Button>
+      <details class="vitals">
+        <summary>Situação da farm</summary>
+        <p v-if="!summary">Situação indisponível</p>
+        <template v-else>
+          <p v-if="failed || Date.now() - summary.generatedAt > 30000">
+            Dados desatualizados
+          </p>
+          <p>
+            Imprimindo: {{ summary.counts.printing }} · Atenção:
+            {{ summary.counts.paused + summary.counts.error }} · Ociosas:
+            {{ summary.counts.idle }} · Offline: {{ summary.counts.offline }}
+          </p>
+          <p>Próxima conclusão: Não informada</p>
+        </template>
+      </details>
     </header>
-    <aside class="sidebar">
-      <nav aria-label="Navegação principal">
+    <aside class="rail" aria-label="Módulos">
+      <nav aria-label="Módulos">
         <NuxtLink
-          v-for="link in links"
-          :key="link.to"
-          :to="link.to"
-          :aria-current="route.path === link.to ? 'page' : undefined"
+          v-for="item in modules"
+          :key="item.to"
+          :to="item.to"
+          :aria-current="
+            item.paths.some(
+              (path) =>
+                route.path === path ||
+                (path !== '/' && route.path.startsWith(path + '/')),
+            )
+              ? 'page'
+              : undefined
+          "
         >
-          {{ link.label }}
+          <span aria-hidden="true">{{ item.icon }}</span><span>{{
+            item.label
+          }}</span>
         </NuxtLink>
       </nav>
     </aside>
+    <aside class="sidebar">
+      <button
+        type="button"
+        :aria-expanded="!sectionCollapsed"
+        @click="sectionCollapsed = !sectionCollapsed"
+      >
+        {{ activeModule?.label ?? 'Navegação' }}
+      </button>
+      <ShellNavigation
+        v-if="!sectionCollapsed"
+        :links="sectionLinks"
+        :path="route.path"
+      />
+    </aside>
     <div id="conteudo-shell" class="content" tabindex="-1">
-      <header v-if="section && section.to !== '/'">
+      <div v-if="section && section.to !== '/'" class="breadcrumbs">
         <nav aria-label="Localização">
           <ol>
             <li><NuxtLink to="/">Início</NuxtLink></li>
@@ -262,9 +353,13 @@ async function refreshAccount() {
             </template>
           </ol>
         </nav>
-      </header>
+      </div>
       <slot />
     </div>
+    <footer class="event-strip">
+      Último evento: indisponível ·
+      <NuxtLink to="/historico">Ver histórico</NuxtLink>
+    </footer>
     <Dialog v-model="drawer" class="drawer" title="Menu">
       <ShellNavigation
         :links="links"
@@ -272,12 +367,13 @@ async function refreshAccount() {
         @navigate="drawer = false"
       />
     </Dialog>
-    <Dialog v-model="search" title="Buscar páginas">
+    <Dialog v-model="search" title="Buscar">
       <label>
         Nome da página
         <input v-model="query" type="search" autofocus />
       </label>
-      <p v-if="!results.length" role="status">Nenhuma página encontrada.</p>
+      <p>Busca de impressoras e bobinas indisponível.</p>
+      <p v-if="!results.length" role="status">Nenhum resultado encontrado.</p>
       <ShellNavigation
         :links="results"
         :path="route.path"
@@ -290,7 +386,7 @@ async function refreshAccount() {
         Ativar atalhos de teclado
       </label>
       <ul>
-        <li><kbd>/</kbd> — Buscar páginas</li>
+        <li><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>K</kbd> — Buscar</li>
         <li><kbd>g</kbd> depois <kbd>f</kbd> — Minha farm</li>
         <li><kbd>g</kbd> depois <kbd>b</kbd> — Biblioteca</li>
         <li><kbd>?</kbd> — Abrir esta ajuda</li>
@@ -302,7 +398,15 @@ async function refreshAccount() {
 <style scoped>
 .shell {
   display: grid;
-  grid-template-columns: 14rem minmax(0, 1fr);
+  grid-template-columns: 56px 190px minmax(0, 1fr);
+  min-height: 100vh;
+  color: var(--ops-text);
+  background: var(--ops-canvas);
+  --ops-canvas: var(--color-surface);
+  --ops-panel: var(--color-surface-raised);
+  --ops-text: var(--color-text);
+  --ops-muted: var(--color-text-muted);
+  --ops-border: var(--color-border);
 }
 .toolbar {
   grid-column: 1 / -1;
@@ -325,8 +429,48 @@ input {
   max-inline-size: 100%;
   min-block-size: 2.75rem;
 }
+.rail {
+  background: var(--ops-panel);
+  border-right: 1px solid var(--ops-border);
+}
+.rail nav {
+  display: grid;
+}
+.rail a {
+  min-height: 56px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  font-size: 10px;
+  text-decoration: none;
+  color: var(--ops-text);
+}
+.rail a span:first-child {
+  font-size: 20px;
+}
+.rail a[aria-current='page'] {
+  border-left: 3px solid var(--color-accent);
+  background: var(--ops-canvas);
+  font-weight: 700;
+}
+.vitals {
+  color: var(--ops-text);
+}
+.vitals summary {
+  cursor: pointer;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
+.event-strip {
+  grid-column: 1 / -1;
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--ops-border);
+  font-size: var(--font-size-sm);
+}
 .sidebar,
-.content > header {
+.breadcrumbs {
   padding: var(--space-4);
 }
 .sidebar {
@@ -388,7 +532,8 @@ a:focus-visible {
   .shell {
     grid-template-columns: minmax(0, 1fr);
   }
-  .sidebar {
+  .sidebar,
+  .rail {
     display: none;
   }
   .drawer-trigger {

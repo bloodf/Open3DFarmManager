@@ -43,6 +43,8 @@ export default defineNuxtConfig({
       enabled: false,
       origin: '',
       sessionSecret: '',
+      credentialEncryptionKey: '',
+      credentialEncryptionPreviousKey: '',
       databaseUrl: '',
       bootstrapToken: '',
       /** NUXT_AUTH_PASSWORD_RESET=true enables owner-issued reset links. */

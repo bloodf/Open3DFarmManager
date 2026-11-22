@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from 'vue'
+import { createFarmRequestGuard } from '../utils/farm-request-guard.ts'
 import Button from '../components/ui/Button.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import ErrorState from '../components/ui/ErrorState.vue'
@@ -21,6 +22,8 @@ type ConnectResponse = AccountView | { tfaRequired: true; tfaKey: string }
 const farms = ref<Farm[]>([])
 const farmId = ref('')
 const account = ref<AccountView | null>(null)
+const guard = createFarmRequestGuard(() => farmId.value)
+const accountFarm = ref('')
 const mode = ref<'email-code' | 'password' | 'token' | 'tfa'>('email-code')
 const region = ref<'global' | 'china'>('global')
 const email = ref('')
@@ -80,13 +83,21 @@ async function report(text: string, failed: boolean) {
 
 async function loadStatus() {
   if (!farmId.value) return
+  const id = farmId.value
+  const current = guard.start(id)
+  account.value = null
+  accountFarm.value = ''
   unavailable.value = false
   try {
-    account.value = await $fetch<AccountView>(
-      `/api/farms/${farmId.value}/bambu-cloud`,
-      { retry: 0, timeout: 15_000 },
-    )
+    const result = await $fetch<AccountView>(`/api/farms/${id}/bambu-cloud`, {
+      retry: 0,
+      timeout: 15_000,
+    })
+    if (!current()) return
+    account.value = result
+    accountFarm.value = id
   } catch (cause: unknown) {
+    if (!current()) return
     account.value = null
     const status = statusCode(cause)
     if (status === 404) {
@@ -175,6 +186,7 @@ async function connect() {
     tfaKey.value = ''
     mode.value = 'email-code'
     account.value = response
+    accountFarm.value = farmId.value
     await report(
       response.expired
         ? 'Conta conectada. O token expirou.'
@@ -207,19 +219,26 @@ function cancelTfa() {
 }
 
 async function disconnect() {
-  if (pending.value || !farmId.value) return
+  if (pending.value || !farmId.value || accountFarm.value !== farmId.value)
+    return
+  const id = accountFarm.value
+  const current = guard.start(id)
   pending.value = true
   message.value = ''
   error.value = false
   try {
-    account.value = await $fetch<AccountView>(
-      `/api/farms/${farmId.value}/bambu-cloud`,
-      { method: 'DELETE', retry: 0, timeout: 15_000 },
-    )
+    const result = await $fetch<AccountView>(`/api/farms/${id}/bambu-cloud`, {
+      method: 'DELETE',
+      retry: 0,
+      timeout: 15_000,
+    })
+    if (!current()) return
+    account.value = result
     clearSecrets()
     tfaKey.value = ''
     await report('Conta Bambu Cloud desconectada.', false)
   } catch (cause: unknown) {
+    if (!current()) return
     const status = statusCode(cause)
     await report(
       status === 403

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { connectPhrozen } from '../../packages/connector/src/phrozen/index.ts'
 import { startPhrozenSimulator } from '../../packages/sim-tools/src/phrozen-simulator.ts'
-import fixture from '../fixtures/phrozen/revo-14k-v153.json' with { type: 'json' }
+import fixture from '../fixtures/phrozen/synthetic-revo-14k-v153.json' with { type: 'json' }
 
 test('discovers Revo and reads raw status from the provisioned address', async (t) => {
   const sim = await startPhrozenSimulator(fixture)
@@ -11,7 +11,7 @@ test('discovers Revo and reads raw status from the provisioned address', async (
   assert.deepEqual(printer.identity, {
     id: '0123456789abcdef0123456789abcdef',
     board: '000000000001d354',
-    model: 'Sonic Mighty Revo',
+    model: 'Sonic Mighty Revo 14K',
     firmware: 'V153',
   })
   assert.equal(printer.authentication, 'none')
@@ -39,6 +39,7 @@ for (const [fault, error] of [
 }
 
 for (const attributes of [
+  { MachineName: 'Sonic Mighty Revo' },
   { MachineName: 'Sonic Mighty Revo 16K' },
   { ProtocolVersion: 'V1.0.0' },
   { FirmwareVersion: 'V999' },

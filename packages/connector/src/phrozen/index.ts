@@ -5,7 +5,7 @@ import { isIPv4 } from 'node:net'
 // Phrozen demonstrates ChituManager on the Revo 14K with V138:
 // https://www.youtube.com/watch?v=ngnSR3nWJGw
 // Wire contract: https://github.com/cbd-tech/SDCP-Smart-Device-Control-Protocol-V3.0.0
-const MODEL = 'Sonic Mighty Revo'
+const MODEL = 'Sonic Mighty Revo 14K'
 const FIRMWARE = new Set(['V138', 'V153'])
 
 function object(value: unknown): Record<string, unknown> {
@@ -29,7 +29,7 @@ function identity(frame: string) {
   const { MachineName, MainboardID, FirmwareVersion, ProtocolVersion } =
     attributes
   if (
-    (MachineName !== MODEL && MachineName !== 'Sonic Mighty Revo 14K') ||
+    MachineName !== MODEL ||
     typeof FirmwareVersion !== 'string' ||
     !FIRMWARE.has(FirmwareVersion) ||
     ProtocolVersion !== 'V3.0.0'

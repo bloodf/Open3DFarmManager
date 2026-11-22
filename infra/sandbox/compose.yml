@@ -5,7 +5,6 @@ x-node: &node
   user: '${SANDBOX_UID:?}:${SANDBOX_GID:?}'
   volumes:
     - ../..:/workspace:ro
-    - ${SANDBOX_STATE:?}:/sandbox:ro
   cap_drop: [ALL]
   security_opt: [no-new-privileges:true]
 services:
@@ -48,6 +47,12 @@ services:
     command: [node, --env-file=/sandbox/app.env, infra/sandbox/app.ts]
     ports:
       - '127.0.0.1::3000'
+    volumes: !override
+      - ../..:/workspace:ro
+      - ${SANDBOX_STATE:?}/app.env:/sandbox/app.env:ro
+      - ${SANDBOX_STATE:?}/tls.crt:/sandbox/tls.crt:ro
+      - ${SANDBOX_STATE:?}/tls.key:/sandbox/tls.key:ro
+      - ${SANDBOX_STATE:?}/keys.json:/sandbox/keys.json:ro
   connector:
     <<: *node
     network_mode: service:bambu
@@ -56,7 +61,11 @@ services:
       NODE_EXTRA_CA_CERTS: /sandbox/tls.crt
     volumes: !override
       - ../..:/workspace:ro
-      - ${SANDBOX_STATE:?}:/sandbox
+      - ${SANDBOX_STATE:?}/tls.crt:/sandbox/tls.crt:ro
+      - ${SANDBOX_STATE:?}/runtime.json:/sandbox/runtime.json:ro
+      - ${SANDBOX_STATE:?}/credential.json:/sandbox/credential.json:ro
+      - ${SANDBOX_STATE:?}/bambu-credential.json:/sandbox/bambu-credential.json:ro
+      - ${SANDBOX_STATE:?}/connector-data:/sandbox/connector-data
     command:
       - node
       - packages/connector/dist/cli.js

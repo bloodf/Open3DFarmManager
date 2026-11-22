@@ -16,7 +16,7 @@ export const webhookHandler = defineEventHandler(async (event) => {
       principal,
       new PostgresWebhooks(
         integrationAuthPool(),
-        credentialKeyring(useRuntimeConfig().auth),
+        credentialKeyring(useRuntimeConfig().auth ?? {}),
       ),
       headers,
       event.context.params?.webhookId,

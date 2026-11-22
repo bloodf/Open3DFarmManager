@@ -8,7 +8,7 @@ Some state is issued or confirmed by the server and then relied on locally witho
 
 The pause capability path already has hard bounds in code. A capability lasts at most 30 s (`PAUSE_POLICY_HARD_MAXIMUMS.capabilityMs`, plus the `capability_expires_at <= consumed_at + 30000` check in migration 0018). A control binding lasts at most 30 s, an admission at most 8 s and a command at most 5 s. Each signed capability was issued by an online server, so it is fresh evidence by itself. The new bound covers state that has no signature of its own and comes only from the last server contact, such as the planned trusted-key cache.
 
-The v1 `authorizeCommand` lease is supplied by the caller and capped at 60 s. That cap does not enforce the offline lifetime: the transport must still authenticate where the lease came from.
+The former v1 `authorizeCommand` lease (removed in #609) was supplied by the caller and capped at 60 s. That cap does not enforce the offline lifetime: the transport must still authenticate where the lease came from.
 
 ## Bound
 

@@ -18,6 +18,7 @@ import {
   type JobHistoryItem,
 } from '../utils/job-history-view.ts'
 
+const route = useRoute()
 type Farm = { farmId: string }
 const farms = ref<Farm[]>([])
 const farmId = ref('')
@@ -129,7 +130,10 @@ async function loadFarms() {
     }),
   )
   farms.value = page?.farms ?? []
-  farmId.value = farms.value.length === 1 ? (farms.value[0]?.farmId ?? '') : ''
+  const requested = route.query.farm
+  farmId.value =
+    farms.value.find((farm) => farm.farmId === requested)?.farmId ??
+    (farms.value.length === 1 ? (farms.value[0]?.farmId ?? '') : '')
   if (farmId.value) await loadJobs()
 }
 async function loadJobs(before: string | null = null) {

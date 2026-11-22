@@ -7,33 +7,40 @@ import { selectedFarm } from '../utils/farm-request-guard.ts'
 import { listenForAuthInvalidation } from '../utils/auth-invalidation'
 import { createShellShortcuts } from '../utils/shell-shortcuts'
 import { themeScript, themeStyles } from '../utils/pre-hydration'
+import { useStatusSummary } from '../composables/useStatusSummary'
+import { useShellRecords } from '../composables/useShellRecords'
+import { spoolDisplayTitle } from '../utils/spool-library-format'
+import { jobHistoryRow } from '../utils/job-history-view'
 
 useHead({
   script: [{ innerHTML: themeScript }],
   style: [{ innerHTML: themeStyles }],
+  meta: [{ name: 'theme-color', content: 'var(--color-surface)' }],
 })
-const theme = ref('system')
-let media: MediaQueryList | undefined
-function applyTheme() {
-  document.documentElement.dataset.theme =
-    theme.value === 'system' ? (media?.matches ? 'dark' : 'light') : theme.value
-}
+const theme = ref('dark')
 function changeTheme() {
+  theme.value = theme.value === 'dark' ? 'light' : 'dark'
   try {
     localStorage.setItem('farm-theme', theme.value)
   } catch {}
-  applyTheme()
+  document.documentElement.dataset.theme = theme.value
+  document.documentElement.classList.toggle('dark', theme.value === 'dark')
+  document.documentElement.style.colorScheme = theme.value
+  const meta = document.querySelector<HTMLMetaElement>('meta[name=theme-color]')
+  if (meta)
+    meta.content = getComputedStyle(document.documentElement)
+      .getPropertyValue('--color-surface')
+      .trim()
 }
 onMounted(() => {
-  try {
-    const saved = localStorage.getItem('farm-theme')
-    if (saved === 'light' || saved === 'dark') theme.value = saved
-  } catch {}
-  media = matchMedia('(prefers-color-scheme: dark)')
-  media.addEventListener('change', applyTheme)
-  applyTheme()
+  theme.value =
+    document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'
+  const meta = document.querySelector<HTMLMetaElement>('meta[name=theme-color]')
+  if (meta)
+    meta.content = getComputedStyle(document.documentElement)
+      .getPropertyValue('--color-surface')
+      .trim()
 })
-onUnmounted(() => media?.removeEventListener('change', applyTheme))
 
 type FarmPage = { farms: { farmId: string }[] }
 type BrowserDevicePage = { currentRole: string }
@@ -46,12 +53,32 @@ const search = ref(false)
 const help = ref(false)
 const query = ref('')
 const shortcutsEnabled = ref(true)
-const activeFarm = computed(() =>
-  route.path === '/farm'
-    ? (route.query.farm ??
-      (farms.value.length === 1 ? farms.value[0]?.farmId : ''))
-    : '',
+const activeFarm = computed(
+  () =>
+    route.query.farm ??
+    (farms.value.length === 1 ? farms.value[0]?.farmId : ''),
 )
+const selectedFarmId = computed(
+  () => selectedFarm(farms.value, route.query.farm)?.farmId,
+)
+const { summary, failed } = useStatusSummary({
+  farmId: () => selectedFarmId.value,
+})
+const summaryStale = computed(
+  () =>
+    failed.value ||
+    (!!summary.value &&
+      (Date.now() - summary.value.generatedAt > 30000 ||
+        summary.value.states.some(
+          (state) => Date.now() - state.observedAt > 30000,
+        ))),
+)
+const { spools, spoolState, spoolTruncated, latestJob, eventState } =
+  useShellRecords(
+    () => selectedFarmId.value,
+    () => search.value,
+    () => query.value,
+  )
 const authenticated = ref(false)
 const currentRole = ref<string | null>(null)
 const isOwner = computed(() => currentRole.value === 'owner')
@@ -99,17 +126,121 @@ const links = computed(() => [
     : [{ to: '/entrar', label: 'Entrar' }]),
 ])
 
+const modules = [
+  {
+    to: '/farm',
+    label: 'Farm',
+    icon: '▦',
+    paths: ['/farm', '/impressoras', '/painel'],
+  },
+  {
+    to: '/bobinas',
+    label: 'Estoque',
+    icon: '◉',
+    paths: ['/bobinas', '/spoolman'],
+  },
+  { to: '/historico', label: 'Cuidado', icon: '◇', paths: ['/historico'] },
+  {
+    to: '/biblioteca',
+    label: 'Criar',
+    icon: '▤',
+    paths: ['/biblioteca', '/arquivos'],
+  },
+  {
+    to: '/conta',
+    label: 'Sistema',
+    icon: '⚙',
+    paths: ['/conta', '/connectors', '/rede', '/dispositivos', '/integracoes'],
+  },
+]
+
+const activeModule = computed(() =>
+  modules.find((item) =>
+    item.paths.some(
+      (path) => route.path === path || route.path.startsWith(path + '/'),
+    ),
+  ),
+)
+const sectionLinks = computed(() => {
+  const paths = activeModule.value?.paths
+  return paths
+    ? links.value.filter((link) => paths.includes(link.to))
+    : links.value
+})
+const sectionCollapsed = ref(false)
+onMounted(() => {
+  try {
+    sectionCollapsed.value =
+      localStorage.getItem('farm-shell-section-collapsed') === 'true'
+  } catch {}
+})
+watch(sectionCollapsed, (collapsed) => {
+  try {
+    localStorage.setItem('farm-shell-section-collapsed', String(collapsed))
+  } catch {}
+})
 const section = computed(() =>
   links.value.find(
     ({ to }) => to === route.path.split('/').slice(0, 2).join('/'),
   ),
 )
-const results = computed(() => {
-  const normalize = (value: string) =>
-    value.toLocaleLowerCase('pt-BR').normalize('NFD').replace(/\p{M}/gu, '')
+const normalize = (value: string) =>
+  value.toLocaleLowerCase('pt-BR').normalize('NFD').replace(/\p{M}/gu, '')
+const paletteGroups = computed(() => {
   const term = normalize(query.value.trim())
-  return links.value.filter(({ label }) => normalize(label).includes(term))
+  const matches = (value: string) => normalize(value).includes(term)
+  return [
+    {
+      label: 'Páginas',
+      items: links.value.filter(({ label }) => matches(label)),
+    },
+    {
+      label: 'Impressoras',
+      items: (summary.value?.states ?? [])
+        .filter((item) =>
+          matches(`${item.displayName ?? ''} ${item.printerKey}`),
+        )
+        .map((item) => ({
+          label: item.displayName || item.printerKey,
+          to: `/impressoras/${encodeURIComponent(item.printerKey)}?farm=${encodeURIComponent(selectedFarmId.value ?? '')}`,
+        })),
+    },
+    {
+      label: 'Bobinas',
+      items: spools.value
+        .filter((item) =>
+          matches(
+            `${spoolDisplayTitle(item)} ${item.id} ${item.filament.material ?? ''} ${item.filament.color_hex ?? ''}`,
+          ),
+        )
+        .map((item) => ({
+          label: `${spoolDisplayTitle(item)} · #${item.id}`,
+          to: `/bobinas?farm=${encodeURIComponent(selectedFarmId.value ?? '')}&q=${encodeURIComponent(String(item.id))}`,
+        })),
+    },
+  ]
 })
+const paletteItems = computed(() =>
+  paletteGroups.value.flatMap((group) => group.items),
+)
+const paletteIndex = ref(0)
+watch([query, paletteItems], () => {
+  paletteIndex.value = 0
+})
+function paletteKey(event: KeyboardEvent) {
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    if (!paletteItems.value.length) return
+    event.preventDefault()
+    const delta = event.key === 'ArrowDown' ? 1 : -1
+    paletteIndex.value =
+      (paletteIndex.value + delta + paletteItems.value.length) %
+      paletteItems.value.length
+  } else if (event.key === 'Enter' && paletteItems.value[paletteIndex.value]) {
+    event.preventDefault()
+    void router.push(paletteItems.value[paletteIndex.value]!.to)
+    search.value = false
+  }
+}
 const shortcuts = createShellShortcuts((shortcut) => {
   if (shortcut === 'search') search.value = true
   if (shortcut === 'help') help.value = true
@@ -131,6 +262,15 @@ function switchFarm(event: Event) {
 }
 
 function handleKeydown(event: KeyboardEvent) {
+  if (
+    (event.ctrlKey || event.metaKey) &&
+    event.key.toLowerCase() === 'k' &&
+    !event.isComposing
+  ) {
+    event.preventDefault()
+    search.value = true
+    return
+  }
   if (shortcutsEnabled.value) shortcuts(event)
 }
 let stopAuthListener: (() => void) | undefined
@@ -209,9 +349,9 @@ async function refreshAccount() {
       >
       <Button
         aria-haspopup="dialog"
-        aria-keyshortcuts="/"
+        aria-keyshortcuts="Control+K Meta+K /"
         @click="search = true"
-        >Buscar páginas</Button
+        >Buscar (Ctrl/⌘ K)</Button
       >
       <Button aria-haspopup="dialog" aria-keyshortcuts="?" @click="help = true"
         >Atalhos</Button
@@ -225,29 +365,72 @@ async function refreshAccount() {
           </option>
         </select>
       </label>
-      <label>
-        Tema
-        <select v-model="theme" @change="changeTheme">
-          <option value="system">Sistema</option>
-          <option value="light">Claro</option>
-          <option value="dark">Escuro</option>
-        </select>
-      </label>
+      <Button
+        :aria-label="
+          theme === 'dark' ? 'Ativar tema claro' : 'Ativar tema escuro'
+        "
+        @click="changeTheme"
+      >
+        {{ theme === 'dark' ? '☀ Claro' : '☾ Escuro' }}
+      </Button>
+      <details class="vitals">
+        <summary>
+          Resumo armazenado<span v-if="summary">
+            · Imprimindo: {{ summary.counts.printing }} · Atenção:
+            {{ summary.counts.paused + summary.counts.error }}</span
+          ><span v-else> · Indisponível</span>
+          <span v-if="summaryStale"> · Desatualizado</span>
+        </summary>
+        <p v-if="!summary">Situação indisponível</p>
+        <template v-else>
+          <p v-if="summaryStale">Dados desatualizados</p>
+          <p>
+            Imprimindo: {{ summary.counts.printing }} · Atenção:
+            {{ summary.counts.paused + summary.counts.error }} · Ociosas:
+            {{ summary.counts.idle }} · Offline: {{ summary.counts.offline }}
+          </p>
+          <p>Próxima conclusão: Não informada</p>
+        </template>
+      </details>
     </header>
-    <aside class="sidebar">
-      <nav aria-label="Navegação principal">
+    <aside class="rail" aria-label="Módulos">
+      <nav aria-label="Módulos">
         <NuxtLink
-          v-for="link in links"
-          :key="link.to"
-          :to="link.to"
-          :aria-current="route.path === link.to ? 'page' : undefined"
+          v-for="item in modules"
+          :key="item.to"
+          :to="item.to"
+          :aria-current="
+            item.paths.some(
+              (path) =>
+                route.path === path ||
+                (path !== '/' && route.path.startsWith(path + '/')),
+            )
+              ? 'page'
+              : undefined
+          "
         >
-          {{ link.label }}
+          <span aria-hidden="true">{{ item.icon }}</span><span>{{
+            item.label
+          }}</span>
         </NuxtLink>
       </nav>
     </aside>
+    <aside class="sidebar">
+      <button
+        type="button"
+        :aria-expanded="!sectionCollapsed"
+        @click="sectionCollapsed = !sectionCollapsed"
+      >
+        {{ activeModule?.label ?? 'Navegação' }}
+      </button>
+      <ShellNavigation
+        v-if="!sectionCollapsed"
+        :links="sectionLinks"
+        :path="route.path"
+      />
+    </aside>
     <div id="conteudo-shell" class="content" tabindex="-1">
-      <header v-if="section && section.to !== '/'">
+      <div v-if="section && section.to !== '/'" class="breadcrumbs">
         <nav aria-label="Localização">
           <ol>
             <li><NuxtLink to="/">Início</NuxtLink></li>
@@ -262,9 +445,30 @@ async function refreshAccount() {
             </template>
           </ol>
         </nav>
-      </header>
+      </div>
       <slot />
     </div>
+    <footer class="event-strip">
+      <template v-if="latestJob"
+        >Último trabalho: {{ jobHistoryRow(latestJob).outcome }} ·
+        {{ jobHistoryRow(latestJob).filename }} ·
+        {{ jobHistoryRow(latestJob).endedAt }}</template
+      >
+      <template v-else-if="eventState === 'ready'"
+        >Nenhum trabalho finalizado registrado</template
+      >
+      <template v-else-if="eventState === 'loading'"
+        >Consultando histórico…</template
+      >
+      <template v-else>Último evento indisponível</template> ·
+      <NuxtLink
+        :to="{
+          path: '/historico',
+          query: selectedFarmId ? { farm: selectedFarmId } : {},
+        }"
+        >Ver histórico</NuxtLink
+      >
+    </footer>
     <Dialog v-model="drawer" class="drawer" title="Menu">
       <ShellNavigation
         :links="links"
@@ -272,17 +476,36 @@ async function refreshAccount() {
         @navigate="drawer = false"
       />
     </Dialog>
-    <Dialog v-model="search" title="Buscar páginas">
-      <label>
-        Nome da página
-        <input v-model="query" type="search" autofocus />
-      </label>
-      <p v-if="!results.length" role="status">Nenhuma página encontrada.</p>
-      <ShellNavigation
-        :links="results"
-        :path="route.path"
-        @navigate="search = false"
+    <Dialog v-model="search" title="Buscar">
+      <label for="shell-search">Buscar páginas, impressoras e bobinas</label>
+      <input
+        id="shell-search"
+        v-model="query"
+        type="search"
+        autofocus
+        @keydown="paletteKey"
       />
+      <p v-if="spoolState === 'unavailable'">Busca de bobinas indisponível.</p>
+      <p v-if="spoolTruncated">
+        Há mais bobinas. Refine a busca para encontrá-las.
+      </p>
+      <p v-if="!summary">Busca de impressoras indisponível.</p>
+      <p v-if="!paletteItems.length" role="status">
+        Nenhum resultado encontrado.
+      </p>
+      <div v-for="group in paletteGroups" :key="group.label">
+        <h3 v-if="group.items.length">{{ group.label }}</h3>
+        <ul v-if="group.items.length" class="palette-list">
+          <li v-for="item in group.items" :key="item.to">
+            <NuxtLink
+              :to="item.to"
+              :class="{ selected: paletteItems[paletteIndex] === item }"
+              @click="search = false"
+              >{{ item.label }}</NuxtLink
+            >
+          </li>
+        </ul>
+      </div>
     </Dialog>
     <Dialog v-model="help" title="Atalhos de teclado">
       <label>
@@ -290,7 +513,7 @@ async function refreshAccount() {
         Ativar atalhos de teclado
       </label>
       <ul>
-        <li><kbd>/</kbd> — Buscar páginas</li>
+        <li><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>K</kbd> — Buscar</li>
         <li><kbd>g</kbd> depois <kbd>f</kbd> — Minha farm</li>
         <li><kbd>g</kbd> depois <kbd>b</kbd> — Biblioteca</li>
         <li><kbd>?</kbd> — Abrir esta ajuda</li>
@@ -302,7 +525,15 @@ async function refreshAccount() {
 <style scoped>
 .shell {
   display: grid;
-  grid-template-columns: 14rem minmax(0, 1fr);
+  grid-template-columns: 56px 190px minmax(0, 1fr);
+  min-height: 100vh;
+  color: var(--ops-text);
+  background: var(--ops-canvas);
+  --ops-canvas: var(--color-surface);
+  --ops-panel: var(--color-surface-raised);
+  --ops-text: var(--color-text);
+  --ops-muted: var(--color-text-muted);
+  --ops-border: var(--color-border);
 }
 .toolbar {
   grid-column: 1 / -1;
@@ -325,8 +556,61 @@ input {
   max-inline-size: 100%;
   min-block-size: 2.75rem;
 }
+.rail {
+  background: var(--ops-panel);
+  border-right: 1px solid var(--ops-border);
+}
+.rail nav {
+  display: grid;
+}
+.rail a {
+  min-height: 56px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  font-size: 10px;
+  text-decoration: none;
+  color: var(--ops-text);
+}
+.rail a span:first-child {
+  font-size: 20px;
+}
+.rail a[aria-current='page'] {
+  border-left: 3px solid var(--color-accent);
+  background: var(--ops-canvas);
+  font-weight: 700;
+}
+.palette-list {
+  list-style: none;
+  padding: 0;
+}
+.palette-list a {
+  display: block;
+  padding: var(--space-2);
+  min-height: 44px;
+}
+.palette-list a.selected {
+  background: var(--surface);
+  outline: 2px solid var(--color-focus-ring);
+}
+.vitals {
+  color: var(--ops-text);
+}
+.vitals summary {
+  cursor: pointer;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
+.event-strip {
+  grid-column: 1 / -1;
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--ops-border);
+  font-size: var(--font-size-sm);
+}
 .sidebar,
-.content > header {
+.breadcrumbs {
   padding: var(--space-4);
 }
 .sidebar {
@@ -388,7 +672,8 @@ a:focus-visible {
   .shell {
     grid-template-columns: minmax(0, 1fr);
   }
-  .sidebar {
+  .sidebar,
+  .rail {
     display: none;
   }
   .drawer-trigger {

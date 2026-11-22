@@ -4,7 +4,7 @@ import { receiveApiCommand } from './api-command.ts'
 import {
   decodeApiEnvelopeFrame,
   encodeApiEnvelopeResultFrame,
-} from '../../farm-protocol/src/api-envelope.ts'
+} from '../../../farm-protocol/src/api-envelope.ts'
 import { PAUSE_POLICY_HARD_MAXIMUMS } from '../../../farm-protocol/src/pause-capability.ts'
 import {
   controlEffectMatches,

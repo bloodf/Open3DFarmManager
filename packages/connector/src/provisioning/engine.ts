@@ -184,6 +184,14 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
   if (!isTrustedProvisioningAuthority(options.authority))
     throw new Error('Provisioning requires an explicitly trusted authority')
   const policy = createPrinterNetworkPolicy(options.printerNetworks)
+  /** Canonical IPv4 inside the configured printer networks. Anything else is refused. */
+  const originAllowed = (origin: string) => {
+    try {
+      return policy.allows(new URL(origin).hostname)
+    } catch {
+      return false
+    }
+  }
   if (options.managedBridge) {
     if (options.managedBridge.ownership !== 'connector-owned-fresh')
       throw new Error('Managed bridge ownership must be explicit')
@@ -639,6 +647,8 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
     if (state.active) return errorFrame(frame.request_id, 'busy')
     if (frame.target.backend === 'moonraker') {
       const origin = new URL(frame.target.origin).origin
+      if (!originAllowed(origin))
+        return errorFrame(frame.request_id, 'invalid-request')
       if (
         state.operations.some((id) => {
           const prior = journal.readOperation(id)
@@ -650,6 +660,10 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
         })
       )
         return errorFrame(frame.request_id, 'busy')
+    }
+    if (frame.target.backend === 'spoolman') {
+      if (!originAllowed(frame.target.origin))
+        return errorFrame(frame.request_id, 'invalid-request')
     }
     if (frame.target.backend === 'anycubic') {
       const host = frame.target.host
@@ -1093,6 +1107,11 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
     if (op.stage !== 'prepared') return describe(frame, op)
     if (journal.readState().revision !== op.expected_revision)
       return errorFrame(frame.request_id, 'revision-conflict')
+    if (
+      (op.target.backend === 'moonraker' || op.target.backend === 'spoolman') &&
+      !originAllowed(op.target.origin)
+    )
+      return errorFrame(frame.request_id, 'invalid-request')
     if (op.target.backend === 'moonraker') {
       if (!op.printer || !op.bridge_instance_id)
         return errorFrame(frame.request_id, 'identity-conflict')

@@ -71,7 +71,7 @@ test('network-fault job runs Docker-only acceptance on ubuntu-24.04', () => {
     'actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020',
   )
   assert.equal(steps[1]?.with?.['node-version'], '22.23.5')
-  assert.match(steps[2]?.run ?? '', /npm ci --ignore-scripts/)
+  assert.equal(steps[2]?.run, 'npm ci --ignore-scripts --include=optional')
 
   const runStep = steps.find((step) =>
     /test-rtc-farm-acceptance\.ts --network-fault/.test(step.run ?? ''),

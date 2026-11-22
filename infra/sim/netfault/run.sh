@@ -58,6 +58,9 @@ cleanup() {
 }
 finish() {
   status=$?
+  if ((status != 0)); then
+    dc logs --no-color browser 2>&1 | tee "$out/$scenario-browser.log" >&2 || true
+  fi
   cleanup || status=1
   if docker image inspect "$project-router" >/dev/null 2>&1; then
     docker image rm "$project-router" >/dev/null || status=1
@@ -69,9 +72,11 @@ trap finish EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 modules=$(realpath "$here/../../../node_modules")
-mkdir -p "$NETFAULT_NDC/node_modules"
-# Mount only node-datachannel and its runtime dependency into the router.
+mkdir -p "$NETFAULT_NDC/node_modules/@node-datachannel"
+# The probes use the pinned linux/amd64 glibc image. Ship the matching native
+# addon from npm's optional dependencies alongside the JS wrapper.
 cp -rL "$modules/node-datachannel" "$modules/detect-libc" "$NETFAULT_NDC/node_modules/"
+cp -rL "$modules/@node-datachannel/linux-x64-gnu" "$NETFAULT_NDC/node_modules/@node-datachannel/"
 printf '{"private":true}\n' > "$NETFAULT_NDC/package.json"
 chmod -R a+rX "$NETFAULT_NDC"
 router() { dc exec -T -e O="$NETFAULT_OCTET" router sh -euc "$1"; }

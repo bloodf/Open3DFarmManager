@@ -63,7 +63,7 @@ tags:
   - name: Authentication
     description: OAuth 2.0 client-credentials tokens.
   - name: Printers
-    description: Printers, their status, files and macros.
+    description: Printers, their status, readiness, qualified capabilities, files and macros.
   - name: Inventory
     description: Read-only filament inventory mirrored from Spoolman.
   - name: Jobs
@@ -201,6 +201,53 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /printers/readiness:
+    get:
+      operationId: listPrinterReadiness
+      tags: [Printers]
+      summary: Readiness of every granted printer
+      description: |
+        One page of pairing and eligibility for every printer covered by a
+        `printers:read` grant. `paired` means OpenFarm has an assignment.
+        `eligible` means the latest observation is present, not degraded, and
+        the qualified operation is `supported-control` or `monitoring-only`.
+        `setupPath` is an owner-facing path on this OpenFarm server, not a
+        printer address and not a command channel. Out-of-grant printers are
+        omitted. Machine specs are not included.
+      security:
+        - clientCredentials: ['printers:read']
+      parameters:
+        - $ref: '#/components/parameters/FarmIdFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page of printer readiness summaries.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrinterReadinessPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /printers/status:
     get:
       operationId: listPrinterStatus
@@ -234,6 +281,48 @@ paths:
                 $ref: '#/components/schemas/PrinterStatusPage'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /printers/{printerId}/capabilities:
+    get:
+      operationId: getPrinterCapabilities
+      tags: [Printers]
+      summary: Qualified operation for one printer
+      description: |
+        The operation Shop can rely on for this granted printer, with the
+        catalog evidence revision that justified it. Classification uses
+        catalog evidence grades and the latest printer state. Machine specs are
+        not included; read those from `GET /printers`. `evidenceRevision` is
+        null when no catalog entry matched. A printer outside the grant answers
+        404.
+      security:
+        - clientCredentials: ['printers:read']
+      parameters:
+        - $ref: '#/components/parameters/PrinterId'
+      responses:
+        '200':
+          description: Qualified operation and catalog evidence revision.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrinterCapabilities'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -1264,7 +1353,7 @@ components:
         clientCredentials:
           tokenUrl: /api/integrations/v1/oauth/token
           scopes:
-            printers:read: Read printers and their status.
+            printers:read: Read printers, their status, readiness and qualified capabilities.
             files:read: List files stored on printers.
             inventory:read: Read Spoolman inventory snapshots.
             jobs:read: Read job history and API-submitted jobs.
@@ -1821,6 +1910,93 @@ components:
           maxItems: 16
           items:
             $ref: '#/components/schemas/PrinterAlert'
+    PrinterCapabilities:
+      type: object
+      description: >-
+        Qualified operation for one printer. Machine specs are intentionally
+        absent; they belong to `Printer` and `PrinterSpecs`.
+      required: [printerId, operation, catalogId, evidenceRevision]
+      additionalProperties: false
+      properties:
+        printerId:
+          $ref: '#/components/schemas/Uuid'
+        operation:
+          type: string
+          enum:
+            - supported-control
+            - monitoring-only
+            - unknown-firmware
+            - temporarily-unavailable
+            - unqualified
+        catalogId:
+          type: [string, 'null']
+          description: Compatibility catalog entry, or null when nothing matched.
+          pattern: '^[a-z0-9-]{1,80}$'
+        evidenceRevision:
+          type: [string, 'null']
+          description: >-
+            SHA-256 of the catalog evidence used for this classification.
+            Null when no catalog entry matched. Does not cover machine specs.
+          pattern: '^[a-f0-9]{64}$'
+    PrinterReadiness:
+      type: object
+      required:
+        - printerId
+        - farmId
+        - printerKey
+        - paired
+        - eligible
+        - observedAt
+        - degradedReason
+        - setupPath
+      additionalProperties: false
+      properties:
+        printerId:
+          $ref: '#/components/schemas/Uuid'
+        farmId:
+          $ref: '#/components/schemas/Uuid'
+        printerKey:
+          type: string
+          minLength: 1
+          maxLength: 128
+        paired:
+          type: boolean
+          description: True when OpenFarm has an assignment for this printer.
+        eligible:
+          type: boolean
+          description: >-
+            True when the printer is paired, a non-degraded observation exists,
+            and the qualified operation is supported-control or monitoring-only.
+        observedAt:
+          type: [integer, 'null']
+          minimum: 0
+          description: Last observation, in milliseconds since the Unix epoch.
+        degradedReason:
+          type: [string, 'null']
+          enum:
+            - offline
+            - reconnecting
+            - error
+            - client-certificate-missing
+            - null
+        setupPath:
+          type: string
+          minLength: 1
+          maxLength: 512
+          pattern: "^/impressoras/[^?]+\\?farm=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          description: >-
+            Owner-facing path on this OpenFarm server. Not a printer address.
+    PrinterReadinessPage:
+      allOf:
+        - $ref: '#/components/schemas/PageInfo'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              maxItems: 100
+              items:
+                $ref: '#/components/schemas/PrinterReadiness'
     BulkPrinterStatus:
       allOf:
         - $ref: '#/components/schemas/PrinterStatus'

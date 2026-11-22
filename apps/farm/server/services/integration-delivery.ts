@@ -277,6 +277,8 @@ export class IntegrationDeliveryService {
           nonce,
           issued_at: issuedAt,
           expires_at: issuedAt + ttl,
+          scope: requiredScopeFor(input.command),
+          grant_epoch: issuedAt,
           kind: input.command.kind,
           ...(input.command.kind === 'job'
             ? { job: input.command.job }

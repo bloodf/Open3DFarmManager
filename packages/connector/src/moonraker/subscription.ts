@@ -80,6 +80,7 @@ const Status = z
       filename: z.unknown().optional(),
       print_duration: z.unknown().optional(),
       total_duration: z.unknown().optional(),
+      filament_used: z.unknown().optional(),
       info: z.unknown().optional(),
     }),
     virtual_sdcard: z.object({ progress }),
@@ -110,6 +111,7 @@ const Delta = z.tuple([
           filename: z.unknown().optional(),
           print_duration: z.unknown().optional(),
           total_duration: z.unknown().optional(),
+          filament_used: z.unknown().optional(),
           info: z.unknown().optional(),
         })
         .optional(),

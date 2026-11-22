@@ -115,6 +115,7 @@ const jobObjects = {
     'filename',
     'print_duration',
     'total_duration',
+    'filament_used',
     'info',
   ],
 }

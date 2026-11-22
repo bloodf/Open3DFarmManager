@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import Button from '../ui/Button.vue'
 import Card from '../ui/Card.vue'
 import { errorCopy } from './error-copy.ts'
@@ -9,7 +9,7 @@ const emit = defineEmits<{
   recover: [to: string | undefined]
 }>()
 
-const copy = errorCopy(props.statusCode)
+const copy = computed(() => errorCopy(props.statusCode))
 const heading = ref<HTMLElement | null>(null)
 
 // A route change replaces the whole screen: put the reader on the new heading.

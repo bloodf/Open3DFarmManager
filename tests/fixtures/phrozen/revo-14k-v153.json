@@ -1,0 +1,23 @@
+{
+  "Id": "0123456789abcdef0123456789abcdef",
+  "Data": {
+    "MachineName": "Sonic Mighty Revo",
+    "BrandName": "Phrozen",
+    "MainboardID": "000000000001d354",
+    "MainboardIP": "192.0.2.10",
+    "ProtocolVersion": "V3.0.0",
+    "FirmwareVersion": "V153"
+  },
+  "fixtureStatus": {
+    "CurrentStatus": [1],
+    "TempOfUVLED": 38,
+    "ReleaseFilm": 12,
+    "PrintInfo": {
+      "Status": 3,
+      "CurrentLayer": 18,
+      "TotalLayer": 150,
+      "Filename": "sample.prz",
+      "ErrorNumber": 0
+    }
+  }
+}

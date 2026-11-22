@@ -10,6 +10,8 @@ import { readPrivateJsonFile } from '../config/local.ts'
 import { PrinterState } from '../../../farm-protocol/src/state.ts'
 import type { RawPrinterObservation } from './farm-snapshot-provider.ts'
 
+const REPORT_FRESHNESS_MS = 5000
+
 export function createAnycubicCollection(input: {
   binding: AnycubicCollectorConfig['anycubic']['printers'][number]
   signal: AbortSignal
@@ -98,12 +100,13 @@ export function createAnycubicCollection(input: {
       const firmware = mapAnycubicFirmware(JSON.parse(payload.toString('utf8')))
       if (firmware) firmwareObservation = { firmware, observedAtMonoMs: now }
       if (report.kind === 'ignored' && !firmware) return
-      const state = (report as Record<string, unknown>).state
+      const observation: Record<string, unknown> = report
+      const state = observation.state
       if (state === 'printing' || state === 'paused') {
         activeJob = true
         // A new job starts: the previous end is no longer the last one.
         lastJob = undefined
-        const name = (report as Record<string, unknown>).filename
+        const name = observation.filename
         if (typeof name === 'string' && name && name.length <= 255)
           activeFilename = name
       } else if (
@@ -123,10 +126,23 @@ export function createAnycubicCollection(input: {
         activeJob = false
         activeFilename = undefined
       }
-      for (const [key, value] of Object.entries(
-        report as Record<string, unknown>,
-      )) {
+      const jobState = state ?? values.state
+      const active = jobState === 'printing' || jobState === 'paused'
+      const filenameChanged =
+        typeof observation.filename === 'string' &&
+        observation.filename !== values.filename
+      const estimateAt = times.estimatedRemainingSeconds
+      if (
+        !active ||
+        filenameChanged ||
+        (estimateAt !== undefined && now - estimateAt >= REPORT_FRESHNESS_MS)
+      ) {
+        delete values.estimatedRemainingSeconds
+        delete times.estimatedRemainingSeconds
+      }
+      for (const [key, value] of Object.entries(observation)) {
         if (key === 'kind') continue
+        if (key === 'estimatedRemainingSeconds' && !active) continue
         values[key] =
           key === 'progress'
             ? Number(value) / 100
@@ -157,7 +173,7 @@ export function createAnycubicCollection(input: {
       clearTimeout(timer)
       timer = setTimeout(
         invalidate,
-        Math.max(1, (times.state ?? now) + 5000 - now),
+        Math.max(1, (times.state ?? now) + REPORT_FRESHNESS_MS - now),
       )
     },
   })

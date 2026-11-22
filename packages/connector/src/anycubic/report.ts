@@ -7,6 +7,13 @@ export function decodeAnycubicReport(payload: Buffer) {
     const data = 'data' in envelope ? envelope.data : envelope
     if (!data || typeof data !== 'object' || Array.isArray(data))
       return { kind: 'invalid' as const }
+    const row = data as Record<string, unknown>
+    const project =
+      row.project &&
+      typeof row.project === 'object' &&
+      !Array.isArray(row.project)
+        ? (row.project as Record<string, unknown>)
+        : undefined
     const observation: Record<string, unknown> = {}
     const fields = {
       curr_nozzle_temp: 'toolTemperatureCelsius',
@@ -16,7 +23,7 @@ export function decodeAnycubicReport(payload: Buffer) {
       total_layers: 'totalLayer',
     }
     for (const [source, target] of Object.entries(fields)) {
-      const value = (data as Record<string, unknown>)[source]
+      const value = row[source] ?? project?.[source]
       if (
         typeof value === 'number' &&
         Number.isFinite(value) &&
@@ -25,7 +32,18 @@ export function decodeAnycubicReport(payload: Buffer) {
       )
         observation[target] = value
     }
-    const row = data as Record<string, unknown>
+    // Simulator-verified, hardware-unqualified. Kobra 3 LAN reports minutes:
+    // https://github.com/rvanderp3/kobra-connect#known-limitations
+    // The estimate is in info's project or directly in a print progress report:
+    // https://github.com/chrisfore/anycubic_ha_local/blob/main/custom_components/anycubic/anycubic_local/models.py
+    const minutes = row.remain_time ?? project?.remain_time
+    if (
+      typeof minutes === 'number' &&
+      Number.isSafeInteger(minutes) &&
+      minutes >= 0 &&
+      Number.isSafeInteger(minutes * 60)
+    )
+      observation.estimatedRemainingSeconds = minutes * 60
     // LAN field names and ACE slot shape: https://github.com/chrisfore/anycubic_ha_local/blob/main/custom_components/anycubic/anycubic_local/models.py
     const fans: Record<string, number> = {}
     for (const [source, target] of Object.entries({
@@ -124,13 +142,22 @@ export function decodeAnycubicReport(payload: Buffer) {
       }
       if (materials.length <= 17) observation.materials = materials
     }
-    if (typeof row.filename === 'string' && row.filename.length <= 1024)
-      observation.filename = row.filename
+    const filename = row.filename ?? project?.filename
+    if (typeof filename === 'string' && filename.length <= 1024)
+      observation.filename = filename
+    // LAN info reports device availability separately from active job state.
+    let state = row.state
+    if (state === 'free') state = 'idle'
+    if (state === 'busy') {
+      state = project?.state
+      if (state === 'printing' && project?.pause === 1) state = 'paused'
+      if (state === 'finish') state = 'finished'
+    }
     if (
-      typeof row.state === 'string' &&
-      ['idle', 'printing', 'paused', 'error', 'finished'].includes(row.state)
+      typeof state === 'string' &&
+      ['idle', 'printing', 'paused', 'error', 'finished'].includes(state)
     )
-      observation.state = row.state
+      observation.state = state
     return Object.keys(observation).length
       ? { kind: 'observation' as const, ...observation }
       : { kind: 'ignored' as const }

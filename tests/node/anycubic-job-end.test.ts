@@ -142,6 +142,8 @@ test('Anycubic lifecycle reports completed, cancelled and failed jobs through sn
       start()
       await until(() => latest()?.state === 'printing')
       assert.equal(latest()?.lastJob, undefined)
+      sim.setRemainingMinutes(7)
+      await until(() => latest()?.estimatedRemainingSeconds === 420)
       if (outcome === 'cancelled')
         publish(
           'anycubic/anycubicCloud/v1/printer/public/20024/TEST/print/request',
@@ -150,6 +152,7 @@ test('Anycubic lifecycle reports completed, cancelled and failed jobs through sn
       if (outcome === 'failed') sim.failPrint()
       await until(() => latest()?.lastJob?.outcome === outcome)
       const finished = latest()?.lastJob
+      assert.equal(latest()?.estimatedRemainingSeconds, undefined)
       assert.ok(Number.isSafeInteger(finished?.endedAt))
       await delay(120)
       assert.deepEqual(latest()?.lastJob, finished)

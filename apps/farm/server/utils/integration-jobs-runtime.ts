@@ -14,7 +14,7 @@ import {
   IntegrationJobsService,
 } from '../services/integration-jobs.ts'
 import { PostgresIntegrationAudit } from '../storage/integration-audit-postgres.ts'
-import { PostgresIntegrationDelivery } from '../storage/integration-delivery-postgres.ts'
+import { PostgresIntegrationJobDelivery } from '../storage/integration-jobs-history.ts'
 import { PostgresIntegrationJobs } from '../storage/integration-jobs-postgres.ts'
 import { PostgresIntegrationActions } from '../storage/integration-actions-postgres.ts'
 import { PostgresIntegrationApprovals } from '../storage/integration-approval-postgres.ts'
@@ -112,7 +112,7 @@ export async function integrationJobsRuntime() {
       search_path: 'pg_catalog',
     },
   })
-  const deliveryStore = new PostgresIntegrationDelivery(pool)
+  const deliveryStore = new PostgresIntegrationJobDelivery(pool)
   const delivery = signer
     ? new IntegrationDeliveryService({
         store: deliveryStore,
@@ -183,4 +183,13 @@ export async function closeIntegrationJobsRuntime() {
   const closing = active
   active = undefined
   await closing?.pool.end({ timeout: 3 })
+}
+
+/** Read history even on installations that disable API job submission. */
+export async function integrationJobHistoryPool() {
+  if (
+    !integrationJobsConfig.safeParse(useRuntimeConfig().integrationJobs).success
+  )
+    return null
+  return (await integrationJobsRuntime()).pool
 }

@@ -9,7 +9,7 @@ for (const [fixture, kind] of [
   [centauri, 'fdm'],
   [saturn, 'resin'],
 ] as const) {
-  test(`reads SDCP v3 ${kind} status and history over UDP and WebSocket`, async (t) => {
+  test(`reads SDCP v3 ${kind} status over UDP and WebSocket`, async (t) => {
     const sim = await startSdcpSimulator(fixture)
     t.after(sim.close)
     const client = await connectSdcp('127.0.0.1', sim)
@@ -20,10 +20,27 @@ for (const [fixture, kind] of [
       kind === 'fdm' ? 'http://127.0.0.1:3031/video' : undefined,
     )
     assert.deepEqual(await client.readStatus(), fixture.fixtureStatus)
-    assert.deepEqual(await client.readHistoryIds(), ['fixture-task'])
-    assert.deepEqual(sim.commands, [0, 320])
+    assert.deepEqual(sim.commands, [0])
   })
 }
+
+test('reads Saturn V1.5.6 history with command 320', async (t) => {
+  const sim = await startSdcpSimulator(saturn)
+  t.after(sim.close)
+  const client = await connectSdcp('127.0.0.1', sim)
+  assert.equal(client.historySupported, true)
+  assert.deepEqual(await client.readHistoryIds(), ['fixture-task'])
+  assert.deepEqual(sim.commands, [320])
+})
+
+test('stock Centauri V1.1.46 history sends no command', async (t) => {
+  const sim = await startSdcpSimulator(centauri)
+  t.after(sim.close)
+  const client = await connectSdcp('127.0.0.1', sim)
+  assert.equal(client.historySupported, false)
+  await assert.rejects(client.readHistoryIds(), /unsupported/)
+  assert.deepEqual(sim.commands, [])
+})
 
 for (const [fault, expected] of [
   ['denied', /denied command 0/],

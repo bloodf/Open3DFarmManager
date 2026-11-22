@@ -7,7 +7,7 @@ import { isIPv4 } from 'node:net'
 // Centauri stock firmware: https://github.com/bjan/pycentauri/blob/main/docs/PROTOCOL.md
 // Saturn 16K: https://github.com/alfiedennen/sdcp-saturn-4-ultra
 const models = {
-  'Centauri Carbon': { kind: 'fdm', historyFirmware: 'V1.1.46' },
+  'Centauri Carbon': { kind: 'fdm' },
   'Saturn 4 Ultra 16K': { kind: 'resin', historyFirmware: 'V1.5.6' },
   'Saturn 4 Ultra': { kind: 'resin' },
   'Mars 5 Ultra': { kind: 'resin' },

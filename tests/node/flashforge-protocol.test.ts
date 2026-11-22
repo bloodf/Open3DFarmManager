@@ -269,13 +269,19 @@ test('enforces the 265 C nozzle API ceiling before dispatch', async (t) => {
   const { adapter, writes } = await setup(t)
   const allow = () => true
   await assert.rejects(
-    adapter.execute({ kind: 'temperature', heater: 'nozzle', celsius: 266 }, allow),
+    adapter.execute(
+      { kind: 'temperature', heater: 'nozzle', celsius: 266 },
+      allow,
+    ),
     /Flashforge temperature denied/,
   )
   assert.deepEqual(writes, [])
 
   assert.deepEqual(
-    await adapter.execute({ kind: 'temperature', heater: 'nozzle', celsius: 265 }, allow),
+    await adapter.execute(
+      { kind: 'temperature', heater: 'nozzle', celsius: 265 },
+      allow,
+    ),
     { acknowledged: true },
   )
   assert.deepEqual(writes, [

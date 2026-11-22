@@ -248,8 +248,8 @@ export function createCrealityTelemetryClient(options: {
       const frame = parseCrealityFrame(data.toString(), 65536)
       if (!frame) return
       // K1 LAN keepalive, source-read and hardware-unqualified.
-      // https://github.com/OrcaSlicer/OrcaSlicer/blob/07f38df2a4fd3439cffbf991ee41ee99ec71fbee/src/slic3r/Utils/CrealityPrint.cpp#L279-L284
-      // https://github.com/ChestnutLabs/printer-protocol-orchard/blob/fd5026ef9ec8b6b0f7b22884a2f2389e614c8fdf/protocols/creality.md#L46-L49
+      // https://github.com/OrcaSlicer/OrcaSlicer/blob/07f38df2a4fd3439cffbf991ee41ee99ec71fbee/src/slic3r/Utils/CrealityPrint.cpp#L303-L308
+      // https://github.com/ChestnutLabs/printer-protocol-orchard/blob/fd5026ef9ec8b6b0f7b22884a2f2389e614c8fdf/protocols/creality.md#L56-L57
       if (frame.ModeCode === 'heart_beat') {
         if (connection.readyState === WebSocket.OPEN)
           connection.send('ok', (error) => {

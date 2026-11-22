@@ -1,3 +1,4 @@
+import { boundPrinterString } from '@open3dfarmmanager/farm-protocol'
 import type { CrealityTelemetry } from './index.ts'
 
 /** Map the version carried by a stock Creality status frame. */
@@ -12,5 +13,5 @@ export function mapCrealityFirmware(
     /[\x00-\x1f\x7f-\x9f]/.test(version)
   )
     return undefined
-  return { current: version }
+  return { current: boundPrinterString(version) }
 }

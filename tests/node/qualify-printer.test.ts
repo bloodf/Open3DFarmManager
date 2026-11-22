@@ -73,6 +73,7 @@ test('CLI arguments: help displays usage and missing required options fail with 
   const helpResult = await runCli(['--help'])
   assert.equal(helpResult.code, 0)
   assert.ok(helpResult.out.includes('Usage: node scripts/qualify-printer.ts'))
+  assert.ok(helpResult.out.includes('anycubic=9883'))
 
   const noArgs = await runCli([])
   assert.equal(noArgs.code, 2)
@@ -449,5 +450,9 @@ test('CLI exit code: an unreachable report is printed and exits 1', async () => 
   // Without bridge credentials the KobraLink client refuses before any request.
   const result = await runCli(['--vendor', 'kobralink', '--host', '127.0.0.1'])
   assert.equal(result.code, 1)
-  assert.equal(JSON.parse(result.out).qualification.status, 'unreachable')
+  const report = JSON.parse(result.out)
+  assert.equal(report.qualification.status, 'unreachable')
+  assert.match(report.qualification.summary, /no credential file/)
+  assert.deepEqual(report.identity, {})
+  assert.equal(report.catalog.matchedCatalogId, null)
 })

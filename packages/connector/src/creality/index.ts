@@ -1,3 +1,4 @@
+import { boundPrinterString } from '@open3dfarmmanager/farm-protocol'
 import WebSocket from 'ws'
 import { resolveCrealityEndpoint } from '../discovery/creality.ts'
 
@@ -79,7 +80,7 @@ export function decodeCrealityStatus(
       value.length <= max &&
       !/[\x00-\x1f\x7f-\x9f]/.test(value)
     )
-      result[target] = value
+      result[target] = target === 'filename' ? boundPrinterString(value) : value
   }
   // Stock :9999 status and boxsInfo wire shapes:
   // https://github.com/DaviBe92/k2-websocket-re
@@ -147,7 +148,7 @@ export function decodeCrealityStatus(
             m.type.length <= 64 &&
             !/[\x00-\x1f\x7f-\x9f]/.test(m.type)
           )
-            material.materialType = m.type
+            material.materialType = boundPrinterString(m.type)
           if (typeof m.color === 'string') {
             const match = /^#(?:0)?([0-9a-f]{6})$/i.exec(m.color)
             if (match) material.colorHex = `${match[1]!.toUpperCase()}FF`

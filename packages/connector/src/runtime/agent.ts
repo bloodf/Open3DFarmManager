@@ -108,6 +108,7 @@ type AgentDiagnostic =
   | { kind: 'readonly-terminal'; reason: string }
   | { kind: 'delivery'; status: 'delivered' | 'retained'; count: number }
   | { kind: 'drain-loss'; expired: number; capacity: number }
+  | { kind: 'telemetry-entry-dropped' }
   | { kind: 'storage-degraded'; lost: number }
   | { kind: 'storage-recovered'; lost: number }
   | {
@@ -266,6 +267,8 @@ async function runConnectorAgentOnce(
       logger.warn('queue-loss', { ...value })
     } else if (value.kind === 'storage-degraded') {
       logger.warn('storage-degraded', { lost: value.lost })
+    } else if (value.kind === 'telemetry-entry-dropped') {
+      logger.warn('telemetry-entry-dropped')
     }
     if (value.kind === 'summary' || diagnosticBudget-- > 0)
       input.onDiagnostic(value)
@@ -954,6 +957,7 @@ async function runConnectorAgentOnce(
             tracked,
             () => clock.now(),
             attemptSignal,
+            () => diagnostic({ kind: 'telemetry-entry-dropped' }),
           )
         } finally {
           // Drain may return cancelled before its sender releases the active slot.
@@ -973,11 +977,10 @@ async function runConnectorAgentOnce(
         }
         if (result.status === 'delivered') totals.delivered += result.count
         // A storage fault during this attempt is handled at the top of the loop.
-        if (queue.storageDegraded) continue
+        if (queue.storageDegraded || result.status === 'dropped') continue
         if (
           result.status === 'uncertain' ||
-          (result.status === 'retained' &&
-            ['busy', 'oversized'].includes(result.reason))
+          (result.status === 'retained' && result.reason === 'busy')
         )
           throw new Error('Telemetry drain requires operator review')
         if (signal.aborted) return

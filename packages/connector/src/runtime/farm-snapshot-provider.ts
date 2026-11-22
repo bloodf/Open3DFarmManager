@@ -1,3 +1,4 @@
+import { PRINTER_STRING_MAX_UNITS } from '@open3dfarmmanager/farm-protocol'
 import type { MacroParamMap } from '../moonraker/control-macros.ts'
 import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
 import { moonrakerLastJob } from '../moonraker/normalize.ts'
@@ -167,7 +168,11 @@ export function createFarmSnapshotSource(input: {
       const linkHealth = input.linkHealthFor?.(ref.printerKey)
       if (linkHealth) printer.linkHealth = linkHealth
       const localWebUiOrigin = input.localWebUiOriginFor?.(ref.assignmentId)
-      if (localWebUiOrigin) printer.localWebUiOrigin = localWebUiOrigin
+      if (
+        localWebUiOrigin &&
+        localWebUiOrigin.length <= PRINTER_STRING_MAX_UNITS
+      )
+        printer.localWebUiOrigin = localWebUiOrigin
       const lastJob = lastJobs.get(ref.printerKey)
       if (lastJob) printer.lastJob = lastJob
       for (const field of ['fans', 'light', 'materials'] as const) {

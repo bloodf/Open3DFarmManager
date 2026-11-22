@@ -230,6 +230,16 @@ const policies: RoutePolicy[] = [
     scopes: ['control:basic', 'control:extended'],
   },
   { method: 'GET', path: /^\/inventory$/, scopes: ['inventory:read'] },
+  {
+    method: 'GET',
+    path: /^\/resin\/(?:lots|vats|usage)$/,
+    scopes: ['inventory:read'],
+  },
+  {
+    method: 'GET',
+    path: /^\/environment\/measurements$/,
+    scopes: ['environment:read'],
+  },
   { method: 'GET', path: /^\/library$/, scopes: ['library:read'] },
   { method: 'POST', path: /^\/library$/, scopes: ['library:write'] },
   {

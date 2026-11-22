@@ -624,6 +624,134 @@ export const fixtures: Record<string, Fixture> = {
     }),
     fault: 'pool',
   },
+  'GET /environment/measurements': {
+    scopes: ['environment:read'],
+    success: '200',
+    valid: () => ({ method: 'GET', path: '/environment/measurements?limit=1' }),
+    more: [
+      {
+        name: 'second page through nextCursor',
+        run: async (world) => {
+          const app = world.addApp(farm(['environment:read']))
+          const token = await tokenFor(world, app)
+          const first = await send({
+            method: 'GET',
+            path: '/environment/measurements?limit=1',
+            token,
+          })
+          const cursor = (first.result.json as { nextCursor: string })
+            .nextCursor
+          return send({
+            method: 'GET',
+            path: `/environment/measurements?limit=1&cursor=${cursor}`,
+            token,
+          })
+        },
+      },
+    ],
+    bad: () => ({ method: 'GET', path: '/environment/measurements?limit=0' }),
+    missing: () => ({
+      method: 'GET',
+      path: `/environment/measurements?farmId=${ids.unknown}`,
+    }),
+    fault: 'printers',
+  },
+  'GET /resin/lots': {
+    scopes: ['inventory:read'],
+    success: '200',
+    valid: () => ({ method: 'GET', path: '/resin/lots?limit=1' }),
+    more: [
+      {
+        name: 'second page through nextCursor',
+        run: async (world) => {
+          const app = world.addApp(farm(['inventory:read']))
+          const token = await tokenFor(world, app)
+          const first = await send({
+            method: 'GET',
+            path: '/resin/lots?limit=1',
+            token,
+          })
+          const cursor = (first.result.json as { nextCursor: string })
+            .nextCursor
+          return send({
+            method: 'GET',
+            path: `/resin/lots?limit=1&cursor=${cursor}`,
+            token,
+          })
+        },
+      },
+    ],
+    bad: () => ({ method: 'GET', path: '/resin/lots?limit=0' }),
+    missing: () => ({
+      method: 'GET',
+      path: `/resin/lots?farmId=${ids.unknown}`,
+    }),
+    fault: 'pool',
+  },
+  'GET /resin/usage': {
+    scopes: ['inventory:read'],
+    success: '200',
+    valid: () => ({ method: 'GET', path: '/resin/usage?limit=1' }),
+    more: [
+      {
+        name: 'second page through nextCursor',
+        run: async (world) => {
+          const app = world.addApp(farm(['inventory:read']))
+          const token = await tokenFor(world, app)
+          const first = await send({
+            method: 'GET',
+            path: '/resin/usage?limit=1',
+            token,
+          })
+          const cursor = (first.result.json as { nextCursor: string })
+            .nextCursor
+          return send({
+            method: 'GET',
+            path: `/resin/usage?limit=1&cursor=${cursor}`,
+            token,
+          })
+        },
+      },
+    ],
+    bad: () => ({ method: 'GET', path: '/resin/usage?limit=0' }),
+    missing: () => ({
+      method: 'GET',
+      path: `/resin/usage?farmId=${ids.unknown}`,
+    }),
+    fault: 'pool',
+  },
+  'GET /resin/vats': {
+    scopes: ['inventory:read'],
+    success: '200',
+    valid: () => ({ method: 'GET', path: '/resin/vats?limit=1' }),
+    more: [
+      {
+        name: 'second page through nextCursor',
+        run: async (world) => {
+          const app = world.addApp(farm(['inventory:read']))
+          const token = await tokenFor(world, app)
+          const first = await send({
+            method: 'GET',
+            path: '/resin/vats?limit=1',
+            token,
+          })
+          const cursor = (first.result.json as { nextCursor: string })
+            .nextCursor
+          return send({
+            method: 'GET',
+            path: `/resin/vats?limit=1&cursor=${cursor}`,
+            token,
+          })
+        },
+      },
+    ],
+    bad: () => ({ method: 'GET', path: '/resin/vats?limit=0' }),
+    missing: () => ({
+      method: 'GET',
+      path: `/resin/vats?farmId=${ids.unknown}`,
+    }),
+    fault: 'pool',
+  },
   'GET /jobs': {
     scopes: ['jobs:read'],
     success: '200',

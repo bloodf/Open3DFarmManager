@@ -113,6 +113,18 @@ export interface InventoryRow {
   observedAt: number
   snapshot: unknown
 }
+export interface ResinLedgerEntryRow {
+  id: string
+  printerId: string
+  kind: 'vat' | 'bottle' | 'volume' | 'film' | 'lcd'
+  target: string | null
+  name: string | null
+  volumeMl: number | null
+  layers: number | null
+  hours: number | null
+  source: 'manual' | 'reported'
+  recordedAt: number
+}
 export interface HistoryRow {
   id: string
   farmId: string
@@ -423,6 +435,8 @@ export class World {
   readonly actions: IntegrationActionsService
   inventory: InventoryRow[] = []
   history: HistoryRow[] = []
+  /** Rows of farm.resin_ledger_entries, as the resin reader selects them. */
+  resinLedger: ResinLedgerEntryRow[] = []
   inbox: InboxResult = { kind: 'files', data: [], nextOffset: null }
   inboxCalls: { farmId: string; agentId: string; query: unknown }[] = []
   readonly pool: unknown
@@ -541,6 +555,44 @@ export class World {
         snapshot: { observedAt: this.clock, stale: true, total: 0, spools: [] },
       },
     ]
+    this.resinLedger = [
+      {
+        id: '00000000-0000-4000-8000-000000000001',
+        printerId: ids.printerA1,
+        kind: 'bottle',
+        target: null,
+        name: 'Lote-A1',
+        volumeMl: 750,
+        layers: null,
+        hours: null,
+        source: 'manual',
+        recordedAt: this.clock - 2_000,
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000002',
+        printerId: ids.printerA1,
+        kind: 'vat',
+        target: null,
+        name: 'Vat-1',
+        volumeMl: null,
+        layers: null,
+        hours: null,
+        source: 'reported',
+        recordedAt: this.clock - 1_000,
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000003',
+        printerId: ids.printerA2,
+        kind: 'bottle',
+        target: null,
+        name: 'Lote-B7',
+        volumeMl: null,
+        layers: null,
+        hours: null,
+        source: 'manual',
+        recordedAt: this.clock - 500,
+      },
+    ]
     this.history = [3, 2, 1].map((n) => ({
       id: String(100 + n),
       farmId: ids.farmA,
@@ -624,6 +676,54 @@ export class World {
               `${row.farmId}|${row.connectorId}` > `${posFarm}|${posConnector}`,
           )
           .slice(0, limit)
+      }
+      if (text.includes('farm.resin_ledger_entries')) {
+        if (text.includes('ranked')) {
+          const [printerIds, limit] = v as [string[], number]
+          return this.resinLedger
+            .filter((row) => printerIds.includes(row.printerId))
+            .sort((a, b) => b.recordedAt - a.recordedAt)
+            .slice(0, limit)
+        }
+        const [farmWide, assignments, farmId, , afterId, , limit] = v as [
+          string[],
+          string[],
+          string | null,
+          unknown,
+          string | null,
+          unknown,
+          number,
+        ]
+        return this.authStore.printers
+          .filter(
+            (row) =>
+              farmWide.includes(row.farmId) || assignments.includes(row.id),
+          )
+          .filter((row) => farmId === null || row.farmId === farmId)
+          .filter((row) => afterId === null || row.id > afterId)
+          .filter((row) =>
+            this.resinLedger.some((entry) => entry.printerId === row.id),
+          )
+          .sort((a, b) => a.id.localeCompare(b.id))
+          .slice(0, limit)
+          .map((row) => ({
+            id: row.id,
+            farmId: row.farmId,
+            printerKey: row.printerKey,
+          }))
+      }
+      if (text.includes('PARTITION BY p.id')) {
+        const [printerIds, limit] = v as [string[], number]
+        return this.history
+          .filter((row) => printerIds.includes(row.printerId))
+          .sort((a, b) => b.endedAt - a.endedAt || Number(b.id) - Number(a.id))
+          .slice(0, limit)
+          .map((row) => ({
+            id: row.id,
+            printerId: row.printerId,
+            outcome: row.outcome,
+            endedAt: row.endedAt,
+          }))
       }
       if (text.includes('farm.job_history')) {
         const [

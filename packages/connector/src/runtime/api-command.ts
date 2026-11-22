@@ -61,7 +61,7 @@ export type ApiCommandResult =
   /** Unauthenticated, not ours, or a replay: nothing is reported. */
   | {
       kind: 'dropped'
-      reason: 'invalid' | 'invalid-signature' | 'invalid-issuer' | 'replay'
+      reason: 'invalid' | 'invalid-issuer' | 'replay'
     }
   | { kind: 'refused'; code: ApiEnvelopeRefusalCode; detail?: string }
   | { kind: 'completed' }
@@ -273,8 +273,6 @@ export function createApiCommandRunner(config: {
         now: config.clock.wallNow(),
       })
       if (!verdict.ok) {
-        if (verdict.reason === 'invalid-signature')
-          return { kind: 'dropped', reason: verdict.reason }
         if (verdict.reason === 'invalid' || verdict.reason === 'identity')
           return { kind: 'dropped', reason: 'invalid' }
         const { signature: _signature, ...claims } = signed
@@ -456,14 +454,17 @@ export function createApiCommandRunner(config: {
               { action: 'start_print', args: { file, ...extra } },
               (at) => {
                 if (mapping)
-                  config.libraryLinks?.remember(mapping.printer_key, {
-                    name: file,
-                    sha256: parsed.data.sha256,
-                    ...(parsed.data.plate === undefined
-                      ? {}
-                      : { plate: parsed.data.plate }),
-                    sentAt: at,
-                  })
+                  config.libraryLinks?.remember(
+                    mapping.printer_key,
+                    {
+                      name: file,
+                      sha256: parsed.data.sha256,
+                      ...(parsed.data.plate === undefined
+                        ? {}
+                        : { plate: parsed.data.plate }),
+                    },
+                    at,
+                  )
               },
             ),
         })

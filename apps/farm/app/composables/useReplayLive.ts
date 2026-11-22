@@ -48,7 +48,9 @@ export function useReplayLive(farmId: Ref<string>) {
       (item) => item.assignment.printerKey === printerKey,
     )
     if (!row || scope?.farmId !== farmId.value)
-      return { outcome: 'not-sent', code: 'stale-selection' }
+      return versionId
+        ? { outcome: 'not-sent', code: 'stale-selection' }
+        : { outcome: 'not-sent' }
     if (!liveFor(printerKey)?.live)
       return { outcome: 'not-sent', code: 'webrtc-unavailable' }
     if (versionId) {
@@ -76,7 +78,7 @@ export function useReplayLive(farmId: Ref<string>) {
     }
     const { assignment } = row
     const abort = new AbortController()
-    return sendLibraryReplay(
+    const result = await sendLibraryReplay(
       (onState) => controls.connectFiles(row, abort.signal, onState),
       args,
       () =>
@@ -93,6 +95,9 @@ export function useReplayLive(farmId: Ref<string>) {
             current.connectorStatus === 'approved',
         ),
     )
+    return result.outcome === 'not-sent' && !result.code
+      ? { ...result, code: 'webrtc-unavailable' }
+      : result
   }
   return { liveFor, send }
 }

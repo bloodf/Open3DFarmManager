@@ -157,10 +157,7 @@ async function fixture(options: {
 
 describe('Connector library dispatch admission', () => {
   test.each([
-    [
-      { wrongSignature: true },
-      { kind: 'dropped', reason: 'invalid-signature' },
-    ],
+    [{ wrongSignature: true }, { kind: 'dropped', reason: 'invalid' }],
     [
       { missingScope: true },
       {

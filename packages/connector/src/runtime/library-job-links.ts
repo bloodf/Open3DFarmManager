@@ -9,8 +9,6 @@ export interface LibraryJobStart {
   name: string
   sha256: string
   plate?: number
-  /** Connector wall time at the authorized send boundary. */
-  sentAt?: number
 }
 
 type LastJob = NonNullable<PrinterState['lastJob']>
@@ -33,6 +31,7 @@ export function createLibraryJobLinks() {
       stopped?: boolean
       previousEnd?: number
       observedAt?: number
+      sentAt?: number
     }
   >()
   const latest = new Map<string, { observedAt: number; endedAt?: number }>()
@@ -49,11 +48,12 @@ export function createLibraryJobLinks() {
 
   return {
     /** Called at the authorized write boundary, even if the acknowledgement is lost. */
-    remember(printerKey: string, start: LibraryJobStart) {
+    remember(printerKey: string, start: LibraryJobStart, sentAt?: number) {
       pending.delete(printerKey)
       const previousEnd = latest.get(printerKey)?.endedAt
       pending.set(printerKey, {
         ...start,
+        ...(sentAt === undefined ? {} : { sentAt }),
         ran: false,
         ...(previousEnd === undefined ? {} : { previousEnd }),
       })

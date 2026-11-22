@@ -73,7 +73,7 @@ export type ReplayControl = {
   dispose(): Promise<void>
 }
 
-/** Open a live session and issue at most one signed command. */
+/** Retry only confirmed-unsent attempts that have no explicit refusal. */
 export async function sendLibraryReplay(
   connect: (
     onState: (state: FarmPauseControlState) => void,
@@ -81,32 +81,38 @@ export async function sendLibraryReplay(
   args: LibraryPrintArgs,
   selectionCurrent: () => boolean = () => true,
 ): Promise<ReplayResult> {
-  if (!selectionCurrent())
-    return { outcome: 'not-sent', code: 'stale-selection' }
-  let code: string | undefined
-  let control: ReplayControl
-  try {
-    control = await connect((state) => {
-      if (state.kind === 'settled' && state.code) code = state.code
-    })
-  } catch {
-    return { outcome: 'not-sent', code: code ?? 'webrtc-unavailable' }
-  }
-  try {
+  for (let attempt = 0; attempt < 3; attempt++) {
     if (!selectionCurrent())
       return { outcome: 'not-sent', code: 'stale-selection' }
-    const outcome = await control.issueControlCommand(
-      'start_library_print',
-      args,
-    )
-    if (outcome === undefined)
-      return { outcome: 'not-sent', code: code ?? 'webrtc-unavailable' }
-    if (outcome === 'not-sent') return { outcome, code: code ?? 'guard-denied' }
-    return { outcome, ...(code ? { code } : {}) }
-  } catch {
-    return { outcome: 'outcome-unknown' }
-  } finally {
-    control.close()
-    await control.dispose().catch(() => {})
+    let code: string | undefined
+    let result: ReplayResult = { outcome: 'not-sent' }
+    let control: ReplayControl | undefined
+    try {
+      control = await connect((state) => {
+        if (state.kind === 'settled' && state.code) code = state.code
+      })
+    } catch {
+      if (code) return { outcome: 'not-sent', code }
+    }
+    if (control) {
+      try {
+        if (!selectionCurrent())
+          return { outcome: 'not-sent', code: 'stale-selection' }
+        const outcome = await control.issueControlCommand(
+          'start_library_print',
+          args,
+        )
+        result = { outcome: outcome ?? 'not-sent', ...(code ? { code } : {}) }
+      } catch {
+        result = { outcome: 'outcome-unknown' }
+      } finally {
+        control.close()
+        await control.dispose().catch(() => {})
+      }
+    }
+    if (result.outcome !== 'not-sent' || result.code || attempt === 2)
+      return result
+    await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)))
   }
+  return { outcome: 'not-sent' }
 }

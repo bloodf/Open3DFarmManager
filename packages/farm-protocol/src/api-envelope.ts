@@ -282,15 +282,7 @@ export type ApiEnvelopeVerification = Readonly<{
 }>
 export type ApiEnvelopeVerdict =
   | { ok: true; envelope: ApiEnvelopeV1 }
-  | {
-      ok: false
-      reason:
-        | 'invalid'
-        | 'invalid-signature'
-        | 'identity'
-        | 'expired'
-        | 'not-yet-valid'
-    }
+  | { ok: false; reason: 'invalid' | 'identity' | 'expired' | 'not-yet-valid' }
 /**
  * Explicit pinned key only: no embedded key, algorithm choice or fallback.
  * Fails closed on a wrong farm or agent, an expired envelope and one issued
@@ -313,7 +305,7 @@ export async function verifyApiEnvelope(
       new Uint8Array(decodeBase64url(sig, 64)),
       apiEnvelopePayload(claims),
     )
-    if (!valid) return { ok: false, reason: 'invalid-signature' }
+    if (!valid) return { ok: false, reason: 'invalid' }
     if (claims.farm_id !== pin.farmId || claims.agent_id !== pin.agentId)
       return { ok: false, reason: 'identity' }
     if (pin.now >= claims.expires_at) return { ok: false, reason: 'expired' }

@@ -607,12 +607,7 @@ describe(
         filename: serverName,
       })
       expect(c.links).toEqual([
-        {
-          printerKey: 'printer-1',
-          name: serverName,
-          sha256: hash,
-          sentAt: expect.any(Number),
-        },
+        { printerKey: 'printer-1', name: serverName, sha256: hash },
       ])
     })
 

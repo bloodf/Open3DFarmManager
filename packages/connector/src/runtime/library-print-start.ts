@@ -348,7 +348,11 @@ export function withLibraryPrint<D extends PreparedPauseDriver>(
     starter: ReturnType<typeof createLibraryPrintStarter> | undefined
     /** Upload target of the locally provisioned printer behind a binding. */
     targetFor(binding: PrinterBinding): FileUploadTarget | undefined
-    remember?(binding: PrinterBinding, link: LibraryPrintLink): void
+    remember?(
+      binding: PrinterBinding,
+      link: LibraryPrintLink,
+      sentAt: number,
+    ): void
   },
 ): D {
   const { starter } = config
@@ -404,14 +408,17 @@ export function withLibraryPrint<D extends PreparedPauseDriver>(
               ...request,
               beforeSend() {
                 if (!request.beforeSend()) return false
-                config.remember?.(binding, {
-                  name,
-                  sha256: parsed.data.sha256,
-                  ...(parsed.data.plate === undefined
-                    ? {}
-                    : { plate: parsed.data.plate }),
-                  sentAt: Date.now(),
-                })
+                config.remember?.(
+                  binding,
+                  {
+                    name,
+                    sha256: parsed.data.sha256,
+                    ...(parsed.data.plate === undefined
+                      ? {}
+                      : { plate: parsed.data.plate }),
+                  },
+                  Date.now(),
+                )
                 return true
               },
             },

@@ -21,7 +21,7 @@ describe('library dispatch run correlation', () => {
   test('a new observed run links once, ignoring stale and repeated previous observations', () => {
     const links = createLibraryJobLinks()
     links.attach(observed(100, 'idle', { lastJob: completed(90) }))
-    links.remember('mock', { name: filename, sha256, sentAt: 120 })
+    links.remember('mock', { name: filename, sha256 }, 120)
     links.attach(observed(119, 'printing', { filename: 'old.gcode' }))
     links.attach(observed(130, 'printing', { filename }))
     expect(
@@ -45,7 +45,7 @@ describe('library dispatch run correlation', () => {
 
   test('another active file invalidates a pending match, including a later manual run of the selected file', () => {
     const links = createLibraryJobLinks()
-    links.remember('mock', { name: filename, sha256, sentAt: 100 })
+    links.remember('mock', { name: filename, sha256 }, 100)
     links.attach(observed(120, 'printing', { filename: 'manual.gcode' }))
     links.attach(observed(150, 'printing', { filename }))
     expect(
@@ -56,7 +56,7 @@ describe('library dispatch run correlation', () => {
 
   test('a run with no observed matching active file is not linked', () => {
     const links = createLibraryJobLinks()
-    links.remember('mock', { name: filename, sha256, sentAt: 100 })
+    links.remember('mock', { name: filename, sha256 }, 100)
     links.attach(observed(110, 'printing'))
     expect(
       links.attach(observed(130, 'idle', { lastJob: completed(120) })).lastJob
@@ -86,15 +86,14 @@ describe('browser dispatch', () => {
     expect(session.close).toHaveBeenCalledOnce()
   })
 
-  test('unavailable WebRTC ends the attempt with an explicit reason', async () => {
+  test('unavailable WebRTC never sends a command', async () => {
     const connect = vi.fn(async () => {
       throw new Error('no connection')
     })
     expect(await sendLibraryReplay(connect, { sha256 })).toEqual({
       outcome: 'not-sent',
-      code: 'webrtc-unavailable',
     })
-    expect(connect).toHaveBeenCalledOnce()
+    expect(connect).toHaveBeenCalledTimes(3)
   })
 
   test('a lost acknowledgement is uncertain after one issue', async () => {

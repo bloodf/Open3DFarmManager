@@ -36,7 +36,8 @@
         "apps/farm/server/utils/spool-library/observe.ts",
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "scripts/test-spoolman-websocket.mjs",
-        "tests/integration/spoolman-ws/feed.test.ts"
+        "tests/integration/spoolman-ws/feed.test.ts",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "handshake": "HTTP Upgrade; optional authorization as configured by server/source",
@@ -67,7 +68,9 @@
         "apps/farm/server/utils/spool-library/observe.ts",
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "scripts/test-spoolman-websocket.mjs",
-        "tests/integration/spoolman-ws/feed.test.ts"
+        "tests/integration/spoolman-ws/feed.test.ts",
+        "scripts/test-spoolman-parity.mjs",
+        "tests/fixtures/spoolman/parity/websocket-scenarios.json"
       ],
       "gaps": [],
       "external_client_coverage_status": "partial",
@@ -87,7 +90,8 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "apps/farm/server/utils/spool-library/legacy-api/lists.ts",
-        "scripts/test-spoolman-aux-api.mjs"
+        "scripts/test-spoolman-aux-api.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [],
@@ -116,7 +120,8 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-api/lists.ts",
         "scripts/test-spoolman-aux-api.mjs",
-        "tests/integration/spoolman-aux/catalog.test.ts"
+        "tests/integration/spoolman-aux/catalog.test.ts",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
@@ -137,7 +142,8 @@
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "apps/farm/server/utils/spool-library/legacy-api/info.ts",
         "apps/farm/server/utils/spool-library/legacy-api/export.ts",
-        "scripts/test-spoolman-aux-api.mjs"
+        "scripts/test-spoolman-aux-api.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [],
@@ -177,7 +183,8 @@
         "apps/farm/server/utils/spool-library/legacy-api/info.ts",
         "apps/farm/server/utils/spool-library/legacy-api/export.ts",
         "scripts/test-spoolman-aux-api.mjs",
-        "tests/integration/spoolman-aux/info-backup.test.ts"
+        "tests/integration/spoolman-aux/info-backup.test.ts",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "gaps": [
         "POST /api/v1/backup returns a farm-scoped JSON export in the response body instead of a server-side backup file; path is the fixed text \"inline:export\" and the 500 \"Backup failed\" case cannot occur."
@@ -199,7 +206,8 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "apps/farm/server/utils/spool-library/legacy-api/export.ts",
-        "scripts/test-spoolman-aux-api.mjs"
+        "scripts/test-spoolman-aux-api.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [
@@ -245,7 +253,8 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-api/export.ts",
         "scripts/test-spoolman-aux-api.mjs",
-        "tests/integration/spoolman-aux/catalog.test.ts"
+        "tests/integration/spoolman-aux/catalog.test.ts",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
@@ -265,7 +274,8 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "apps/farm/server/utils/spool-library/legacy-api/export.ts",
-        "scripts/test-spoolman-aux-api.mjs"
+        "scripts/test-spoolman-aux-api.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [
@@ -322,7 +332,8 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-api/export.ts",
         "scripts/test-spoolman-aux-api.mjs",
-        "tests/integration/spoolman-aux/catalog.test.ts"
+        "tests/integration/spoolman-aux/catalog.test.ts",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
@@ -342,7 +353,8 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "apps/farm/server/utils/spool-library/legacy-api/export.ts",
-        "scripts/test-spoolman-aux-api.mjs"
+        "scripts/test-spoolman-aux-api.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [
@@ -388,7 +400,8 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-api/export.ts",
         "scripts/test-spoolman-aux-api.mjs",
-        "tests/integration/spoolman-aux/catalog.test.ts"
+        "tests/integration/spoolman-aux/catalog.test.ts",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
@@ -409,7 +422,8 @@
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "apps/farm/server/utils/spool-library/legacy-api/external-filament.ts",
         "apps/farm/server/utils/spool-library/legacy-api/external-config.ts",
-        "scripts/test-spoolman-aux-api.mjs"
+        "scripts/test-spoolman-aux-api.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [],
@@ -438,7 +452,8 @@
         "apps/farm/server/utils/spool-library/legacy-api/external-config.ts",
         "scripts/test-spoolman-aux-api.mjs",
         "tests/integration/spoolman-aux/external-routes.test.ts",
-        "scripts/test-spoolman-external-filament.mjs"
+        "scripts/test-spoolman-external-filament.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "gaps": [
         "The external library is only available when SPOOLMAN_EXTERNAL_DB_URL is configured; no default public catalog is fetched."
@@ -461,7 +476,8 @@
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "apps/farm/server/utils/spool-library/legacy-api/external-filament.ts",
         "apps/farm/server/utils/spool-library/legacy-api/external-config.ts",
-        "scripts/test-spoolman-aux-api.mjs"
+        "scripts/test-spoolman-aux-api.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [
@@ -537,7 +553,8 @@
         "apps/farm/server/utils/spool-library/legacy-api/external-config.ts",
         "scripts/test-spoolman-aux-api.mjs",
         "tests/integration/spoolman-aux/external-routes.test.ts",
-        "scripts/test-spoolman-external-filament.mjs"
+        "scripts/test-spoolman-external-filament.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "gaps": [
         "The external library is only available when SPOOLMAN_EXTERNAL_DB_URL is configured; no default public catalog is fetched."
@@ -560,7 +577,8 @@
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "apps/farm/server/utils/spool-library/legacy-api/external-filament.ts",
         "apps/farm/server/utils/spool-library/legacy-api/external-config.ts",
-        "scripts/test-spoolman-aux-api.mjs"
+        "scripts/test-spoolman-aux-api.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [],
@@ -590,7 +608,8 @@
         "apps/farm/server/utils/spool-library/legacy-api/external-filament.ts",
         "apps/farm/server/utils/spool-library/legacy-api/external-config.ts",
         "scripts/test-spoolman-aux-api.mjs",
-        "tests/integration/spoolman-aux/external-routes.test.ts"
+        "tests/integration/spoolman-aux/external-routes.test.ts",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "gaps": [
         "The external library is only available when SPOOLMAN_EXTERNAL_DB_URL is configured; no default public catalog is fetched."
@@ -613,7 +632,8 @@
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "apps/farm/server/utils/spool-library/legacy-api/field.ts",
         "apps/farm/server/storage/postgres-spool-library-aux.ts",
-        "scripts/test-spoolman-aux-api.mjs"
+        "scripts/test-spoolman-aux-api.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [
@@ -663,7 +683,8 @@
         "apps/farm/server/utils/spool-library/legacy-api/field.ts",
         "apps/farm/server/storage/postgres-spool-library-aux.ts",
         "scripts/test-spoolman-aux-api.mjs",
-        "tests/integration/spoolman-aux/setting-field.test.ts"
+        "tests/integration/spoolman-aux/setting-field.test.ts",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
@@ -684,7 +705,8 @@
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "apps/farm/server/utils/spool-library/legacy-api/field.ts",
         "apps/farm/server/storage/postgres-spool-library-aux.ts",
-        "scripts/test-spoolman-aux-api.mjs"
+        "scripts/test-spoolman-aux-api.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [
@@ -757,11 +779,10 @@
         "apps/farm/server/utils/spool-library/legacy-api/field.ts",
         "apps/farm/server/storage/postgres-spool-library-aux.ts",
         "scripts/test-spoolman-aux-api.mjs",
-        "tests/integration/spoolman-aux/setting-field.test.ts"
+        "tests/integration/spoolman-aux/setting-field.test.ts",
+        "scripts/test-spoolman-parity.mjs"
       ],
-      "gaps": [
-        "Error message texts of the 400/404/415 answers are not verified against the upstream source (only the OpenAPI document is pinned); status codes and the Message body shape are."
-      ],
+      "gaps": [],
       "external_client_coverage_status": "not_covered",
       "builtin_server_compatibility_status": "implemented"
     },
@@ -780,7 +801,8 @@
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "apps/farm/server/utils/spool-library/legacy-api/field.ts",
         "apps/farm/server/storage/postgres-spool-library-aux.ts",
-        "scripts/test-spoolman-aux-api.mjs"
+        "scripts/test-spoolman-aux-api.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [
@@ -855,11 +877,10 @@
         "apps/farm/server/utils/spool-library/legacy-api/field.ts",
         "apps/farm/server/storage/postgres-spool-library-aux.ts",
         "scripts/test-spoolman-aux-api.mjs",
-        "tests/integration/spoolman-aux/setting-field.test.ts"
+        "tests/integration/spoolman-aux/setting-field.test.ts",
+        "scripts/test-spoolman-parity.mjs"
       ],
-      "gaps": [
-        "Error message texts of the 400/404/415 answers are not verified against the upstream source (only the OpenAPI document is pinned); status codes and the Message body shape are."
-      ],
+      "gaps": [],
       "external_client_coverage_status": "not_covered",
       "builtin_server_compatibility_status": "implemented"
     },
@@ -877,7 +898,8 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "apps/farm/server/utils/spool-library/legacy-api/field.ts",
-        "scripts/test-spoolman-aux-api.mjs"
+        "scripts/test-spoolman-aux-api.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [
@@ -949,11 +971,10 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-api/field.ts",
         "scripts/test-spoolman-aux-api.mjs",
-        "tests/integration/spoolman-aux/setting-field.test.ts"
+        "tests/integration/spoolman-aux/setting-field.test.ts",
+        "scripts/test-spoolman-parity.mjs"
       ],
-      "gaps": [
-        "Error message texts of the 400/404/415 answers are not verified against the upstream source (only the OpenAPI document is pinned); status codes and the Message body shape are."
-      ],
+      "gaps": [],
       "external_client_coverage_status": "not_covered",
       "builtin_server_compatibility_status": "implemented"
     },
@@ -964,12 +985,15 @@
       "transport": "http",
       "upstream_operation_id": "Find_filaments_filament_get",
       "upstream_tags": ["filament"],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "Served on the farm-scoped built-in legacy API. Compared with the pinned Spoolman v0.27.1 image answer by answer (status, headers, body, key order) by scripts/test-spoolman-parity.mjs and with the recorded answers by scripts/test-spoolman-vendor-filament.mjs.",
       "sources": [
-        "packages/sim-tools/src/mocks/spoolman-mock.ts",
-        "tests/node/e16-353.test.mjs"
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/filament.ts",
+        "scripts/test-spoolman-vendor-filament.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [
@@ -1248,12 +1272,17 @@
       ],
       "evidence": [
         "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1filament/get",
-        "packages/sim-tools/src/mocks/spoolman-mock.ts",
-        "tests/node/e16-353.test.mjs"
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/filament.ts",
+        "scripts/test-spoolman-vendor-filament.mjs",
+        "scripts/test-spoolman-parity.mjs",
+        "tests/fixtures/spoolman/vendor-filament/cases.json",
+        "tests/fixtures/spoolman/vendor-filament/upstream.json"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "POST /api/v1/filament",
@@ -1262,12 +1291,15 @@
       "transport": "http",
       "upstream_operation_id": "Add_filament_filament_post",
       "upstream_tags": ["filament"],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "Served on the farm-scoped built-in legacy API. Compared with the pinned Spoolman v0.27.1 image answer by answer (status, headers, body, key order) by scripts/test-spoolman-parity.mjs and with the recorded answers by scripts/test-spoolman-vendor-filament.mjs.",
       "sources": [
-        "packages/sim-tools/src/mocks/spoolman-mock.ts",
-        "tests/node/e16-353.test.mjs"
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/filament.ts",
+        "scripts/test-spoolman-vendor-filament.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [],
@@ -1316,12 +1348,17 @@
       "relevant_headers": ["Content-Type"],
       "evidence": [
         "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1filament/post",
-        "packages/sim-tools/src/mocks/spoolman-mock.ts",
-        "tests/node/e16-353.test.mjs"
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/filament.ts",
+        "scripts/test-spoolman-vendor-filament.mjs",
+        "scripts/test-spoolman-parity.mjs",
+        "tests/fixtures/spoolman/vendor-filament/cases.json",
+        "tests/fixtures/spoolman/vendor-filament/upstream.json"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "DELETE /api/v1/filament/{filament_id}",
@@ -1330,12 +1367,15 @@
       "transport": "http",
       "upstream_operation_id": "Delete_filament_filament__filament_id__delete",
       "upstream_tags": ["filament"],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "Served on the farm-scoped built-in legacy API. Compared with the pinned Spoolman v0.27.1 image answer by answer (status, headers, body, key order) by scripts/test-spoolman-parity.mjs and with the recorded answers by scripts/test-spoolman-vendor-filament.mjs.",
       "sources": [
-        "packages/sim-tools/src/mocks/spoolman-mock.ts",
-        "tests/node/e16-353.test.mjs"
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/filament.ts",
+        "scripts/test-spoolman-vendor-filament.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [
@@ -1403,12 +1443,17 @@
       ],
       "evidence": [
         "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1filament~1{filament_id}/delete",
-        "packages/sim-tools/src/mocks/spoolman-mock.ts",
-        "tests/node/e16-353.test.mjs"
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/filament.ts",
+        "scripts/test-spoolman-vendor-filament.mjs",
+        "scripts/test-spoolman-parity.mjs",
+        "tests/fixtures/spoolman/vendor-filament/cases.json",
+        "tests/fixtures/spoolman/vendor-filament/upstream.json"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "GET /api/v1/filament/{filament_id}",
@@ -1417,12 +1462,15 @@
       "transport": "http",
       "upstream_operation_id": "Get_filament_filament__filament_id__get",
       "upstream_tags": ["filament"],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "Served on the farm-scoped built-in legacy API. Compared with the pinned Spoolman v0.27.1 image answer by answer (status, headers, body, key order) by scripts/test-spoolman-parity.mjs and with the recorded answers by scripts/test-spoolman-vendor-filament.mjs.",
       "sources": [
-        "packages/sim-tools/src/mocks/spoolman-mock.ts",
-        "tests/node/e16-353.test.mjs"
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/filament.ts",
+        "scripts/test-spoolman-vendor-filament.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [
@@ -1486,12 +1534,17 @@
       ],
       "evidence": [
         "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1filament~1{filament_id}/get",
-        "packages/sim-tools/src/mocks/spoolman-mock.ts",
-        "tests/node/e16-353.test.mjs"
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/filament.ts",
+        "scripts/test-spoolman-vendor-filament.mjs",
+        "scripts/test-spoolman-parity.mjs",
+        "tests/fixtures/spoolman/vendor-filament/cases.json",
+        "tests/fixtures/spoolman/vendor-filament/upstream.json"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "PATCH /api/v1/filament/{filament_id}",
@@ -1500,12 +1553,15 @@
       "transport": "http",
       "upstream_operation_id": "Update_filament_filament__filament_id__patch",
       "upstream_tags": ["filament"],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "Served on the farm-scoped built-in legacy API. Compared with the pinned Spoolman v0.27.1 image answer by answer (status, headers, body, key order) by scripts/test-spoolman-parity.mjs and with the recorded answers by scripts/test-spoolman-vendor-filament.mjs.",
       "sources": [
-        "packages/sim-tools/src/mocks/spoolman-mock.ts",
-        "tests/node/e16-353.test.mjs"
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/filament.ts",
+        "scripts/test-spoolman-vendor-filament.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [
@@ -1575,12 +1631,17 @@
       "relevant_headers": ["Content-Type"],
       "evidence": [
         "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1filament~1{filament_id}/patch",
-        "packages/sim-tools/src/mocks/spoolman-mock.ts",
-        "tests/node/e16-353.test.mjs"
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/filament.ts",
+        "scripts/test-spoolman-vendor-filament.mjs",
+        "scripts/test-spoolman-parity.mjs",
+        "tests/fixtures/spoolman/vendor-filament/cases.json",
+        "tests/fixtures/spoolman/vendor-filament/upstream.json"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "WS /api/v1/filament/{filament_id}",
@@ -1599,7 +1660,8 @@
         "apps/farm/server/utils/spool-library/observe.ts",
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "scripts/test-spoolman-websocket.mjs",
-        "tests/integration/spoolman-ws/feed.test.ts"
+        "tests/integration/spoolman-ws/feed.test.ts",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "handshake": "HTTP Upgrade; optional authorization as configured by server/source",
@@ -1629,7 +1691,9 @@
         "apps/farm/server/utils/spool-library/observe.ts",
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "scripts/test-spoolman-websocket.mjs",
-        "tests/integration/spoolman-ws/feed.test.ts"
+        "tests/integration/spoolman-ws/feed.test.ts",
+        "scripts/test-spoolman-parity.mjs",
+        "tests/fixtures/spoolman/parity/websocket-scenarios.json"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
@@ -1836,7 +1900,8 @@
         "tests/node/e16-353.test.mjs",
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
-        "scripts/test-spoolman-aux-api.mjs"
+        "scripts/test-spoolman-aux-api.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [],
@@ -1866,7 +1931,8 @@
         "tests/node/e16-353.test.mjs",
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
-        "scripts/test-spoolman-aux-api.mjs"
+        "scripts/test-spoolman-aux-api.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
@@ -1888,7 +1954,8 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "apps/farm/server/utils/spool-library/legacy-api/info.ts",
-        "scripts/test-spoolman-aux-api.mjs"
+        "scripts/test-spoolman-aux-api.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [],
@@ -1919,7 +1986,8 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-api/info.ts",
         "scripts/test-spoolman-aux-api.mjs",
-        "tests/integration/spoolman-aux/info-backup.test.ts"
+        "tests/integration/spoolman-aux/info-backup.test.ts",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
@@ -1940,7 +2008,8 @@
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "apps/farm/server/utils/spool-library/legacy-api/location.ts",
         "apps/farm/server/storage/postgres-spool-library-aux.ts",
-        "scripts/test-spoolman-aux-api.mjs"
+        "scripts/test-spoolman-aux-api.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [],
@@ -1970,7 +2039,8 @@
         "apps/farm/server/utils/spool-library/legacy-api/location.ts",
         "apps/farm/server/storage/postgres-spool-library-aux.ts",
         "scripts/test-spoolman-aux-api.mjs",
-        "tests/integration/spoolman-aux/location.test.ts"
+        "tests/integration/spoolman-aux/location.test.ts",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
@@ -1992,7 +2062,8 @@
         "apps/farm/server/utils/spool-library/legacy-api/location.ts",
         "apps/farm/server/storage/postgres-spool-library-aux.ts",
         "apps/farm/server/utils/spool-library/legacy-path.ts",
-        "scripts/test-spoolman-aux-api.mjs"
+        "scripts/test-spoolman-aux-api.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [
@@ -2045,7 +2116,8 @@
         "apps/farm/server/storage/postgres-spool-library-aux.ts",
         "apps/farm/server/utils/spool-library/legacy-path.ts",
         "scripts/test-spoolman-aux-api.mjs",
-        "tests/integration/spoolman-aux/location.test.ts"
+        "tests/integration/spoolman-aux/location.test.ts",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
@@ -2065,7 +2137,8 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "apps/farm/server/utils/spool-library/legacy-api/lists.ts",
-        "scripts/test-spoolman-aux-api.mjs"
+        "scripts/test-spoolman-aux-api.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [],
@@ -2094,7 +2167,8 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-api/lists.ts",
         "scripts/test-spoolman-aux-api.mjs",
-        "tests/integration/spoolman-aux/catalog.test.ts"
+        "tests/integration/spoolman-aux/catalog.test.ts",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
@@ -2114,7 +2188,8 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "apps/farm/server/utils/spool-library/legacy-api/lists.ts",
-        "scripts/test-spoolman-aux-api.mjs"
+        "scripts/test-spoolman-aux-api.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [],
@@ -2143,7 +2218,8 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-api/lists.ts",
         "scripts/test-spoolman-aux-api.mjs",
-        "tests/integration/spoolman-aux/catalog.test.ts"
+        "tests/integration/spoolman-aux/catalog.test.ts",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
@@ -2163,7 +2239,8 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "apps/farm/server/utils/spool-library/legacy-api/search.ts",
-        "scripts/test-spoolman-aux-api.mjs"
+        "scripts/test-spoolman-aux-api.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [
@@ -2266,11 +2343,11 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-api/search.ts",
         "scripts/test-spoolman-aux-api.mjs",
-        "tests/integration/spoolman-aux/catalog.test.ts"
+        "tests/integration/spoolman-aux/catalog.test.ts",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "gaps": [
-        "CSS colour-name queries (e.g. \"red\") are not recognised as colour queries; only #hex codes are.",
-        "Result ranking (exact, prefix, substring, then id) is approximated; the upstream ranking is not pinned."
+        "CSS colour-name queries (e.g. \"red\") are not recognised as colour queries; only #hex codes are."
       ],
       "external_client_coverage_status": "not_covered",
       "builtin_server_compatibility_status": "implemented"
@@ -2290,7 +2367,8 @@
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "apps/farm/server/utils/spool-library/legacy-api/setting.ts",
         "apps/farm/server/storage/postgres-spool-library-aux.ts",
-        "scripts/test-spoolman-aux-api.mjs"
+        "scripts/test-spoolman-aux-api.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [],
@@ -2320,7 +2398,8 @@
         "apps/farm/server/utils/spool-library/legacy-api/setting.ts",
         "apps/farm/server/storage/postgres-spool-library-aux.ts",
         "scripts/test-spoolman-aux-api.mjs",
-        "tests/integration/spoolman-aux/setting-field.test.ts"
+        "tests/integration/spoolman-aux/setting-field.test.ts",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
@@ -2341,7 +2420,8 @@
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "apps/farm/server/utils/spool-library/legacy-api/setting.ts",
         "apps/farm/server/storage/postgres-spool-library-aux.ts",
-        "scripts/test-spoolman-aux-api.mjs"
+        "scripts/test-spoolman-aux-api.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [
@@ -2409,11 +2489,10 @@
         "apps/farm/server/utils/spool-library/legacy-api/setting.ts",
         "apps/farm/server/storage/postgres-spool-library-aux.ts",
         "scripts/test-spoolman-aux-api.mjs",
-        "tests/integration/spoolman-aux/setting-field.test.ts"
+        "tests/integration/spoolman-aux/setting-field.test.ts",
+        "scripts/test-spoolman-parity.mjs"
       ],
-      "gaps": [
-        "Error message texts of the 400/404/415 answers are not verified against the upstream source (only the OpenAPI document is pinned); status codes and the Message body shape are."
-      ],
+      "gaps": [],
       "external_client_coverage_status": "not_covered",
       "builtin_server_compatibility_status": "implemented"
     },
@@ -2432,7 +2511,8 @@
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "apps/farm/server/utils/spool-library/legacy-api/setting.ts",
         "apps/farm/server/storage/postgres-spool-library-aux.ts",
-        "scripts/test-spoolman-aux-api.mjs"
+        "scripts/test-spoolman-aux-api.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [
@@ -2507,11 +2587,10 @@
         "apps/farm/server/utils/spool-library/legacy-api/setting.ts",
         "apps/farm/server/storage/postgres-spool-library-aux.ts",
         "scripts/test-spoolman-aux-api.mjs",
-        "tests/integration/spoolman-aux/setting-field.test.ts"
+        "tests/integration/spoolman-aux/setting-field.test.ts",
+        "scripts/test-spoolman-parity.mjs"
       ],
-      "gaps": [
-        "Error message texts of the 400/404/415 answers are not verified against the upstream source (only the OpenAPI document is pinned); status codes and the Message body shape are."
-      ],
+      "gaps": [],
       "external_client_coverage_status": "not_covered",
       "builtin_server_compatibility_status": "implemented"
     },
@@ -2532,7 +2611,8 @@
         "apps/farm/server/utils/spool-library/observe.ts",
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "scripts/test-spoolman-websocket.mjs",
-        "tests/integration/spoolman-ws/feed.test.ts"
+        "tests/integration/spoolman-ws/feed.test.ts",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "handshake": "HTTP Upgrade; optional authorization as configured by server/source",
@@ -2562,7 +2642,9 @@
         "apps/farm/server/utils/spool-library/observe.ts",
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "scripts/test-spoolman-websocket.mjs",
-        "tests/integration/spoolman-ws/feed.test.ts"
+        "tests/integration/spoolman-ws/feed.test.ts",
+        "scripts/test-spoolman-parity.mjs",
+        "tests/fixtures/spoolman/parity/websocket-scenarios.json"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
@@ -2585,7 +2667,8 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "apps/farm/server/utils/spool-library/legacy-api/spool.ts",
-        "scripts/test-spoolman-spool-api.mjs"
+        "scripts/test-spoolman-spool-api.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [
@@ -3012,7 +3095,8 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-api/spool.ts",
         "scripts/test-spoolman-spool-api.mjs",
-        "tests/fixtures/spoolman/spool-api/upstream.json"
+        "tests/fixtures/spoolman/spool-api/upstream.json",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "gaps": [],
       "external_client_coverage_status": "partial",
@@ -3034,7 +3118,8 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "apps/farm/server/utils/spool-library/legacy-api/spool.ts",
-        "scripts/test-spoolman-spool-api.mjs"
+        "scripts/test-spoolman-spool-api.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [],
@@ -3088,7 +3173,8 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-api/spool.ts",
         "scripts/test-spoolman-spool-api.mjs",
-        "tests/fixtures/spoolman/spool-api/upstream.json"
+        "tests/fixtures/spoolman/spool-api/upstream.json",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
@@ -3109,7 +3195,8 @@
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "apps/farm/server/utils/spool-library/legacy-api/location.ts",
         "apps/farm/server/storage/postgres-spool-library-aux.ts",
-        "scripts/test-spoolman-aux-api.mjs"
+        "scripts/test-spoolman-aux-api.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [
@@ -3174,11 +3261,10 @@
         "apps/farm/server/utils/spool-library/legacy-api/location.ts",
         "apps/farm/server/storage/postgres-spool-library-aux.ts",
         "scripts/test-spoolman-aux-api.mjs",
-        "tests/integration/spoolman-aux/location.test.ts"
+        "tests/integration/spoolman-aux/location.test.ts",
+        "scripts/test-spoolman-parity.mjs"
       ],
-      "gaps": [
-        "Error message texts of the 400/404/415 answers are not verified against the upstream source (only the OpenAPI document is pinned); status codes and the Message body shape are."
-      ],
+      "gaps": [],
       "external_client_coverage_status": "not_covered",
       "builtin_server_compatibility_status": "implemented"
     },
@@ -3196,7 +3282,8 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "apps/farm/server/utils/spool-library/legacy-api/group.ts",
-        "scripts/test-spoolman-aux-api.mjs"
+        "scripts/test-spoolman-aux-api.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [
@@ -3547,11 +3634,11 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-api/group.ts",
         "scripts/test-spoolman-aux-api.mjs",
-        "tests/integration/spoolman-aux/catalog.test.ts"
+        "tests/integration/spoolman-aux/catalog.test.ts",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "gaps": [
-        "Sorting supports the group.* keys and filament.name, filament.material and filament.vendor.name; other documented sort keys are ignored.",
-        "Error message texts of the 400/404/415 answers are not verified against the upstream source (only the OpenAPI document is pinned); status codes and the Message body shape are."
+        "Sorting supports the group.* keys and filament.name, filament.material and filament.vendor.name; other documented sort keys are ignored."
       ],
       "external_client_coverage_status": "not_covered",
       "builtin_server_compatibility_status": "implemented"
@@ -3572,7 +3659,8 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "apps/farm/server/utils/spool-library/legacy-api/spool.ts",
-        "scripts/test-spoolman-spool-api.mjs"
+        "scripts/test-spoolman-spool-api.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [
@@ -3634,7 +3722,8 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-api/spool.ts",
         "scripts/test-spoolman-spool-api.mjs",
-        "tests/fixtures/spoolman/spool-api/upstream.json"
+        "tests/fixtures/spoolman/spool-api/upstream.json",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
@@ -3656,7 +3745,8 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "apps/farm/server/utils/spool-library/legacy-api/spool.ts",
-        "scripts/test-spoolman-spool-api.mjs"
+        "scripts/test-spoolman-spool-api.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [
@@ -3725,7 +3815,8 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-api/spool.ts",
         "scripts/test-spoolman-spool-api.mjs",
-        "tests/fixtures/spoolman/spool-api/upstream.json"
+        "tests/fixtures/spoolman/spool-api/upstream.json",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
@@ -3747,7 +3838,8 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "apps/farm/server/utils/spool-library/legacy-api/spool.ts",
-        "scripts/test-spoolman-spool-api.mjs"
+        "scripts/test-spoolman-spool-api.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [
@@ -3822,7 +3914,8 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-api/spool.ts",
         "scripts/test-spoolman-spool-api.mjs",
-        "tests/fixtures/spoolman/spool-api/upstream.json"
+        "tests/fixtures/spoolman/spool-api/upstream.json",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
@@ -3845,7 +3938,8 @@
         "apps/farm/server/utils/spool-library/observe.ts",
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "scripts/test-spoolman-websocket.mjs",
-        "tests/integration/spoolman-ws/feed.test.ts"
+        "tests/integration/spoolman-ws/feed.test.ts",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "handshake": "HTTP Upgrade; optional authorization as configured by server/source",
@@ -3875,7 +3969,9 @@
         "apps/farm/server/utils/spool-library/observe.ts",
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "scripts/test-spoolman-websocket.mjs",
-        "tests/integration/spoolman-ws/feed.test.ts"
+        "tests/integration/spoolman-ws/feed.test.ts",
+        "scripts/test-spoolman-parity.mjs",
+        "tests/fixtures/spoolman/parity/websocket-scenarios.json"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
@@ -3895,7 +3991,8 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "apps/farm/server/utils/spool-library/legacy-api/spool.ts",
-        "scripts/test-spoolman-spool-api.mjs"
+        "scripts/test-spoolman-spool-api.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [
@@ -3968,7 +4065,8 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-api/spool.ts",
         "scripts/test-spoolman-spool-api.mjs",
-        "tests/fixtures/spoolman/spool-api/upstream.json"
+        "tests/fixtures/spoolman/spool-api/upstream.json",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
@@ -4176,7 +4274,8 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "apps/farm/server/utils/spool-library/legacy-api/spool.ts",
-        "scripts/test-spoolman-spool-api.mjs"
+        "scripts/test-spoolman-spool-api.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [
@@ -4251,7 +4350,8 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-api/spool.ts",
         "scripts/test-spoolman-spool-api.mjs",
-        "tests/fixtures/spoolman/spool-api/upstream.json"
+        "tests/fixtures/spoolman/spool-api/upstream.json",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "gaps": [],
       "external_client_coverage_status": "covered",
@@ -4271,7 +4371,8 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "apps/farm/server/utils/spool-library/legacy-api/lists.ts",
-        "scripts/test-spoolman-aux-api.mjs"
+        "scripts/test-spoolman-aux-api.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [],
@@ -4300,7 +4401,8 @@
         "apps/farm/server/routes/spoolman/[...path].ts",
         "apps/farm/server/utils/spool-library/legacy-api/lists.ts",
         "scripts/test-spoolman-aux-api.mjs",
-        "tests/integration/spoolman-aux/catalog.test.ts"
+        "tests/integration/spoolman-aux/catalog.test.ts",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "gaps": [
         "POST /api/v1/tag/scan is not served, so no reader is ever listed."
@@ -4473,12 +4575,15 @@
       "transport": "http",
       "upstream_operation_id": "Find_vendor_vendor_get",
       "upstream_tags": ["vendor"],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "Served on the farm-scoped built-in legacy API. Compared with the pinned Spoolman v0.27.1 image answer by answer (status, headers, body, key order) by scripts/test-spoolman-parity.mjs and with the recorded answers by scripts/test-spoolman-vendor-filament.mjs.",
       "sources": [
-        "packages/sim-tools/src/mocks/spoolman-mock.ts",
-        "tests/node/e16-353.test.mjs"
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/vendor.ts",
+        "scripts/test-spoolman-vendor-filament.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [
@@ -4602,12 +4707,17 @@
       ],
       "evidence": [
         "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1vendor/get",
-        "packages/sim-tools/src/mocks/spoolman-mock.ts",
-        "tests/node/e16-353.test.mjs"
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/vendor.ts",
+        "scripts/test-spoolman-vendor-filament.mjs",
+        "scripts/test-spoolman-parity.mjs",
+        "tests/fixtures/spoolman/vendor-filament/cases.json",
+        "tests/fixtures/spoolman/vendor-filament/upstream.json"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "POST /api/v1/vendor",
@@ -4616,12 +4726,15 @@
       "transport": "http",
       "upstream_operation_id": "Add_vendor_vendor_post",
       "upstream_tags": ["vendor"],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "Served on the farm-scoped built-in legacy API. Compared with the pinned Spoolman v0.27.1 image answer by answer (status, headers, body, key order) by scripts/test-spoolman-parity.mjs and with the recorded answers by scripts/test-spoolman-vendor-filament.mjs.",
       "sources": [
-        "packages/sim-tools/src/mocks/spoolman-mock.ts",
-        "tests/node/e16-353.test.mjs"
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/vendor.ts",
+        "scripts/test-spoolman-vendor-filament.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [],
@@ -4670,12 +4783,17 @@
       "relevant_headers": ["Content-Type"],
       "evidence": [
         "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1vendor/post",
-        "packages/sim-tools/src/mocks/spoolman-mock.ts",
-        "tests/node/e16-353.test.mjs"
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/vendor.ts",
+        "scripts/test-spoolman-vendor-filament.mjs",
+        "scripts/test-spoolman-parity.mjs",
+        "tests/fixtures/spoolman/vendor-filament/cases.json",
+        "tests/fixtures/spoolman/vendor-filament/upstream.json"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "DELETE /api/v1/vendor/{vendor_id}",
@@ -4684,12 +4802,15 @@
       "transport": "http",
       "upstream_operation_id": "Delete_vendor_vendor__vendor_id__delete",
       "upstream_tags": ["vendor"],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "Served on the farm-scoped built-in legacy API. Compared with the pinned Spoolman v0.27.1 image answer by answer (status, headers, body, key order) by scripts/test-spoolman-parity.mjs and with the recorded answers by scripts/test-spoolman-vendor-filament.mjs.",
       "sources": [
-        "packages/sim-tools/src/mocks/spoolman-mock.ts",
-        "tests/node/e16-353.test.mjs"
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/vendor.ts",
+        "scripts/test-spoolman-vendor-filament.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [
@@ -4746,12 +4867,17 @@
       ],
       "evidence": [
         "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1vendor~1{vendor_id}/delete",
-        "packages/sim-tools/src/mocks/spoolman-mock.ts",
-        "tests/node/e16-353.test.mjs"
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/vendor.ts",
+        "scripts/test-spoolman-vendor-filament.mjs",
+        "scripts/test-spoolman-parity.mjs",
+        "tests/fixtures/spoolman/vendor-filament/cases.json",
+        "tests/fixtures/spoolman/vendor-filament/upstream.json"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "GET /api/v1/vendor/{vendor_id}",
@@ -4760,12 +4886,15 @@
       "transport": "http",
       "upstream_operation_id": "Get_vendor_vendor__vendor_id__get",
       "upstream_tags": ["vendor"],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "Served on the farm-scoped built-in legacy API. Compared with the pinned Spoolman v0.27.1 image answer by answer (status, headers, body, key order) by scripts/test-spoolman-parity.mjs and with the recorded answers by scripts/test-spoolman-vendor-filament.mjs.",
       "sources": [
-        "packages/sim-tools/src/mocks/spoolman-mock.ts",
-        "tests/node/e16-353.test.mjs"
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/vendor.ts",
+        "scripts/test-spoolman-vendor-filament.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [
@@ -4829,12 +4958,17 @@
       ],
       "evidence": [
         "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1vendor~1{vendor_id}/get",
-        "packages/sim-tools/src/mocks/spoolman-mock.ts",
-        "tests/node/e16-353.test.mjs"
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/vendor.ts",
+        "scripts/test-spoolman-vendor-filament.mjs",
+        "scripts/test-spoolman-parity.mjs",
+        "tests/fixtures/spoolman/vendor-filament/cases.json",
+        "tests/fixtures/spoolman/vendor-filament/upstream.json"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "PATCH /api/v1/vendor/{vendor_id}",
@@ -4843,12 +4977,15 @@
       "transport": "http",
       "upstream_operation_id": "Update_vendor_vendor__vendor_id__patch",
       "upstream_tags": ["vendor"],
-      "product_status": "unimplemented",
-      "scope": null,
-      "notes": "No maintained external Connector client call is recorded for this route, and no matching built-in Spoolman replacement-server route was found. The pinned upstream contract is documented above; compatibility remains an explicit gap.",
+      "product_status": "implemented",
+      "scope": "farm-scoped legacy API (/spoolman/<token>/api/v1/...)",
+      "notes": "Served on the farm-scoped built-in legacy API. Compared with the pinned Spoolman v0.27.1 image answer by answer (status, headers, body, key order) by scripts/test-spoolman-parity.mjs and with the recorded answers by scripts/test-spoolman-vendor-filament.mjs.",
       "sources": [
-        "packages/sim-tools/src/mocks/spoolman-mock.ts",
-        "tests/node/e16-353.test.mjs"
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/vendor.ts",
+        "scripts/test-spoolman-vendor-filament.mjs",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "parameters": [
@@ -4918,12 +5055,17 @@
       "relevant_headers": ["Content-Type"],
       "evidence": [
         "docs/compatibility/spoolman-openapi-v0.27.1.json#/paths/~1vendor~1{vendor_id}/patch",
-        "packages/sim-tools/src/mocks/spoolman-mock.ts",
-        "tests/node/e16-353.test.mjs"
+        "apps/farm/server/routes/spoolman/[...path].ts",
+        "apps/farm/server/utils/spool-library/legacy-handler.ts",
+        "apps/farm/server/utils/spool-library/legacy-api/vendor.ts",
+        "scripts/test-spoolman-vendor-filament.mjs",
+        "scripts/test-spoolman-parity.mjs",
+        "tests/fixtures/spoolman/vendor-filament/cases.json",
+        "tests/fixtures/spoolman/vendor-filament/upstream.json"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
-      "builtin_server_compatibility_status": "unimplemented"
+      "builtin_server_compatibility_status": "implemented"
     },
     {
       "endpoint_id": "WS /api/v1/vendor/{vendor_id}",
@@ -4942,7 +5084,8 @@
         "apps/farm/server/utils/spool-library/observe.ts",
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "scripts/test-spoolman-websocket.mjs",
-        "tests/integration/spoolman-ws/feed.test.ts"
+        "tests/integration/spoolman-ws/feed.test.ts",
+        "scripts/test-spoolman-parity.mjs"
       ],
       "request_schema": {
         "handshake": "HTTP Upgrade; optional authorization as configured by server/source",
@@ -4972,7 +5115,9 @@
         "apps/farm/server/utils/spool-library/observe.ts",
         "apps/farm/server/utils/spool-library/legacy-handler.ts",
         "scripts/test-spoolman-websocket.mjs",
-        "tests/integration/spoolman-ws/feed.test.ts"
+        "tests/integration/spoolman-ws/feed.test.ts",
+        "scripts/test-spoolman-parity.mjs",
+        "tests/fixtures/spoolman/parity/websocket-scenarios.json"
       ],
       "gaps": [],
       "external_client_coverage_status": "not_covered",
@@ -5121,7 +5266,7 @@
     },
     {
       "path": "tests/fixtures/spoolman/spool-api/upstream.json",
-      "sha256": "024f2edee070f73225a2aaa2348eb8da259c93d4f42e2546deab2528dcd67697",
+      "sha256": "96cf2cc667cfdaa4241f81170cb4bcb192ce684b2fa121c24e884f53b6e731e5",
       "purpose": "Recorded upstream Spoolman v0.27.1 HTTP responses for spool API contract replay (#540)",
       "provenance": "Captured directly from local digest-pinned ghcr.io/donkie/spoolman:0.27.1 (revision ff8efd517b76a4b2783f29c89e9b9fbcd8cd167b) with --network none via scripts/capture-spoolman-spool-api.mjs."
     },
@@ -5136,6 +5281,24 @@
       "sha256": "f1b360624af4b407fe85037db389592233d12e839cbcac645efa51678d644da2",
       "purpose": "External material library fixture for the auxiliary API tests (#545, #562)",
       "provenance": "Original MIT fixture data: three synthetic materials in the SpoolmanDB materials.json shape pinned by upstream v0.27.1 ExternalMaterial. Not copied from the upstream database."
+    },
+    {
+      "path": "tests/fixtures/spoolman/parity/aux-cases.json",
+      "sha256": "46329f07b30a6b953ee68e7f20b2df3997bbe0c1726d26bbf4a93262a2d10656",
+      "purpose": "Auxiliary endpoint request corpus for the live parity harness (#546): info, backup, settings, extra fields, locations, distinct lists, export, search, groups, tags, external library, origin guard.",
+      "provenance": "Original MIT test request definitions; every answer is produced live by the pinned Spoolman v0.27.1 image and compared with the built-in server by scripts/test-spoolman-parity.mjs."
+    },
+    {
+      "path": "tests/fixtures/spoolman/parity/client-flows.json",
+      "sha256": "9613249d30434d4a02b5c1ca5d55125c832d8974695d7f258aa6b652d7cfbf89",
+      "purpose": "Client call sequences for the live parity harness (#546): Klipper macro through Moonraker, OctoPrint plugin, Home Assistant integration and OrcaSlicer plugin.",
+      "provenance": "Original MIT request definitions derived from the client sources cited in docs/SPOOLMAN-UPSTREAM-CONTRACT-FIXTURES.md; answers are produced live by the pinned image."
+    },
+    {
+      "path": "tests/fixtures/spoolman/parity/websocket-scenarios.json",
+      "sha256": "e28d095064046314e9f794b57ba51cb3ccbbde645f99994484cae61dcb9d2c5d",
+      "purpose": "Websocket scenarios for the live parity harness (#546): the same HTTP changes with listeners on every upstream feed path.",
+      "provenance": "Original MIT scenario definitions; the event streams of the pinned image and the built-in server are compared by scripts/test-spoolman-parity.mjs."
     }
   ],
   "gaps": [
@@ -5148,13 +5311,14 @@
   "builtin_server_differences": [
     "POST /api/v1/backup returns a farm-scoped JSON export in the response body (BackupResponse fields created and path, plus an export member); no server-side file is written, so there is no backup directory and no 500 \"Backup failed\" case.",
     "GET /api/v1/info describes the built-in server: db_type postgresql, empty data_dir, logs_dir and backups_dir, no update check.",
-    "Settings: only registered keys exist (currency, round_prices, print_presets, base_url, locations_spoolorders, extra_fields_vendor, extra_fields_filament, extra_fields_spool). The extra_fields_* settings mirror the farm's extra-field registry and are changed through /api/v1/field, not through /api/v1/setting.",
-    "Error message texts of 400/404/415 answers for fields, settings, renames and groups are not verified against the upstream source, which is not vendored; status codes and body shapes follow the pinned OpenAPI.",
-    "GET /api/v1/search recognises #hex colour queries only (no CSS colour names); ranking is approximated.",
+    "Settings: the registered keys are those of upstream (currency, round_prices, print_presets, label_designs, extra_fields_vendor, extra_fields_filament, extra_fields_spool, base_url, locations, locations_spoolorders, dashboard_groups, dashboard_spoolorders). The extra_fields_* settings are views of the farm's extra-field registry (the data /api/v1/field manages): a write of a valid array replaces the registry and is read back as sent until a field endpoint rewrites it. Values are stored as parsed JSON and read back re-serialised compactly, so insignificant whitespace in a written value is not preserved. The text of the 400 answer for a malformed extra_fields_* entry is generic (\"Extra field at index N is not valid.\"), not pydantic's error listing.",
+    "Record ids: Spoolman (SQLite rows without AUTOINCREMENT) gives a new record the id of a deleted highest-id record; the built-in server never reuses an id. The parity harness normalises ids in websocket payloads by order of first appearance and never creates a record after deleting the highest-id one over HTTP.",
+    "Browser writes from another origin are refused with 403 when the request context carries the Origin, Host and X-Forwarded-Host headers (the Nitro route passes them); upstream's SPOOLMAN_CORS_ORIGIN and SPOOLMAN_ALLOWED_HOSTS settings do not exist here, so only the same-host rule applies.",
     "Tag endpoints (POST/DELETE on /spool/{id}/tag and /filament/{id}/tag, POST /tag/scan) are not served because migration 0089 has no tag storage; GET /tag/reader is always empty. Their websocket feeds are served; see the websocket entry below.",
     "The external filament library needs SPOOLMAN_EXTERNAL_DB_URL; it syncs in the background and answers 500 until the first sync, as upstream does before its first sync.",
     "The API path is percent-decoded once (so location names with spaces work); encoded dots, slashes, backslashes and NUL are refused with 401, as are malformed escapes.",
     "Writes to settings and extra-field definitions need the runtime database role to be a member of farm_spool_features (migration 0089) as well as farm_spool_library; without it those writes answer 503 and everything else is unaffected.",
-    "Websocket feeds are served on the farm-scoped path /spoolman/<token>/api/v1/... (root, /vendor, /filament, /spool, /setting/ and the per-id and per-key paths) with the upstream event JSON, authenticated by the same legacy credential as HTTP (a read credential may listen). The farm is fixed at connect time, so a client never hears another farm's events; events are sent only after the change commits, in order, for changes made through the built-in HTTP API (a vendor delete also sends filament updates for filaments that lost their vendor; a location or field rename sends one spool update per changed spool). Clients send nothing. A handshake whose Origin differs from the Host is accepted and closed with code 4403, a missing Host with 4400, as upstream; an unknown credential or path is refused with HTTP 401 or 404. A credential revoked while a feed is open is not re-checked until the client reconnects. The tag-scan feeds accept connections but never send an event (no tag storage). One farm may hold at most 256 open feeds; further ones are closed with 1013."
+    "Websocket feeds are served on the farm-scoped path /spoolman/<token>/api/v1/... (root, /vendor, /filament, /spool, /setting/ and the per-id and per-key paths) with the upstream event JSON, authenticated by the same legacy credential as HTTP (a read credential may listen). The farm is fixed at connect time, so a client never hears another farm's events; events are sent only after the change commits, in order, for changes made through the built-in HTTP API (a vendor delete also sends filament updates for filaments that lost their vendor; a location or field rename sends one spool update per changed spool, where Spoolman sends neither). Any text a client sends is answered with {\"status\":\"healthy\"} as upstream. The feeds also answer on the trailing-slash spellings of their paths (Spoolman serves only the exact route paths and refuses the others). A handshake whose Origin differs from the Host is accepted and closed with code 4403 and a missing Host with 4400 (Spoolman rejects such a handshake itself with HTTP 403); an unknown credential is refused with HTTP 401 and a path that is no feed with HTTP 404 (Spoolman: 403). A credential revoked while a feed is open is not re-checked until the client reconnects. The tag-scan feeds accept connections but never send an event (no tag storage). One farm may hold at most 256 open feeds; further ones are closed with 1013.",
+    "The parity harness (scripts/test-spoolman-parity.mjs) replays the recorded client contracts, the vendor, filament and spool corpora, the auxiliary endpoints and websocket scenarios against the pinned image and the built-in server and fails on any difference that is not an entry of tests/contract/spoolman-parity/allowed-differences.json; each entry cites a sentence of this list."
   ]
 }

@@ -71,14 +71,21 @@ export function observeRepository(
       // The mutation already succeeded; its event is best effort.
     }
   }
-  const settingChanged = (key: string) =>
+  /**
+   * One event per setting and request: a registry write is several repository
+   * calls but one setting change (a later event replaces an earlier one).
+   */
+  const settingChanged = (key: string, type: SpoolEventType = 'updated') =>
     safely(async () => {
       const views = await settingViews(repo)
       const setting = views.ok ? views.value[key] : undefined
       if (!setting || !Object.hasOwn(SETTING_DEFINITIONS, key)) return
-      events.push(
-        buildFeedEvent('updated', 'setting', key, { key, setting }, now()),
-      )
+      for (let i = events.length - 1; i >= 0; i--) {
+        const earlier = events[i]!
+        if (earlier.pool[0] === 'setting' && earlier.pool[1] === key)
+          events.splice(i, 1)
+      }
+      events.push(buildFeedEvent(type, 'setting', key, { key, setting }, now()))
     })
 
   const spoolRows = async () => {
@@ -102,8 +109,8 @@ export function observeRepository(
           await settingChanged(`extra_fields_${definition.entityType}`)
         return result
       },
-      async delete(entity, key) {
-        const result = await repo.extraFields.delete(entity, key)
+      async delete(entity, key, keepValues) {
+        const result = await repo.extraFields.delete(entity, key, keepValues)
         if (result.ok) await settingChanged(`extra_fields_${entity}`)
         return result
       },
@@ -117,7 +124,8 @@ export function observeRepository(
       },
       async reset(key) {
         const result = await repo.settings.reset(key)
-        if (result.ok) await settingChanged(key)
+        // Upstream announces a setting that was unset as deleted.
+        if (result.ok) await settingChanged(key, 'deleted')
         return result
       },
     },

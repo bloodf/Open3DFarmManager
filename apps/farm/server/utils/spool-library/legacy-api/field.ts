@@ -55,10 +55,31 @@ export function fieldJson(field: SpoolExtraFieldDefinition) {
   }
 }
 
-const sorted = (fields: SpoolExtraFieldDefinition[]) =>
-  [...fields].sort(
-    (a, b) => a.order - b.order || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0),
-  )
+/**
+ * Wire shape of `ExtraField` as the field endpoints send it
+ * (`response_model_exclude_none`): unset members are absent, and
+ * `multi_choice` only exists for the choice type.
+ */
+export function fieldWire(field: SpoolExtraFieldDefinition) {
+  return {
+    name: field.name,
+    order: field.order,
+    ...(field.unit === null ? {} : { unit: field.unit }),
+    field_type: field.fieldType,
+    ...(field.defaultValue === null
+      ? {}
+      : { default_value: field.defaultValue }),
+    ...(field.choices === null ? {} : { choices: field.choices }),
+    ...(field.fieldType === 'choice'
+      ? { multi_choice: field.multiChoice }
+      : {}),
+    key: field.key,
+    entity_type: field.entityType,
+  }
+}
+
+/** The registry is an ordered list: a field keeps the place it was added at. */
+const registry = (fields: SpoolExtraFieldDefinition[]) => fields
 
 const BODY: readonly (readonly [string, FieldSpec])[] = [
   ['name', { kind: 'str', max: 128, required: true }],
@@ -75,7 +96,11 @@ function parseBody(
   extraIssues: Issue[],
 ):
   | { issues: Issue[] }
-  | { definition: Omit<SpoolExtraFieldDefinition, 'entityType' | 'key'> } {
+  | {
+      definition: Omit<SpoolExtraFieldDefinition, 'entityType' | 'key'>
+      /** `multi_choice` was sent (null counts as not sent). */
+      multiChoiceSet: boolean
+    } {
   const checked = checkBody(request.body, BODY)
   const issues = [...extraIssues, ...checked.issues]
   if (checked.fatal) return { issues }
@@ -152,28 +177,54 @@ function parseBody(
       choices,
       multiChoice: (v['multi_choice'] as boolean | null | undefined) ?? false,
     },
+    multiChoiceSet:
+      v['multi_choice'] !== null && v['multi_choice'] !== undefined,
   }
 }
 
-/** Registry rules the pinned upstream enforces with a 400 `Message`. */
+/** Upstream `MAX_EXTRA_FIELDS_PER_ENTITY`. */
+export const MAX_EXTRA_FIELDS = 128
+
+/** Upstream `validate_extra_field`: the 400 message, or null. */
 function definitionError(
   definition: SpoolExtraFieldDefinition,
-  existing: SpoolExtraFieldDefinition | undefined,
+  multiChoiceSet: boolean,
 ): string | null {
-  if (existing && existing.fieldType !== definition.fieldType)
-    return 'Field type cannot be changed once the field exists.'
   if (definition.fieldType === 'choice') {
-    if (!definition.choices || definition.choices.length === 0)
-      return 'Choices must be set for a field of type choice.'
+    if (definition.choices === null)
+      return 'Choices must be set for field type choice.'
+    if (!multiChoiceSet)
+      return 'Multi choice must be set for field type choice.'
   } else {
     if (definition.choices !== null)
-      return 'Choices can only be set for a field of type choice.'
-    if (definition.multiChoice)
-      return 'Multi choice can only be set for a field of type choice.'
+      return 'Choices must not be set for field type other than choice.'
+    if (multiChoiceSet)
+      return 'Multi choice must not be set for field type other than choice.'
   }
   if (definition.defaultValue !== null) {
     const error = extraValueError(definition, definition.defaultValue)
     if (error) return `Default value is not valid: ${error}`
+  }
+  return null
+}
+
+/** Upstream `add_or_update_extra_field`: rules for a field that exists. */
+function updateError(
+  definition: SpoolExtraFieldDefinition,
+  existing: SpoolExtraFieldDefinition | undefined,
+): string | null {
+  if (!existing) return null
+  if (existing.fieldType !== definition.fieldType)
+    return 'Field type cannot be changed.'
+  if (definition.fieldType === 'choice') {
+    if (existing.multiChoice !== definition.multiChoice)
+      return 'Multi choice cannot be changed.'
+    if (
+      existing.choices !== null &&
+      definition.choices !== null &&
+      !existing.choices.every((choice) => definition.choices?.includes(choice))
+    )
+      return 'Cannot remove existing choices.'
   }
   return null
 }
@@ -183,11 +234,16 @@ async function list(
   entity: SpoolEntityType,
 ): Promise<LegacyModuleResult> {
   const fields = await repo.extraFields.list(entity)
-  return fields.ok ? respond(200, sorted(fields.value).map(fieldJson)) : fields
+  return fields.ok
+    ? respond(200, registry(fields.value).map(fieldWire))
+    : fields
 }
 
-const missingField = (key: string) =>
-  message(404, `Extra field with key ${key} does not exist.`)
+const missingField = (key: string, entity: SpoolEntityType) =>
+  message(
+    404,
+    `Extra field with key ${key} does not exist for entity type ${entity}`,
+  )
 
 async function values(
   repo: SpoolLibraryRepository,
@@ -196,7 +252,8 @@ async function values(
 ): Promise<LegacyModuleResult> {
   const fields = await repo.extraFields.list(entity)
   if (!fields.ok) return fields
-  if (!fields.value.some((f) => f.key === key)) return missingField(key)
+  if (!fields.value.some((f) => f.key === key))
+    return message(404, `No extra field with key '${key}'.`)
   const rows =
     entity === 'vendor'
       ? await loadAll((page) => repo.vendors.list(page))
@@ -214,9 +271,17 @@ async function values(
     } catch {
       continue
     }
-    for (const item of Array.isArray(decoded) ? decoded : [decoded])
-      if (item !== null && item !== undefined)
-        seen.add(typeof item === 'string' ? item : JSON.stringify(item))
+    // SQLite's json_extract: a scalar string is its text, a list or object its
+    // minified JSON text; null and empty values are left out.
+    const text =
+      typeof decoded === 'string'
+        ? decoded
+        : decoded === null || decoded === undefined
+          ? ''
+          : typeof decoded === 'object'
+            ? JSON.stringify(decoded)
+            : String(decoded)
+    if (text !== '') seen.add(text)
   }
   return respond(
     200,
@@ -263,15 +328,20 @@ export const fieldModule: LegacyApiModule = {
         entityType: entity.value,
         key: key.value,
       }
-      const error = definitionError(
-        definition,
-        existing.value.find((f) => f.key === definition.key),
-      )
+      const error =
+        definitionError(definition, parsed.multiChoiceSet) ??
+        updateError(
+          definition,
+          existing.value.find((f) => f.key === definition.key),
+        )
       if (error) return message(400, error)
       const saved = await repo.extraFields.upsert(definition)
       if (!saved.ok)
         return saved.reason === 'limit'
-          ? message(400, 'Too many extra fields for this entity type.')
+          ? message(
+              400,
+              `Cannot add another extra field for ${entity.value}, the maximum is ${MAX_EXTRA_FIELDS}.`,
+            )
           : saved
       return list(repo, entity.value)
     }
@@ -283,7 +353,9 @@ export const fieldModule: LegacyApiModule = {
     if (request.method === 'GET') return values(repo, entity.value, key.value)
     const removed = await repo.extraFields.delete(entity.value, key.value)
     if (!removed.ok)
-      return removed.reason === 'not-found' ? missingField(key.value) : removed
+      return removed.reason === 'not-found'
+        ? missingField(key.value, entity.value)
+        : removed
     return list(repo, entity.value)
   },
 }

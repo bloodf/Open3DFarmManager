@@ -41,7 +41,7 @@ function checkRename(
 export const locationModule: LegacyApiModule = {
   name: 'location',
   async handle(repo, request) {
-    const location = /^\/api\/v1\/location(?:\/([^/]+))?$/.exec(request.apiPath)
+    const location = /^\/api\/v1\/location(?:\/(.+))?$/.exec(request.apiPath)
     const field = /^\/api\/v1\/spool\/field\/([^/]+)$/.exec(request.apiPath)
     if (!location && !field) return undefined
     const allowed = location

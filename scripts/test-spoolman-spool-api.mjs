@@ -471,17 +471,14 @@ try {
     'literal-upstream-client-contracts-moonraker-octoprint-ha-orca-connector-kobra',
   )
 
-  // Unclaimed sibling subpath `/api/v1/spool/group` stays 404
-  const groupUnclaimed = await call(
-    writeA,
-    'GET',
-    '/api/v1/spool/group?group_by=location',
-  )
+  // A path no route serves is FastAPI's 404 (verified against the pinned
+  // image by scripts/test-spoolman-parity.mjs)
+  const unclaimed = await call(writeA, 'GET', '/api/v1/unclaimed-sibling')
   assert.deepEqual(
-    [groupUnclaimed.status, groupUnclaimed.body],
-    [404, { message: 'Not Found' }],
+    [unclaimed.status, unclaimed.body],
+    [404, { detail: 'Not Found' }],
   )
-  check('sibling-spool-group-path-left-unclaimed')
+  check('unclaimed-path-answers-not-found')
 
   // ---- cross-farm isolation: farm B sees nothing of farm A and cannot touch it
   const emptyB = await call(writeB, 'GET', '/api/v1/spool?allow_archived=true')

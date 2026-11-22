@@ -5,7 +5,10 @@ import {
   handleLegacyRequest,
   legacyFailure,
 } from '../../utils/spool-library/legacy-handler.ts'
-import { classifyLegacyBody } from '../../utils/spool-library/legacy-api/body.ts'
+import {
+  classifyLegacyBody,
+  describeLegacyBody,
+} from '../../utils/spool-library/legacy-api/body.ts'
 import { spoolLibraryRuntime } from '../../utils/spool-library/runtime.ts'
 import { createSpoolFeedHooks } from '../../utils/spool-library/ws-feed.ts'
 import { splitLegacyPath } from '../../utils/spool-library/legacy-path.ts'
@@ -67,6 +70,15 @@ async function handleHttp(event: H3Event) {
       pathname,
       query,
       body: classifyLegacyBody(raw, getRequestHeader(event, 'content-type')),
+      bodyDetails: describeLegacyBody(
+        raw,
+        getRequestHeader(event, 'content-type'),
+      ),
+      headers: {
+        origin: getRequestHeader(event, 'origin') ?? null,
+        host: getRequestHeader(event, 'host') ?? null,
+        forwardedHost: getRequestHeader(event, 'x-forwarded-host') ?? null,
+      },
     })
   } catch (error) {
     logUnhandledError(error, { path: '/spoolman/' })

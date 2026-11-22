@@ -528,7 +528,7 @@ try {
   const unclaimed = await call(writeA, 'GET', '/api/v1/unclaimed-endpoint')
   assert.deepEqual(
     [unclaimed.status, unclaimed.body],
-    [404, { message: 'Not Found' }],
+    [404, { detail: 'Not Found' }],
   )
   check('module-interface-extends-dispatcher')
 

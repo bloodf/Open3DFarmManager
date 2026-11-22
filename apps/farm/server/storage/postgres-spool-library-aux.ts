@@ -35,8 +35,8 @@ export type AuxRepository = Pick<
   >
 }
 
-/** Upstream bounds: 128 definitions per entity would be generous; stay under the list cap. */
-const MAX_FIELDS_PER_ENTITY = 256
+/** Upstream `MAX_EXTRA_FIELDS_PER_ENTITY`. */
+const MAX_FIELDS_PER_ENTITY = 128
 const KEY = /^[a-z0-9_]{1,64}$/
 const ok = <T>(value: T): Result<T> => ({ ok: true, value })
 const invalid = { ok: false, reason: 'invalid-input' } as const
@@ -51,6 +51,24 @@ const ENTITY_TABLE: Record<SpoolEntityType, string> = {
 
 export function createAuxRepository(ctx: AuxContext): AuxRepository {
   const farm = ctx.farmId
+  /**
+   * Settings and field definitions are listed in the order they were first
+   * written (upstream rows keep their rowid): `updated_at` of a new row is one
+   * past the largest of the farm's rows, and a rewrite keeps it.
+   */
+  const nextSettingOrder = (sp: Sql) =>
+    sp`GREATEST(${ctx.now}::bigint, 1 + COALESCE((SELECT max(updated_at) FROM farm.spool_library_settings WHERE farm_id=${farm}::uuid), 0))`
+  /**
+   * The `extra_fields_<entity>` setting counts as set once a field was written,
+   * and then reads as the registry (a text value kept by a direct write to the
+   * setting is dropped, as upstream rewrites it from the registry).
+   */
+  const markRegistry = async (sp: Sql, entity: SpoolEntityType) => {
+    await sp`
+      INSERT INTO farm.spool_library_settings (farm_id, key, value, updated_at)
+      VALUES (${farm}::uuid, ${`extra_fields_${entity}`}, '[]'::jsonb, ${nextSettingOrder(sp)})
+      ON CONFLICT (farm_id, key) DO UPDATE SET value='[]'::jsonb`
+  }
   return {
     extraFieldWrites: {
       upsert: (definition: SpoolExtraFieldDefinition) =>
@@ -72,16 +90,19 @@ export function createAuxRepository(ctx: AuxContext): AuxRepository {
             VALUES (${farm}::uuid, ${definition.entityType}, ${definition.key}, ${definition.name}, ${definition.fieldType},
               ${definition.order}, ${definition.unit}, ${definition.defaultValue},
               ${definition.choices === null ? null : sp.json(definition.choices as never)},
-              ${definition.multiChoice}, ${ctx.now})
+              ${definition.multiChoice},
+              GREATEST(${ctx.now}::bigint, 1 + COALESCE((SELECT max(updated_at) FROM farm.spool_library_fields
+                WHERE farm_id=${farm}::uuid AND entity_type=${definition.entityType}), 0)))
             ON CONFLICT (farm_id, entity_type, key) DO UPDATE SET
               name=EXCLUDED.name, field_type=EXCLUDED.field_type, sort_order=EXCLUDED.sort_order,
               unit=EXCLUDED.unit, default_value=EXCLUDED.default_value, choices=EXCLUDED.choices,
               multi_choice=EXCLUDED.multi_choice, updated_at=EXCLUDED.updated_at,
               source_key='local',
               source_sha256='0000000000000000000000000000000000000000000000000000000000000000'`
+          await markRegistry(sp, definition.entityType)
           return ok(true as const)
         }),
-      delete: (entity: SpoolEntityType, key: string) =>
+      delete: (entity: SpoolEntityType, key: string, keepValues = false) =>
         ctx.guarded(true, async (sp) => {
           if (!KEY.test(key) || !(entity in ENTITY_TABLE)) return invalid
           const rows = await sp`
@@ -89,9 +110,11 @@ export function createAuxRepository(ctx: AuxContext): AuxRepository {
             WHERE farm_id=${farm}::uuid AND entity_type=${entity} AND key=${key}
             RETURNING key`
           if (!rows[0]) return missing
+          await markRegistry(sp, entity)
           // Upstream also drops the value from every record of the entity.
-          await sp`UPDATE ${sp.unsafe(ENTITY_TABLE[entity])} SET extra = extra - ${key}::text
-            WHERE farm_id=${farm}::uuid AND extra ? ${key}::text`
+          if (!keepValues)
+            await sp`UPDATE ${sp.unsafe(ENTITY_TABLE[entity])} SET extra = extra - ${key}::text
+              WHERE farm_id=${farm}::uuid AND extra ? ${key}::text`
           return ok(true as const)
         }),
     },
@@ -102,7 +125,7 @@ export function createAuxRepository(ctx: AuxContext): AuxRepository {
           ok(
             await sp<
               SpoolSetting[]
-            >`SELECT key, value FROM farm.spool_library_settings WHERE farm_id=${farm}::uuid ORDER BY key LIMIT 256`,
+            >`SELECT key, value FROM farm.spool_library_settings WHERE farm_id=${farm}::uuid ORDER BY updated_at, key LIMIT 256`,
           ),
         ),
       set: (key: string, value: unknown) =>
@@ -110,8 +133,8 @@ export function createAuxRepository(ctx: AuxContext): AuxRepository {
           if (!KEY.test(key)) return invalid
           await sp`
             INSERT INTO farm.spool_library_settings (farm_id, key, value, updated_at)
-            VALUES (${farm}::uuid, ${key}, ${sp.json(value as never)}, ${ctx.now})
-            ON CONFLICT (farm_id, key) DO UPDATE SET value=EXCLUDED.value, updated_at=EXCLUDED.updated_at,
+            VALUES (${farm}::uuid, ${key}, ${sp.json(value as never)}, ${nextSettingOrder(sp)})
+            ON CONFLICT (farm_id, key) DO UPDATE SET value=EXCLUDED.value,
               source_key='local',
               source_sha256='0000000000000000000000000000000000000000000000000000000000000000'`
           return ok(true as const)
@@ -129,13 +152,10 @@ export function createAuxRepository(ctx: AuxContext): AuxRepository {
         ctx.guarded(false, async (sp) => {
           const rows = await sp<
             { location: string }[]
-          >`SELECT DISTINCT location FROM farm.spools WHERE farm_id=${farm}::uuid AND location IS NOT NULL LIMIT 20000`
-          // Code-point order, independent of the database collation.
-          return ok(
-            rows
-              .map((row) => row.location)
-              .sort((x, y) => (x < y ? -1 : x > y ? 1 : 0)),
-          )
+          >`SELECT location FROM farm.spools WHERE farm_id=${farm}::uuid AND location IS NOT NULL GROUP BY location ORDER BY min(id) LIMIT 20000`
+          // Upstream selects DISTINCT without an order: the first spool to
+          // hold a location lists it.
+          return ok(rows.map((row) => row.location))
         }),
     },
 

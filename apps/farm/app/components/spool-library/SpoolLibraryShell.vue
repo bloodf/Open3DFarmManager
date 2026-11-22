@@ -18,6 +18,7 @@ const props = defineProps<{
     | 'stock'
     | 'drying'
     | 'labels'
+    | 'finder'
     | 'reports'
   title: string
   description: string
@@ -83,6 +84,11 @@ const navLinks = computed(() => {
       id: 'labels' as const,
       to: { path: '/bobinas/etiquetas', query },
       label: 'Etiquetas',
+    },
+    {
+      id: 'finder' as const,
+      to: { path: '/bobinas/localizar', query },
+      label: 'Localizar',
     },
     {
       id: 'reports' as const,

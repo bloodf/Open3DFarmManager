@@ -1,5 +1,5 @@
 import { randomBytes, X509Certificate } from 'node:crypto'
-import { writeFile } from 'node:fs/promises'
+import { chmod, mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import postgres, { type Sql } from 'postgres'
 import { IntegrationAppsService } from '../apps/farm/server/services/integration-apps.ts'
@@ -25,6 +25,13 @@ export async function seedSandbox(
   state: string,
   options: { origin?: string; moonraker?: string; local?: boolean } = {},
 ) {
+  // The seed directory contains credentials and may be supplied by an
+  // operator, so enforce its privacy even when it already exists.
+  await mkdir(state, { recursive: true, mode: 0o700 })
+  await chmod(state, 0o700)
+  const connectorData = join(state, 'connector-data')
+  await mkdir(connectorData, { recursive: true, mode: 0o700 })
+  await chmod(connectorData, 0o700)
   const origin = options.origin ?? 'https://app:3000'
   const moonraker = options.moonraker ?? 'http://klipper:7125'
   const sandboxPath = (name: string) =>
@@ -81,7 +88,7 @@ export async function seedSandbox(
   const ownerSql = pool('sandbox_owner')
   const integrationSql = pool('sandbox_integrations')
   try {
-    const identity = loadOrCreateIdentity(join(state, 'connector-data'))
+    const identity = loadOrCreateIdentity(connectorData)
     const enrolled = await enrollConnector({
       admin,
       pairSql,

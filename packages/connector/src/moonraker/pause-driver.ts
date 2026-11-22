@@ -350,19 +350,17 @@ export function openFixedMoonrakerPause(input: {
     if (terminal) return
     try {
       current()
-      if (
-        binary ||
-        !Buffer.isBuffer(data) ||
-        ++receivedFrames > 16 ||
-        (receivedBytes += data.byteLength) > 32768
-      )
-        throw failure()
+      if (binary || !Buffer.isBuffer(data)) throw failure()
       const frame = decodeMoonrakerFrame(
         data,
         binary,
         Math.min(4096, selected.limits.maxMessageBytes),
       )
+      // Side notifications cannot acknowledge a request; do not count them
+      // toward the reply-frame or byte caps while waiting for a result.
       if (SideNotification.safeParse(frame).success) return
+      if (++receivedFrames > 16 || (receivedBytes += data.byteLength) > 32768)
+        throw failure()
       const result = Reply.parse(frame)
       if (
         !pending ||

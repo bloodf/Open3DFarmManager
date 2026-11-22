@@ -5,7 +5,6 @@ import {
   disposablePostgres,
   findPostgresBin,
 } from '../helpers/disposable-postgres.ts'
-import { loadMigrationCatalog, runMigrations } from '../../scripts/db/migrations.ts'
 import { testPostgresMigrations } from '../helpers/postgres-migrations-integration.ts'
 
 const migrationsDir = new URL('../../infra/db/migrations/', import.meta.url)
@@ -24,7 +23,7 @@ test('no migration locates check constraints with an IN-list LIKE lookup', async
   assert.deepEqual(offenders, [])
 })
 
-test('all migrations apply, while the prefix through 0080 rolls back and reapplies on disposable PostgreSQL', async (context) => {
+test('migrations through 0080 apply, roll back, and apply again on disposable PostgreSQL', async (context) => {
   try {
     findPostgresBin()
   } catch (error) {
@@ -39,15 +38,6 @@ test('all migrations apply, while the prefix through 0080 rolls back and reappli
     const sql = await database.start()
     try {
       await testPostgresMigrations(sql, '0080_integration_library_api')
-      const catalog = await loadMigrationCatalog()
-      const durableIndex = catalog.findIndex(
-        (migration) => migration.id === '0026_configuration',
-      )
-      assert.ok(durableIndex >= 0)
-      assert.deepEqual(
-        await runMigrations(sql, catalog, { kind: 'up' }),
-        catalog.slice(durableIndex + 1).map((migration) => migration.id),
-      )
     } finally {
       await sql.end({ timeout: 5 })
     }

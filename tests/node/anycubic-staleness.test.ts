@@ -14,7 +14,9 @@ test('partial reports keep Anycubic available after once-only fields expire', as
   writeFileSync(passwordFile, JSON.stringify('synthetic'), { mode: 0o600 })
   const controller = new AbortController()
   let report: (payload: unknown) => void = () => {}
-  const observations: unknown[] = []
+  const observations: Parameters<
+    Parameters<typeof createAnycubicCollection>[0]['onObservation']
+  >[0][] = []
   const unavailable: number[] = []
   const collection = createAnycubicCollection({
     binding: {
@@ -42,12 +44,24 @@ test('partial reports keep Anycubic available after once-only fields expire', as
         progress: 10,
         filename: 'part.gcode',
         total_layers: 100,
+        project: { remain_time: 18 },
       },
     })
     for (let i = 1; i <= 8; i++) {
       now += 1000
       t.mock.timers.tick(1000)
       report({ data: { state: 'printing', progress: 10 + i } })
+      const latest = observations.at(-1)
+      assert.equal(
+        latest?.printer.estimatedRemainingSeconds,
+        i < 5 ? 1080 : undefined,
+      )
+      const timing = latest?.fieldObservedAtMonoMs
+      assert.ok(timing && 'anycubic' in timing)
+      assert.equal(
+        timing.anycubic.estimatedRemainingSeconds,
+        i < 5 ? 100 : undefined,
+      )
     }
     assert.equal(observations.length, 9)
     assert.deepEqual(unavailable, [])

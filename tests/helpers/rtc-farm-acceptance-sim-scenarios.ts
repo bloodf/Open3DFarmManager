@@ -96,6 +96,39 @@ export function simulatorRtcFarmScenarios(
   }
 }
 
+export const mockSimulatorRtcFarmScenarios: Record<string, RtcFarmScenario> =
+  Object.fromEntries(
+    Object.entries(
+      simulatorRtcFarmScenarios({
+        RTC_FARM_TEST_SIM_MOONRAKER: 'http://127.0.0.1:1',
+        RTC_FARM_TEST_SIM_SPOOLMAN: 'http://127.0.0.1:1',
+        RTC_FARM_TEST_SIM_PRINTING_PAUSE: 'sv06',
+      }),
+    ).map(([name, row]) => [
+      name,
+      {
+        ...row,
+        resources: ['mock-simulator'],
+        expect:
+          name === 'farm-page-simulator-inventory'
+            ? [
+                ...row.expect,
+                'farm-page-printer-ui-origin-link',
+                'farm-page-tablet-grid',
+                'printers-page-tablet-grid',
+              ]
+            : row.expect,
+        env: {
+          ...row.env,
+          SIGNALLING_HTTPS_SIM_MOONRAKER: '',
+          SIGNALLING_HTTPS_SIM_SPOOLMAN: '',
+          SIGNALLING_HTTPS_MOCK_SIMULATOR:
+            name === 'farm-page-printing-pause' ? 'sv06' : 'u1',
+        },
+      },
+    ]),
+  )
+
 /**
  * Inside the Connector fixture child: the opted-in simulator origins, after a
  * read-only `/server/info` check that Klippy is connected and ready.

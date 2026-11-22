@@ -33,6 +33,7 @@ export function allAcceptanceRows(env: NodeJS.ProcessEnv = process.env) {
 
 export function runnableAcceptanceRows(env: NodeJS.ProcessEnv = process.env) {
   return allAcceptanceRows(env).filter((row) => {
+    if (env.OPENFARM_SIM?.trim().toLowerCase() !== 'docker') return true
     if (row === 'farm-page-camera')
       return Boolean(
         env.RTC_FARM_TEST_RTSP_HELPER && env.RTC_FARM_TEST_RTSP_PORT,

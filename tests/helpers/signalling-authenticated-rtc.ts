@@ -1,3 +1,6 @@
+import { startMoonrakerMock } from '../../packages/sim-tools/src/mocks/moonraker-mock.ts'
+import { startSpoolmanMock } from '../../packages/sim-tools/src/mocks/spoolman-mock.ts'
+import { seedSpoolman } from '../../packages/sim-tools/src/spoolman.ts'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { appendFile, open, realpath } from 'node:fs/promises'
@@ -112,6 +115,7 @@ async function resourceLedger(input: SignallingIdentityInput) {
 async function connectorChild(
   input: SignallingIdentityInput,
   note: Awaited<ReturnType<typeof resourceLedger>>,
+  mocks?: { moonraker: string; spoolman: string },
 ) {
   const child = spawn(
     process.execPath,
@@ -152,6 +156,10 @@ async function connectorChild(
             .filter((key) => process.env[key])
             .map((key) => [key, process.env[key]!]),
         ),
+        ...(mocks && {
+          SIGNALLING_HTTPS_SIM_MOONRAKER: mocks.moonraker,
+          SIGNALLING_HTTPS_SIM_SPOOLMAN: mocks.spoolman,
+        }),
       },
     },
   )
@@ -343,6 +351,11 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
     throw Error('Camera fixture requires the farm page')
   if (closure !== 'disconnect' && closure !== 'revocation')
     throw Error('Invalid RTC closure scenario')
+  const mockProfile = process.env.SIGNALLING_HTTPS_MOCK_SIMULATOR
+  if (mockProfile && mockProfile !== 'sv06' && mockProfile !== 'u1')
+    throw Error('Invalid in-process simulator profile')
+  let mockMoonraker: Awaited<ReturnType<typeof startMoonrakerMock>> | undefined
+  let mockSpoolman: Awaited<ReturnType<typeof startSpoolmanMock>> | undefined
   let used = false
   return Object.freeze({
     async identityHandles(input: SignallingIdentityInput) {
@@ -397,11 +410,21 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
             connector?.dispose(),
             input.ownerPage.unroute(route, serve),
           ])
+          const mockResults = await Promise.allSettled([
+            mockMoonraker?.close(),
+            mockSpoolman?.close(),
+          ])
+          if (mockMoonraker || mockSpoolman)
+            await note('in-process-simulators-closed')
           current = undefined
           await note(
             'browser-actor-and-route-disposed; parent-owns-pages-and-context',
           )
-          if (results.some((result) => result.status === 'rejected'))
+          if (
+            [...results, ...mockResults].some(
+              (result) => result.status === 'rejected',
+            )
+          )
             throw Error('RTC fixture cleanup incomplete')
         })()
         return disposal
@@ -434,7 +457,25 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
             await actor.evaluate((actor) => actor.publicJwk),
           )
         ).publicKey
-        connector = await connectorChild(input, note)
+        if (mockProfile) {
+          mockMoonraker = await startMoonrakerMock({ profile: mockProfile })
+          mockSpoolman = await startSpoolmanMock()
+          await note(
+            'in-process-simulators:' +
+              JSON.stringify({
+                moonraker: mockMoonraker.origin,
+                spoolman: mockSpoolman.origin,
+              }),
+          )
+          await seedSpoolman(mockSpoolman.origin)
+        }
+        connector = await connectorChild(
+          input,
+          note,
+          mockMoonraker && mockSpoolman
+            ? { moonraker: mockMoonraker.origin, spoolman: mockSpoolman.origin }
+            : undefined,
+        )
         const identity = await connector.request({ kind: 'identity' })
         if (identity.kind !== 'identity')
           throw Error('Connector identity missing')
@@ -595,14 +636,21 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
             await testPrintingPausePage({
               fixture: input,
               directory: runtime.directory,
+              ...(mockMoonraker
+                ? { ownedMockOrigin: mockMoonraker.origin }
+                : {}),
               note: session.note,
             })
             return
           }
-          if (process.env.SIGNALLING_HTTPS_SIM_MOONRAKER) {
+          if (mockMoonraker || process.env.SIGNALLING_HTTPS_SIM_MOONRAKER) {
             const { testSimulatorFarmPage } =
               await import('./signalling-sim-farm-page.ts')
-            await testSimulatorFarmPage({ fixture: input, note: session.note })
+            await testSimulatorFarmPage({
+              fixture: input,
+              mockOrigin: mockMoonraker?.origin,
+              note: session.note,
+            })
             await session.note(
               'authenticated-farm-page-simulator-inventory-and-readonly-degradation',
             )

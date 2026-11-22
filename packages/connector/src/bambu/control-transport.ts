@@ -33,6 +33,11 @@ const ControlRequest = z.union([
       ]),
       param: z.string().max(512).optional(),
       url: z.string().max(800).optional(),
+      ams_mapping: z
+        .array(z.number().int().min(-1).max(255))
+        .max(64)
+        .optional(),
+      use_ams: z.boolean().optional(),
       sequence_id: sequence,
     }),
   }),

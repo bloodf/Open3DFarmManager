@@ -4,6 +4,8 @@ import { isIPv4 } from 'node:net'
 import type { Printer } from './index.ts'
 import { readFileSync } from 'node:fs'
 
+const secureHosts = new Set<string>()
+
 const service = '_services._dns-sd._udp.local'
 export function crealityQuery(): Buffer {
   return Buffer.concat([
@@ -36,6 +38,7 @@ function probe(
   ca?: string,
   strict = false,
   rejectMetadata = secure,
+  allowUnavailable = false,
 ): Promise<Printer | undefined> {
   return new Promise((resolve, reject) => {
     let done = false
@@ -153,9 +156,12 @@ function probe(
       if (
         !done &&
         strict &&
-        error.code !== 'ECONNREFUSED' &&
-        error.code !== 'EHOSTUNREACH' &&
-        error.code !== 'ENETUNREACH'
+        !(
+          allowUnavailable &&
+          ['ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH'].includes(
+            error.code ?? '',
+          )
+        )
       ) {
         done = true
         reject(new Error(`Creality HTTPS discovery failed: ${error.message}`))
@@ -172,14 +178,27 @@ export async function probeCreality(
   },
 ): Promise<Printer | undefined> {
   if (!isIPv4(host)) return
-  return (
-    (await probe(
-      host,
-      ports.https,
-      true,
-      ports.caFile ? readFileSync(ports.caFile, 'utf8') : undefined,
-    )) ?? (await probe(host, ports.http, false))
+  // An explicitly shared HTTP/HTTPS probe port denotes a legacy-only scan.
+  if (
+    ports.https === ports.http &&
+    !ports.caFile &&
+    !secureHosts.has(`${host}:${ports.https}`)
   )
+    return probe(host, ports.http, false)
+  const discovered = await probe(
+    host,
+    ports.https,
+    true,
+    ports.caFile ? readFileSync(ports.caFile, 'utf8') : undefined,
+    true,
+    true,
+    !ports.caFile && !secureHosts.has(`${host}:${ports.https}`),
+  )
+  if (discovered) {
+    secureHosts.add(`${host}:${ports.https}`)
+    return discovered
+  }
+  return probe(host, ports.http, false)
 }
 
 /** Resolve once before opening a socket. Invalid secure metadata never downgrades. */
@@ -196,7 +215,12 @@ export async function resolveCrealityEndpoint(input: {
     true,
     ca,
     true,
+    true,
+    !input.caFile &&
+      !secureHosts.has(`${input.host}:${input.httpsPort ?? 443}`) &&
+      input.port !== undefined,
   )
+  if (discovered) secureHosts.add(`${input.host}:${input.httpsPort ?? 443}`)
   return {
     host: input.host,
     port: discovered?.port ?? input.port ?? 9999,

@@ -53,6 +53,8 @@ const key = (farmId: string, pool: readonly string[]) =>
 export class SpoolFeedBus {
   private readonly pools = new Map<string, Set<FeedSubscriber>>()
   private readonly perFarm = new Map<string, number>()
+  /** Feeds keyed by the legacy credential that opened them. */
+  private readonly byCredential = new Map<string, Set<FeedSubscriber>>()
 
   /** True when at least one client of this farm is listening. */
   hasSubscribers(farmId: string): boolean {
@@ -62,11 +64,14 @@ export class SpoolFeedBus {
   /**
    * Listen to one pool of one farm. Returns the unsubscribe function, or
    * `undefined` when the farm already holds the maximum number of feeds.
+   * `credentialId` ties the feed to the legacy credential so revocation can
+   * close it without touching feeds of other credentials on the same farm.
    */
   subscribe(
     farmId: string,
     pool: readonly string[],
     subscriber: FeedSubscriber,
+    credentialId: string,
   ): (() => void) | undefined {
     const count = this.perFarm.get(farmId) ?? 0
     if (count >= MAX_FEEDS_PER_FARM) return undefined
@@ -75,6 +80,9 @@ export class SpoolFeedBus {
     if (!set) this.pools.set(id, (set = new Set()))
     set.add(subscriber)
     this.perFarm.set(farmId, count + 1)
+    let credSet = this.byCredential.get(credentialId)
+    if (!credSet) this.byCredential.set(credentialId, (credSet = new Set()))
+    credSet.add(subscriber)
     let active = true
     return () => {
       if (!active) return
@@ -85,6 +93,9 @@ export class SpoolFeedBus {
       const left = (this.perFarm.get(farmId) ?? 1) - 1
       if (left <= 0) this.perFarm.delete(farmId)
       else this.perFarm.set(farmId, left)
+      const remaining = this.byCredential.get(credentialId)
+      remaining?.delete(subscriber)
+      if (remaining?.size === 0) this.byCredential.delete(credentialId)
     }
   }
 
@@ -100,6 +111,25 @@ export class SpoolFeedBus {
           } catch {
             // A dead socket must not stop delivery to the others.
           }
+      }
+  }
+
+  /**
+   * Close every feed opened with this legacy credential (revocation). Other
+   * credentials on the same farm keep their feeds.
+   */
+  closeCredential(
+    credentialId: string,
+    code = 4401,
+    reason = 'Unauthorized',
+  ): void {
+    const set = this.byCredential.get(credentialId)
+    if (!set) return
+    for (const subscriber of [...set])
+      try {
+        subscriber.close(code, reason)
+      } catch {
+        // Already closed.
       }
   }
 

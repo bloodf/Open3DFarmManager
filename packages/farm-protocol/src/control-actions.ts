@@ -189,10 +189,30 @@ export function controlRoleAllowed(
     return role === 'owner' || role === 'admin'
   return ['owner', 'admin', 'operator'].includes(role)
 }
+/** Motion, filament, macros and job starts never run while a print owns the printer. */
+export const IDLE_ONLY_CONTROL_ACTIONS: ReadonlySet<string> = new Set([
+  'home',
+  'load_filament',
+  'unload_filament',
+  'run_macro',
+  'start_print',
+  'start_library_print',
+])
+/**
+ * The one idle-only rule shared by every Connector entry point: true when
+ * `action` must be refused as printer-busy because a print is running or paused.
+ */
+export function controlPrinterBusy(action: string, state: string): boolean {
+  return (
+    IDLE_ONLY_CONTROL_ACTIONS.has(action) &&
+    (state === 'printing' || state === 'paused')
+  )
+}
 export function controlSourceState(
   action: ExtendedControlAction,
   state: string,
 ): boolean {
+  if (controlPrinterBusy(action, state)) return false
   if (action === 'exclude_object')
     return state === 'printing' || state === 'paused'
   if (action === 'emergency_stop') return true

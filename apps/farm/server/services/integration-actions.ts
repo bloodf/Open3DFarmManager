@@ -209,6 +209,8 @@ export class IntegrationActionsService {
       return { ok: false, problem: 'validation-failed' }
     const action = parseActionRequest(body)
     if (!action) return { ok: false, problem: 'validation-failed' }
+    if (action.action === 'start_library_print')
+      return { ok: false, problem: 'unsupported' }
     const requiredScope = (
       CONTROL_BASIC.has(action.action) ? 'control:basic' : 'control:extended'
     ) as NewAction['requiredScope']

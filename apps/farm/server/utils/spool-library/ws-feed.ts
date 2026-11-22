@@ -40,6 +40,8 @@ export interface SpoolFeedHooks {
 
 interface Session {
   farmId: string
+  /** Legacy credential that authenticated this feed; closed on revoke. */
+  credentialId: string
   pool: readonly string[]
   /** Upstream accepts, then closes with this code. */
   refuse?: { code: number; reason: string }
@@ -140,7 +142,11 @@ export function createSpoolFeedHooks(
           (failure.body as { message: string }).message,
         )
       }
-      const session: Session = { farmId: farm.value, pool }
+      const session: Session = {
+        farmId: farm.value,
+        credentialId: path.parsed.credentialId,
+        pool,
+      }
       const refuse = handshakeRefusal(request.headers)
       if (refuse) session.refuse = refuse
       request.context[SESSION] = session
@@ -151,10 +157,15 @@ export function createSpoolFeedHooks(
       if (!session) return peer.close(1011, 'Internal error')
       if (session.refuse)
         return peer.close(session.refuse.code, session.refuse.reason)
-      const unsubscribe = bus.subscribe(session.farmId, session.pool, {
-        send: (text) => peer.send(text),
-        close: (code, reason) => peer.close(code, reason),
-      })
+      const unsubscribe = bus.subscribe(
+        session.farmId,
+        session.pool,
+        {
+          send: (text) => peer.send(text),
+          close: (code, reason) => peer.close(code, reason),
+        },
+        session.credentialId,
+      )
       if (!unsubscribe) return peer.close(1013, 'Too many feeds')
       session.unsubscribe = unsubscribe
     },

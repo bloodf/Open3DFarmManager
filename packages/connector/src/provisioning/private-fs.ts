@@ -166,12 +166,75 @@ function processAlive(pid: number): boolean {
   }
 }
 
+/** Opaque process start identity from /proc; undefined when unreadable. */
+function processStartTime(pid: number): string | undefined {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8')
+    return stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19]
+  } catch {
+    return undefined
+  }
+}
+
+type LockOwner = { pid: number; start: string | undefined }
+
+function parseLockOwner(text: string): LockOwner | undefined {
+  // Empty leftover from a crash mid-write is stale.
+  if (text === '') return { pid: 0, start: undefined }
+  const match = /^([1-9][0-9]{0,9})\n(?:([0-9]+)\n)?$/.exec(text)
+  if (!match) return undefined
+  return { pid: Number(match[1]), start: match[2] }
+}
+
+function lockBody(pid: number, start: string | undefined): string {
+  return start !== undefined ? `${pid}\n${start}\n` : `${pid}\n`
+}
+
+/**
+ * True when the recorded owner certainly cannot still hold the lock: empty,
+ * dead PID, reused PID (start mismatch), or a legacy same-PID lock that cannot
+ * prove it is this process incarnation.
+ */
+function lockStale(owner: LockOwner): boolean {
+  if (owner.pid < 1) return true
+  if (!processAlive(owner.pid)) return true
+  const current = processStartTime(owner.pid)
+  if (owner.start !== undefined && current !== undefined)
+    return owner.start !== current
+  // Legacy PID-only lock with our PID: if start identities are available we
+  // would have written one, so this is a prior incarnation after PID reuse.
+  if (
+    owner.start === undefined &&
+    owner.pid === process.pid &&
+    processStartTime(process.pid) !== undefined
+  )
+    return true
+  // Cannot prove staleness (live other PID, or start unreadable).
+  return false
+}
+
+function readLockText(path: string): string {
+  const stat = lstatSync(path)
+  privateStat(stat, false)
+  if (stat.size > 64) fail()
+  const lockFd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+  try {
+    return readFileSync(lockFd, 'utf8')
+  } finally {
+    closeSync(lockFd)
+  }
+}
+
 /**
  * Exclusive cross-process lock (O_EXCL). A lock whose recorded process no
- * longer exists is stale and is replaced; a live holder means busy.
+ * longer exists, or whose start identity does not match a live PID (including
+ * PID reuse after restart), is stale and is replaced; a live holder means busy.
+ * Empty lock files are treated as stale.
  */
 export function acquirePrivateLock(path: string): (() => void) | null {
   resolvedAbsolute(dirname(path))
+  const selfStart = processStartTime(process.pid)
+  const body = lockBody(process.pid, selfStart)
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const fd = openSync(
@@ -183,7 +246,7 @@ export function acquirePrivateLock(path: string): (() => void) | null {
         0o600,
       )
       try {
-        writeSync(fd, `${process.pid}\n`)
+        writeSync(fd, body)
         fsyncSync(fd)
       } finally {
         closeSync(fd)
@@ -202,19 +265,16 @@ export function acquirePrivateLock(path: string): (() => void) | null {
       ))
         return fail()
     }
-    const stat = lstatSync(path)
-    privateStat(stat, false)
-    if (stat.size > 32) fail()
-    const lockFd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW)
-    let text: string
-    try {
-      text = readFileSync(lockFd, 'utf8')
-    } finally {
-      closeSync(lockFd)
-    }
-    if (!/^[1-9][0-9]{0,9}\n$/.test(text)) fail()
-    const pid = Number(text.trim())
-    if (pid === process.pid || processAlive(pid)) return null
+    const text = readLockText(path)
+    const owner = parseLockOwner(text)
+    if (owner === undefined) return fail()
+    if (!lockStale(owner)) return null
+    // Re-read before unlink so a concurrent winner is not displaced.
+    const again = readLockText(path)
+    if (again !== text) continue
+    const ownerAgain = parseLockOwner(again)
+    if (ownerAgain === undefined || !lockStale(ownerAgain)) return null
+    // Drop the stale file, then retry O_EXCL so only one recoverer wins.
     unlinkSync(path)
   }
   return null

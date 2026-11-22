@@ -140,7 +140,11 @@ interface Connection {
   readonly request: IncomingMessage
   readonly mode: SignallingMode
   readonly pause: PauseOwner | undefined
-  readonly resource: SignallingResourceHandle
+  resource: SignallingResourceHandle
+  resources: SignallingWebSocketResources
+  releaseAdmission: () => void
+  cancelPromotedLifetime: () => void
+  makePort: (active: () => boolean) => SignallingSocketPort
   readonly start: SignallingClockSample
   lastSample: SignallingClockSample
   readonly supportsApiQueries: boolean
@@ -203,6 +207,9 @@ export class SignallingRuntime {
   readonly #cookie: SessionConfig
   readonly #clock: SignallingClock
   readonly #resources: SignallingWebSocketResources
+  readonly #connectorResources: SignallingWebSocketResources
+  readonly #connectorSources = new Map<string, number>()
+  #connectorPending = 0
   readonly #coordinator: SignallingCoordinator
   readonly #connections = new Map<IncomingMessage, Connection>()
   /** Strictly increasing confirmation sequence, anchored to database time. */
@@ -384,6 +391,10 @@ export class SignallingRuntime {
       now: () => this.#clock.monotonic(),
       after,
     })
+    this.#connectorResources = new SignallingWebSocketResources({
+      now: () => this.#clock.monotonic(),
+      after,
+    })
     this.#coordinator = new SignallingCoordinator(
       input.reader,
       input.credentials,
@@ -408,7 +419,27 @@ export class SignallingRuntime {
       )
       const request = inspected.request
       const start = signallingClockSample(this.#clock)
-      const resource = this.#resources.reserve({
+      const source = request.socket.remoteAddress ?? 'unknown'
+      let releaseAdmission = () => {}
+      if (role === 'connector') {
+        const count = this.#connectorSources.get(source) ?? 0
+        if (this.#connectorPending >= 8 || count >= 2)
+          throw new Error('Capacity')
+        this.#connectorPending++
+        this.#connectorSources.set(source, count + 1)
+        let released = false
+        releaseAdmission = () => {
+          if (released) return
+          released = true
+          this.#connectorPending--
+          const remaining = (this.#connectorSources.get(source) ?? 1) - 1
+          if (remaining) this.#connectorSources.set(source, remaining)
+          else this.#connectorSources.delete(source)
+        }
+      }
+      const resources =
+        role === 'connector' ? this.#connectorResources : this.#resources
+      const makePort = (active: () => boolean): SignallingSocketPort => ({
         bufferedAmount: () => connection?.native?.bufferedAmount() ?? 0,
         send: (text) => {
           if (
@@ -420,17 +451,30 @@ export class SignallingRuntime {
           connection.native.send(text)
         },
         terminate: () => {
+          if (!active()) return
           if (connection) this.#close(connection)
           else request.socket.destroy()
         },
-        close: (code, reason) => connection?.native?.close?.(code, reason),
+        close: (code, reason) => {
+          if (active()) connection?.native?.close?.(code, reason)
+        },
       })
-      if (!resource || request.socket.destroyed) throw new Error('Capacity')
+      const resource = resources.reserve(
+        makePort(() => !connection || connection.resources === resources),
+      )
+      if (!resource || request.socket.destroyed) {
+        releaseAdmission()
+        throw new Error('Capacity')
+      }
       connection = {
         request,
         mode,
         pause,
         resource,
+        resources,
+        releaseAdmission,
+        cancelPromotedLifetime: () => {},
+        makePort,
         start,
         lastSample: start,
         // Older Connectors reject unfamiliar frames. This hint carries no authority.
@@ -528,7 +572,7 @@ export class SignallingRuntime {
       return
     try {
       const text = signallingMessageText(message)
-      this.#resources.receive(connection.resource, text, async (wire) => {
+      connection.resources.receive(connection.resource, text, async (wire) => {
         this.#observeClock(connection)
         await this.#process(connection, wire)
         if (!connection.closed) this.#observeClock(connection)
@@ -566,6 +610,7 @@ export class SignallingRuntime {
     this.#pauseOwner = undefined
     for (const connection of this.#connections.values()) this.#close(connection)
     this.#resources.dispose()
+    this.#connectorResources.dispose()
     this.#inboxes.clear()
   }
   #connection(peer: unknown): Connection | undefined {
@@ -647,7 +692,7 @@ export class SignallingRuntime {
   #wire(connection: Connection, wire: string): void {
     if (
       !this.#owned(connection) ||
-      !this.#resources.send(connection.resource, wire)
+      !connection.resources.send(connection.resource, wire)
     )
       throw Error('Closed signalling send')
   }
@@ -867,6 +912,23 @@ export class SignallingRuntime {
           this.#inboxes.has(inboxKey(connection, current.identity.agent_id))
         )
           throw new Error('Inbox proof expired')
+        const oldResources = connection.resources
+        const oldResource = connection.resource
+        const promoted = this.#resources.reserve(
+          connection.makePort(() => connection.resources === this.#resources),
+        )
+        if (!promoted) throw new Error('Capacity')
+        connection.resources = this.#resources
+        connection.resource = promoted
+        oldResources.close(oldResource)
+        connection.releaseAdmission()
+        const remaining =
+          30_000 - (this.#clock.monotonic() - connection.start.monotonic)
+        if (!Number.isFinite(remaining) || remaining <= 0)
+          throw new Error('Expired')
+        connection.cancelPromotedLifetime = after(remaining, () =>
+          this.#close(connection),
+        )
         connection.state = { kind: 'connector.ready', identity: current }
         this.#inboxes.set(
           inboxKey(connection, current.identity.agent_id),
@@ -1123,7 +1185,7 @@ export class SignallingRuntime {
       connection.revalidationCancel = null
       const state = connection.state
       if (!('identity' in state) || connection.closed) return
-      void this.#resources.work(connection.resource, async () => {
+      void connection.resources.work(connection.resource, async () => {
         let current: Identity | null
         try {
           current = await this.#current(connection, state.identity)
@@ -1206,7 +1268,9 @@ export class SignallingRuntime {
     }
     // Drop any retained JWT from preauthentication/retry state before termination.
     connection.state = { kind: 'connector.begin' }
-    this.#resources.close(connection.resource, closeCode)
+    connection.releaseAdmission()
+    connection.cancelPromotedLifetime()
+    connection.resources.close(connection.resource, closeCode)
     if (!closeCode) {
       connection.native?.terminate()
       connection.request.socket.destroy()

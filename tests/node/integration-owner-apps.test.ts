@@ -86,13 +86,20 @@ function fixture(): {
       state.grants.push(grant)
       return grant
     },
-    async revokeGrant(_actor, id) {
+    async revokeGrant(_actor, id, _now, expectedFarmId) {
       const grant = state.grants.find((item) => item.id === id)
       if (!grant) return 'not-found'
+      if (expectedFarmId !== undefined && grant.farmId !== expectedFarmId)
+        return 'not-found'
       grant.disabledAt = Date.now()
       grant.disabledReason = 'revoked'
-      return 'ok'
+      return {
+        farmId: grant.farmId,
+        appId: grant.appId,
+        printerAssignmentId: grant.printerAssignmentId,
+      }
     },
+
     async listApps(_actor, id) {
       return id === farmId ? [...state.apps] : null
     },

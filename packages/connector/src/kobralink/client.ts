@@ -33,6 +33,15 @@ export class KobraLinkError extends Error {
 const fail = (code: KobraLinkErrorCode): never => {
   throw new KobraLinkError(code)
 }
+const UPLOAD_DEADLINE_CAP_MS = 60_000
+const UPLOAD_BYTES_PER_STEP = 8192
+const UPLOAD_MS_PER_STEP = 1000
+
+function kobraLinkUploadDeadlineMs(sizeBytes: number, baseMs: number): number {
+  const transferMs =
+    Math.ceil(sizeBytes / UPLOAD_BYTES_PER_STEP) * UPLOAD_MS_PER_STEP
+  return Math.min(UPLOAD_DEADLINE_CAP_MS, baseMs + transferMs)
+}
 const text = z.string().min(1).max(128)
 const bindingSchema = z.strictObject({
   id: text.regex(/^[A-Za-z0-9_-]+$/),
@@ -168,6 +177,7 @@ export function createKobraLinkClient(options: KobraLinkOptions) {
     body?: unknown,
     auth = false,
     expectedGeneration = generation,
+    deadlineMs = timeoutMs,
   ): Promise<unknown> {
     if (expectedGeneration !== generation) fail('unauthorized')
     if (options.signal?.aborted) fail('unavailable')
@@ -186,7 +196,7 @@ export function createKobraLinkClient(options: KobraLinkOptions) {
       timer = setTimeout(() => {
         controller.abort()
         reject(new KobraLinkError('timeout'))
-      }, timeoutMs)
+      }, deadlineMs)
     })
     const operation = async () => {
       const response = await transport(origin + path, {
@@ -571,12 +581,15 @@ export function createKobraLinkClient(options: KobraLinkOptions) {
       const body = await kobraLinkUploadBody(filePath, name)
       const current = await getPrinter(b)
       if (current.availability !== 'available') fail('unavailable')
+      const part = body.get('file')
+      const sizeBytes = part instanceof Blob ? part.size : 0
       return request(
         `/api/v1/printers/${b.id}/files`,
         'POST',
         body,
         false,
         sessionGeneration,
+        kobraLinkUploadDeadlineMs(sizeBytes, timeoutMs),
       )
     },
     supportedControls: KOBRALINK_CONTROLS,

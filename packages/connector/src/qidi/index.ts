@@ -180,7 +180,7 @@ export function createQidiAdapter(input: {
       return uploadMoonrakerFile({
         ...file,
         origin: origin.origin,
-        apiKey: auth?.apiKey,
+        ...(auth?.apiKey !== undefined ? { apiKey: auth.apiKey } : {}),
       })
     },
   }

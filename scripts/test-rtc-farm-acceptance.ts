@@ -129,6 +129,10 @@ const ALLOWED_ENV = [
   'LC_ALL',
   'TZ',
   'PLAYWRIGHT_BROWSERS_PATH',
+  'OPENFARM_BROWSER',
+  'OPENFARM_CHROME_PATH',
+  'LD_LIBRARY_PATH',
+  'FONTCONFIG_FILE',
   'XDG_CACHE_HOME',
 ]
 const childEnv: NodeJS.ProcessEnv = Object.fromEntries(

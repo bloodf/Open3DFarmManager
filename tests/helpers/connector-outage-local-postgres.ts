@@ -9,6 +9,7 @@ import { promisify } from 'node:util'
 const exec = promisify(execFile)
 const CANDIDATE_DIRS = [
   process.env.OUTAGE_TEST_PG_BIN,
+  process.env.OPENFARM_PG_BIN,
   '/opt/homebrew/opt/postgresql@17/bin',
   '/usr/local/opt/postgresql@17/bin',
   '/usr/lib/postgresql/17/bin',

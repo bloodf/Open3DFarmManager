@@ -57,6 +57,31 @@ const body = {
 }
 const ORIGIN = 'https://farm.example.invalid'
 
+test('approval decision parsing releases the request body reader lock', async () => {
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('{"decision":"reject"}'))
+      controller.close()
+    },
+  })
+  const request = new Request('https://farm.example.invalid/decision', {
+    method: 'POST',
+    headers: { origin: ORIGIN, 'content-type': 'application/json' },
+    body,
+    duplex: 'half',
+  } as RequestInit)
+  const deps: ApprovalHttpDeps = {
+    origin: ORIGIN,
+    authenticate: async () => ({ accountId: 'operator' }),
+    service: {
+      decide: async () => ({ ok: false, problem: 'not-found' }),
+    } as unknown as ApprovalHttpDeps['service'],
+  }
+
+  await decideApprovalRequest(request, deps, farm, randomUUID())
+  assert.equal(body.locked, false)
+})
+
 const grant = (requiresApproval: boolean): IntegrationGrant => ({
   id: randomUUID(),
   appId: app,

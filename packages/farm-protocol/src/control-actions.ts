@@ -38,16 +38,23 @@ export const ExtendedControlAction = z.enum([
   'queue_op',
   'bed_mesh',
   'gcode',
+  'confirm_collection',
 ])
 export type ExtendedControlAction = z.infer<typeof ExtendedControlAction>
 /** Optional, advisory detail of a command result. It never changes the outcome. */
 export const ControlResultCode = z.enum([
+  'signature',
+  'scope',
+  'state',
+  'busy',
+  'guard-denied',
   'bambu-authorization-required',
   'incompatible',
   'download-failed',
   'checksum-mismatch',
   'cache-full',
   'local-file-missing',
+  'awaiting-collection',
 ])
 export type ControlResultCode = z.infer<typeof ControlResultCode>
 export const MOONRAKER_CONTROLS: readonly ControlAction[] = Object.freeze([
@@ -216,6 +223,9 @@ export function controlSourceState(
   if (action === 'exclude_object')
     return state === 'printing' || state === 'paused'
   if (action === 'emergency_stop') return true
+  // The operator says the bed is clear: only while no job owns the printer.
+  if (action === 'confirm_collection')
+    return state === 'idle' || state === 'cancelled' || state === 'error'
   // A library start uploads a file first: never onto a printer that is busy.
   if (action === 'start_library_print')
     return !['printing', 'paused', 'unknown', 'error'].includes(state)
@@ -359,6 +369,10 @@ export const ConfigWriteArguments = z.union([
         /^\d{13}\.bak$/.test(backup.slice(path.length + '.openfarm-'.length)),
     ),
 ])
+/** The finished attempt (its end time in ms) whose bed the operator cleared. */
+export const CollectionArguments = z.strictObject({
+  attempt: z.string().regex(/^(?:0|[1-9][0-9]{0,15})$/),
+})
 export const ControlArguments = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('file_op'), args: FileOperation }),
   z.strictObject({
@@ -374,6 +388,10 @@ export const ControlArguments = z.discriminatedUnion('action', [
     args: ExcludeObjectArguments,
   }),
   z.strictObject({ action: z.literal('bed_mesh'), args: BedMeshArguments }),
+  z.strictObject({
+    action: z.literal('confirm_collection'),
+    args: CollectionArguments,
+  }),
   z.strictObject({ action: z.literal('extrude'), args: ExtrudeArguments }),
   z.strictObject({
     action: z.literal('run_macro'),

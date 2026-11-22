@@ -1,90 +1,80 @@
 import assert from 'node:assert/strict'
+import { setTimeout } from 'node:timers/promises'
 import { test } from 'node:test'
+import {
+  discoverSdcp,
+  parseSdcpDiscovery,
+} from '../../packages/connector/src/discovery/sdcp.ts'
 import { connectSdcp } from '../../packages/connector/src/sdcp/index.ts'
 import { startSdcpSimulator } from '../../packages/sim-tools/src/sdcp-simulator.ts'
 import centauri from '../fixtures/sdcp/centauri.json' with { type: 'json' }
 import saturn from '../fixtures/sdcp/saturn.json' with { type: 'json' }
 
-for (const [fixture, kind] of [
-  [centauri, 'fdm'],
-  [saturn, 'resin'],
-] as const) {
-  test(`reads SDCP v3 ${kind} status over UDP and WebSocket`, async (t) => {
-    const sim = await startSdcpSimulator(fixture)
-    t.after(sim.close)
-    const client = await connectSdcp('127.0.0.1', sim)
-    assert.equal(client.kind, kind)
-    assert.equal(client.authentication, 'none')
-    assert.equal(
-      client.cameraUrl,
-      kind === 'fdm' ? 'http://127.0.0.1:3031/video' : undefined,
-    )
-    assert.deepEqual(await client.readStatus(), fixture.fixtureStatus)
-    assert.deepEqual(sim.commands, [0])
-  })
-}
-
-test('reads Saturn V1.5.6 history with command 320', async (t) => {
+test('discovers Saturn and reads board-scoped v3 status with command 0', async (t) => {
   const sim = await startSdcpSimulator(saturn)
   t.after(sim.close)
-  const client = await connectSdcp('127.0.0.1', sim)
-  assert.equal(client.historySupported, true)
-  assert.deepEqual(await client.readHistoryIds(), ['fixture-task'])
-  assert.deepEqual(sim.commands, [320])
-})
-
-test('stock Centauri V1.1.46 history sends no command', async (t) => {
-  const sim = await startSdcpSimulator(centauri)
-  t.after(sim.close)
-  const client = await connectSdcp('127.0.0.1', sim)
-  assert.equal(client.historySupported, false)
-  await assert.rejects(client.readHistoryIds(), /unsupported/)
-  assert.deepEqual(sim.commands, [])
-})
-
-for (const [fault, expected] of [
-  ['denied', /denied command 0/],
-  ['disconnect', /disconnected/],
-  ['timeout', /response timeout/],
-  ['malformed', SyntaxError],
-  ['wrong-board', /response timeout/],
-] as const) {
-  test(`SDCP handles ${fault} with one request`, async (t) => {
-    const sim = await startSdcpSimulator(saturn, fault)
-    t.after(sim.close)
-    const client = await connectSdcp('127.0.0.1', { ...sim, timeoutMs: 300 })
-    await assert.rejects(client.readStatus(), expected)
-    assert.deepEqual(sim.commands, [0])
+  const identities = await discoverSdcp({
+    target: '127.0.0.1',
+    port: sim.discoveryPort,
+    timeoutMs: 200,
   })
-}
-
-test('rejects legacy SDCP without attempting WebSocket', async (t) => {
-  const sim = await startSdcpSimulator({
-    ...saturn,
-    Data: {
-      Attributes: { ...saturn.Data.Attributes, ProtocolVersion: 'V1.0.0' },
-    },
-  } as typeof saturn)
-  t.after(sim.close)
-  await assert.rejects(
-    connectSdcp('127.0.0.1', sim),
-    /Unsupported SDCP version/,
+  assert.equal(identities.length, 1)
+  const identity = identities[0]!
+  assert.equal(identity.model, saturn.Data.MachineName)
+  assert.equal(identity.firmwareVersion, saturn.Data.FirmwareVersion)
+  const client = connectSdcp(identity, {
+    port: sim.websocketPort,
+    now: () => 100,
+  })
+  t.after(client.close)
+  const frame = {
+    MainboardID: identity.mainboardId,
+    Topic: `sdcp/status/${identity.mainboardId}`,
+    Status: saturn.fixtureStatus,
+  }
+  sim.setStatus({ ...frame, MainboardID: 'wrong-board' })
+  for (let i = 0; i < 100 && !sim.requests.length; i++) await setTimeout(10)
+  assert.deepEqual(
+    sim.requests.map(
+      (request) => (request as { Data: { Cmd: number } }).Data.Cmd,
+    ),
+    [0],
   )
-  assert.deepEqual(sim.commands, [])
+  assert.deepEqual(client.command(320), { ok: false, reason: 'unsupported' })
+  assert.equal(client.snapshot(), undefined)
+  sim.publish(frame)
+  for (let i = 0; i < 100 && !client.snapshot(); i++) await setTimeout(10)
+  assert.deepEqual(client.snapshot(), {
+    state: 'printing',
+    currentLayer: 20,
+    totalLayer: 200,
+    progress: 0.1,
+    observedAt: 100,
+  })
 })
 
-test('history remains disabled on an unobserved firmware', async (t) => {
-  const sim = await startSdcpSimulator({
-    ...centauri,
-    Data: {
-      ...centauri.Data,
-      FirmwareVersion: 'V1.2.0',
-      ProtocolVersion: 'V3.0.0',
-    },
-  } as typeof centauri)
-  t.after(sim.close)
-  const client = await connectSdcp('127.0.0.1', sim)
-  assert.equal(client.historySupported, false)
-  await assert.rejects(client.readHistoryIds(), /unsupported/)
-  assert.deepEqual(sim.commands, [])
+test('rejects Centauri even when discovery supplies the required v3 fields', () => {
+  const discovery = {
+    Id: centauri.Id,
+    Data: { ...saturn.Data, ...centauri.Data },
+  }
+  assert.equal(
+    parseSdcpDiscovery(Buffer.from(JSON.stringify(discovery)), '127.0.0.1'),
+    undefined,
+  )
+})
+
+test('rejects legacy SDCP and unsupported models before opening a socket', () => {
+  const identity = parseSdcpDiscovery(
+    Buffer.from(JSON.stringify(saturn)),
+    '127.0.0.1',
+  )!
+  assert.throws(
+    () => connectSdcp({ ...identity, protocolVersion: 'V1.0.0' }),
+    /Unsupported SDCP protocol version/,
+  )
+  assert.throws(
+    () => connectSdcp({ ...identity, model: centauri.Data.MachineName }),
+    /Unsupported SDCP model/,
+  )
 })

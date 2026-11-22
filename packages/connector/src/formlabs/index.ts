@@ -1,144 +1,94 @@
-// PreForm API v1 device contract: https://developer.formlabs.com/api-reference/devices/
-// Firmware reference: https://formlabs.com/support/Firmware-Release-Notes/
-const models = ['Form 4', 'Form 4L'] as const
-const localConnections = ['UNKNOWN', 'USB', 'WIFI', 'ETHERNET']
+import { isIP } from 'node:net'
+import { z } from 'zod'
 
-function malformed(): never {
-  throw new Error('Malformed PreForm device reply')
+// Formlabs Local API 0.9.11: https://formlabs-dashboard-api-resources.s3.us-east-1.amazonaws.com/formlabs-local-api-v0.9.11.html
+const Device = z.object({
+  id: z.string().min(1).max(128),
+  product_name: z.string().min(1).max(128),
+  status: z.string().min(1).max(256),
+  is_connected: z.boolean(),
+  connection_type: z.string().optional(),
+  ip_address: z.string().optional(),
+  firmware_version: z.string().optional(),
+})
+const List = z.object({
+  count: z.number().int().nonnegative(),
+  devices: z.array(Device).max(256),
+})
+export type FormlabsDevice = z.infer<typeof Device>
+export function isLocalFormlabsHost(host: string) {
+  if (isIP(host) !== 4) return host === '::1'
+  const parts = host.split('.').map(Number)
+  return (
+    parts[0] === 10 ||
+    parts[0] === 127 ||
+    (parts[0] === 172 && parts[1]! >= 16 && parts[1]! <= 31) ||
+    (parts[0] === 192 && parts[1] === 168) ||
+    (parts[0] === 169 && parts[1] === 254)
+  )
 }
+export const isSupportedFormlabsModel = (model: string) =>
+  /^(form 4|form 4l)$/i.test(model.trim())
 
-function record(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) malformed()
-  return value as Record<string, unknown>
-}
-
-function string(value: unknown) {
-  if (typeof value !== 'string') malformed()
-  return value
-}
-
-function quantity(value: unknown) {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0)
-    malformed()
-  return value
-}
-
-function parseDevices(reply: unknown) {
-  const { count, devices } = record(reply)
-  if (!Array.isArray(devices) || count !== devices.length) malformed()
-  const seen = new Set<string>()
-  return devices.flatMap((entry: unknown) => {
-    const device = record(entry)
-    const model = models.find((name) => name === device.product_name)
-    if (!model) return []
-    if (typeof device.is_connected !== 'boolean') malformed()
-    const connection = string(device.connection_type)
-    if (!device.is_connected || !localConnections.includes(connection))
-      return []
-
-    const id = string(device.id)
-    const firmware = string(device.firmware_version)
-    if (!id.trim() || !firmware.trim() || seen.has(id)) malformed()
-    seen.add(id)
-    const remainingMs = quantity(device.estimated_print_time_remaining_ms)
-    if (!Number.isSafeInteger(remainingMs)) malformed()
-    const cartridges = Object.entries(record(device.cartridge_data)).map(
-      ([id, value]) => {
-        const cartridge = record(value)
-        return {
-          id,
-          materialCode: string(cartridge.cartridgeMaterialCode),
-          estimatedDispensedMl: quantity(
-            cartridge.cartridgeEstimatedVolumeDispensed_mL,
-          ),
-          originalVolumeMl: quantity(cartridge.cartridgeOriginalVolume_mL),
-        }
-      },
-    )
-    return [
-      {
-        id,
-        model,
-        firmware,
-        connection,
-        statusText: string(device.status),
-        remainingMs,
-        tankId: string(device.tank_id) || null,
-        tankMaterialCode: string(device.tank_material_code) || null,
-        cartridges,
-      },
-    ]
-  })
-}
-
-export function createFormlabsAdapter(origin: string, timeoutMs = 10_000) {
-  const endpoint = new URL(origin)
+/** Only a locally configured IP host is accepted. Never follow redirects or issue writes. */
+export function connectFormlabs(input: {
+  host: string
+  port: number
+  staleAfterMs?: number
+  now?: () => number
+  timeoutMs?: number
+}) {
   if (
-    !['http:', 'https:'].includes(endpoint.protocol) ||
-    endpoint.username ||
-    endpoint.password ||
-    endpoint.pathname !== '/' ||
-    endpoint.search ||
-    endpoint.hash
-  ) {
-    throw new Error('Expected a PreForm HTTP(S) origin')
-  }
-
-  async function read(path: string, body?: object) {
-    const response = await fetch(new URL(path, endpoint), {
-      method: body ? 'POST' : 'GET',
-      ...(body && {
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-      }),
-      redirect: 'manual',
-      signal: AbortSignal.timeout(timeoutMs),
-    })
-    if (response.status !== 200) {
-      await response.body?.cancel()
-      throw new Error(`PreForm HTTP ${response.status}`)
-    }
-
-    if (!response.body) malformed()
-    const reader = response.body.getReader()
-    const chunks: Uint8Array[] = []
-    let size = 0
-    try {
-      for (;;) {
-        const { done, value } = await reader.read()
-        if (done) break
-        size += value.byteLength
-        if (size > 1024 * 1024) {
-          await reader.cancel()
-          throw new Error('Oversized PreForm device reply')
-        }
-        chunks.push(value)
+    !isLocalFormlabsHost(input.host) ||
+    !Number.isInteger(input.port) ||
+    input.port < 1 ||
+    input.port > 65535
+  )
+    throw Error('Invalid PreForm host')
+  const url = `http://${isIP(input.host) === 6 ? `[${input.host}]` : input.host}:${input.port}/devices/`
+  const now = input.now ?? Date.now
+  let snapshot:
+    | {
+        devices: FormlabsDevice[]
+        retrievedAt: number
+        printerObservedAt: null
       }
-    } finally {
-      reader.releaseLock()
-    }
-
-    let reply: unknown
-    try {
-      reply = JSON.parse(
-        new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)),
-      )
-    } catch {
-      malformed()
-    }
-    return parseDevices(reply)
-  }
-
-  async function list() {
-    return read('/v1/device/list/')
-  }
-
+    | undefined
   return {
-    list,
-    discover: () => read('/v1/device/discover/', { timeout_seconds: 2 }),
-    async readStatus(id: string) {
-      const devices = await list()
-      return devices.find((device) => device.id === id) ?? null
+    capabilities: { status: true, dispatch: false, control: false } as const,
+    async refresh() {
+      try {
+        const response = await fetch(url, {
+          method: 'GET',
+          redirect: 'error',
+          signal: AbortSignal.timeout(input.timeoutMs ?? 5000),
+        })
+        if (!response.ok) throw Error('PreForm host unavailable')
+        const body = await response.text()
+        if (body.length > 262144) throw Error('PreForm response too large')
+        const list = List.parse(JSON.parse(body))
+        if (list.count !== list.devices.length)
+          throw Error('Invalid PreForm device count')
+        snapshot = {
+          devices: list.devices,
+          retrievedAt: now(),
+          printerObservedAt: null,
+        }
+        return snapshot
+      } catch (error) {
+        snapshot = undefined
+        throw error
+      }
     },
+    snapshot() {
+      const age = snapshot ? now() - snapshot.retrievedAt : -1
+      return age >= 0 && age < (input.staleAfterMs ?? 30000)
+        ? snapshot
+        : undefined
+    },
+    command: (_command: unknown) => ({
+      ok: false as const,
+      reason: 'unsupported' as const,
+    }),
   }
 }

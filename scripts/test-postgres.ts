@@ -234,6 +234,13 @@ export const PG_SUITE_CONTRACTS: Record<string, PgSuiteContract> = {
       admitted: 'REGISTRATION_SYNTHETIC_TEST_DISPOSABLE',
     },
   },
+  'test-postgres-resin-ledger.ts': {
+    migrations: '0092_resin_ledger',
+    fixture: {
+      port: 'RESIN_LEDGER_SYNTHETIC_TEST_PORT',
+      admitted: 'RESIN_LEDGER_SYNTHETIC_TEST_DISPOSABLE',
+    },
+  },
   'test-postgres-session-clock.ts': {
     migrations: 'full',
     fixture: {

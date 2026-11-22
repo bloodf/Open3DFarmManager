@@ -8,6 +8,7 @@ import {
   type ApiEnvelopeV1,
 } from '../../../farm-protocol/src/api-envelope.ts'
 import {
+  controlPrinterBusy,
   controlSourceState,
   LibraryPrintArgs,
   LIBRARY_PRINT_API_SCOPE,
@@ -65,15 +66,6 @@ export type ApiCommandResult =
   | { kind: 'outcome-unknown' }
 
 const CONTROL_BASIC = new Set(['pause', 'resume', 'cancel'])
-/** Motion and macros never run while a print owns the printer. */
-const IDLE_ONLY = new Set([
-  'home',
-  'load_filament',
-  'unload_filament',
-  'run_macro',
-  'start_print',
-  'start_library_print',
-])
 const MAX_EXECUTE_MS = 5000
 
 /** The scope a grant must hold for this envelope; mirrors the server's issue check. */
@@ -245,10 +237,7 @@ export function createApiCommandRunner(config: {
       observed.printState === 'error'
     )
       return ['not-ready', 'printer not ready']
-    if (
-      IDLE_ONLY.has(action) &&
-      (observed.printState === 'printing' || observed.printState === 'paused')
-    )
+    if (controlPrinterBusy(action, observed.printState))
       return ['printer-busy', 'printer is printing']
     if (
       (action === 'start_print' || action === 'start_library_print') &&

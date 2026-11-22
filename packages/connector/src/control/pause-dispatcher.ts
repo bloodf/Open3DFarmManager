@@ -4,6 +4,7 @@ import {
   type ControlLimits,
 } from '../runtime/control-limits.ts'
 import {
+  controlPrinterBusy,
   controlSourceState,
   controlRoleAllowed,
   controlTargetState,
@@ -629,11 +630,17 @@ export function createPauseDispatcher(config: {
           observation.connectionGeneration === connectionGeneration
         )
       }
+      /** Set by eligible() when the shared idle-only rule refused the command. */
+      let refusedBusy = false
       function eligible(): ControlObservation | null {
         if (!capability) return null
         const now = sample()
         if (!now) return null
         const current = readObservation(printerBinding, capability, now)
+        refusedBusy =
+          !!current &&
+          current.ready &&
+          controlPrinterBusy(command.action, current.printState)
         if (
           !current ||
           !current.ready ||
@@ -780,7 +787,7 @@ export function createPauseDispatcher(config: {
             !current ||
             current.connectionGeneration !== connectionGeneration
           ) {
-            finalize('not-sent', 'state', 'guard-denied')
+            finalize('not-sent', refusedBusy ? 'busy' : 'state', 'guard-denied')
             return
           }
           observationVersion = observationVersions.get(printerBinding)

@@ -94,3 +94,45 @@ if (journeyEnabled())
       }
     })
   })
+
+if (journeyEnabled())
+  test('mostra a temperatura do bico ativo da Snapmaker U1 simulada', async ({
+    browser,
+  }) => {
+    test.setTimeout(5 * 60_000)
+    const journey = await startJourneyHarness({
+      browser,
+      simulator: 'moonraker-fixture',
+      moonraker: { mock: { profile: 'u1' } },
+    })
+    try {
+      const printer = journey.printer.control
+      printer.update({
+        activeExtruder: 'extruder2',
+        extruders: {
+          extruder2: { temperature: 230, target: 235 },
+          extruder3: { temperature: 245, target: 250 },
+        },
+      })
+
+      await journey.expectLiveTelemetry()
+      const row = journey.farmRow()
+      const temperatures = row.getByLabel('Temperaturas observadas')
+      await expect(temperatures).toContainText('230 °C')
+      await expect(temperatures).toContainText('60 °C')
+
+      printer.update({ activeExtruder: 'extruder3' })
+      await expect(temperatures).toContainText('245 °C')
+
+      printer.update({ activeExtruder: 'extruder' })
+      await expect(temperatures).toContainText('210 °C')
+
+      printer.update({ activeExtruder: 'extruder9' })
+      await expect(temperatures).toContainText('Indisponível')
+      await expect(temperatures).toContainText('60 °C')
+      await journey.expectProgress(0.25)
+      expect(printer.gcodeScripts).toEqual([])
+    } finally {
+      await journey.close()
+    }
+  })

@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { createMoonrakerSocket } from './socket.ts'
 import { Reply, decodeMoonrakerFrame } from './frame.ts'
 import { parseMoonrakerServerInfo } from './parse.ts'
-import { parseIdentifyResult } from './discovery-parse.ts'
+import { parseIdentifyResult, selectToolObjects } from './discovery-parse.ts'
 import type { MoonrakerLimits } from '../config/moonraker.ts'
 export {
   validateMoonrakerInput,
@@ -87,6 +87,8 @@ const Notification = z.strictObject({
 
 export type MoonrakerCompleteObservation = Readonly<{
   result: unknown
+  /** This request selected toolhead.extruder alongside the nozzle readings. */
+  activeToolQuery: boolean
   requestStartedAtMonoMs: number
   receivedAtMonoMs: number
 }>
@@ -156,7 +158,8 @@ export function openMoonrakerClient(input: {
   let queryTimer: ReturnType<typeof setTimeout> | undefined
   let queryTimeout: ReturnType<typeof setTimeout> | undefined
   let nextId = 1
-  let pending: { id: number; started: number } | undefined
+  let pending:
+    { id: number; started: number; activeToolQuery?: boolean } | undefined
   let finished = false
   let subscribed = false
   let identified = false
@@ -295,7 +298,11 @@ export function openMoonrakerClient(input: {
           return
         }
         const started = performance.now()
-        pending = { id: ++nextId, started }
+        pending = {
+          id: ++nextId,
+          started,
+          activeToolQuery: Object.hasOwn(queryObjects, 'toolhead'),
+        }
         queryTimeout = setTimeout(
           () => finish('stale'),
           Math.min(1000, input.limits.requestTimeoutMs),
@@ -388,6 +395,14 @@ export function openMoonrakerClient(input: {
           )
           objects = { ...baseObjects, ...optional }
           queryObjects = { ...baseQueryObjects, ...optional }
+          if (input.onComplete && listed.objects.includes('toolhead')) {
+            const tools = selectToolObjects(listed)
+            if (tools.some((name) => name !== 'extruder')) {
+              delete queryObjects.extruder
+              for (const name of tools) queryObjects[name] = ['temperature']
+              queryObjects.toolhead = ['extruder']
+            }
+          }
           discovering = false
           if (!wasDiscovering) {
             extendSubscription = true
@@ -411,8 +426,8 @@ export function openMoonrakerClient(input: {
           !Object.hasOwn(reply.data, 'result')
         )
           throw new Error('Unexpected reply')
-        const received = performance.now(),
-          started = pending.started
+        const received = performance.now()
+        const { started, activeToolQuery = false } = pending
         if (
           received < started ||
           (input.onComplete &&
@@ -436,6 +451,7 @@ export function openMoonrakerClient(input: {
         input.onComplete?.(
           Object.freeze({
             result: reply.data.result,
+            activeToolQuery,
             requestStartedAtMonoMs: started,
             receivedAtMonoMs: received,
           }),

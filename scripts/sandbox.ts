@@ -126,20 +126,17 @@ try {
         { stdio: 'inherit' },
       )
     }
-    if (
-      !existsSync('apps/farm/.output/server/index.mjs') ||
-      !existsSync('packages/connector/dist/cli.js')
-    )
-      execFileSync('npm', ['run', 'build'], { stdio: 'inherit' })
-    docker([
-      'up',
-      '-d',
-      '--wait',
-      '--no-recreate',
-      'postgres',
-      'klipper',
-      'bambu',
-    ])
+    if (!existsSync('infra/sandbox/.output/server/index.mjs'))
+      execFileSync('npx', ['nuxt', 'build', 'infra/sandbox'], {
+        stdio: 'inherit',
+      })
+    if (!existsSync('packages/connector/dist/cli.js'))
+      execFileSync(
+        'npm',
+        ['run', 'build', '-w', '@open3dfarmmanager/connector'],
+        { stdio: 'inherit' },
+      )
+    docker(['up', '-d', '--wait', '--no-recreate', 'postgres', 'klipper'])
     const port = (service: string, internal: number) => {
       const mapped = docker(['port', service, String(internal)], true).trim()
       const publicPort = Number(
@@ -167,6 +164,7 @@ try {
       '--wait',
       '--no-deps',
       '--force-recreate',
+      'bambu',
       'app',
       'connector',
     ])

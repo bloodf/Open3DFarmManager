@@ -40,6 +40,9 @@ services:
   bambu:
     <<: *node
     command: [node, infra/sandbox/bambu.ts]
+    volumes: !override
+      - ../..:/workspace:ro
+      - ${SANDBOX_STATE:?}/bambu-credential.json:/sandbox/bambu-credential.json:ro
     ports:
       - '127.0.0.1::9999'
   app:

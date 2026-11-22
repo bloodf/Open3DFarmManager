@@ -306,6 +306,7 @@ async function runAssignmentControl(
           backend: 'bambu',
           host: bambu.host,
           serial: bambu.serial,
+          port: bambu.ftpsPort,
           accessCode: readBambuCredentials(bambu).password,
           trust: {
             ...(bambu.caFile

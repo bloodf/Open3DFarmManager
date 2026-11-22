@@ -1,5 +1,5 @@
 import { MAX_HEARTBEAT_HEALTH_BYTES } from '@open3dfarmmanager/farm-protocol'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import {
   openQueueCollectionJournal,
   unavailableQueueCollectionJournal,
@@ -13,6 +13,12 @@ import {
   runBackgroundDiscovery,
 } from './background-discovery.ts'
 import { decodeApiEnvelopeFrame } from '../../../farm-protocol/src/api-envelope.ts'
+import { encodeSignallingClientFrame } from '../../../farm-protocol/src/signalling-socket.ts'
+import {
+  CLIENT_WRITE_LIMIT,
+  type SocketPort,
+} from '../webrtc/signalling-client-channel.ts'
+import { openApiJobLifecycle } from './api-job-lifecycle.ts'
 import { createRuntimeLogger } from './log.ts'
 import { openFilamentRunJournal } from '../control/filament-run-journal.ts'
 import { createFilamentRunAccounting } from '../spoolman/filament-run.ts'
@@ -306,9 +312,17 @@ async function runConnectorAgentOnce(
   const withdrawU1 = declareSnapmakerU1Printers(moonrakerPrinters)
   // A job already finished on connect is reported only when OpenFarm has a
   // pending dispatch on that printer; otherwise the history import owns it.
+  const apiJobs = openApiJobLifecycle({
+    path: resolve(
+      input.dataDirectory,
+      `api-jobs-${credential.farm_id}-${credential.agent_id}.json`,
+    ),
+    onError: (error) => logger.warn('api-job-journal', { error }),
+  })
   const rememberedStarts = new Map<string, number>()
   const withdrawPendingDispatch = registerMoonrakerPendingDispatch(
     (printerKey) =>
+      apiJobs.hasRunning(printerKey) ||
       rememberedStarts.has(printerKey) ||
       collection.read(printerKey).dispatchedAt !== undefined,
   )
@@ -600,7 +614,7 @@ async function runConnectorAgentOnce(
       snapshots &&
       rtcBackend.mode === 'direct'
     ) {
-      const { AuthenticatedConnectorSignallingClient } =
+      const { AuthenticatedConnectorSignallingClient, connectorSocket } =
         await import('../cloud/authenticated-signalling-client.ts')
       const { FarmStatusSender } =
         await import('../webrtc/farm-status-sender.ts')
@@ -632,6 +646,12 @@ async function runConnectorAgentOnce(
           createSession(onTerminal, onAdmitted) {
             const inbox = new AbortController()
             let pendingQueries = 0
+            let socket: SocketPort | undefined
+            let detachJobReports: (() => void) | undefined
+            const closeInbox = () => {
+              inbox.abort()
+              detachJobReports?.()
+            }
             const client = new AuthenticatedConnectorSignallingClient(
               {
                 url: signalling.endpoint,
@@ -647,7 +667,48 @@ async function runConnectorAgentOnce(
               {
                 genuineStatus: { assignmentRefs: refs, detailSourceFor },
                 ...(cameraMedia ? { cameraMedia } : {}),
+                async socketFactory() {
+                  socket = await connectorSocket(
+                    signalling.endpoint,
+                    undefined,
+                    true,
+                  )
+                  return socket
+                },
                 onInboxReady() {
+                  // The command callback belongs to its original session.
+                  // Reports reuse this admitted socket with one bounded write in flight.
+                  if (inbox.signal.aborted || signal.aborted) return
+                  detachJobReports = apiJobs.attach(
+                    (wire) =>
+                      new Promise<void>((resolve, reject) => {
+                        const message = encodeSignallingClientFrame({
+                          v: 1,
+                          t: 'connector.api-result',
+                          wire,
+                        })
+                        if (
+                          signal.aborted ||
+                          inbox.signal.aborted ||
+                          !socket?.isOpen() ||
+                          socket.bufferedBytes() + Buffer.byteLength(message) >
+                            CLIENT_WRITE_LIMIT
+                        ) {
+                          reject(new Error('API job report inbox unavailable'))
+                          if (!signal.aborted && !inbox.signal.aborted)
+                            client.close('api-job-report-write')
+                          return
+                        }
+                        socket.send(message, (error) => {
+                          if (!error) resolve()
+                          else {
+                            reject(error)
+                            if (!inbox.signal.aborted)
+                              client.close('api-job-report-write')
+                          }
+                        })
+                      }),
+                  )
                   onAdmitted()
                   diagnostic({ kind: 'readonly-listening' })
                 },
@@ -694,18 +755,19 @@ async function runConnectorAgentOnce(
                     apiHandlers.values().next().value
                   handler?.(frame, {
                     report,
+                    apiJobs,
                     signal: inbox.signal,
                     freshness: offline.freshness,
                   })
                 },
                 onAuthorityRevoked(serverSeq) {
-                  inbox.abort()
+                  closeInbox()
                   offline?.revoke(serverSeq)
                 },
                 onVerifiedAdmission: () =>
                   diagnostic({ kind: 'readonly-admitted' }),
                 onTerminal(reason) {
-                  inbox.abort()
+                  closeInbox()
                   try {
                     diagnostic({
                       kind: 'readonly-terminal',
@@ -945,6 +1007,7 @@ async function runConnectorAgentOnce(
     tasks.push(
       collectIntoQueue({
         config: config.collection,
+        apiJobs,
         controlsFor: (printerKey) => {
           const ref = refs.find((entry) => entry.printerKey === printerKey)
           return ref ? controlsFor?.(ref.assignmentId) : undefined

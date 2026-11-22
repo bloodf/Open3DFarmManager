@@ -38,6 +38,7 @@ import { controlWithinLimits, type ControlLimits } from './control-limits.ts'
 import { fetchJobFile, JobFileError } from './job-file-fetch.ts'
 import { supportsFileUpload, type FileUploadTarget } from './file-upload.ts'
 import type { createLibraryPrintStarter } from './library-print-start.ts'
+import type { ApiJobLifecycle } from './api-job-lifecycle.ts'
 import type { LibraryJobLinks } from './library-job-links.ts'
 
 /** A grant as last confirmed by the server; `freshness` bounds how long it is trusted offline. */
@@ -109,6 +110,7 @@ export function createApiCommandRunner(config: {
   ) => Promise<boolean>
   storageDegraded?: () => boolean
   signal?: AbortSignal
+  apiJobs?: ApiJobLifecycle | undefined
   jobFiles?: {
     directory: string
     targetFor(printerKey: string): FileUploadTarget | undefined
@@ -352,6 +354,7 @@ export function createApiCommandRunner(config: {
     let confirmed = true
     let threw = false
     let prepared = false
+    let jobWatch: ReturnType<ApiJobLifecycle['watch']> | undefined
     const deadline = AbortSignal.timeout(
       Math.max(
         1,
@@ -408,8 +411,14 @@ export function createApiCommandRunner(config: {
                 binding,
                 beforeSend() {
                   if (!beforeSend()) return false
-                  onSend?.(sentAt)
-                  return true
+                  try {
+                    onSend?.(sentAt)
+                    return true
+                  } catch {
+                    permitted = false
+                    lastRefusal = ['not-ready', 'API job journal unavailable']
+                    return false
+                  }
                 },
                 signal,
               },
@@ -505,7 +514,17 @@ export function createApiCommandRunner(config: {
           directory: config.jobFiles.directory,
           signal,
           authorize,
-          start: () => executeDriver(),
+          start: (filename) =>
+            executeDriver(request, (at) => {
+              if (mapping && target.backend === 'moonraker')
+                jobWatch = config.apiJobs?.watch(
+                  mapping.printer_key,
+                  filename,
+                  envelope.cmd_id,
+                  at,
+                  sentMono,
+                )
+            }),
           ...(config.jobFiles.ca ? { ca: config.jobFiles.ca } : {}),
         })
       } else await executeDriver()
@@ -536,6 +555,10 @@ export function createApiCommandRunner(config: {
         threw = true
       }
     }
+    // Losing the inbox after positive local confirmation only affects reporting.
+    const interrupted =
+      signal.aborted && !(jobWatch && acknowledged && confirmed)
+    if (threw || interrupted || !acknowledged || !confirmed) jobWatch?.dispose()
     if (attempted && !guardCalled) {
       finishCommand(
         config.journal,
@@ -554,7 +577,7 @@ export function createApiCommandRunner(config: {
       ]
       return refuse(envelope, code, detail)
     }
-    if (threw || signal.aborted || !acknowledged) {
+    if (threw || interrupted || !acknowledged) {
       finishCommand(config.journal, receipt, 'outcome-unknown', 'rpc-unknown')
       return { kind: 'outcome-unknown' }
     }
@@ -567,9 +590,20 @@ export function createApiCommandRunner(config: {
       )
       return { kind: 'outcome-unknown' }
     }
-    if (!finishCommand(config.journal, receipt, 'applied', 'rpc-acknowledged'))
+    if (
+      !finishCommand(config.journal, receipt, 'applied', 'rpc-acknowledged')
+    ) {
+      jobWatch?.dispose()
       return { kind: 'outcome-unknown' }
-    send(envelope, envelope.kind === 'job' ? 'started' : 'completed')
+    }
+    if (jobWatch) {
+      try {
+        jobWatch.confirm()
+      } catch {
+        jobWatch.dispose()
+        return { kind: 'outcome-unknown' }
+      }
+    } else send(envelope, envelope.kind === 'job' ? 'started' : 'completed')
     return { kind: 'completed' }
   }
 }
@@ -585,6 +619,7 @@ export async function receiveApiCommand(
     signal: AbortSignal
     report(wire: string): void
     freshness: CachedAuthorityFreshness
+    apiJobs?: ApiJobLifecycle | undefined
   },
 ) {
   const { envelope } = decodeApiEnvelopeFrame(frame.wire)
@@ -602,6 +637,7 @@ export async function receiveApiCommand(
   const runner = createApiCommandRunner({
     ...config,
     report: inbox.report,
+    apiJobs: inbox.apiJobs ?? config.apiJobs,
     signal: inbox.signal,
     grants: {
       lookup: (id) =>

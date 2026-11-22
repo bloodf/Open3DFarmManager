@@ -1,4 +1,4 @@
--- Refuse to roll back while any grant still carries a scope added by 0093;
+-- Refuse to roll back while any grant still carries a scope added by 0094;
 -- the owner must revoke those grants first.
 DO $$
 BEGIN
@@ -6,7 +6,7 @@ BEGIN
     SELECT 1 FROM farm.integration_app_grants
     WHERE scopes && ARRAY['environment:read','plates:confirm','alerts:write','camera:view']::text[]
   ) THEN
-    RAISE EXCEPTION 'Integration grants still use scopes added by migration 0093';
+    RAISE EXCEPTION 'Integration grants still use scopes added by migration 0094';
   END IF;
 END $$;
 

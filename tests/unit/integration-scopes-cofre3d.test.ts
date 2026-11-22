@@ -5,6 +5,8 @@ import { loadMigrationCatalog } from '../../scripts/db/migrations.ts'
 import {
   hashClientSecret,
   INTEGRATION_SCOPES,
+  IntegrationAppsService,
+  type IntegrationAppsStore,
   type IntegrationGrant,
   type IntegrationScope,
   type StoredCredential,
@@ -95,6 +97,36 @@ describe('Cofre3D integration scopes', () => {
     expect(validScopes(['plates:read', 'printers:read'])).toBe(false)
   })
 
+  test('passes an owner grant with the new scopes to the store', async () => {
+    const store: IntegrationAppsStore = {
+      createApp: async () => 'not-found',
+      revokeApp: async () => 'not-found',
+      addCredential: async () => 'not-found',
+      revokeCredential: async () => 'not-found',
+      createGrant: async (actor, input, now) => {
+        expect(actor).toBe('owner')
+        expect(input.scopes).toEqual([...NEW_SCOPES])
+        return {
+          id: 'grant',
+          ...input,
+          printerAssignmentId: input.printerAssignmentId ?? null,
+          requiresApproval: input.requiresApproval ?? false,
+          createdAt: now,
+          disabledAt: null,
+          disabledReason: null,
+        }
+      },
+      revokeGrant: async () => 'not-found',
+      listApps: async () => null,
+      listGrants: async () => null,
+      findActiveCredential: async () => null,
+      effectiveGrants: async () => [],
+    }
+    const service = new IntegrationAppsService(store, () => 50_000)
+    const input = { appId: 'app', farmId, scopes: [...NEW_SCOPES] }
+    expect(await service.createGrant('owner', input)).toMatchObject(input)
+  })
+
   test('issues and verifies tokens carrying the new scopes', async () => {
     const auth = authWith(['printers:read', ...NEW_SCOPES])
     const token = await auth.issue(clientId, secret, [...NEW_SCOPES])
@@ -130,16 +162,16 @@ describe('Cofre3D integration scopes', () => {
       ).toBeUndefined()
   })
 
-  test('migration 0093 extends the DB scope check with a guarded rollback', async () => {
+  test('migration 0094 extends the DB scope check with a guarded rollback', async () => {
     const catalog = await loadMigrationCatalog()
-    expect(catalog[92]?.id).toBe('0093_integration_cofre3d_scopes')
+    expect(catalog[93]?.id).toBe('0094_integration_cofre3d_scopes')
     const dir = new URL('../../infra/db/migrations/', import.meta.url)
     const up = await readFile(
-      new URL('0093_integration_cofre3d_scopes.up.sql', dir),
+      new URL('0094_integration_cofre3d_scopes.up.sql', dir),
       'utf8',
     )
     const down = await readFile(
-      new URL('0093_integration_cofre3d_scopes.down.sql', dir),
+      new URL('0094_integration_cofre3d_scopes.down.sql', dir),
       'utf8',
     )
     const quoted = INTEGRATION_SCOPES.map((scope) => `'${scope}'`).join(',')
@@ -175,7 +207,7 @@ describe('Cofre3D integration scopes', () => {
     const guide = await readFile('docs/INTEGRATION-API.md', 'utf8')
     const page = await readFile('apps/farm/app/pages/integracoes.vue', 'utf8')
     for (const scope of INTEGRATION_SCOPES)
-      expect(guide).toContain('| `' + scope + '` |')
+      expect(guide).toMatch(new RegExp(`^\\|[ \t]*\`${scope}\`[ \t]*\\|`, 'm'))
     expect(page).toContain("['environment:read', 'Consultar ambiente']")
     expect(page).toContain("['plates:confirm', 'Confirmar placa livre']")
     expect(page).toContain("['alerts:write', 'Enviar alertas']")

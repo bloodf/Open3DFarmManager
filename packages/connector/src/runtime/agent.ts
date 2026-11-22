@@ -943,6 +943,10 @@ async function runConnectorAgentOnce(
     tasks.push(
       collectIntoQueue({
         config: config.collection,
+        controlsFor: (printerKey) => {
+          const ref = refs.find((entry) => entry.printerKey === printerKey)
+          return ref ? (controlsFor?.(ref.assignmentId) ?? []) : []
+        },
         linkHealthFor: (printerKey) => links.get(printerKey),
         libraryLinks,
         discoverMoonrakerObjects: true,

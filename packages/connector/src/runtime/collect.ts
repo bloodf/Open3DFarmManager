@@ -38,6 +38,7 @@ import {
 import type { RawMoonrakerUnavailable } from '../moonraker/subscription.ts'
 import { join } from 'node:path'
 import type { PrinterState } from '@open3dfarmmanager/farm-protocol'
+import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
 import { TelemetryQueue, type QueueLoss } from '../cloud/queue.ts'
 import { type LocalCollectorConfig } from '../config/local.ts'
 import { assertUnscopedCollection } from './queue-scope.ts'
@@ -106,6 +107,9 @@ export async function collectLocalTelemetry(input: {
 
 /** Caller owns the already-open queue and its scope/close lifecycle. */
 export async function collectIntoQueue(input: {
+  controlsFor?: (
+    printerKey: string,
+  ) => readonly ExtendedControlAction[] | undefined
   onLoss?: (value: Extract<Diagnostic, { kind: 'loss' }>) => void
   linkHealthFor?: (printerKey: string) => MoonrakerLinkHealth | undefined
   discoverMoonrakerObjects?: boolean
@@ -210,7 +214,11 @@ export async function collectIntoQueue(input: {
         }
         const printer =
           input.libraryLinks?.attach(event.printer) ?? event.printer
-        const queued = machineGate.apply(printer)
+        const controls = input.controlsFor?.(printer.printerKey)
+        const queued = machineGate.apply({
+          ...printer,
+          ...(controls === undefined ? {} : { controls: [...controls] }),
+        })
         let receipt
         try {
           receipt = queue.enqueue(queued, now)

@@ -17,7 +17,11 @@ import {
 
 export class JobFileError extends Error {
   readonly reason:
-    'unsupported' | 'checksum-mismatch' | 'too-large' | 'download-failed' | 'download-refused'
+    | 'unsupported'
+    | 'checksum-mismatch'
+    | 'too-large'
+    | 'download-failed'
+    | 'download-refused'
   constructor(reason: JobFileError['reason']) {
     super(reason)
     this.reason = reason
@@ -28,17 +32,31 @@ function isUnsafeAddress(address: string): boolean {
   const version = isIP(address)
   if (version === 4) {
     const [a, b] = address.split('.').map(Number)
-    return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) ||
-      (a === 172 && b! >= 16 && b! <= 31) || (a === 192 && b === 168) ||
-      (a === 100 && b! >= 64 && b! <= 127) || a! >= 224
+    return (
+      a === 0 ||
+      a === 10 ||
+      a === 127 ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b! >= 16 && b! <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 100 && b! >= 64 && b! <= 127) ||
+      a! >= 224
+    )
   }
   if (version === 6) {
     const normalized = address.toLowerCase()
-    return normalized === '::' || normalized === '::1' ||
-      normalized.startsWith('fc') || normalized.startsWith('fd') ||
-      /^fe[89ab]/.test(normalized) || normalized.startsWith('ff') ||
-      normalized.startsWith('::ffff:127.') || normalized.startsWith('::ffff:10.') ||
-      normalized.startsWith('::ffff:192.168.') || normalized.startsWith('::ffff:169.254.')
+    return (
+      normalized === '::' ||
+      normalized === '::1' ||
+      normalized.startsWith('fc') ||
+      normalized.startsWith('fd') ||
+      /^fe[89ab]/.test(normalized) ||
+      normalized.startsWith('ff') ||
+      normalized.startsWith('::ffff:127.') ||
+      normalized.startsWith('::ffff:10.') ||
+      normalized.startsWith('::ffff:192.168.') ||
+      normalized.startsWith('::ffff:169.254.')
+    )
   }
   return true
 }
@@ -77,8 +95,14 @@ export async function fetchJobFile(input: {
       let pinnedLookup: { address: string; family: number } | undefined
       if (redirects > 0) {
         try {
-          const addresses = await lookup(url.hostname, { all: true, verbatim: true })
-          if (!addresses.length || addresses.some(({ address }) => isUnsafeAddress(address)))
+          const addresses = await lookup(url.hostname, {
+            all: true,
+            verbatim: true,
+          })
+          if (
+            !addresses.length ||
+            addresses.some(({ address }) => isUnsafeAddress(address))
+          )
             throw new Error('unsafe address')
           pinnedLookup = addresses[0]
         } catch {

@@ -3,10 +3,17 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { createServer } from 'node:https'
 import { once } from 'node:events'
-import { fetchJobFile, JobFileError } from '../../packages/connector/src/runtime/job-file-fetch.ts'
+import {
+  fetchJobFile,
+  JobFileError,
+} from '../../packages/connector/src/runtime/job-file-fetch.ts'
 
-const cert = await readFile(new URL('../fixtures/bambu-ftps/cert.pem', import.meta.url))
-const key = await readFile(new URL('../fixtures/bambu-ftps/key.pem', import.meta.url))
+const cert = await readFile(
+  new URL('../fixtures/bambu-ftps/cert.pem', import.meta.url),
+)
+const key = await readFile(
+  new URL('../fixtures/bambu-ftps/key.pem', import.meta.url),
+)
 
 test('refuses redirects to loopback with the generic refusal code', async () => {
   const server = createServer({ cert, key }, (_req, res) => {

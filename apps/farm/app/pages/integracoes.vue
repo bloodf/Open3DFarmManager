@@ -50,6 +50,10 @@ const scopeOptions = [
   ['control:basic', 'Controles básicos'],
   ['control:extended', 'Controles avançados'],
   ['events:subscribe', 'Receber eventos'],
+  ['environment:read', 'Consultar ambiente'],
+  ['plates:confirm', 'Confirmar placa livre'],
+  ['alerts:write', 'Enviar alertas'],
+  ['camera:view', 'Ver câmera'],
 ] as const
 
 async function load() {

@@ -13,6 +13,11 @@ export const INTEGRATION_SCOPES = [
   'jobs:write',
   'library:read',
   'library:write',
+  // Appended last: token scope masks use each scope's index in this list.
+  'environment:read',
+  'plates:confirm',
+  'alerts:write',
+  'camera:view',
 ] as const
 export type IntegrationScope = (typeof INTEGRATION_SCOPES)[number]
 

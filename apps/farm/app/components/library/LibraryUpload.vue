@@ -35,6 +35,12 @@ const result = ref<{ version: LibraryVersion; deduplicated: boolean } | null>(
   null,
 )
 const needsConnector = computed(() => props.mode === 'connector')
+const connectorError = computed(() =>
+  error.value.startsWith('Escolha o Connector') ? error.value : undefined,
+)
+const fileError = computed(() =>
+  connectorError.value ? undefined : error.value,
+)
 
 function pick(event: Event) {
   const picked = (event.target as HTMLInputElement).files?.[0] ?? null
@@ -86,7 +92,7 @@ async function submit() {
 
 <template>
   <form class="upload" novalidate @submit.prevent="submit">
-    <Field label="Arquivo (.gcode ou .3mf, até 512 MiB)">
+    <Field label="Arquivo (.gcode ou .3mf, até 512 MiB)" :error="fileError">
       <template #default="{ control }">
         <input
           v-bind="control"
@@ -128,7 +134,11 @@ async function submit() {
         />
       </template>
     </Field>
-    <Field v-if="needsConnector" label="Connector de destino">
+    <Field
+      v-if="needsConnector"
+      label="Connector de destino"
+      :error="connectorError"
+    >
       <template #default="{ control }">
         <select v-bind="control" v-model="agentId" :disabled="busy">
           <option value="">Escolha um Connector</option>
@@ -138,7 +148,6 @@ async function submit() {
         </select>
       </template>
     </Field>
-    <p v-if="error" role="alert" class="error">{{ error }}</p>
     <ProgressBar v-if="busy" label="Progresso do envio" :value="progress" />
     <Button type="submit" :disabled="busy">
       {{ busy ? 'Enviando…' : 'Enviar para a biblioteca' }}
@@ -172,10 +181,6 @@ async function submit() {
 .upload :deep(select) {
   max-width: 100%;
   min-width: 0;
-}
-.error {
-  color: var(--printer-error);
-  margin: 0;
 }
 .selected {
   margin: 0;

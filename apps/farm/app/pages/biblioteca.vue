@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { selectedFarm } from '../utils/farm-request-guard.ts'
 import { formatWeight } from '../utils/ui-format.ts'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Button from '../components/ui/Button.vue'
@@ -38,6 +39,7 @@ type Settings = {
   retentionDays: number
 }
 
+const route = useRoute()
 const farmId = ref('')
 const items = ref<LibraryItem[]>([])
 const nextCursor = ref<string | null>(null)
@@ -150,11 +152,11 @@ async function start() {
   noFarm.value = false
   try {
     const page = await $fetch<{ farms: { farmId: string }[] }>('/api/farms', {
-      query: { limit: 1 },
+      query: { limit: 50 },
       retry: 0,
       timeout: 15_000,
     })
-    farmId.value = page.farms[0]?.farmId ?? ''
+    farmId.value = selectedFarm(page.farms, route.query.farm)?.farmId ?? ''
     if (!farmId.value) {
       noFarm.value = true
       loading.value = false

@@ -11,20 +11,31 @@ import { qualifyKobraX } from '../../scripts/qualify/kobra-x.ts'
 // End-to-end against the Kobra X mock: the read-only native path recovers the
 // identity over HTTP, logs in over mutual TLS with the supplied client
 // certificate, and observes telemetry from the printer's public report topic.
-test('qualifies a Kobra X over the native LAN path, read-only', async () => {
+test('qualifies a Kobra X over the native LAN path, read-only', async (t) => {
   installNetworkGuard()
   const mock = await startKobraXMock({ camera: false })
   try {
-    const result = await qualifyKobraX(
-      {
-        vendor: 'kobra-x',
-        host: '127.0.0.1',
-        port: mock.mqttPort,
-        httpPort: mock.httpPort,
-        certFile: mock.tls.clientCertPath,
-        keyFile: mock.tls.clientKeyPath,
-        timeoutMs: 6000,
+    const options = {
+      vendor: 'kobra-x' as const,
+      host: '127.0.0.1',
+      port: mock.mqttPort,
+      httpPort: mock.httpPort,
+      certFile: mock.tls.clientCertPath,
+      keyFile: mock.tls.clientKeyPath,
+      timeoutMs: 6000,
+    }
+
+    await t.test(
+      'refuses the fixture certificate without explicit trust',
+      async () => {
+        await assert.rejects(qualifyKobraX(options, {}), {
+          code: 'DEPTH_ZERO_SELF_SIGNED_CERT',
+        })
       },
+    )
+
+    const result = await qualifyKobraX(
+      { ...options, caFile: mock.tls.serverCertPath },
       {},
     )
 

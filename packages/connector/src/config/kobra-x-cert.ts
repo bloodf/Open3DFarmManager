@@ -5,7 +5,17 @@ import {
   realpathSync,
   type Dirent,
 } from 'node:fs'
-import { basename, extname, isAbsolute, join, normalize } from 'node:path'
+import { homedir } from 'node:os'
+import {
+  basename,
+  extname,
+  isAbsolute,
+  join,
+  posix,
+  relative,
+  sep,
+  win32,
+} from 'node:path'
 import { z } from 'zod'
 import { parseBoundedJson } from '../../../farm-protocol/src/json.ts'
 import type { ConfigurationErrorCode } from '../../../farm-protocol/src/configuration-frames.ts'
@@ -34,6 +44,154 @@ export const ANYCUBIC_SLICER_NEXT_TYPICAL_PATHS = Object.freeze({
   win32: 'C:\\Program Files\\AnycubicSlicerNext\\resources',
   linux: '/opt/AnycubicSlicerNext/resources',
 })
+
+export const KOBRA_INSTALL_PATH_ERROR_CODE: ConfigurationErrorCode =
+  'client-cert-missing'
+
+export interface KobraInstallPathPolicyOptions {
+  platform?: NodeJS.Platform
+  homeDir?: string
+  localAppData?: string
+}
+
+function safeHomeDir(override?: string): string | null {
+  if (override !== undefined) return override.trim() || null
+  try {
+    const value = homedir().trim()
+    return value || null
+  } catch {
+    return null
+  }
+}
+
+function isPathWithinRoot(
+  candidate: string,
+  root: string,
+  platform: NodeJS.Platform,
+): boolean {
+  if (platform === 'win32') {
+    const resolvedRoot = win32.resolve(root)
+    const resolvedCandidate = win32.resolve(candidate)
+    const rel = win32.relative(
+      resolvedRoot.toLowerCase(),
+      resolvedCandidate.toLowerCase(),
+    )
+    return (
+      rel === '' ||
+      (rel !== '..' && !rel.startsWith('..\\') && !win32.isAbsolute(rel))
+    )
+  }
+  const resolvedRoot = posix.resolve(root)
+  const resolvedCandidate = posix.resolve(candidate)
+  const rel = posix.relative(resolvedRoot, resolvedCandidate)
+  return (
+    rel === '' ||
+    (rel !== '..' && !rel.startsWith('../') && !posix.isAbsolute(rel))
+  )
+}
+
+export function allowedKobraInstallRoots(
+  options: KobraInstallPathPolicyOptions = {},
+): readonly string[] {
+  const platform = options.platform ?? process.platform
+  if (platform === 'darwin') {
+    return ['/Applications/AnycubicSlicerNext.app']
+  }
+  if (platform === 'linux') {
+    const roots = ['/opt/AnycubicSlicerNext']
+    const home = safeHomeDir(options.homeDir)
+    if (home && posix.isAbsolute(home)) {
+      const resolvedHome = posix.resolve(home)
+      if (resolvedHome !== '/') {
+        roots.push(
+          posix.join(resolvedHome, '.local', 'share', 'AnycubicSlicerNext'),
+        )
+      }
+    }
+    return roots
+  }
+  if (platform === 'win32') {
+    const roots = ['C:\\Program Files\\AnycubicSlicerNext']
+    const rawLocalAppData =
+      options.localAppData !== undefined
+        ? options.localAppData.trim()
+        : (process.env.LOCALAPPDATA?.trim() ?? '')
+    if (
+      rawLocalAppData &&
+      !/^(?:\\\\|\/\/)/.test(rawLocalAppData) &&
+      win32.isAbsolute(rawLocalAppData)
+    ) {
+      roots.push(
+        win32.join(win32.resolve(rawLocalAppData), 'AnycubicSlicerNext'),
+      )
+    } else {
+      const home = safeHomeDir(options.homeDir)
+      if (home && !/^(?:\\\\|\/\/)/.test(home) && win32.isAbsolute(home)) {
+        roots.push(
+          win32.join(
+            win32.resolve(home),
+            'AppData',
+            'Local',
+            'AnycubicSlicerNext',
+          ),
+        )
+      }
+    }
+    return roots
+  }
+  return []
+}
+
+function matchAllowedInstallRoot(
+  rawPath: string,
+  options: KobraInstallPathPolicyOptions = {},
+): { root: string; resolved: string } | null {
+  const platform = options.platform ?? process.platform
+  const trimmed = rawPath.trim()
+  if (!trimmed || /[\u0000-\u001f\u007f]/.test(trimmed)) return null
+  if (platform === 'win32') {
+    if (/^(?:\\\\|\/\/)/.test(trimmed) || !win32.isAbsolute(trimmed))
+      return null
+    const resolved = win32.resolve(trimmed)
+    for (const root of allowedKobraInstallRoots(options)) {
+      if (isPathWithinRoot(resolved, root, platform)) {
+        return { root: win32.resolve(root), resolved }
+      }
+    }
+    return null
+  }
+  if (!posix.isAbsolute(trimmed)) return null
+  const resolved = posix.resolve(trimmed)
+  for (const root of allowedKobraInstallRoots(options)) {
+    if (isPathWithinRoot(resolved, root, platform)) {
+      return { root: posix.resolve(root), resolved }
+    }
+  }
+  return null
+}
+
+export function isAllowedKobraInstallPath(
+  rawPath: string,
+  options: KobraInstallPathPolicyOptions = {},
+): boolean {
+  return matchAllowedInstallRoot(rawPath, options) !== null
+}
+
+function hasNoSymlinkSegmentsBelow(root: string, target: string): boolean {
+  const rel = relative(root, target)
+  if (!rel) return true
+  if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    return false
+  }
+  let cursor = root
+  for (const segment of rel.split(sep)) {
+    if (!segment) continue
+    cursor = join(cursor, segment)
+    const stat = lstatSync(cursor, { throwIfNoEntry: false })
+    if (!stat || stat.isSymbolicLink()) return false
+  }
+  return true
+}
 
 export const StoredKobraClientCert = z.strictObject({
   version: z.literal(1),
@@ -109,11 +267,15 @@ function decodeBase64(b64: string): Uint8Array {
 }
 
 function readBoundedFileBytes(filePath: string): Uint8Array | null {
-  const stat = lstatSync(filePath, { throwIfNoEntry: false })
-  if (!stat || stat.isSymbolicLink() || !stat.isFile()) return null
-  if (stat.size <= 0 || stat.size > MAX_SOURCE_FILE_BYTES) return null
-  const buf = readFileSync(filePath)
-  return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+  try {
+    const stat = lstatSync(filePath, { throwIfNoEntry: false })
+    if (!stat || stat.isSymbolicLink() || !stat.isFile()) return null
+    if (stat.size <= 0 || stat.size > MAX_SOURCE_FILE_BYTES) return null
+    const buf = readFileSync(filePath)
+    return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+  } catch {
+    return null
+  }
 }
 
 function collectCandidateFiles(
@@ -165,6 +327,16 @@ export type KobraClientCertImportResult =
       metadata?: Partial<KobraClientCertMetadata> | undefined
     }
 
+const KOBRA_INSTALL_PATH_ERROR: Extract<
+  KobraClientCertImportResult,
+  { ok: false }
+> = Object.freeze({
+  ok: false,
+  reason: 'missing',
+  message:
+    'Não foi possível importar o certificado do cliente a partir do caminho informado do Anycubic Slicer Next.',
+})
+
 export async function importKobraClientCertFromInput(
   input: KobraClientCertificateInput,
   now = Date.now(),
@@ -208,260 +380,212 @@ export async function importKobraClientCertFromInput(
     }
   }
 
-  const rawPath = input.path.trim()
-  if (!rawPath || rawPath.includes('\0') || !isAbsolute(rawPath)) {
-    return {
-      ok: false,
-      reason: 'unreadable',
-      message:
-        'Caminho de instalação do Anycubic Slicer Next inválido (unreadable path).',
-    }
-  }
-  const normalized = normalize(rawPath)
-  const stat = lstatSync(normalized, { throwIfNoEntry: false })
-  if (!stat) {
-    return {
-      ok: false,
-      reason: 'missing',
-      message:
-        'Certificado do cliente não encontrado no caminho informado do Anycubic Slicer Next (client certificate missing).',
-    }
-  }
-  if (stat.isSymbolicLink()) {
-    return {
-      ok: false,
-      reason: 'unreadable',
-      message:
-        'Caminho não pode ser um link simbólico (unreadable symbolic link).',
-    }
+  const matched = matchAllowedInstallRoot(input.path)
+  if (!matched) {
+    return KOBRA_INSTALL_PATH_ERROR
   }
 
-  if (stat.isFile()) {
-    const bytes = readBoundedFileBytes(normalized)
-    if (!bytes) {
-      return {
-        ok: false,
-        reason: 'unreadable',
-        message:
-          'Arquivo de certificado ilegível ou excede o limite permitido (unreadable file).',
-      }
+  try {
+    const rootStat = lstatSync(matched.root, { throwIfNoEntry: false })
+    if (!rootStat || rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
+      return KOBRA_INSTALL_PATH_ERROR
     }
-    const direct = await validateKobraClientCertificate({ bytes, now })
-    if (direct.ok) {
-      return {
-        ok: true,
-        cert: StoredKobraClientCert.parse({
-          version: 1,
-          format: direct.format,
-          subject: direct.metadata.subject,
-          commonName: direct.metadata.commonName,
-          notBefore: direct.metadata.notBefore,
-          notAfter: direct.metadata.notAfter,
-          notBeforeIso: direct.metadata.notBeforeIso,
-          notAfterIso: direct.metadata.notAfterIso,
-          fingerprintSha256: direct.metadata.fingerprintSha256,
-          certificatePem: direct.certificatePem,
-          keyPem: direct.keyPem,
-        }),
-      }
+    if (!hasNoSymlinkSegmentsBelow(matched.root, matched.resolved)) {
+      return KOBRA_INSTALL_PATH_ERROR
     }
-    // Check sibling .key file in the same directory when pointing at a cert file.
-    const parentDir = join(normalized, '..')
-    const base = basename(normalized, extname(normalized))
-    const siblingCandidates = [
-      join(parentDir, `${base}.key`),
-      join(parentDir, `${base}.pem`),
-      join(parentDir, 'client.key'),
-      join(parentDir, 'private.key'),
+    const stat = lstatSync(matched.resolved, { throwIfNoEntry: false })
+    if (!stat || stat.isSymbolicLink()) {
+      return KOBRA_INSTALL_PATH_ERROR
+    }
+    const realRoot = realpathSync(matched.root)
+    const realTarget = realpathSync(matched.resolved)
+    if (!isPathWithinRoot(realTarget, realRoot, process.platform)) {
+      return KOBRA_INSTALL_PATH_ERROR
+    }
+
+    if (stat.isFile()) {
+      const bytes = readBoundedFileBytes(matched.resolved)
+      if (!bytes) {
+        return KOBRA_INSTALL_PATH_ERROR
+      }
+      const direct = await validateKobraClientCertificate({ bytes, now })
+      if (direct.ok) {
+        return {
+          ok: true,
+          cert: StoredKobraClientCert.parse({
+            version: 1,
+            format: direct.format,
+            subject: direct.metadata.subject,
+            commonName: direct.metadata.commonName,
+            notBefore: direct.metadata.notBefore,
+            notAfter: direct.metadata.notAfter,
+            notBeforeIso: direct.metadata.notBeforeIso,
+            notAfterIso: direct.metadata.notAfterIso,
+            fingerprintSha256: direct.metadata.fingerprintSha256,
+            certificatePem: direct.certificatePem,
+            keyPem: direct.keyPem,
+          }),
+        }
+      }
+      // Check sibling .key file in the same directory when pointing at a cert file.
+      const parentDir = join(matched.resolved, '..')
+      if (isPathWithinRoot(parentDir, matched.root, process.platform)) {
+        const base = basename(matched.resolved, extname(matched.resolved))
+        const siblingCandidates = [
+          join(parentDir, `${base}.key`),
+          join(parentDir, `${base}.pem`),
+          join(parentDir, 'client.key'),
+          join(parentDir, 'private.key'),
+        ]
+        const certText = new TextDecoder('utf-8', { fatal: false }).decode(
+          bytes,
+        )
+        for (const keyPath of siblingCandidates) {
+          if (keyPath === matched.resolved) continue
+          const keyBytes = readBoundedFileBytes(keyPath)
+          if (!keyBytes) continue
+          const keyText = new TextDecoder('utf-8', { fatal: false }).decode(
+            keyBytes,
+          )
+          const paired = await validateKobraClientCertificate({
+            text: `${certText}\n${keyText}`,
+            now,
+          })
+          if (paired.ok) {
+            return {
+              ok: true,
+              cert: StoredKobraClientCert.parse({
+                version: 1,
+                format: paired.format,
+                subject: paired.metadata.subject,
+                commonName: paired.metadata.commonName,
+                notBefore: paired.metadata.notBefore,
+                notAfter: paired.metadata.notAfter,
+                notBeforeIso: paired.metadata.notBeforeIso,
+                notAfterIso: paired.metadata.notAfterIso,
+                fingerprintSha256: paired.metadata.fingerprintSha256,
+                certificatePem: paired.certificatePem,
+                keyPem: paired.keyPem,
+              }),
+            }
+          }
+        }
+      }
+      return KOBRA_INSTALL_PATH_ERROR
+    }
+
+    if (!stat.isDirectory()) {
+      return KOBRA_INSTALL_PATH_ERROR
+    }
+
+    const scanState = {
+      seen: 0,
+      certFiles: [] as string[],
+      keyFiles: [] as string[],
+      p12Files: [] as string[],
+    }
+    const preferredSubdirs = [
+      join(matched.resolved, 'Contents', 'Resources'),
+      join(matched.resolved, 'resources'),
+      join(matched.resolved, 'certs'),
+      matched.resolved,
     ]
-    const certText = new TextDecoder('utf-8', { fatal: false }).decode(bytes)
-    for (const keyPath of siblingCandidates) {
-      if (keyPath === normalized) continue
-      const keyBytes = readBoundedFileBytes(keyPath)
-      if (!keyBytes) continue
-      const keyText = new TextDecoder('utf-8', { fatal: false }).decode(
-        keyBytes,
-      )
-      const paired = await validateKobraClientCertificate({
-        text: `${certText}\n${keyText}`,
-        now,
-      })
-      if (paired.ok) {
+    const scannedDirs = new Set<string>()
+    for (const dir of preferredSubdirs) {
+      const dirStat = lstatSync(dir, { throwIfNoEntry: false })
+      if (!dirStat || dirStat.isSymbolicLink() || !dirStat.isDirectory())
+        continue
+      if (!hasNoSymlinkSegmentsBelow(matched.root, dir)) continue
+      const real = realpathSync(dir)
+      if (!isPathWithinRoot(real, realRoot, process.platform)) continue
+      if (scannedDirs.has(real)) continue
+      scannedDirs.add(real)
+      collectCandidateFiles(dir, scanState, 0)
+    }
+
+    for (const certFile of scanState.certFiles) {
+      const bytes = readBoundedFileBytes(certFile)
+      if (!bytes) continue
+      const direct = await validateKobraClientCertificate({ bytes, now })
+      if (direct.ok) {
         return {
           ok: true,
           cert: StoredKobraClientCert.parse({
             version: 1,
-            format: paired.format,
-            subject: paired.metadata.subject,
-            commonName: paired.metadata.commonName,
-            notBefore: paired.metadata.notBefore,
-            notAfter: paired.metadata.notAfter,
-            notBeforeIso: paired.metadata.notBeforeIso,
-            notAfterIso: paired.metadata.notAfterIso,
-            fingerprintSha256: paired.metadata.fingerprintSha256,
-            certificatePem: paired.certificatePem,
-            keyPem: paired.keyPem,
+            format: direct.format,
+            subject: direct.metadata.subject,
+            commonName: direct.metadata.commonName,
+            notBefore: direct.metadata.notBefore,
+            notAfter: direct.metadata.notAfter,
+            notBeforeIso: direct.metadata.notBeforeIso,
+            notAfterIso: direct.metadata.notAfterIso,
+            fingerprintSha256: direct.metadata.fingerprintSha256,
+            certificatePem: direct.certificatePem,
+            keyPem: direct.keyPem,
           }),
         }
       }
-    }
-    return {
-      ok: false,
-      reason: direct.reason,
-      message: direct.message,
-      ...(direct.metadata ? { metadata: direct.metadata } : {}),
-    }
-  }
-
-  if (!stat.isDirectory()) {
-    return {
-      ok: false,
-      reason: 'unreadable',
-      message:
-        'O caminho informado deve ser um diretório de instalação ou arquivo de certificado (unreadable).',
-    }
-  }
-
-  const scanState = {
-    seen: 0,
-    certFiles: [] as string[],
-    keyFiles: [] as string[],
-    p12Files: [] as string[],
-  }
-  const preferredSubdirs = [
-    join(normalized, 'Contents', 'Resources'),
-    join(normalized, 'resources'),
-    join(normalized, 'certs'),
-    normalized,
-  ]
-  const scannedDirs = new Set<string>()
-  for (const dir of preferredSubdirs) {
-    const dirStat = lstatSync(dir, { throwIfNoEntry: false })
-    if (!dirStat || dirStat.isSymbolicLink() || !dirStat.isDirectory()) continue
-    const real = realpathSync(dir)
-    if (scannedDirs.has(real)) continue
-    scannedDirs.add(real)
-    collectCandidateFiles(dir, scanState, 0)
-  }
-
-  let fallbackFailure: Extract<
-    KobraClientCertImportResult,
-    { ok: false }
-  > | null = null
-  const priority: Record<KobraClientCertErrorReason, number> = {
-    expired: 3,
-    'wrong-subject': 2,
-    unreadable: 1,
-    missing: 0,
-  }
-  const recordFailure = (res: {
-    reason: KobraClientCertErrorReason
-    message: string
-    metadata?: Partial<KobraClientCertMetadata> | undefined
-  }) => {
-    if (
-      !fallbackFailure ||
-      priority[res.reason] > priority[fallbackFailure.reason]
-    ) {
-      fallbackFailure = {
-        ok: false,
-        reason: res.reason,
-        message: res.message,
-        ...(res.metadata ? { metadata: res.metadata } : {}),
+      const certText = new TextDecoder('utf-8', { fatal: false }).decode(bytes)
+      for (const keyFile of scanState.keyFiles) {
+        if (join(keyFile, '..') !== join(certFile, '..')) continue
+        const keyBytes = readBoundedFileBytes(keyFile)
+        if (!keyBytes) continue
+        const keyText = new TextDecoder('utf-8', { fatal: false }).decode(
+          keyBytes,
+        )
+        const paired = await validateKobraClientCertificate({
+          text: `${certText}\n${keyText}`,
+          now,
+        })
+        if (paired.ok) {
+          return {
+            ok: true,
+            cert: StoredKobraClientCert.parse({
+              version: 1,
+              format: paired.format,
+              subject: paired.metadata.subject,
+              commonName: paired.metadata.commonName,
+              notBefore: paired.metadata.notBefore,
+              notAfter: paired.metadata.notAfter,
+              notBeforeIso: paired.metadata.notBeforeIso,
+              notAfterIso: paired.metadata.notAfterIso,
+              fingerprintSha256: paired.metadata.fingerprintSha256,
+              certificatePem: paired.certificatePem,
+              keyPem: paired.keyPem,
+            }),
+          }
+        }
       }
     }
-  }
 
-  for (const certFile of scanState.certFiles) {
-    const bytes = readBoundedFileBytes(certFile)
-    if (!bytes) continue
-    const direct = await validateKobraClientCertificate({ bytes, now })
-    if (direct.ok) {
-      return {
-        ok: true,
-        cert: StoredKobraClientCert.parse({
-          version: 1,
-          format: direct.format,
-          subject: direct.metadata.subject,
-          commonName: direct.metadata.commonName,
-          notBefore: direct.metadata.notBefore,
-          notAfter: direct.metadata.notAfter,
-          notBeforeIso: direct.metadata.notBeforeIso,
-          notAfterIso: direct.metadata.notAfterIso,
-          fingerprintSha256: direct.metadata.fingerprintSha256,
-          certificatePem: direct.certificatePem,
-          keyPem: direct.keyPem,
-        }),
-      }
-    }
-    const certText = new TextDecoder('utf-8', { fatal: false }).decode(bytes)
-    for (const keyFile of scanState.keyFiles) {
-      if (join(keyFile, '..') !== join(certFile, '..')) continue
-      const keyBytes = readBoundedFileBytes(keyFile)
-      if (!keyBytes) continue
-      const keyText = new TextDecoder('utf-8', { fatal: false }).decode(
-        keyBytes,
-      )
-      const paired = await validateKobraClientCertificate({
-        text: `${certText}\n${keyText}`,
-        now,
-      })
-      if (paired.ok) {
+    for (const p12File of scanState.p12Files) {
+      const bytes = readBoundedFileBytes(p12File)
+      if (!bytes) continue
+      const res = await validateKobraClientCertificate({ bytes, now })
+      if (res.ok) {
         return {
           ok: true,
           cert: StoredKobraClientCert.parse({
             version: 1,
-            format: paired.format,
-            subject: paired.metadata.subject,
-            commonName: paired.metadata.commonName,
-            notBefore: paired.metadata.notBefore,
-            notAfter: paired.metadata.notAfter,
-            notBeforeIso: paired.metadata.notBeforeIso,
-            notAfterIso: paired.metadata.notAfterIso,
-            fingerprintSha256: paired.metadata.fingerprintSha256,
-            certificatePem: paired.certificatePem,
-            keyPem: paired.keyPem,
+            format: res.format,
+            subject: res.metadata.subject,
+            commonName: res.metadata.commonName,
+            notBefore: res.metadata.notBefore,
+            notAfter: res.metadata.notAfter,
+            notBeforeIso: res.metadata.notBeforeIso,
+            notAfterIso: res.metadata.notAfterIso,
+            fingerprintSha256: res.metadata.fingerprintSha256,
+            certificatePem: res.certificatePem,
+            keyPem: res.keyPem,
           }),
         }
       }
-      recordFailure(paired)
     }
-    recordFailure(direct)
-  }
 
-  for (const p12File of scanState.p12Files) {
-    const bytes = readBoundedFileBytes(p12File)
-    if (!bytes) continue
-    const res = await validateKobraClientCertificate({ bytes, now })
-    if (res.ok) {
-      return {
-        ok: true,
-        cert: StoredKobraClientCert.parse({
-          version: 1,
-          format: res.format,
-          subject: res.metadata.subject,
-          commonName: res.metadata.commonName,
-          notBefore: res.metadata.notBefore,
-          notAfter: res.metadata.notAfter,
-          notBeforeIso: res.metadata.notBeforeIso,
-          notAfterIso: res.metadata.notAfterIso,
-          fingerprintSha256: res.metadata.fingerprintSha256,
-          certificatePem: res.certificatePem,
-          keyPem: res.keyPem,
-        }),
-      }
-    }
-    recordFailure(res)
+    return KOBRA_INSTALL_PATH_ERROR
+  } catch {
+    return KOBRA_INSTALL_PATH_ERROR
   }
-
-  return (
-    fallbackFailure ?? {
-      ok: false,
-      reason: 'missing',
-      message:
-        'Nenhum certificado de cliente Kobra X encontrado na instalação informada do Anycubic Slicer Next (client certificate missing).',
-    }
-  )
 }
 
 export type KobraClientIdentitySource = 'file' | 'install' | 'bundled'
@@ -511,7 +635,7 @@ export async function resolveKobraClientIdentity(
       (options.platform ??
         process.platform) as keyof typeof ANYCUBIC_SLICER_NEXT_TYPICAL_PATHS
     ]
-  if (installPath) {
+  if (installPath && isAllowedKobraInstallPath(installPath)) {
     const stat = lstatSync(installPath, { throwIfNoEntry: false })
     if (stat && !stat.isSymbolicLink()) {
       const imported = await importKobraClientCertFromInput(

@@ -1,4 +1,6 @@
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { collectPrinterPages } from '../utils/printer-pages.ts'
+import { createFarmRequestGuard } from '../utils/farm-request-guard.ts'
 import { useSpoolLibraryFarm } from './useSpoolLibraryFarm.ts'
 import {
   EMPTY_SPOOL_FILTERS,
@@ -43,11 +45,16 @@ export async function fetchSpools(farmId: string) {
 }
 
 export async function fetchPrinters(farmId: string): Promise<PrinterRef[]> {
-  const response = await $fetch<{ printers: PrinterRef[] }>(
-    `/api/farms/${farmId}/printers`,
-    { query: { limit: 50 }, retry: 0, timeout: 15_000 },
+  return collectPrinterPages((after) =>
+    $fetch<{ printers: PrinterRef[]; nextAfter: string | null }>(
+      `/api/farms/${farmId}/printers`,
+      {
+        query: { limit: 50, ...(after ? { after } : {}) },
+        retry: 0,
+        timeout: 15_000,
+      },
+    ),
   )
-  return response.printers
 }
 
 /**
@@ -55,30 +62,32 @@ export async function fetchPrinters(farmId: string): Promise<PrinterRef[]> {
  * runs `load(farmId)` on mount and whenever the farm changes, and tracks
  * loading, error and status-message state.
  */
-export function useSpoolFeaturePage(load: (farmId: string) => Promise<void>) {
+export function useSpoolFeaturePage(
+  load: (farmId: string, current: () => boolean) => Promise<void>,
+) {
   const farm = useSpoolLibraryFarm()
   const loading = ref(false)
   const error = ref('')
   const statusMessage = ref('')
   const actionError = ref('')
-  let generation = 0
+  const guard = createFarmRequestGuard(() => farm.farmId.value)
 
   async function reload() {
     const id = farm.farmId.value
     if (!id) return
-    const mine = ++generation
+    const current = guard.start(id)
     loading.value = true
     error.value = ''
     try {
-      await load(id)
+      await load(id, current)
     } catch (cause) {
-      if (mine === generation)
+      if (current())
         error.value = extractApiError(
           cause,
           'Não foi possível carregar os dados. Tente novamente.',
         ).message
     } finally {
-      if (mine === generation) loading.value = false
+      if (current()) loading.value = false
     }
   }
 
@@ -112,7 +121,7 @@ export function useSpoolFeaturePage(load: (farmId: string) => Promise<void>) {
     if (next && next !== prev) void reload()
   })
   onBeforeUnmount(() => {
-    generation++
+    guard.invalidate()
   })
 
   return {

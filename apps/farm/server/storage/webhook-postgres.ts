@@ -1,6 +1,10 @@
 import { randomBytes, randomUUID } from 'node:crypto'
 import type { Sql } from 'postgres'
 import {
+  openWebhookSecret,
+  sealWebhookSecret,
+} from '../utils/webhooks/secret.ts'
+import {
   webhookRetrySeconds,
   type WebhookDelivery,
 } from '../services/webhook-delivery.ts'
@@ -36,9 +40,11 @@ function view({ description, ...row }: Webhook) {
 
 export class PostgresWebhooks {
   private readonly sql: Sql
+  private readonly secretKey: string
 
-  constructor(sql: Sql) {
+  constructor(sql: Sql, secretKey: string) {
     this.sql = sql
+    this.secretKey = secretKey
   }
 
   async sandbox(appId: string) {
@@ -80,7 +86,7 @@ export class PostgresWebhooks {
       const createdAt = Date.now()
       await tx`
         INSERT INTO farm.integration_webhooks (id, app_id, url, events, description, signing_secret, created_at)
-        VALUES (${id}, ${appId}, ${input.url}, ${input.events}, ${input.description ?? null}, ${signingSecret}, ${createdAt})
+        VALUES (${id}, ${appId}, ${input.url}, ${input.events}, ${input.description ?? null}, ${sealWebhookSecret(signingSecret, this.secretKey)}, ${createdAt})
       `
       return { id, ...input, createdAt, signingSecret }
     })
@@ -125,7 +131,13 @@ export class PostgresWebhooks {
       RETURNING o.subscription_id AS "subscriptionId", o.event_id AS "eventId", o.body::text AS body,
         o.attempts, w.url, w.signing_secret AS secret, a.sandbox
     `
-    return delivery
+    if (!delivery) return undefined
+    const opened = openWebhookSecret(delivery.secret, this.secretKey)
+    if (opened.legacy) {
+      await this
+        .sql`UPDATE farm.integration_webhooks SET signing_secret = ${sealWebhookSecret(opened.secret, this.secretKey)} WHERE id = ${delivery.subscriptionId} AND signing_secret = ${delivery.secret}`
+    }
+    return { ...delivery, secret: opened.secret }
   }
 
   async eligible(delivery: WebhookDelivery) {

@@ -52,6 +52,8 @@ docker save "$connector" | gzip > "$artifacts/connector-$tag-image.tar.gz"
 container=$(docker create --platform linux/amd64 "$connector")
 docker cp "$container:/app/." "$runtime/"
 printf '{"type":"module"}\n' > "$runtime/package.json"
+mkdir -p "$runtime/notices"
+cp -a packages/connector/notices/node-datachannel "$runtime/notices/"
 tar -czf "$artifacts/connector-$tag-linux-amd64.tar.gz" -C "$runtime" .
 
 (

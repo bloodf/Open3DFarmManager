@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: MIT
-import { connect as mqttConnect } from 'mqtt'
+import { connect as mqttConnect, type IClientOptions } from 'mqtt'
+import { readFileSync } from 'node:fs'
 import {
   readKobraXInfo,
   recoverKobraXCredentials,
 } from '../../packages/connector/src/kobra-x/discovery.ts'
 import { decodeAnycubicReport } from '../../packages/connector/src/anycubic/report.ts'
 import { resolveKobraClientIdentity } from '../../packages/connector/src/config/kobra-x-cert.ts'
+import { createKobraXMqttTlsOptions } from './kobra-x-tls.ts'
 import type {
   QualifyCliOptions,
   ObservedIdentity,
@@ -74,17 +76,22 @@ export async function qualifyKobraX(
     ...(certFile !== undefined ? { certFile } : {}),
     ...(keyFile !== undefined ? { keyFile } : {}),
   })
+  const ca = options.caFile
+    ? readFileSync(options.caFile, 'utf8')
+    : credentials.caPem
+  const pinSha256 = options.pinSha256 ?? credentials.pinSha256
 
   const reportBase = `anycubic/anycubicCloud/v1/printer/public/${modeId}/${deviceId}/`
   const requestBase = `anycubic/anycubicCloud/v1/slicer/printer/${modeId}/${deviceId}/`
 
+  const mqttTls = createKobraXMqttTlsOptions(ca, pinSha256)
   const client = mqttConnect({
     host,
     port: mqttPort,
     protocol: 'mqtts',
     cert: clientIdentity.certPem,
     key: clientIdentity.keyPem,
-    rejectUnauthorized: false,
+    ...mqttTls,
     username,
     password,
     protocolVersion: 4,
@@ -93,7 +100,7 @@ export async function qualifyKobraX(
     resubscribe: false,
     reconnectPeriod: 0,
     connectTimeout: Math.min(timeoutMs, 5000),
-  })
+  } as IClientOptions)
 
   const observedFields = new Set<string>()
   const sample: Record<string, unknown> = {}

@@ -46,10 +46,14 @@ const plate = ref('1')
 const pendingDelete = ref('')
 const replaying = ref(false)
 const replayVersion = ref<LibraryVersion>()
+const replayItemId = ref('')
+const replayPlate = ref(1)
 const canReplay = (v: LibraryVersion) =>
   !!props.replaySend && !!props.replayPrinters && v.deletedAt === null
 function replay(v: LibraryVersion) {
   replayVersion.value = v
+  replayItemId.value = props.item?.id ?? ''
+  replayPlate.value = Number(plate.value)
   replaying.value = true
 }
 
@@ -67,6 +71,7 @@ const columns = [
   { id: 'status', label: 'Situação' },
   { id: 'actions', label: 'Ações' },
 ]
+let loadRequest = 0
 const rows = computed(() =>
   versions.value.map((v) => ({
     id: v.id,
@@ -83,29 +88,51 @@ const rows = computed(() =>
 )
 
 async function load() {
-  if (!props.item) return
+  const request = ++loadRequest
+  const item = props.item
+  const farmId = props.farmId
+  if (!item) {
+    loading.value = false
+    return
+  }
   loading.value = true
   error.value = ''
   try {
     const body = await $fetch<{ versions: LibraryVersion[] }>(
-      `/api/farms/${props.farmId}/library/items/${props.item.id}/versions`,
+      `/api/farms/${farmId}/library/items/${item.id}/versions`,
       { retry: 0, timeout: 15_000 },
     )
+    if (
+      request !== loadRequest ||
+      props.item?.id !== item.id ||
+      props.farmId !== farmId
+    )
+      return
     versions.value = body.versions
     selectedVersion.value = body.versions[0]?.id ?? ''
     plate.value = '1'
   } catch {
+    if (
+      request !== loadRequest ||
+      props.item?.id !== item.id ||
+      props.farmId !== farmId
+    )
+      return
     error.value = 'Não foi possível carregar o histórico de versões.'
   } finally {
-    loading.value = false
+    if (request === loadRequest) loading.value = false
   }
 }
 watch(
-  () => [open.value, props.item?.id] as const,
+  () => [open.value, props.item?.id, props.farmId] as const,
   ([isOpen]) => {
     status.value = ''
     pendingDelete.value = ''
     if (isOpen) void load()
+    else {
+      loadRequest += 1
+      loading.value = false
+    }
   },
 )
 
@@ -208,6 +235,8 @@ async function uploaded() {
   <ReplayDialog
     v-if="replayVersion && replayPrinters && replaySend"
     v-model="replaying"
+    :item-id="replayItemId"
+    :preferred-plate="replayPlate"
     :source="{
       sha256: replayVersion.sha256,
       name: replayVersion.originalName,

@@ -177,12 +177,12 @@ function temperature(value: number | undefined) {
   font-size: 1.1rem;
 }
 .kiosk__warn {
-  color: #ffb454;
+  color: var(--state-paused-color);
   font-weight: 700;
 }
 .kiosk__head .kiosk__warn.stale {
   background: transparent;
-  border-color: #ffb454;
+  border-color: var(--state-paused-color);
 }
 .kiosk__loading {
   display: grid;

@@ -30,6 +30,9 @@ const project =
   createHash('sha256').update(process.cwd()).digest('hex').slice(0, 12)
 const state = join(tmpdir(), project + '-' + uid)
 mkdirSync(state, { mode: 0o700, recursive: true })
+// Bind-mounted for the Connector only; create it here so Docker does not
+// invent a root-owned directory on first start.
+mkdirSync(join(state, 'connector-data'), { mode: 0o700, recursive: true })
 const stateInfo = lstatSync(state)
 if (
   !stateInfo.isDirectory() ||

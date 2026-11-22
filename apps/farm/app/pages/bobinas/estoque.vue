@@ -31,11 +31,12 @@ const defaultError = ref('')
 const drafts = reactive<Record<number, string>>({})
 const rowErrors = reactive<Record<number, string>>({})
 
-async function load(farmId: string) {
+async function load(farmId: string, current: () => boolean) {
   const [response, spools] = await Promise.all([
     featureFetch<LowStockResponse>(farmId, 'low-stock'),
     fetchSpools(farmId),
   ])
+  if (!current()) return
   stock.value = response
   canWrite.value = spools.canWrite
   defaultInput.value =
@@ -95,7 +96,7 @@ async function saveDefault() {
         method: 'PUT',
         body: { defaultLowStockThresholdGrams: parsed.value },
       })
-      await load(farmId.value)
+      await page.reload()
     },
     parsed.value === null
       ? 'Limite padrão removido.'
@@ -121,7 +122,7 @@ async function saveThreshold(item: LowStockItem) {
         `low-stock/filaments/${item.filamentId}`,
         { method: 'PUT', body: { thresholdGrams: parsed.value } },
       )
-      await load(farmId.value)
+      await page.reload()
     },
     parsed.value === null
       ? `${itemName(item)} voltou a usar o limite padrão.`

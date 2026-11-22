@@ -150,6 +150,14 @@ export function verifyWebhook(
   secret: string,
 ): boolean {
   if (!/^\d{1,16}$/.test(timestamp)) return false
+  const timestampValue = Number(timestamp)
+  const timestampMs =
+    timestampValue < 100_000_000_000 ? timestampValue * 1000 : timestampValue
+  if (
+    !Number.isSafeInteger(timestampMs) ||
+    Math.abs(Date.now() - timestampMs) > 5 * 60 * 1000
+  )
+    return false
   const expected = createHmac('sha256', secret)
     .update(`${timestamp}.`)
     .update(rawBody)

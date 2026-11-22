@@ -79,6 +79,14 @@ export async function readMoonrakerReady(input: {
   }
 }
 
+// Status objects have open fields, including explicitly nullable values.
+const ObjectStatus = z.record(z.string(), z.record(z.string(), z.unknown()))
+const StatusUpdate = z.tuple([ObjectStatus, z.number().nonnegative()])
+const StatusResult = z.object({
+  status: ObjectStatus,
+  eventtime: z.number().nonnegative(),
+})
+
 const Notification = z.strictObject({
   jsonrpc: z.literal('2.0'),
   method: z.string().max(128),
@@ -233,7 +241,7 @@ export function openMoonrakerClient(input: {
     if (finished) return
     clearTimeout(timer)
     timer = setTimeout(
-      () => finish('offline'),
+      () => finish(earlyUpdates.length ? 'invalid-response' : 'offline'),
       input.onComplete
         ? Math.min(1000, input.limits.requestTimeoutMs)
         : input.limits.requestTimeoutMs,
@@ -339,6 +347,8 @@ export function openMoonrakerClient(input: {
     )
   }
   let lastRequestStarted = 0
+  const earlyUpdates: z.infer<typeof StatusUpdate>[] = []
+  let earlyBytes = 0
   function message(data: import('ws').RawData, isBinary: boolean) {
     if (finished) return
     try {
@@ -419,13 +429,11 @@ export function openMoonrakerClient(input: {
             received - started >= Math.min(1000, input.limits.requestTimeoutMs))
         )
           throw Error('Late observation')
+        const replayAfter = earlyUpdates.length
+          ? StatusResult.parse(reply.data.result).eventtime
+          : undefined
         if (reply.data.id === extensionId) {
-          const result = z
-            .object({
-              status: z.record(z.string(), z.unknown()),
-              eventtime: z.number(),
-            })
-            .parse(reply.data.result)
+          const result = StatusResult.parse(reply.data.result)
           input.onStatus([result.status, result.eventtime])
           extensionId = undefined
         }
@@ -444,6 +452,21 @@ export function openMoonrakerClient(input: {
           subscribed = true
           clearTimeout(timer)
           resolveSnapshot(reply.data.result)
+          if (replayAfter !== undefined) {
+            // The async subscriber installs its baseline from the snapshot
+            // continuation. Replay only updates newer than that snapshot.
+            queueMicrotask(() => {
+              if (finished) return
+              try {
+                for (const update of earlyUpdates)
+                  if (update[1] > replayAfter) input.onStatus(update)
+              } catch {
+                finish('invalid-response')
+              } finally {
+                earlyUpdates.length = 0
+              }
+            })
+          }
         }
         if (extendSubscription) sendExtension()
         else scheduleQuery()
@@ -451,8 +474,20 @@ export function openMoonrakerClient(input: {
       }
       const notification = Notification.parse(value)
       if (notification.method === 'notify_status_update') {
-        if (!subscribed) throw new Error('Status before baseline')
-        input.onStatus(notification.params)
+        const update = StatusUpdate.parse(notification.params)
+        if (subscribed) input.onStatus(update)
+        else {
+          // Moonraker delivers status asynchronously while the subscribe
+          // reply is in flight. The frame decoder already requires a Buffer.
+          if (!pending || discovering) throw Error('Status before subscription')
+          earlyBytes += (data as Buffer).byteLength
+          if (
+            earlyBytes > input.limits.maxMessageBytes ||
+            earlyUpdates.length >= 64
+          )
+            throw Error('Early status limit')
+          earlyUpdates.push(update)
+        }
       } else if (
         [
           'notify_klippy_disconnected',

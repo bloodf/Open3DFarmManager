@@ -547,6 +547,14 @@ onBeforeUnmount(() => {
           </header>
 
           <div class="stock-block">
+            <StatusBadge
+              v-if="
+                spoolRemainingPercent(spool) !== null &&
+                spoolRemainingPercent(spool)! <= 20
+              "
+              tone="attention"
+              label="Bobina com pouco material"
+            />
             <div class="stock-numbers">
               <strong>
                 Restante: {{ formatSpoolWeight(spool.remaining_weight) }}

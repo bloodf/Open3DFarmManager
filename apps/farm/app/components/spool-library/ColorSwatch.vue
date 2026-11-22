@@ -9,7 +9,7 @@ import type { FilamentItem } from '../../utils/spool-library-types.ts'
 const props = defineProps<{
   filament: Pick<
     FilamentItem,
-    'color_hex' | 'multi_color_hexes' | 'multi_color_direction'
+    'color_hex' | 'multi_color_hexes' | 'multi_color_direction' | 'name'
   >
   showLabel?: boolean
 }>()
@@ -26,7 +26,9 @@ const label = computed(() => filamentColorLabel(props.filament))
       aria-hidden="true"
       :style="background ? { background } : undefined"
     />
-    <span v-if="showLabel !== false" class="swatch-label">{{ label }}</span>
+    <span v-if="showLabel !== false" class="swatch-label">
+      <span v-if="filament.name">{{ filament.name }} · </span>{{ label }}
+    </span>
   </span>
 </template>
 

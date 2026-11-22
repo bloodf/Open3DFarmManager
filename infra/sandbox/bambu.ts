@@ -1,10 +1,7 @@
 import { startBambuSimulator } from '../../packages/sim-tools/src/bambu-simulator.ts'
 import { syntheticBambuTls } from './bambu-synthetic-identity.ts'
-import { readFileSync } from 'node:fs'
-
-const { accessCode } = JSON.parse(
-  readFileSync('/sandbox/bambu-credential.json', 'utf8'),
-) as { accessCode: string }
+const accessCode = process.env.SANDBOX_BAMBU_ACCESS_CODE
+if (!accessCode) throw new Error('Missing synthetic Bambu access code')
 
 const simulator = await startBambuSimulator({
   host: '0.0.0.0',

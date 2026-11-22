@@ -163,6 +163,10 @@ test('sandbox bambu has no state mount; app and connector get only needed files'
     'bambu still needs the workspace',
   )
 
+  assert.deepEqual(mapping(bambu.environment), {
+    SANDBOX_BAMBU_ACCESS_CODE: '${SANDBOX_BAMBU_ACCESS_CODE:-}',
+  })
+
   const app = mapping(services.app)
   assert.deepEqual(
     volumeList(app).toSorted(),

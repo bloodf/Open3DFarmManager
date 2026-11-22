@@ -130,7 +130,7 @@ async function checkScreenshotAttribution(page, siteDir, provenance, label) {
       [`rota ${known.route}`, 'route'],
       [known.viewport, 'viewport'],
       [provenance.date, 'capture date'],
-      [provenance.commit.slice(0, 7), 'commit'],
+      ...(provenance.commit ? [[provenance.commit.slice(0, 7), 'commit']] : []),
     ]
     for (const [text, what] of expected) {
       if (!caption.includes(text))

@@ -41,6 +41,13 @@ export interface PostgresBinaries {
 
 let cachedBinaries: PostgresBinaries | undefined
 
+function reportCleanupFailure(context: string, error: unknown): void {
+  process.emitWarning(
+    `${context}: ${error instanceof Error ? error.message : String(error)}`,
+    { type: 'CleanupWarning' },
+  )
+}
+
 /**
  * Lowest supported server major. Runtime and suites set transaction_timeout,
  * which PostgreSQL 16 rejects (find_option: unrecognized configuration
@@ -78,7 +85,9 @@ export function findPostgresBin(forceRefresh = false): PostgresBinaries {
         candidates.push(join(linuxBase, v, 'bin'))
       }
     }
-  } catch {}
+  } catch (error) {
+    reportCleanupFailure('Could not inspect PostgreSQL installations', error)
+  }
 
   const tooOld: string[] = []
   for (const dir of candidates) {
@@ -420,10 +429,22 @@ log_timezone = 'UTC'
                 'immediate',
                 'stop',
               ])
-            } catch {}
+            } catch (cleanupError) {
+              reportCleanupFailure(
+                'Could not stop failed PostgreSQL startup',
+                cleanupError,
+              )
+            }
           }
           if (tempDir && existsSync(tempDir)) {
-            await rm(tempDir, { recursive: true, force: true }).catch(() => {})
+            await rm(tempDir, { recursive: true, force: true }).catch(
+              (cleanupError) => {
+                reportCleanupFailure(
+                  'Could not remove failed PostgreSQL startup directory',
+                  cleanupError,
+                )
+              },
+            )
           }
           throw startupErr
         }
@@ -473,7 +494,12 @@ log_timezone = 'UTC'
         )
         return sql
       } catch (err) {
-        await this.stop().catch(() => {})
+        await this.stop().catch((cleanupError) => {
+          reportCleanupFailure(
+            'Could not clean up failed PostgreSQL fixture',
+            cleanupError,
+          )
+        })
         throw err
       }
     },
@@ -488,7 +514,9 @@ log_timezone = 'UTC'
         try {
           const content = await readFile(logPath, 'utf8')
           return content.slice(-10000)
-        } catch {}
+        } catch (error) {
+          reportCleanupFailure('Could not read PostgreSQL logs', error)
+        }
       }
       return ''
     },
@@ -544,10 +572,16 @@ log_timezone = 'UTC'
                 'immediate',
                 'stop',
               ])
-            } catch {}
+            } catch (error) {
+              failure ??= error
+            }
           }
           if (tempDir && existsSync(tempDir)) {
-            await rm(tempDir, { recursive: true, force: true }).catch(() => {})
+            await rm(tempDir, { recursive: true, force: true }).catch(
+              (error) => {
+                failure ??= error
+              },
+            )
             ledger({ removed: 'cluster', tempDir })
           }
         }

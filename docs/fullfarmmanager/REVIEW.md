@@ -181,6 +181,8 @@ Discovery covers enumeration or identification at a configured address. Connecti
 
 ## Driver fan-out
 
+**Ownership:** Bambu, Creality FDM, Anycubic FDM, Snapmaker and Klipper-based drivers belong to the openfarm-fdm team. Elegoo, Phrozen, Formlabs, Anycubic resin, Creality HALOT, Prusa, Qidi, Flashforge and other brands belong to openfarm-drivers. Shared driver interfaces, catalog schema and Connector core belong to this repository's core team.
+
 Build in the order below. Rows with incomplete maker wire contracts start with evidence and an offline model harness. Enable only the capabilities that the evidence supports. USB-only models can use explicit offline records and manual file handoff. Size is relative implementation effort for each family.
 
 Every unit uses original code and simulated or fixture-backed tests. Start each fixture with `recorded` and its source, or `spec-derived, not captured` and its doc URL. No automated test contacts a physical printer. Keep existing hardware-path tests green. Owner hardware runs qualify each model/firmware/capability over and above simulator acceptance.

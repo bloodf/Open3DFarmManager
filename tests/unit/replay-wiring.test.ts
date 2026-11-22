@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { join } from 'node:path'
+import { Server } from 'node:net'
 import { expect as pw } from '@playwright/test'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
@@ -141,6 +142,24 @@ beforeAll(async () => {
 }, 60_000)
 afterAll(async () => {
   await harness?.close()
+})
+
+describe('page harness setup cleanup', () => {
+  it('closes its listener and browser context when mounting fails', async () => {
+    const listeningServers = () =>
+      (process as NodeJS.Process & { _getActiveHandles(): unknown[] })
+        ._getActiveHandles()
+        .filter(
+          (handle: unknown) => handle instanceof Server && handle.listening,
+        ).length
+    const before = listeningServers()
+    await expect(
+      harness.open('historico', routes(), {
+        init: "Object.defineProperty(window, '__mount', { configurable: false, value: () => { throw new Error('mount fault') } })",
+      }),
+    ).rejects.toThrow()
+    expect(listeningServers()).toBe(before)
+  })
 })
 
 describe('Histórico', () => {

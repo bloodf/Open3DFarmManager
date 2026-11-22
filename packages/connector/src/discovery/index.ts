@@ -8,6 +8,7 @@ export type Printer = {
   vendor: 'bambu' | 'moonraker' | 'creality' | 'anycubic' | 'kobra-x'
   host: string
   port?: number
+  transport?: 'wss'
   serial?: string
   model?: string
   name?: string

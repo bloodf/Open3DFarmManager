@@ -13,6 +13,8 @@ export const CrealityBinding = z.strictObject({
     .max(253)
     .regex(/^[a-zA-Z0-9.:-]+$/),
   port: z.number().int().min(1).max(65535).default(9999),
+  httpsPort: z.number().int().min(1).max(65535).optional(),
+  caFile: z.string().min(1).max(4096).optional(),
   /** Stock HTTP upload port (POST /upload/<name>); absent means 80. */
   httpPort: z.number().int().min(1).max(65535).optional(),
 })

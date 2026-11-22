@@ -1,6 +1,10 @@
 import { z } from 'zod'
 import { parseToolStatus } from './discovery-parse.ts'
 import { supportedMoonrakerActions } from './commands.ts'
+import {
+  TOOL_COMMANDS,
+  type SnapmakerU1UnsupportedReason,
+} from './u1-marker.ts'
 
 /**
  * Snapmaker U1 tool mapping (read-only telemetry).
@@ -120,8 +124,11 @@ export function mapSnapmakerU1Tools(
   return { model: 'snapmaker-u1', tools, activeTool: active?.tool ?? null }
 }
 
-export type SnapmakerU1UnsupportedReason =
-  'tool-command-not-implemented' | 'not-hardware-qualified'
+export {
+  SNAPMAKER_U1_MARKER,
+  SnapmakerU1CommandRefused,
+  type SnapmakerU1UnsupportedReason,
+} from './u1-marker.ts'
 
 export type SnapmakerU1CommandSupport = Readonly<{
   /** Always empty: U1 qualification covers read-only telemetry only. */
@@ -131,9 +138,6 @@ export type SnapmakerU1CommandSupport = Readonly<{
     reason: SnapmakerU1UnsupportedReason
   }>[]
 }>
-
-/** Tool-aware commands the Moonraker adapter has no builder for. */
-const TOOL_COMMANDS = ['select_tool', 'set_tool_temperature'] as const
 
 /**
  * Command capability for a U1. Every command is reported unsupported with a
@@ -156,4 +160,52 @@ export function snapmakerU1CommandSupport(
       })),
     ],
   }
+}
+
+/**
+ * Locally declared Snapmaker U1 printers, by printer key. Only the Connector's
+ * private collector configuration declares a model; nothing from the wire or
+ * the browser can opt a printer in or out.
+ */
+const declaredU1 = new Map<string, number>()
+
+/** Declares the configured U1 printers; the returned function withdraws them. */
+export function declareSnapmakerU1Printers(
+  printers: readonly Readonly<{
+    printerKey: string
+    model?: string | undefined
+  }>[],
+): () => void {
+  const keys = printers
+    .filter((printer) => isSnapmakerU1Model(printer.model))
+    .map((printer) => printer.printerKey)
+  for (const key of keys) declaredU1.set(key, (declaredU1.get(key) ?? 0) + 1)
+  let withdrawn = false
+  return () => {
+    if (withdrawn) return
+    withdrawn = true
+    for (const key of keys) {
+      const count = (declaredU1.get(key) ?? 1) - 1
+      if (count > 0) declaredU1.set(key, count)
+      else declaredU1.delete(key)
+    }
+  }
+}
+
+export function isDeclaredSnapmakerU1(printerKey: string): boolean {
+  return declaredU1.has(printerKey)
+}
+
+/** Objects a U1 subscription adds: every tool heater and the active tool. */
+export const SNAPMAKER_U1_STATUS_OBJECTS: Readonly<Record<string, string[]>> =
+  Object.freeze({
+    ...Object.fromEntries(
+      TOOL_OBJECTS.map((object) => [object, ['temperature', 'target']]),
+    ),
+    toolhead: ['extruder'],
+  })
+
+/** Whether a status object belongs to the U1 tool projection. */
+export function isSnapmakerU1StatusObject(name: string): boolean {
+  return Object.hasOwn(SNAPMAKER_U1_STATUS_OBJECTS, name)
 }

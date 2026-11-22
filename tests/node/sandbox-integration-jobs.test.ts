@@ -154,6 +154,10 @@ test(
         stdio: 'ignore',
         timeout: 120_000,
       })
+      assert.doesNotMatch(
+        await readFile(serverBundle, 'utf8'),
+        /stale sandbox bundle/,
+      )
       const launch = (args: string[], extra: NodeJS.ProcessEnv) => {
         const child = spawn(process.execPath, args, {
           env: { ...process.env, ...extra },

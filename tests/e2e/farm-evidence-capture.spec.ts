@@ -1,5 +1,4 @@
-import { mkdir, mkdtemp, stat, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import {
@@ -31,19 +30,55 @@ async function waitForState(page: Page, scenario: Scenario) {
   // The loading scenario never answers, so its request is the signal.
   if (scenario === 'loading') await page.waitForRequest(pattern)
   else await page.waitForResponse((response) => pattern.test(response.url()))
-  await expect(
-    page.getByRole('heading', { level: 1, name: 'Minha farm', exact: true }),
-  ).toBeVisible()
-  // Let the state render; motion is reduced so nothing animates afterwards.
-  await page.waitForTimeout(750)
+  const heading = page.getByRole('heading', {
+    level: 1,
+    name: 'Minha farm',
+    exact: true,
+  })
+  await expect(heading).toBeVisible()
+  switch (scenario) {
+    case 'populated':
+      await expect(
+        page.getByText('Ender da bancada', { exact: true }),
+      ).toBeVisible()
+      break
+    case 'empty':
+      await expect(
+        page.getByText('Nenhuma impressora atribuída a esta farm.', {
+          exact: true,
+        }),
+      ).toBeVisible()
+      break
+    case 'no-farms':
+      await expect(
+        page.getByText('Sua conta ainda não tem acesso a uma farm.', {
+          exact: true,
+        }),
+      ).toBeVisible()
+      break
+    case 'loading':
+      await expect(
+        page
+          .getByRole('status')
+          .filter({ hasText: 'Carregando o cadastro de impressoras' }),
+      ).toBeVisible()
+      break
+    case 'sign-in':
+      await expect(
+        page.getByRole('heading', { name: 'Entre para ver a farm' }),
+      ).toBeVisible()
+      break
+    case 'error':
+      await expect(page.getByRole('alert')).toBeVisible()
+      break
+  }
 }
 
 test('capture farm screen states with axe results', async ({
   page,
 }, testInfo) => {
   const dir =
-    process.env.POLISH_FARM_SHOTS_DIR ??
-    (await mkdtemp(join(tmpdir(), 'openfarm-shots-')))
+    process.env.POLISH_FARM_SHOTS_DIR ?? testInfo.outputPath('farm-evidence')
   await mkdir(dir, { recursive: true })
   testInfo.setTimeout(300_000)
   const summary: Record<string, unknown> = {}

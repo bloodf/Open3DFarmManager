@@ -7,6 +7,12 @@ import {
 import { moonrakerLastJob } from './normalize.ts'
 import { parseMoonrakerSnapshot } from './parse.ts'
 import {
+  SNAPMAKER_U1_STATUS_OBJECTS,
+  isSnapmakerU1Model,
+  isSnapmakerU1StatusObject,
+  mapSnapmakerU1Tools,
+} from './u1-tools.ts'
+import {
   MoonrakerClientError,
   openMoonrakerClient,
   readMoonrakerReady,
@@ -18,6 +24,8 @@ import {
 export type MoonrakerAssignment = Readonly<{
   printerKey: string
   origin: string
+  /** Locally declared model; "Snapmaker U1" opts into the U1 tool mapping. */
+  model?: string | undefined
 }>
 export type RawMoonrakerObservation = Readonly<{
   printerKey: string
@@ -155,6 +163,7 @@ export function createMoonrakerSubscription(input: {
   signal: AbortSignal
 }): { done: Promise<void> } {
   const { printerKey, origin, limits } = validateMoonrakerInput(input)
+  const snapmakerU1 = isSnapmakerU1Model(input.assignment.model)
   const controller = new AbortController()
   const signal = AbortSignal.any([input.signal, controller.signal])
   let callbackFailure: { error: unknown } | undefined
@@ -221,6 +230,30 @@ export function createMoonrakerSubscription(input: {
       let fingerprint: string | undefined
       // Reset per connection: an end seen only after a reconnect is unwatched.
       let watchingJob = false
+      // U1 only: latest per-tool status, and every tool seen active while the
+      // watched job ran (`null` when the printer did not say).
+      const toolStatus: Record<string, Record<string, unknown>> = {}
+      const jobTools = new Set<string | null>()
+      function observeTools(status: unknown) {
+        if (!snapmakerU1 || !status || typeof status !== 'object') return
+        for (const [name, value] of Object.entries(status)) {
+          if (
+            !isSnapmakerU1StatusObject(name) ||
+            !value ||
+            typeof value !== 'object' ||
+            Array.isArray(value)
+          )
+            continue
+          toolStatus[name] = { ...toolStatus[name], ...value }
+        }
+      }
+      function u1Materials(): PrinterState['materials'] {
+        if (!snapmakerU1) return undefined
+        return mapSnapmakerU1Tools(toolStatus).tools.map((tool) => ({
+          slot: tool.tool,
+          ...(tool.active === null ? {} : { active: tool.active }),
+        }))
+      }
       function publish(
         value: z.infer<typeof Snapshot>,
         temperatureObservation?: RawMoonrakerObservation['temperatureObservation'],
@@ -247,6 +280,7 @@ export function createMoonrakerSubscription(input: {
             observedAt: Date.now(),
           },
         )
+        const materials = u1Materials()
         if (input.onRawObservation && fieldTimes && !invalidated) {
           const observedTimes = fieldTimes
           rawCallback(() =>
@@ -254,7 +288,10 @@ export function createMoonrakerSubscription(input: {
               Object.freeze({
                 printerKey,
                 epoch: currentEpoch,
-                printer: Object.freeze({ ...parsed.printer }),
+                printer: Object.freeze({
+                  ...parsed.printer,
+                  ...(materials ? { materials } : {}),
+                }),
                 status: Object.freeze({
                   webhooks: Object.freeze({ ...value.status.webhooks }),
                   print_stats: Object.freeze({ ...value.status.print_stats }),
@@ -286,15 +323,39 @@ export function createMoonrakerSubscription(input: {
         }
         const jobState = value.status.print_stats.state
         if (!input.jobFields) watchingJob = false
-        else if (jobState === 'printing' || jobState === 'paused')
+        else if (jobState === 'printing' || jobState === 'paused') {
+          if (!watchingJob) jobTools.clear()
           watchingJob = true
-        else if (watchingJob) {
+          if (materials)
+            jobTools.add(
+              materials.some((tool) => tool.active === undefined)
+                ? null
+                : (materials.find((tool) => tool.active)?.slot ?? null),
+            )
+        } else if (watchingJob) {
           const ended = moonrakerLastJob(
             value.status,
             parsed.printer.observedAt,
           )
           if (ended) {
-            lastJob = ended
+            // A U1 reports one total length for all tools: it is attributed
+            // to a tool only when that tool alone was active for the whole job.
+            const [only] = jobTools
+            lastJob =
+              materials && ended.filamentUsedMillimetres !== undefined
+                ? {
+                    ...ended,
+                    filamentUsage: [
+                      {
+                        tool:
+                          jobTools.size === 1 && typeof only === 'string'
+                            ? only
+                            : 'unknown',
+                        millimetres: ended.filamentUsedMillimetres,
+                      },
+                    ],
+                  }
+                : ended
             watchingJob = false
           }
         }
@@ -303,14 +364,18 @@ export function createMoonrakerSubscription(input: {
           parsed.printer.progress,
           parsed.printer.fans,
           parsed.printer.light,
+          materials,
           lastJob?.endedAt,
         ])
         if (nextFingerprint === fingerprint) return
         fingerprint = nextFingerprint
+        const printer = materials
+          ? { ...parsed.printer, materials }
+          : parsed.printer
         emit({
           kind: 'snapshot',
           ...parsed,
-          printer: lastJob ? { ...parsed.printer, lastJob } : parsed.printer,
+          printer: lastJob ? { ...printer, lastJob } : printer,
         })
       }
       try {
@@ -325,6 +390,7 @@ export function createMoonrakerSubscription(input: {
           signal,
           ...(input.discoverObjects ? { discoverObjects: true } : {}),
           ...(input.jobFields ? { jobFields: true } : {}),
+          ...(snapmakerU1 ? { extraObjects: SNAPMAKER_U1_STATUS_OBJECTS } : {}),
           ...(input.onRawObservation
             ? {
                 onInvalidated: invalidate,
@@ -332,6 +398,7 @@ export function createMoonrakerSubscription(input: {
                   observation: import('./client.ts').MoonrakerCompleteObservation,
                 ) {
                   const complete = TemperatureSnapshot.parse(observation.result)
+                  observeTools(complete.status)
                   const value = Snapshot.parse(complete)
                   const stamp = observation.requestStartedAtMonoMs
                   // A delta received during this query has a newer local field
@@ -402,6 +469,7 @@ export function createMoonrakerSubscription(input: {
           onStatus(params) {
             const [delta, eventtime] = Delta.parse(params)
             if (!baseline) throw new Error('No baseline')
+            if (eventtime >= baseline.eventtime) observeTools(delta)
             const optional = OptionalTelemetry.parse(delta)
             const status = {
               ...OptionalTelemetry.parse(baseline.status),
@@ -457,7 +525,9 @@ export function createMoonrakerSubscription(input: {
             publish({ eventtime, status })
           },
         })
-        const initial = Snapshot.parse(await client.snapshot)
+        const raw = await client.snapshot
+        const initial = Snapshot.parse(raw)
+        observeTools((raw as { status?: unknown }).status)
         if (!input.onRawObservation) publish(initial)
         backoff = limits.reconnectMinMs
         const reason = await client.closed

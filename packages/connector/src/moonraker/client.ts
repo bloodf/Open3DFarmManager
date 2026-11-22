@@ -136,6 +136,8 @@ export function openMoonrakerClient(input: {
   discoverObjects?: boolean
   /** Also subscribe to the print_stats fields a finished-job summary needs. */
   jobFields?: boolean
+  /** Model-specific read-only objects added to every subscription and query. */
+  extraObjects?: Readonly<Record<string, readonly string[]>>
   /** Connector identity registered with Moonraker on every connection. */
   client?: { name: string; version: string; url: string }
   onStatus: (params: unknown) => void
@@ -159,10 +161,22 @@ export function openMoonrakerClient(input: {
   let subscribed = false
   let identified = false
   let discovering = input.discoverObjects === true
-  const baseObjects = input.jobFields ? jobObjects : selectedObjects
-  const baseQueryObjects = input.jobFields
-    ? { ...jobObjects, ...temperatureObjects }
-    : completeObjects
+  const extraObjects = Object.fromEntries(
+    Object.entries(input.extraObjects ?? {}).map(([name, fields]) => [
+      name,
+      [...fields],
+    ]),
+  )
+  const baseObjects = {
+    ...(input.jobFields ? jobObjects : selectedObjects),
+    ...extraObjects,
+  }
+  const baseQueryObjects = {
+    ...(input.jobFields
+      ? { ...jobObjects, ...temperatureObjects }
+      : completeObjects),
+    ...extraObjects,
+  }
   let objects: Record<string, string[]> = { ...baseObjects }
   let queryObjects: Record<string, string[]> = { ...baseQueryObjects }
   let resolveSnapshot: (value: unknown) => void = () => {}

@@ -32,6 +32,7 @@ import {
   excludeObjectWire,
 } from './control-print-status.ts'
 import { buildMoonrakerCommand } from './commands.ts'
+import { SnapmakerU1CommandRefused, isDeclaredSnapmakerU1 } from './u1-tools.ts'
 import {
   parseQueueOp,
   parseQueueStatus,
@@ -909,6 +910,10 @@ export function openFixedMoonrakerPause(input: {
       args: Record<string, unknown>,
       request: Parameters<NonNullable<PauseDriver['execute']>>[2],
     ) {
+      // A declared Snapmaker U1 has no qualified command; refuse before any
+      // write, also before its object list has been detected.
+      if (isDeclaredSnapmakerU1(mapping.printer_key))
+        return Promise.reject(new SnapmakerU1CommandRefused(action))
       if (action === 'pause' || action === 'resume' || action === 'cancel')
         return send(commandWire(action), request)
       if (isMotionAction(action)) {
@@ -964,6 +969,10 @@ export function openFixedMoonrakerPause(input: {
       return send(extendedWire(action, args), request, 5000)
     },
     pauseOnce(request: Parameters<PauseDriver['pauseOnce']>[0]) {
+      if (isDeclaredSnapmakerU1(mapping.printer_key))
+        return Promise.reject(
+          new SnapmakerU1CommandRefused(request.action ?? 'pause'),
+        )
       return send(commandWire(request.action ?? 'pause'), request)
     },
     async waitForPaused({

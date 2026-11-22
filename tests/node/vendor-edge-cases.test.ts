@@ -22,50 +22,82 @@ function report(
   }
 }
 
-test('Kobra X does not settle a request from a same type/action report with a different msgid', async () => {
-  let publishedMsgid = ''
+test('Kobra X does not settle a request from a report msgid belonging to another in-flight request', async () => {
+  const published: string[] = []
   const requests = createKobraXRequests({
     topic: (type) => type,
     publish(_topic, payload) {
-      publishedMsgid = (JSON.parse(payload) as { msgid: string }).msgid
+      published.push((JSON.parse(payload) as { msgid: string }).msgid)
     },
     resultTimeoutMs: 80,
   })
-  const pending = requests.send({
+  const first = requests.send({
     type: 'print',
     action: 'start',
     beforeSend: () => true,
   })
-  // Same type/action, different msgid — must not resolve the pending request (#616).
+  const second = requests.send({
+    type: 'print',
+    action: 'start',
+    beforeSend: () => true,
+    resultTimeoutMs: 200,
+  })
+  assert.equal(published.length, 2)
+  const [msgidA, msgidB] = published
+  // Same type/action, but msgid names the other request — must not settle first (#616).
   requests.handleReport(
     report({
       type: 'print',
       action: 'start',
-      msgid: 'other-request-msgid',
+      msgid: msgidB!,
       code: 0,
     }),
   )
+  assert.equal((await second).kind, 'confirmed')
   const mid = await Promise.race([
-    pending.then((outcome) => ({ early: true as const, outcome })),
+    first.then((outcome) => ({ early: true as const, outcome })),
     new Promise<{ early: false }>((resolve) =>
       setTimeout(() => resolve({ early: false }), 20),
     ),
   ])
   assert.equal(mid.early, false)
-  assert.ok(publishedMsgid)
-  // Matching msgid still confirms.
+  // Matching msgid still confirms the remaining request.
   requests.handleReport(
     report({
       type: 'print',
       action: 'start',
-      msgid: publishedMsgid,
+      msgid: msgidA!,
       code: 0,
+    }),
+  )
+  assert.equal((await first).kind, 'confirmed')
+})
+
+test('Kobra X still settles by type/action when the printer chooses its own report msgid', async () => {
+  const requests = createKobraXRequests({
+    topic: (type) => type,
+    publish() {},
+    resultTimeoutMs: 200,
+  })
+  const pending = requests.send({
+    type: 'file',
+    action: 'listLocal',
+    beforeSend: () => true,
+  })
+  // S1 printers acknowledge with the request msgid, then answer on /report
+  // with a printer-chosen msgid — type+action must still confirm.
+  requests.handleReport(
+    report({
+      type: 'file',
+      action: 'listLocal',
+      msgid: 'printer-chosen-msgid',
+      code: 200,
     }),
   )
   assert.equal((await pending).kind, 'confirmed')
 })
 
-test('Kobra X falls back to type/action only when the report has no msgid', async () => {
+test('Kobra X falls back to type/action when the report has no msgid', async () => {
   const requests = createKobraXRequests({
     topic: (type) => type,
     publish() {},

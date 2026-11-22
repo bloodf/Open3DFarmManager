@@ -8,6 +8,7 @@
  *   --color-accent on --color-surface
  *   --color-on-accent on --color-accent
  *   --state-*-color on --color-surface (idle, printing, paused, error, offline, stale)
+ *   --kiosk-stale-color on the kiosk's dark canvas
  */
 
 :root,
@@ -37,6 +38,7 @@
   --state-offline-icon: 'offline';
   --state-stale-color: #5c6570;
   --state-stale-icon: 'stale';
+  --kiosk-stale-color: #f2cd81;
 
   /* Spacing scale */
   --space-1: 0.25rem;
@@ -91,6 +93,7 @@
     --state-error-color: #f0a0a0;
     --state-offline-color: #a8b0b8;
     --state-stale-color: #9aa3ad;
+    --kiosk-stale-color: #e0b35a;
   }
 }
 
@@ -112,4 +115,5 @@
   --state-error-color: #f0a0a0;
   --state-offline-color: #a8b0b8;
   --state-stale-color: #9aa3ad;
+  --kiosk-stale-color: #e0b35a;
 }

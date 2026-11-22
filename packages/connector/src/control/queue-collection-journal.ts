@@ -106,7 +106,8 @@ export function openQueueCollectionJournal(path: string) {
       return structuredClone(read(printer))
     },
     blocked(printer: string): boolean {
-      return awaitsCollection(read(printer))
+      const state = read(printer)
+      return awaitsCollection(state) || state.dispatchedAt !== undefined
     },
     complete(printer: string, attempt: string): void {
       identifier.parse(attempt)
@@ -117,7 +118,7 @@ export function openQueueCollectionJournal(path: string) {
     awaiting(printer: string): readonly string[] {
       return awaitingAttempts(read(printer))
     },
-    /** Durably records an OpenFarm start before it is sent. */
+    /** Durably records an OpenFarm start at the send boundary. */
     dispatched(printer: string, wallMs: number): void {
       save({ ...printers, [printer]: observeDispatch(read(printer), wallMs) })
     },

@@ -28,6 +28,7 @@ export function createLibraryJobLinks() {
     string,
     LibraryJobStart & {
       ran: boolean
+      sawRunning?: boolean
       stopped?: boolean
       previousEnd?: number
       observedAt?: number
@@ -102,17 +103,20 @@ export function createLibraryJobLinks() {
           last !== undefined &&
           last.endedAt > Math.max(start.previousEnd ?? -1, start.sentAt)
         if (
-          (!start.ran && printer.observedAt - start.sentAt > START_WINDOW_MS) ||
+          (!start.ran &&
+            !newEnd &&
+            printer.observedAt - start.sentAt > START_WINDOW_MS) ||
           (running && start.stopped) ||
           (running &&
             printer.filename &&
             stem(printer.filename) !== stem(start.name)) ||
-          (!running && newEnd && (!start.ran || last.sha256 !== undefined))
+          (!running && newEnd && last.sha256 !== undefined)
         ) {
           pending.delete(printerKey)
           return repeat
         }
         if (running) {
+          start.sawRunning = true
           if (printer.filename && stem(printer.filename) === stem(start.name))
             start.ran = true
           return printer
@@ -128,7 +132,7 @@ export function createLibraryJobLinks() {
         return printer
       }
       if (
-        !start.ran ||
+        (!start.ran && (start.sentAt === undefined || start.sawRunning)) ||
         !last ||
         last.sha256 !== undefined ||
         last.filename === undefined ||

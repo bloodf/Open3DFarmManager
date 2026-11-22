@@ -55,7 +55,9 @@ export function observeDispatch(
 ): CollectionState {
   if (!Number.isSafeInteger(wallMs) || wallMs < 0)
     throw new Error('Invalid dispatch time')
-  return { ...state, dispatchedAt: wallMs }
+  return state.dispatchedAt === undefined
+    ? { ...state, dispatchedAt: wallMs }
+    : state
 }
 
 /**

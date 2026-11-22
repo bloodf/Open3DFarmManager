@@ -86,21 +86,31 @@ export function withCollectionHold<D extends PauseDriver>(
       }
       if (!COLLECTION_HELD_ACTIONS.has(action))
         return execute(action, args, request)
-      if (key === undefined || held(key))
-        throw refused('Printer awaiting collection', key !== undefined)
-      // Journaled before the start can leave, so a restart mid-print still
-      // holds the run it began. A start that is never sent leaves a harmless
-      // marker: only a run that finishes after it is held.
-      try {
-        config.journal.dispatched(key, wall())
-      } catch {
-        throw refused('Collection journal unavailable', false)
+      if (key === undefined || held(key)) {
+        let awaiting = false
+        try {
+          awaiting =
+            key !== undefined && config.journal.awaiting(key).length > 0
+        } catch {
+          /* fail closed */
+        }
+        throw refused(
+          awaiting
+            ? 'Printer awaiting collection'
+            : 'Printer start outcome uncertain',
+          awaiting,
+        )
       }
       return execute(action, args, {
         ...request,
-        // The caller's guard runs exactly once; the hold is re-read after it.
         beforeSend() {
-          return request.beforeSend() && !held(key)
+          if (!request.beforeSend() || held(key)) return false
+          try {
+            config.journal.dispatched(key, wall())
+          } catch {
+            throw refused('Collection journal unavailable', false)
+          }
+          return true
         },
       })
     },

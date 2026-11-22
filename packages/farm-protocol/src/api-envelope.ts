@@ -96,6 +96,14 @@ const common = {
   nonce,
   issued_at: time,
   expires_at: time,
+  // Roll out Connector support before issuing these fields: older strict V1
+  // parsers reject them. New Connectors refuse legacy inbox commands without
+  // both claims; legacy envelopes remain parseable for compatibility.
+  scope: z
+    .enum(['jobs:start', 'jobs:write', 'control:basic', 'control:extended'])
+    .optional(),
+  /** Issuance-time authority epoch, revalidated by the delivery claim. */
+  grant_epoch: time.optional(),
 }
 const expiryBounds = (value: { issued_at: number; expires_at: number }) =>
   value.expires_at - value.issued_at >= MIN_API_ENVELOPE_TTL_MS &&

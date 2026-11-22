@@ -160,6 +160,11 @@ export function createApiCommandRunner(config: {
     if (config.signal?.aborted)
       return ['grant-revoked', 'inbox authority ended']
     if (now.wall >= envelope.expires_at) return ['expired', 'envelope expired']
+    if (
+      envelope.scope !== undefined &&
+      envelope.scope !== apiEnvelopeScope(envelope)
+    )
+      return ['grant-revoked', 'action outside the signed scope']
     const grant = config.grants.lookup(envelope.grant_id)
     if (
       !grant ||
@@ -579,8 +584,12 @@ export async function receiveApiCommand(
               grant_id: id,
               app_id: envelope.app_id,
               farm_id: envelope.farm_id,
-              scopes: [frame.scope],
-              revoked: false,
+              scopes: envelope.scope === frame.scope ? [envelope.scope] : [],
+              revoked:
+                envelope.grant_epoch === undefined ||
+                envelope.scope === undefined ||
+                envelope.grant_epoch !== envelope.issued_at ||
+                frame.confirmed_at < envelope.grant_epoch,
             }
           : undefined,
       freshness: {

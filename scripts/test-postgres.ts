@@ -607,7 +607,7 @@ async function main(): Promise<number> {
         )
       const ctx: FixtureContext = {
         port,
-        url: `postgres://fixture@127.0.0.1:${port}/fixture`,
+        url: database.connectionString,
         systemId,
         image,
         logPath: database.logPath,
@@ -622,7 +622,7 @@ async function main(): Promise<number> {
       ledger({ event: 'fixture-ready', job: name, port, state })
       const handle: JobHandle = {
         sql,
-        env: { ...env, ...additions },
+        env: { ...env, ...additions, PGPASSWORD: database.password },
         cleanup: () => database.stop(),
       }
       current.cleanup = handle.cleanup

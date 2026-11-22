@@ -281,6 +281,7 @@ async function runConnectorAgentOnce(
     ((assignmentId: string) => readonly string[] | undefined) | undefined
   let controlsFor:
     ((assignmentId: string) => readonly ExtendedControlAction[]) | undefined
+  let refreshControls: (() => void) | undefined
   const detailSources = createPrinterDetailSources(config)
   // Library prints (#384): download from the server or read the local copy,
   // checked against what each printer itself reported. Never stops the agent.
@@ -814,6 +815,7 @@ async function runConnectorAgentOnce(
           },
           onControls(read) {
             controlsFor = read
+            refreshControls?.()
           },
         }).catch((error: unknown) => {
           // A pause-path failure never stops read-only telemetry or status.
@@ -945,7 +947,11 @@ async function runConnectorAgentOnce(
         config: config.collection,
         controlsFor: (printerKey) => {
           const ref = refs.find((entry) => entry.printerKey === printerKey)
-          return ref ? (controlsFor?.(ref.assignmentId) ?? []) : []
+          return ref ? controlsFor?.(ref.assignmentId) : undefined
+        },
+        onControlsRefresh(refresh) {
+          refreshControls = refresh
+          refresh()
         },
         linkHealthFor: (printerKey) => links.get(printerKey),
         libraryLinks,

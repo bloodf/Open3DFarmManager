@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { TransactionSql } from 'postgres'
 import { startMoonrakerMock } from '../../packages/sim-tools/src/mocks/moonraker-mock.ts'
+import { moonrakerControls } from '../../packages/connector/src/moonraker/control-support.ts'
 import { collectIntoQueue } from '../../packages/connector/src/runtime/collect.ts'
 import { TelemetryQueue } from '../../packages/connector/src/cloud/queue.ts'
 import { parseCollectorConfig } from '../../packages/connector/src/formlabs/config.ts'
@@ -18,6 +19,8 @@ test('simulated print telemetry stores advertised controls for listing and actio
   const directory = mkdtempSync(join(tmpdir(), 'fix-670-controls-'))
   const queue = new TelemetryQueue(join(directory, 'queue'), Date.now())
   const controller = new AbortController()
+  let controls: ReturnType<typeof moonrakerControls> | undefined
+  let refresh = () => {}
   const done = collectIntoQueue({
     config: parseCollectorConfig({
       version: 1,
@@ -28,7 +31,10 @@ test('simulated print telemetry stores advertised controls for listing and actio
     queue,
     signal: controller.signal,
     onDiagnostic() {},
-    controlsFor: () => ['pause', 'cancel'],
+    controlsFor: () => controls,
+    onControlsRefresh(value) {
+      refresh = value
+    },
   })
   const world = freshWorld()
   const app = world.addApp([
@@ -70,7 +76,9 @@ test('simulated print telemetry stores advertised controls for listing and actio
           [event],
         )
         expect(stored?.state).toBe(state)
-        expect(stored?.controls).toEqual(['pause', 'cancel'])
+        expect(stored?.controls).toEqual(
+          state === 'offline' ? undefined : controls,
+        )
         row.state = structuredClone(stored)
         world.actionsStore.targets.set(ids.printerA1, {
           farmId: ids.farmA,
@@ -82,10 +90,9 @@ test('simulated print telemetry stores advertised controls for listing and actio
           { readPrinters: async () => [row], readPrinter: async () => row },
           new URLSearchParams(),
         )
-        expect('data' in listed && listed.data[0]?.controls).toEqual([
-          'pause',
-          'cancel',
-        ])
+        expect('data' in listed && listed.data[0]?.controls).toEqual(
+          stored!.controls ?? [],
+        )
         return
       }
       await new Promise((resolve) => setTimeout(resolve, 20))
@@ -94,6 +101,24 @@ test('simulated print telemetry stores advertised controls for listing and actio
   }
   try {
     await capture('idle')
+    const unknown = await submitIntegrationActionRequest(
+      new Request('http://localhost/actions', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'idempotency-key': 'unknown-pause',
+        },
+        body: JSON.stringify({ action: 'pause', args: {} }),
+      }),
+      principal,
+      ids.printerA1,
+      world.actions,
+    )
+    expect(unknown.status).toBe(202)
+    controls = moonrakerControls(undefined)
+    const initialAt = stored!.observedAt
+    refresh()
+    await capture('idle', initialAt)
     sim.control.update({
       state: 'printing',
       filename: 'part.gcode',
@@ -114,18 +139,19 @@ test('simulated print telemetry stores advertised controls for listing and actio
         ids.printerA1,
         world.actions,
       )
-      expect(response.status).toBe(action === 'resume' ? 422 : 202)
-      if (action === 'resume')
-        expect(await response.json()).toMatchObject({ code: 'unsupported' })
+      expect(response.status).toBe(202)
     }
     expect(
       [...world.envelopes.commands.values()].map(
         (command) => command.kind === 'action' && command.action.action,
       ),
-    ).toEqual(['pause', 'cancel'])
+    ).toEqual(['pause', 'pause', 'cancel', 'resume'])
     const printingAt = stored!.observedAt
     sim.control.completePrint()
     await capture('idle', printingAt)
+    const idleAt = stored!.observedAt
+    sim.control.disconnectClients()
+    await capture('offline', idleAt)
   } finally {
     controller.abort()
     await done

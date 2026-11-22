@@ -367,12 +367,14 @@ export async function testPostgresCredentialSuccessors(
   }
   const login = 'successor_fixture_' + randomUUID().replaceAll('-', '')
   await admin`CREATE ROLE ${admin(login)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS IN ROLE farm_pause_authority`
+  const rolePassword = randomUUID().replaceAll('-', '')
+  await admin.unsafe(`ALTER ROLE "${login}" PASSWORD '${rolePassword}'`)
   const pauseSql = postgres({
     host: '127.0.0.1',
     port,
     database: 'fixture',
     username: login,
-    password: '',
+    password: rolePassword,
     ssl: false,
     max: 1,
     connection: {

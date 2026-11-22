@@ -1,8 +1,10 @@
 // Disposable local PostgreSQL 17 cluster for the Docker-free (OPENFARM_SIM=mock)
-// outage run. Loopback TCP only, trust auth, data inside the caller's work
+// outage run. Loopback TCP with password authentication, data inside the caller's work
 // directory, removed with it. Stops exactly the postmaster it started.
 import { execFile, execFileSync } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import { existsSync } from 'node:fs'
+import { writeFile } from 'node:fs/promises'
 import { delimiter, dirname, isAbsolute, join } from 'node:path'
 import { promisify } from 'node:util'
 
@@ -56,9 +58,23 @@ export async function startLocalPostgres(input: {
     )
   const data = join(input.workDir, 'pgdata')
   const log = join(input.workDir, 'postgres.log')
+  const password = randomBytes(32).toString('hex')
+  const passwordFile = join(input.workDir, 'postgres-password')
+  await writeFile(passwordFile, password, { mode: 0o600 })
   await exec(
     initdb,
-    ['-D', data, '-U', 'fixture', '-A', 'trust', '-E', 'UTF8', '--no-sync'],
+    [
+      '-D',
+      data,
+      '-U',
+      'fixture',
+      '--auth-local=scram-sha-256',
+      '--auth-host=scram-sha-256',
+      `--pwfile=${passwordFile}`,
+      '-E',
+      'UTF8',
+      '--no-sync',
+    ],
     { env, timeout: 60000 },
   )
   input.ledger({
@@ -95,7 +111,7 @@ export async function startLocalPostgres(input: {
     await exec(
       createdb,
       ['-h', '127.0.0.1', '-p', String(input.port), '-U', 'fixture', 'fixture'],
-      { env, timeout: 30000 },
+      { env: { ...env, PGPASSWORD: password }, timeout: 30000 },
     )
   } catch (error) {
     await stop().catch(() => {})
@@ -109,5 +125,5 @@ export async function startLocalPostgres(input: {
     )
     input.ledger({ removed: 'local-postgres-process', data })
   }
-  return { stop, stopSync, logPath: log }
+  return { stop, stopSync, logPath: log, password }
 }

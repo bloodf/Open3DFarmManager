@@ -126,8 +126,12 @@ const postgresJob =
   jobs.postgres ?? assert.fail('ci.yml must define a postgres job')
 const steps = postgresJob.steps as Array<Record<string, Yaml>>
 
-test('Checks workflow is dispatch-only', () => {
-  assert.deepEqual(workflow.on, ['workflow_dispatch'])
+test('Checks runs on pull requests, main pushes, and manual dispatch', () => {
+  assert.deepEqual(workflow.on, {
+    pull_request: '',
+    push: { branches: ['main'] },
+    workflow_dispatch: '',
+  })
 })
 
 test('postgres job exists and keeps the existing checkout and setup pattern', () => {
@@ -163,11 +167,7 @@ test('postgres job runs test:postgres with bounded output and pipefail', () => {
   assert.match(command, /npm run test:postgres 2>&1 \| tail -c 200000/)
 })
 
-test('postgres job does not run on any trigger other than workflow_dispatch', () => {
-  assert.equal(
-    Array.isArray(workflow.on) &&
-      workflow.on.length === 1 &&
-      workflow.on[0] === 'workflow_dispatch',
-    true,
-  )
+test('postgres runs on every Checks trigger and E2E runs only on manual dispatch', () => {
+  assert.equal(postgresJob.if, undefined)
+  assert.equal(jobs.e2e?.if, "github.event_name == 'workflow_dispatch'")
 })

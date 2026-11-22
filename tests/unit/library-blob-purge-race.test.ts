@@ -205,8 +205,7 @@ function createRaceSql(state: State): Sql {
           keepVersions: null,
         },
       ]
-    if (text.includes('SELECT storage_location AS "storageLocation"'))
-      return []
+    if (text.includes('SELECT storage_location AS "storageLocation"')) return []
     if (text.includes('COALESCE(sum(size_bytes), 0)')) return [{ used: 0 }]
     if (text.startsWith('INSERT INTO farm.library_blobs')) {
       const [farmId, hash, sizeBytes] = params as [string, string, number]
@@ -321,8 +320,7 @@ function createRaceSql(state: State): Sql {
     if (text.startsWith('UPDATE farm.library_blobs SET purged_at')) {
       const [now, farmId, hash] = params as [number, string, string]
       const blob = state.blobs.find(
-        (b) =>
-          b.farmId === farmId && b.sha256 === hash && b.purgedAt === null,
+        (b) => b.farmId === farmId && b.sha256 === hash && b.purgedAt === null,
       )
       if (!blob) return []
       blob.purgedAt = now

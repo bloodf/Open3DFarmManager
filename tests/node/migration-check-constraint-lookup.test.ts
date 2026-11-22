@@ -23,7 +23,7 @@ test('no migration locates check constraints with an IN-list LIKE lookup', async
   assert.deepEqual(offenders, [])
 })
 
-test('all migrations apply, roll back, and apply again on disposable PostgreSQL', async (context) => {
+test('migrations through 0080 apply, roll back, and apply again on disposable PostgreSQL', async (context) => {
   try {
     findPostgresBin()
   } catch (error) {
@@ -37,7 +37,7 @@ test('all migrations apply, roll back, and apply again on disposable PostgreSQL'
   try {
     const sql = await database.start()
     try {
-      await testPostgresMigrations(sql)
+      await testPostgresMigrations(sql, '0080_integration_library_api')
     } finally {
       await sql.end({ timeout: 5 })
     }

@@ -38,6 +38,7 @@ import {
 import type { RawMoonrakerUnavailable } from '../moonraker/subscription.ts'
 import { join } from 'node:path'
 import type { PrinterState } from '@open3dfarmmanager/farm-protocol'
+import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
 import { TelemetryQueue, type QueueLoss } from '../cloud/queue.ts'
 import { type LocalCollectorConfig } from '../config/local.ts'
 import { assertUnscopedCollection } from './queue-scope.ts'
@@ -106,6 +107,10 @@ export async function collectLocalTelemetry(input: {
 
 /** Caller owns the already-open queue and its scope/close lifecycle. */
 export async function collectIntoQueue(input: {
+  controlsFor?: (
+    printerKey: string,
+  ) => readonly ExtendedControlAction[] | undefined
+  onControlsRefresh?: (refresh: () => void) => void
   onLoss?: (value: Extract<Diagnostic, { kind: 'loss' }>) => void
   linkHealthFor?: (printerKey: string) => MoonrakerLinkHealth | undefined
   discoverMoonrakerObjects?: boolean
@@ -163,6 +168,8 @@ export async function collectIntoQueue(input: {
   // Transitions are detected in memory; the first observation after a restart emits none.
   // Changes during unreachability fold into one transition from the last-known state at reconnect.
   const lastState = new Map<string, PrinterState['state']>()
+  const latestStates = new Map<string, PrinterState>()
+  const lastControls = new Map<string, string>()
   // The machine block is queued only when it changes.
   const machineGate = createMachineProfileGate()
   function diagnostic(value: Diagnostic) {
@@ -189,6 +196,18 @@ export async function collectIntoQueue(input: {
       if (event.kind === 'unavailable') {
         totals.unavailable++
         diagnostic({ kind: 'unavailable', reason: event.reason })
+        const previous = latestStates.get(event.printerKey)
+        if (previous && previous.state !== 'offline') {
+          const { controls: _controls, ...rest } = previous
+          onEvent({
+            kind: 'snapshot',
+            printer: {
+              ...rest,
+              state: 'offline',
+              observedAt: Math.max(Date.now(), previous.observedAt + 1),
+            },
+          })
+        }
       } else {
         const now = Date.now()
         // Degraded storage drops records; they count as lost, never as queued.
@@ -210,7 +229,18 @@ export async function collectIntoQueue(input: {
         }
         const printer =
           input.libraryLinks?.attach(event.printer) ?? event.printer
-        const queued = machineGate.apply(printer)
+        const controls =
+          printer.state === 'offline'
+            ? undefined
+            : input.controlsFor?.(printer.printerKey)
+        const { controls: _controls, ...withoutControls } = printer
+        const current = {
+          ...withoutControls,
+          ...(controls === undefined ? {} : { controls: [...controls] }),
+        }
+        latestStates.set(printer.printerKey, current)
+        lastControls.set(printer.printerKey, JSON.stringify(controls ?? null))
+        const queued = machineGate.apply(current)
         let receipt
         try {
           receipt = queue.enqueue(queued, now)
@@ -229,6 +259,23 @@ export async function collectIntoQueue(input: {
       fail(error)
     }
   }
+  input.onControlsRefresh?.(() => {
+    for (const printer of latestStates.values()) {
+      if (printer.state === 'offline') continue
+      const controls = input.controlsFor?.(printer.printerKey)
+      if (
+        lastControls.get(printer.printerKey) !==
+        JSON.stringify(controls ?? null)
+      )
+        onEvent({
+          kind: 'snapshot',
+          printer: {
+            ...printer,
+            observedAt: Math.max(Date.now(), printer.observedAt + 1),
+          },
+        })
+    }
+  })
   const materialReads = new Set<Promise<void>>()
   let inventory: SpoolmanSnapshot | undefined
   let lastInventoryObservedAt = -1

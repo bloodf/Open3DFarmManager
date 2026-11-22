@@ -7,6 +7,7 @@ import {
   openSync,
   closeSync,
   readFileSync,
+  rmdirSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
@@ -33,6 +34,9 @@ mkdirSync(state, { mode: 0o700, recursive: true })
 // Bind-mounted for the Connector only; create it here so Docker does not
 // invent a root-owned directory on first start.
 mkdirSync(join(state, 'connector-data'), { mode: 0o700, recursive: true })
+// Postgres data bind volume (compose.yml); the image chowns it to its own user.
+const databaseDir = join(state, 'database')
+mkdirSync(databaseDir, { mode: 0o700, recursive: true })
 const stateInfo = lstatSync(state)
 if (
   !stateInfo.isDirectory() ||
@@ -93,7 +97,28 @@ try {
       },
     )
   if (action) {
-    docker(action === 'down' ? ['down', '--volumes'] : ['stop'])
+    if (action === 'down') {
+      // The postgres image chowns its data to uid 999, so empty the bind
+      // directory from inside a container (after stopping postgres), then
+      // rmdir it (empty, but unreadable to us). Runs before `down --volumes`, which would drop the volume.
+      docker(['stop'])
+      docker([
+        'run',
+        '--rm',
+        '--no-deps',
+        '--user',
+        '0',
+        '--entrypoint',
+        'find',
+        'postgres',
+        '/var/lib/postgresql/data',
+        '-mindepth',
+        '1',
+        '-delete',
+      ])
+      docker(['down', '--volumes'])
+      rmdirSync(databaseDir)
+    } else docker(['stop'])
     if (action === 'down')
       for (const file of ['client.json', 'seed-started']) {
         const path = join(state, file)

@@ -78,6 +78,12 @@ services:
       - /sandbox/credential.json
       - --data-dir
       - /sandbox/connector-data
+# database is bind-mounted under the sandbox state dir (not Docker's volume
+# store); scripts/sandbox.ts creates and removes the directory.
 volumes:
   database:
+    driver_opts:
+      type: none
+      o: bind
+      device: ${SANDBOX_STATE:?}/database
   klipper-data:

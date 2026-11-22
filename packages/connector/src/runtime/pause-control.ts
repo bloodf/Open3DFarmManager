@@ -103,7 +103,7 @@ function label(reason: string): string {
   return /^[a-zA-Z0-9:_-]{1,80}$/.test(reason) ? reason : 'unclassified'
 }
 
-function refuseApiCommand(
+export function refuseApiCommand(
   frame: Parameters<typeof receiveApiCommand>[1],
   inbox: Parameters<typeof receiveApiCommand>[2],
   code: 'printer-busy' | 'not-ready' | 'unsupported',

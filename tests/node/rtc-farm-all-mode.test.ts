@@ -3,6 +3,9 @@ import test from 'node:test'
 import {
   allAcceptanceRows,
   buildAcceptanceSummary,
+  deferredAcceptanceRows,
+  HARDWARE_ACCEPTANCE_DEFERRED,
+  NETWORK_FAULT_PROFILES,
   parseLastJson,
   rowPassed,
   runnableAcceptanceRows,
@@ -58,5 +61,17 @@ test('an overall suite failure preserves each row outcome', () => {
       'command-rejected-tampered',
     ),
     true,
+  )
+})
+
+test('mock mode defers network-fault profiles; docker mode keeps only hardware deferred', () => {
+  assert.deepEqual(NETWORK_FAULT_PROFILES, ['nat', 'netem', 'udp-block'])
+  const mock = deferredAcceptanceRows({ OPENFARM_SIM: 'mock' })
+  assert.equal(mock.length, 4)
+  assert.ok(mock.every((row) => row.row !== undefined))
+  assert.equal(mock.at(-1)?.row, HARDWARE_ACCEPTANCE_DEFERRED.row)
+  assert.deepEqual(
+    deferredAcceptanceRows({ OPENFARM_SIM: 'docker' }).map((row) => row.row),
+    [HARDWARE_ACCEPTANCE_DEFERRED.row],
   )
 })

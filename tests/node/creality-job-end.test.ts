@@ -11,7 +11,12 @@ const require = createRequire(
   new URL('../../packages/connector/package.json', import.meta.url),
 )
 const WebSocket = require('ws')
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+async function waitFor(predicate: () => boolean, description: string) {
+  const deadline = Date.now() + 3000
+  while (!predicate() && Date.now() < deadline)
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  assert.ok(predicate(), `timed out waiting for ${description}`)
+}
 
 for (const outcome of ['completed', 'cancelled', 'failed'] as const) {
   test(`Creality collector reports ${outcome}`, async () => {
@@ -38,7 +43,7 @@ for (const outcome of ['completed', 'cancelled', 'failed'] as const) {
     const ws = new WebSocket(`ws://127.0.0.1:${sim.port}`)
     try {
       await new Promise<void>((resolve) => ws.once('open', resolve))
-      await sleep(50)
+      await waitFor(() => observations.length > 0, 'collector connection')
       ws.send(
         JSON.stringify({
           method: 'upload',
@@ -47,12 +52,16 @@ for (const outcome of ['completed', 'cancelled', 'failed'] as const) {
       )
       ws.send(JSON.stringify({ method: 'start', params: {} }))
       if (outcome === 'cancelled') {
-        await sleep(100)
+        await waitFor(
+          () => Number(sim.state.printProgress) > 0,
+          'simulator print progress before cancellation',
+        )
         ws.send(JSON.stringify({ method: 'set', params: { stop: 1 } }))
       }
-      const deadline = Date.now() + 3000
-      while (!observations.some((p) => p.lastJob) && Date.now() < deadline)
-        await sleep(10)
+      await waitFor(
+        () => observations.some((p) => p.lastJob),
+        'collector last job',
+      )
       const binding: Parameters<FarmSnapshotProvider>[0]['binding'] = {
         v: 1,
         purpose: 'read-only-rtc',

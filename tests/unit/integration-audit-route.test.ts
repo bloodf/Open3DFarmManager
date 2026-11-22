@@ -11,7 +11,10 @@ const accountId = '22222222-2222-4222-8222-222222222222'
 
 function pool(): Sql & { end: ReturnType<typeof vi.fn> } {
   const end = vi.fn(async () => {})
-  return Object.assign(vi.fn(async () => []), { end }) as unknown as Sql & {
+  return Object.assign(
+    vi.fn(async () => []),
+    { end },
+  ) as unknown as Sql & {
     end: ReturnType<typeof vi.fn>
   }
 }

@@ -78,7 +78,6 @@ export async function listIntegrationAudit(deps: ListIntegrationAuditDeps) {
     throw createError({ status: 404, message: 'Farm não encontrada.' })
   return {
     entries,
-    nextCursor:
-      entries.length === 50 ? entries[entries.length - 1]!.id : null,
+    nextCursor: entries.length === 50 ? entries[entries.length - 1]!.id : null,
   }
 }

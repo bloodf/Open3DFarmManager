@@ -414,15 +414,17 @@ async function runAssignmentControl(
       return binding ? router.macros?.(binding) : undefined
     })
     if (input.onControls) {
-      input.onControls((id) => {
+      const readControls = (id: string) => {
         const binding = config.bindingFor(id)
         return binding ? browserDriver.controls(binding) : []
-      })
+      }
+      input.onControls(readControls)
       try {
         await router.detect(printerBinding, input.signal)
       } catch {
         // Failed detection retains the driver's conservative capabilities.
       }
+      input.onControls(readControls)
     }
     relay = createPauseCommandRelay({
       authority: {

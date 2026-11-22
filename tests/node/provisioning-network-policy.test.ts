@@ -17,6 +17,7 @@ import {
 import type { ConfigurationRequestFrame } from '../../packages/farm-protocol/src/configuration-frames.ts'
 import { ConnectorIdentity } from '../../packages/connector/src/identity/store.ts'
 import { createProvisioningEngine } from '../../packages/connector/src/provisioning/engine.ts'
+import { createPrinterNetworkPolicy } from '../../packages/connector/src/provisioning/policy.ts'
 import {
   trustProvisioningAuthority,
   type ProvisioningContext,
@@ -146,15 +147,23 @@ function localRfc1918(): { ip: string; cidr: string } | null {
       if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part)))
         continue
       const [a, b] = parts
-      if (a === 10) return { ip: entry.address, cidr: '10.0.0.0/8' }
-      if (a === 172 && b !== undefined && b >= 16 && b <= 31)
-        return { ip: entry.address, cidr: '172.16.0.0/12' }
-      if (a === 192 && b === 168)
-        return { ip: entry.address, cidr: '192.168.0.0/16' }
+      let cidr: string | null = null
+      if (a === 10) cidr = '10.0.0.0/8'
+      else if (a === 172 && b !== undefined && b >= 16 && b <= 31)
+        cidr = '172.16.0.0/12'
+      else if (a === 192 && b === 168) cidr = '192.168.0.0/16'
+      if (cidr && createPrinterNetworkPolicy([cidr]).allows(entry.address))
+        return { ip: entry.address, cidr }
     }
   }
   return null
 }
+
+test('refuses .0 and .255 hosts inside an allowed private printer CIDR', () => {
+  const policy = createPrinterNetworkPolicy(['192.168.1.0/24'])
+  assert.equal(policy.allows('192.168.1.0'), false)
+  assert.equal(policy.allows('192.168.1.255'), false)
+})
 
 test('refuses loopback, link-local and public origins for moonraker and spoolman', async () => {
   const seen: string[] = []

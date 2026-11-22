@@ -121,6 +121,18 @@ const view = useFarmView({
 })
 definePageMeta({ key: (route) => route.path })
 const { state: viewState, ready, now, discover } = view
+watch(
+  () =>
+    [route.query.farm, ready.value?.farms, ready.value?.scope?.farmId] as const,
+  ([farm, farms, current]) => {
+    if (
+      typeof farm === 'string' &&
+      farm !== current &&
+      farms?.some((item) => item.farmId === farm)
+    )
+      void view.selectFarm(farm)
+  },
+)
 const heading = ref<HTMLElement | null>(null)
 const page = ref<HTMLElement | null>(null)
 const pauseDialog = ref<HTMLDialogElement | null>(null)

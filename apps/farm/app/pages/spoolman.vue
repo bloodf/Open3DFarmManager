@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { selectedFarm } from '../utils/farm-request-guard.ts'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import Button from '../components/ui/Button.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -24,6 +25,7 @@ type Farm = { farmId: string }
 type Connector = { agentId: string; status: 'pending' | 'approved' | 'revoked' }
 
 const farms = ref<Farm[]>([])
+const route = useRoute()
 const farmId = ref('')
 const connectors = ref<Connector[]>([])
 const settings = ref<SpoolmanSavedSetting[]>([])
@@ -97,7 +99,7 @@ async function load() {
       timeout: 15_000,
     })
     farms.value = page.farms
-    farmId.value = page.farms[0]?.farmId ?? ''
+    farmId.value = selectedFarm(page.farms, route.query.farm)?.farmId ?? ''
     if (!farmId.value) noFarm.value = true
     else await refresh()
   } catch (cause) {

@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import ShellNavigation from '../components/shell/ShellNavigation.vue'
 import Button from '../components/ui/Button.vue'
 import Dialog from '../components/ui/Dialog.vue'
+import { selectedFarm } from '../utils/farm-request-guard.ts'
 import { listenForAuthInvalidation } from '../utils/auth-invalidation'
 import { createShellShortcuts } from '../utils/shell-shortcuts'
 import { themeScript, themeStyles } from '../utils/pre-hydration'
@@ -151,6 +152,12 @@ onUnmounted(() => {
   stopAuthListener?.()
   authRequest?.abort()
 })
+watch(
+  () => route.query.farm,
+  () => {
+    void refreshAccount()
+  },
+)
 async function refreshAccount() {
   authRequest?.abort()
   authRequest = new AbortController()
@@ -175,7 +182,7 @@ async function refreshAccount() {
     })
     if (signal.aborted) return
     farms.value = page.farms
-    const farmId = page.farms[0]?.farmId
+    const farmId = selectedFarm(page.farms, route.query.farm)?.farmId
     if (!farmId) return
     const devices = await $fetch<BrowserDevicePage>('/api/browser-devices', {
       query: { farm_id: farmId, limit: 1 },

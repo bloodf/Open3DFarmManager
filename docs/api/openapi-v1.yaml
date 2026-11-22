@@ -2319,6 +2319,10 @@ components:
       required: [name, material, colorHex, remainingGrams, location, archived]
       additionalProperties: false
       properties:
+        spoolId:
+          type: integer
+          minimum: 1
+          description: Spoolman ID scoped to the Connector's configured Spoolman service; absent in older observations.
         name:
           type: [string, 'null']
           maxLength: 32
@@ -2354,6 +2358,9 @@ components:
           minimum: 0
           maximum: 10000
           description: Spools known to Spoolman; `spools` may be a bounded subset.
+        partial:
+          type: boolean
+          description: Present on inventory read responses; true when the snapshot contains fewer spools than total.
         spools:
           type: array
           maxItems: 8

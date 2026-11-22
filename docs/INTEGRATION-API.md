@@ -85,6 +85,14 @@ be a bounded subset of `total`. The Connector's Spoolman setup, active spool
 sources, usage calculation and read-only behaviour are described in
 [SPOOLMAN-INTEGRATION.md](SPOOLMAN-INTEGRATION.md).
 
+### Spool snapshot identity
+
+New Connector observations include `spoolId` for each spool. The ID belongs
+to that Connector's configured Spoolman service, not to the display name;
+older observations may omit it. `partial` is true when the bounded snapshot
+contains fewer entries than `total`. Neither the snapshot cursor nor this flag
+provides a complete spool-level inventory feed.
+
 A `GET /printers` item may carry a read-only `specs` object with what the
 Connector or printer profile reported: `buildVolumeMm` (`x`, `y`, `z` in mm),
 `nozzles` (`[{ diameterMm }]`, one per tool), `spoolSlots` (integer) and

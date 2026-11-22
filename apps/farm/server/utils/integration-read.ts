@@ -130,7 +130,12 @@ export async function listIntegrationInventory(
     const parsed = SpoolInventory.safeParse(row.snapshot)
     if (!parsed.success || parsed.data.observedAt !== row.observedAt)
       throw new Error('Stored inventory does not match its schema')
-    return { farmId: row.farmId, connectorId: row.connectorId, ...parsed.data }
+    return {
+      farmId: row.farmId,
+      connectorId: row.connectorId,
+      ...parsed.data,
+      partial: parsed.data.spools.length < parsed.data.total,
+    }
   })
   const last = data.at(-1)
   return {

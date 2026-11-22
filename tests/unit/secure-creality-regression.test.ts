@@ -1,4 +1,6 @@
 import { createServer } from 'node:net'
+import https from 'node:https'
+import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
 import {
   probeCreality,
@@ -13,6 +15,36 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 describe('secure Creality regressions', () => {
+  it.each([
+    ['custom CA', { caFile: '/dev/null', port: 9999 }],
+    ['system trust', { transport: 'wss', port: 9999 }],
+    ['explicit HTTPS port', { httpsPort: 8443, port: 9999 }],
+    ['default system trust', {}],
+  ] as const)(
+    'requires HTTPS with %s before any discovery',
+    async (_configuration, binding) => {
+      const request = new EventEmitter()
+      const get = vi.spyOn(https, 'get').mockImplementationOnce(() => {
+        queueMicrotask(() =>
+          request.emit(
+            'error',
+            Object.assign(new Error('connection refused'), {
+              code: 'ECONNREFUSED',
+            }),
+          ),
+        )
+        return request as ReturnType<typeof https.get>
+      })
+      try {
+        await expect(
+          resolveCrealityEndpoint({ host: '127.0.0.2', ...binding }),
+        ).rejects.toThrow('Creality HTTPS discovery failed: connection refused')
+      } finally {
+        get.mockRestore()
+      }
+    },
+  )
+
   it('reports valid rows and diagnoses malformed ones without leaking transport', async () => {
     const controller = new AbortController()
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -86,6 +118,9 @@ describe('secure Creality regressions', () => {
       await probeCreality('127.0.0.1', { ...ports, caFile })
       await sim.close()
       sim = undefined
+      await expect(
+        resolveCrealityEndpoint({ host: '127.0.0.1', port: 9999 }),
+      ).rejects.toThrow('Creality HTTPS discovery failed')
       await expect(
         resolveCrealityEndpoint({
           host: '127.0.0.1',

@@ -163,6 +163,7 @@ export function createCrealityDetailStream(
     printerKey: string
     host: string
     port?: number | undefined
+    transport?: 'ws' | 'wss' | undefined
     httpsPort?: number | undefined
     caFile?: string | undefined
   },
@@ -190,12 +191,7 @@ export function createCrealityDetailStream(
     subscribe(listener: (frame: unknown) => void) {
       listeners.add(listener)
       client ??= createCrealityTelemetryClient({
-        host: binding.host,
-        ...(binding.httpsPort === undefined
-          ? {}
-          : { httpsPort: binding.httpsPort }),
-        ...(binding.caFile === undefined ? {} : { caFile: binding.caFile }),
-        ...(binding.port === undefined ? {} : { port: binding.port }),
+        ...binding,
         onTelemetry: publish,
         onDisconnect: () => {
           latest = undefined

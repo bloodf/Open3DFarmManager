@@ -11,10 +11,11 @@ import { z } from 'zod'
  */
 const Loose = z.record(z.string(), z.unknown())
 const Runtime = z.looseObject({
-  version: z.union([z.literal(1), z.literal(2), z.literal(5)]),
+  version: z.union([z.literal(1), z.literal(2), z.literal(5), z.literal(6)]),
   collection: z.looseObject({
-    version: z.union([z.literal(1), z.literal(2), z.literal(5)]),
+    version: z.union([z.literal(1), z.literal(2), z.literal(5), z.literal(6)]),
     printers: z.array(Loose).optional(),
+    sdcp: z.strictObject({ printers: z.array(Loose) }).optional(),
     anycubic: z.strictObject({ printers: z.array(Loose) }).optional(),
     kobralink: z
       .looseObject({
@@ -47,6 +48,24 @@ export function collectableRuntime(
   const filteredCollection = {
     ...runtime.collection,
     ...(moonrakerPrinters ? { printers: moonrakerPrinters } : {}),
+  }
+  if (runtime.collection.sdcp) {
+    const printers = runtime.collection.sdcp.printers.filter(
+      (p) => !hidden.has(String(p.printerKey)),
+    )
+    if (printers.length)
+      return {
+        ...runtime,
+        collection: { ...filteredCollection, sdcp: { printers } },
+        assignments,
+      }
+    const { sdcp: _removed, ...collection } = filteredCollection
+    return {
+      ...runtime,
+      version: 1,
+      collection: { ...collection, version: 1 },
+      assignments,
+    }
   }
   if (runtime.collection.anycubic) {
     const printers = runtime.collection.anycubic.printers.filter(

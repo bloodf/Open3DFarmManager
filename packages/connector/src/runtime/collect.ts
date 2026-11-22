@@ -12,8 +12,10 @@ import {
   moonrakerAuthHeaders,
   moonrakerSession,
 } from '../config/moonraker.ts'
+import type { AnycubicCollectorConfig } from '../config/anycubic.ts'
 import type { CrealityCollectorConfig } from '../config/creality.ts'
 import { createAnycubicCollection } from './anycubic-collection.ts'
+import { createSdcpCollection } from './sdcp-collection.ts'
 import { createKobraXCollection } from './kobra-x-collection.ts'
 import type { KobraXBinding } from '../config/kobra-x.ts'
 import { createBambuRuntimeSubscription } from '../bambu/runtime.ts'
@@ -23,8 +25,8 @@ import { createKobraLinkRuntimeSubscription } from '../kobralink/runtime.ts'
 import {
   parseCollectorConfig,
   readCollectorConfig,
-  type AnycubicCollectorConfig,
-} from '../config/anycubic.ts'
+  type SdcpCollectorConfig,
+} from '../config/sdcp.ts'
 import { readKobraClientCertMaterial } from '../config/kobra-x-cert.ts'
 import { createCrealityCollection } from './creality-collection.ts'
 import type { MoonrakerEvent } from '../moonraker/subscription.ts'
@@ -56,7 +58,12 @@ export type Diagnostic =
   | {
       kind: 'unavailable'
       reason:
-        'connecting' | 'offline' | 'stale' | 'not-ready' | 'invalid-response'
+        | 'connecting'
+        | 'offline'
+        | 'stale'
+        | 'not-ready'
+        | 'invalid-response'
+        | 'unsupported-protocol'
     }
   | {
       kind: 'summary'
@@ -121,7 +128,10 @@ export async function collectIntoQueue(input: {
     connect?: Parameters<typeof createKobraXCollection>[0]['connect']
   }
   config:
-    LocalCollectorConfig | CrealityCollectorConfig | AnycubicCollectorConfig
+    | LocalCollectorConfig
+    | CrealityCollectorConfig
+    | AnycubicCollectorConfig
+    | SdcpCollectorConfig
   onInventory?: (snapshot: SpoolmanSnapshot) => void
   onRawObservation?: (observation: RawPrinterObservation) => void
   onRawUnavailable?: (event: RawMoonrakerUnavailable) => void
@@ -730,6 +740,32 @@ export async function collectIntoQueue(input: {
             onEvent({ kind: 'snapshot', printer: value.printer })
           },
           onUnavailable(epoch) {
+            input.onRawUnavailable?.({ printerKey: binding.printerKey, epoch })
+            onEvent({
+              kind: 'unavailable',
+              printerKey: binding.printerKey,
+              reason: 'stale',
+            })
+          },
+        })
+        subscriptions.push({ done: sub.done.catch(fail) })
+      }
+    }
+    if (config.version === 6) {
+      for (const binding of config.sdcp.printers) {
+        const sub = createSdcpCollection({
+          binding,
+          signal,
+          onObservation(value) {
+            input.onRawObservation?.(value)
+            onEvent({ kind: 'snapshot', printer: value.printer })
+          },
+          onUnavailable(epoch, reason) {
+            if (reason.startsWith('Unsupported SDCP protocol version:'))
+              diagnostic({
+                kind: 'unavailable',
+                reason: 'unsupported-protocol',
+              })
             input.onRawUnavailable?.({ printerKey: binding.printerKey, epoch })
             onEvent({
               kind: 'unavailable',

@@ -2,10 +2,11 @@ import dgram from 'node:dgram'
 import { probeAnycubic } from './anycubic.ts'
 import { crealityQuery, isCrealityResponse, probeCreality } from './creality.ts'
 import { isIPv4 } from 'node:net'
+import { discoverSdcp } from './sdcp.ts'
 import { discoverKobraX } from '../kobra-x/discovery.ts'
 
 export type Printer = {
-  vendor: 'bambu' | 'moonraker' | 'creality' | 'anycubic' | 'kobra-x'
+  vendor: 'bambu' | 'moonraker' | 'creality' | 'anycubic' | 'kobra-x' | 'sdcp'
   host: string
   port?: number
   transport?: 'wss'
@@ -209,6 +210,7 @@ type Options = {
    * that injects `queryAddress` must opt in with loopback endpoints.
    */
   kobraX?: false | { target?: string; ssdpPort?: number; httpPort?: number }
+  sdcp?: false | { target?: string; port?: number }
   createSocket?: () => dgram.Socket
 }
 export async function discoverPrinters(
@@ -282,6 +284,14 @@ export async function discoverPrinters(
         } else resolve()
       })
     })
+  const sdcpWork =
+    options.sdcp === false ||
+    (options.sdcp === undefined && options.queryAddress)
+      ? Promise.resolve([])
+      : discoverSdcp({
+          timeoutMs: Math.min(timeout, 2500),
+          ...(options.sdcp ?? {}),
+        }).catch(() => [])
   try {
     await Promise.all([
       ...(options.bambuPorts ?? [2021, 1990]).map((port) => bind(port, false)),
@@ -323,6 +333,14 @@ export async function discoverPrinters(
               ...(name && { name }),
             }
           })
+    const sdcp: Printer[] = (await sdcpWork).map((found) => ({
+      vendor: 'sdcp',
+      host: found.host,
+      port: 3030,
+      serial: found.mainboardId,
+      model: found.model,
+      name: found.name,
+    }))
     const unique = new Map<string, Printer>()
     for (const printer of [
       ...printers,
@@ -330,6 +348,7 @@ export async function discoverPrinters(
       ...creality,
       ...anycubic,
       ...kobraX,
+      ...sdcp,
     ])
       unique.set(
         `${printer.vendor}:${printer.serial ?? printer.host}:${printer.port ?? ''}`,

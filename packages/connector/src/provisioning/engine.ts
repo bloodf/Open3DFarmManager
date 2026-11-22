@@ -75,6 +75,8 @@ import {
   assignmentKobraCertPath,
   commitStagedKobraClientCert,
   discardStagedKobraCert,
+  isAllowedKobraInstallPath,
+  KOBRA_INSTALL_PATH_ERROR_CODE,
   stageKobraClientCert,
 } from '../config/kobra-x-cert.ts'
 import {
@@ -754,6 +756,13 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
       !options.managedBridge
     )
       return errorFrame(frame.request_id, 'not-available')
+    if (
+      (frame.target.backend === 'kobra-x' ||
+        frame.target.backend === 'kobralink-anycubic') &&
+      frame.target.client_certificate?.kind === 'install-path' &&
+      !isAllowedKobraInstallPath(frame.target.client_certificate.path)
+    )
+      return errorFrame(frame.request_id, KOBRA_INSTALL_PATH_ERROR_CODE)
     const pruned = pruneFor(state)
     const now = clock()
     let op: OperationRecord = {

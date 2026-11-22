@@ -15,6 +15,9 @@ import {
 import type { AnycubicCollectorConfig } from '../config/anycubic.ts'
 import type { CrealityCollectorConfig } from '../config/creality.ts'
 import { createAnycubicCollection } from './anycubic-collection.ts'
+import { createFormlabsCollection } from './formlabs-collection.ts'
+import { readPrivateJsonFile } from '../config/local.ts'
+import type { FormlabsCollectorConfig } from '../formlabs/config.ts'
 import { createSdcpCollection } from './sdcp-collection.ts'
 import { createKobraXCollection } from './kobra-x-collection.ts'
 import type { KobraXBinding } from '../config/kobra-x.ts'
@@ -22,11 +25,7 @@ import { createBambuRuntimeSubscription } from '../bambu/runtime.ts'
 import type { createBambuTransport } from '../bambu/transport.ts'
 import type { RawPrinterObservation } from './farm-snapshot-provider.ts'
 import { createKobraLinkRuntimeSubscription } from '../kobralink/runtime.ts'
-import {
-  parseCollectorConfig,
-  readCollectorConfig,
-  type SdcpCollectorConfig,
-} from '../config/sdcp.ts'
+import { parseCollectorConfig } from '../formlabs/config.ts'
 import { readKobraClientCertMaterial } from '../config/kobra-x-cert.ts'
 import { createCrealityCollection } from './creality-collection.ts'
 import type { MoonrakerEvent } from '../moonraker/subscription.ts'
@@ -81,7 +80,9 @@ export async function collectLocalTelemetry(input: {
   signal: AbortSignal
   onDiagnostic: (diagnostic: Diagnostic) => void
 }): Promise<void> {
-  const config = readCollectorConfig(input.configPath)
+  const config = parseCollectorConfig(
+    readPrivateJsonFile(input.configPath, { maxBytes: 65536 }),
+  )
   if (input.signal.aborted) return
   const directory = join(input.dataDirectory, 'telemetry')
   assertUnscopedCollection(directory)
@@ -131,7 +132,8 @@ export async function collectIntoQueue(input: {
     | LocalCollectorConfig
     | CrealityCollectorConfig
     | AnycubicCollectorConfig
-    | SdcpCollectorConfig
+    | FormlabsCollectorConfig
+    | import('../config/sdcp.ts').SdcpCollectorConfig
   onInventory?: (snapshot: SpoolmanSnapshot) => void
   onRawObservation?: (observation: RawPrinterObservation) => void
   onRawUnavailable?: (event: RawMoonrakerUnavailable) => void
@@ -733,6 +735,27 @@ export async function collectIntoQueue(input: {
           ...(input.anycubicTransport
             ? { transport: input.anycubicTransport }
             : {}),
+          binding,
+          signal,
+          onObservation(value) {
+            input.onRawObservation?.(value)
+            onEvent({ kind: 'snapshot', printer: value.printer })
+          },
+          onUnavailable(epoch) {
+            input.onRawUnavailable?.({ printerKey: binding.printerKey, epoch })
+            onEvent({
+              kind: 'unavailable',
+              printerKey: binding.printerKey,
+              reason: 'stale',
+            })
+          },
+        })
+        subscriptions.push({ done: sub.done.catch(fail) })
+      }
+    }
+    if (config.version === 7) {
+      for (const binding of config.formlabs.printers) {
+        const sub = createFormlabsCollection({
           binding,
           signal,
           onObservation(value) {

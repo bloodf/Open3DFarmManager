@@ -64,6 +64,7 @@ export const RTC_FARM_SCENARIOS: Readonly<Record<string, RtcFarmScenario>> =
         ...farmPage,
         SIGNALLING_HTTPS_RTC_CLOSURE: 'disconnect',
         SIGNALLING_HTTPS_FARM_PAUSE: 'yes',
+        ...(isMockSim() ? { SIGNALLING_HTTPS_MOCK_SIMULATOR: 'sv06' } : {}),
       },
       expect: [
         'PASS real generated Nitro HTTPS/WSS farm page signed pause over WebRTC to synthetic Moonraker',

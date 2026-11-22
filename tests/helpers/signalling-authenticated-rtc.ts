@@ -358,6 +358,9 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
     mockProfile !== 'u1'
   )
     throw Error('Invalid in-process simulator profile')
+  const mockProgress =
+    mockProfile === 'sv06' &&
+    process.env.SIGNALLING_HTTPS_SIM_PRINTING_PAUSE !== 'sv06'
   let mockMoonraker: Awaited<ReturnType<typeof startMoonrakerMock>> | undefined
   let mockSpoolman: Awaited<ReturnType<typeof startSpoolmanMock>> | undefined
   let used = false
@@ -462,7 +465,20 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
           )
         ).publicKey
         if (mockProfile) {
-          mockMoonraker = await startMoonrakerMock({ profile: mockProfile })
+          mockMoonraker = await startMoonrakerMock({
+            profile: mockProfile,
+            ...(mockProgress
+              ? {
+                  initial: {
+                    state: 'printing',
+                    filename: 'phase0-status.gcode',
+                    progress: 0.25,
+                    extruder: 210,
+                    bed: 60,
+                  },
+                }
+              : {}),
+          })
           mockSpoolman = await startSpoolmanMock()
           await note(
             'in-process-simulators:' +
@@ -647,7 +663,10 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
             })
             return
           }
-          if (mockMoonraker || process.env.SIGNALLING_HTTPS_SIM_MOONRAKER) {
+          if (
+            (mockMoonraker && !mockProgress) ||
+            process.env.SIGNALLING_HTTPS_SIM_MOONRAKER
+          ) {
             const { testSimulatorFarmPage } =
               await import('./signalling-sim-farm-page.ts')
             await testSimulatorFarmPage({
@@ -668,11 +687,22 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
               note: session.note,
               ...(camera ? { camera } : {}),
               advance: async () => {
-                await session.connector.request({ kind: 'advance-runtime' })
+                if (mockProgress && mockMoonraker) {
+                  const current = mockMoonraker.control.model().progress
+                  assert.ok(current === 0.25 || current === 0.75)
+                  mockMoonraker.control.update({
+                    progress: current === 0.25 ? 0.75 : 0.9,
+                  })
+                } else {
+                  await session.connector.request({ kind: 'advance-runtime' })
+                }
               },
               ...(process.env.SIGNALLING_HTTPS_FARM_PAUSE === 'yes'
                 ? {
-                    pauses: async () => (await observeRuntime()).pauses,
+                    pauses: async () =>
+                      mockProgress && mockMoonraker
+                        ? (mockMoonraker.calls()['printer.print.pause'] ?? 0)
+                        : (await observeRuntime()).pauses,
                     pauseInboxReady: async () =>
                       (await observeRuntime()).pauseInboxReady,
                   }
@@ -875,6 +905,13 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
               browser: lastBrowser,
             }),
         )
+        if (mockMoonraker)
+          await session.note(
+            'in-process-moonraker-recent-rpc:' +
+              JSON.stringify(
+                mockMoonraker.calls.all.slice(-16).map(({ method }) => method),
+              ),
+          )
         await session.note(
           'rtc-failure-kind:' +
             (error instanceof Error ? error.message : 'unknown'),

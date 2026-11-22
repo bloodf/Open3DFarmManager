@@ -27,6 +27,9 @@ jobs:
           sudo apt-get install -y postgresql-17
       - run: bash scripts/test-local-ci.sh
       - run: npm run check:all
+        env:
+          PAUSE_CONTROL_RTC: yes
+          PAUSE_CONTROL_RTC_CASE: valid
       - run: node packages/connector/dist/cli.js --version
   code-node22:
     runs-on: ubuntu-latest

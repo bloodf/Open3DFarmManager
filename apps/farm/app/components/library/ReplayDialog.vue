@@ -4,6 +4,7 @@ import Dialog from '../ui/Dialog.vue'
 import Button from '../ui/Button.vue'
 import type { LibraryPrintArgs } from '../../../../../packages/farm-protocol/src/control-actions.ts'
 import { locationLabel, safeColour } from '../../utils/library-view.ts'
+import { replayOutcomeLocks } from '../../utils/replay-outcome.ts'
 import {
   GROUP_LABELS,
   buildArgs,
@@ -20,6 +21,7 @@ import {
 } from '../../utils/replay-view.ts'
 
 const props = defineProps<{
+  itemId?: string
   source: ReplaySource
   printers: readonly ReplayPrinter[]
   /** Printer of the original job; preselected when it can still be used. */
@@ -64,9 +66,10 @@ const outcome = computed(() =>
   result.value ? replayOutcomeText(result.value) : '',
 )
 const reasons = computed(() => result.value?.reasons ?? [])
+const outcomeLockKey = () => props.itemId ?? props.source.sha256
 
 function reset() {
-  result.value = null
+  result.value = replayOutcomeLocks.get(outcomeLockKey())
   bedClear.value = false
   selectedKey.value = defaultPrinter(groups.value, props.preferredPrinter)
   plate.value = Math.min(
@@ -75,7 +78,7 @@ function reset() {
   )
 }
 watch(
-  [() => open.value, () => props.source.sha256],
+  [() => open.value, () => outcomeLockKey(), () => props.source.sha256],
   ([isOpen]) => {
     if (isOpen) reset()
   },
@@ -121,12 +124,19 @@ async function confirm() {
         bedClear: bedClear.value,
       }),
     )
+    replayOutcomeLocks.record(outcomeLockKey(), result.value)
   } catch {
     // The command may have left the browser: report it as uncertain, never resend.
     result.value = { outcome: 'outcome-unknown' }
+    replayOutcomeLocks.record(outcomeLockKey(), result.value)
   } finally {
     sending.value = false
   }
+}
+
+function confirmPrinterChecked() {
+  replayOutcomeLocks.confirmPrinterChecked(outcomeLockKey())
+  result.value = null
 }
 </script>
 
@@ -243,6 +253,15 @@ async function confirm() {
       <ul v-if="reasons.length">
         <li v-for="reason in reasons" :key="reason">{{ reason }}</li>
       </ul>
+    </div>
+    <div v-if="result?.outcome === 'outcome-unknown'">
+      <p>
+        Verifique a impressora. Se a impressão não começou, confirme abaixo para
+        liberar uma nova tentativa.
+      </p>
+      <Button @click="confirmPrinterChecked"
+        >Confirmei que a impressão não começou</Button
+      >
     </div>
     <Button :disabled="!!problem || sending || result !== null" @click="confirm"
       >Imprimir de novo</Button

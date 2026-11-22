@@ -674,8 +674,8 @@ test('a leftover write-started row from a crash keeps the assignment busy and no
     f.diagnostics.filter((d) => d.kind === 'pause-outcome'),
     [{ kind: 'pause-outcome', outcome: 'rejected', reason: 'busy' }],
   )
-  // Only the crashed row exists: the new command was refused before a claim.
-  assert.deepEqual(journalRows(f.journalDirectory), ['write-started'])
+  // Startup reconciles the crashed row, which still blocks a new pause claim.
+  assert.deepEqual(journalRows(f.journalDirectory), ['outcome-unknown'])
 })
 
 test('a terminal transport closes the peer before any command and the lifecycle reconnects', async (t) => {

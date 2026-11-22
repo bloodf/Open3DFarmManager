@@ -348,6 +348,15 @@ export function createFlashforgeAdapter(
     authorize: (observation: Awaited<ReturnType<typeof readStatus>>) => boolean,
   ) {
     if (writing) throw new Error('Flashforge write already in progress')
+    // https://github.com/Parallel-7/flashforge-api-docs/wiki/HTTP-REST-API#temperaturectl_cmd---temperature-control
+    if (
+      action.kind === 'temperature' &&
+      ((action.heater !== 'nozzle' && action.heater !== 'bed') ||
+        !Number.isInteger(action.celsius) ||
+        action.celsius < 0 ||
+        action.celsius > (action.heater === 'nozzle' ? 265 : 100))
+    )
+      throw new Error('Flashforge temperature denied')
     writing = true
     try {
       const observation = await readStatus()
@@ -381,16 +390,8 @@ export function createFlashforgeAdapter(
           break
         }
         case 'temperature': {
-          // https://github.com/Parallel-7/flashforge-api-docs/wiki/HTTP-REST-API#temperaturectl_cmd---temperature-control
-          if (
-            (action.heater !== 'nozzle' && action.heater !== 'bed') ||
-            !Number.isInteger(action.celsius) ||
-            action.celsius < 0 ||
-            action.celsius > (action.heater === 'nozzle' ? 265 : 110) ||
-            !['ready', 'printing', 'pause'].includes(status)
-          ) {
+          if (!['ready', 'printing', 'pause'].includes(status))
             throw new Error('Flashforge temperature denied')
-          }
           await control('temperatureCtl_cmd', {
             [action.heater === 'nozzle' ? 'rightNozzle' : 'platform']:
               action.celsius || -100,

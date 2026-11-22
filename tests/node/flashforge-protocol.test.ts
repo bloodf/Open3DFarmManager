@@ -16,10 +16,12 @@ const fixture = JSON.parse(
 
 async function setup(t: TestContext) {
   const detail = { ...fixture.detail }
+  const requests: string[] = []
   const writes: { path: string; packet: unknown }[] = []
   const modes = { write: 'ok' }
   const sim = await startFlashforgeSimulator((req, res, body) => {
     const path = req.url ?? ''
+    requests.push(path)
     if (req.method === 'GET' && path === '/?action=stream') {
       res.setHeader(
         'content-type',
@@ -101,6 +103,7 @@ async function setup(t: TestContext) {
     adapter: createFlashforgeAdapter(credentials),
     credentials,
     detail,
+    requests,
     writes,
     modes,
   }
@@ -288,6 +291,34 @@ test('enforces the 265 C nozzle API ceiling before dispatch', async (t) => {
     {
       path: '/control',
       packet: { cmd: 'temperatureCtl_cmd', args: { rightNozzle: 265 } },
+    },
+  ])
+})
+
+test('enforces the 100 C bed API ceiling before any request', async (t) => {
+  const { adapter, requests, writes } = await setup(t)
+  const allow = () => true
+
+  for (const celsius of [101, 110, -1, 99.5]) {
+    await assert.rejects(
+      adapter.execute({ kind: 'temperature', heater: 'bed', celsius }, allow),
+      /Flashforge temperature denied/,
+    )
+  }
+  assert.deepEqual(requests, [])
+
+  assert.deepEqual(
+    await adapter.execute(
+      { kind: 'temperature', heater: 'bed', celsius: 100 },
+      allow,
+    ),
+    { acknowledged: true },
+  )
+  assert.deepEqual(requests, ['/detail', '/control'])
+  assert.deepEqual(writes, [
+    {
+      path: '/control',
+      packet: { cmd: 'temperatureCtl_cmd', args: { platform: 100 } },
     },
   ])
 })

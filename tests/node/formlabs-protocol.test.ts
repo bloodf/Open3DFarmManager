@@ -1,80 +1,62 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
-import { createFormlabsAdapter } from '../../packages/connector/src/formlabs/index.ts'
+import {
+  connectFormlabs,
+  isSupportedFormlabsModel,
+} from '../../packages/connector/src/formlabs/index.ts'
 import { startFormlabsSimulator } from '../../packages/sim-tools/src/formlabs-simulator.ts'
+import fixture from '../fixtures/formlabs/devices.json' with { type: 'json' }
 
-const fixture = JSON.parse(
-  readFileSync(
-    new URL('../fixtures/formlabs/devices.json', import.meta.url),
-    'utf8',
-  ),
-)
-
-test('discovers local supported models and reads reported status over HTTP', async (t) => {
-  const sim = await startFormlabsSimulator(fixture)
+test('reads the synthetic Form 4 family list using the read-only Local API', async (t) => {
+  const sim = await startFormlabsSimulator()
   t.after(sim.close)
-  const adapter = createFormlabsAdapter(sim.origin)
-  const expected = {
-    id: 'fixture-4',
-    model: 'Form 4',
-    firmware: '1.17.1',
-    connection: 'ETHERNET',
-    statusText: 'Synthetic vendor status',
-    remainingMs: 12500,
-    tankId: 'fixture-tank',
-    tankMaterialCode: 'FLGPBK05',
-    cartridges: [
-      {
-        id: 'fixture-cartridge',
-        materialCode: 'FLGPBK05',
-        estimatedDispensedMl: 125.5,
-        originalVolumeMl: 1000,
-      },
-    ],
-  }
-  assert.deepEqual(await adapter.discover(), [
-    expected,
-    {
-      ...expected,
-      id: 'fixture-4l',
-      model: 'Form 4L',
-      remainingMs: 0,
-      tankId: null,
-      tankMaterialCode: null,
-      cartridges: [],
-    },
-  ])
-  assert.deepEqual(await adapter.readStatus('fixture-4'), expected)
-  assert.equal(await adapter.readStatus('fixture-studio'), null)
-  sim.setReply({ count: 0, devices: [] })
-  assert.equal(await adapter.readStatus('fixture-4'), null)
-  assert.deepEqual(sim.requests, [
-    'POST /v1/device/discover/',
-    ...Array(3).fill('GET /v1/device/list/'),
-  ])
+  sim.setResponse(fixture)
+  const adapter = connectFormlabs({
+    host: '127.0.0.1',
+    port: sim.port,
+    now: () => 100,
+  })
+  const result = await adapter.refresh()
+  assert.deepEqual(
+    result.devices.filter(({ product_name }) =>
+      isSupportedFormlabsModel(product_name),
+    ),
+    ['fixture-4', 'fixture-4l', 'fixture-remote'].map((id, index) => ({
+      id,
+      product_name: index === 1 ? 'Form 4L' : 'Form 4',
+      status: 'Synthetic vendor status',
+      is_connected: true,
+      connection_type: index === 2 ? 'REMOTE' : 'ETHERNET',
+      ip_address: '192.0.2.1',
+      firmware_version: '1.17.1',
+    })),
+  )
+  assert.equal(result.printerObservedAt, null)
+  assert.equal(result.retrievedAt, 100)
+  assert.deepEqual(adapter.command('discover'), {
+    ok: false,
+    reason: 'unsupported',
+  })
+  sim.setResponse({ count: 0, devices: [] })
+  assert.deepEqual((await adapter.refresh()).devices, [])
+  assert.deepEqual(sim.requests, Array(2).fill('GET /devices/'))
 })
 
-test('rejects HTTP denial, redirect, disconnect, incomplete body and malformed replies', async (t) => {
-  const sim = await startFormlabsSimulator(fixture)
+test('clears the previous reading after denial, redirect or invalid lists', async (t) => {
+  const sim = await startFormlabsSimulator()
   t.after(sim.close)
-  const adapter = createFormlabsAdapter(sim.origin, 500)
-  for (const [fault, error] of [
-    ['denial', /PreForm HTTP 403/],
-    ['redirect', /PreForm HTTP 307/],
-    ['disconnect', TypeError],
-    ['timeout', { name: 'TimeoutError' }],
-    ['malformed', /Malformed PreForm device reply/],
+  const adapter = connectFormlabs({ host: '127.0.0.1', port: sim.port })
+  for (const [reply, code] of [
+    [fixture, 403],
+    [fixture, 307],
+    [{ ...fixture, count: 1 }, 200],
+    [{ count: 1, devices: [{}] }, 200],
   ] as const) {
-    sim.setFault(fault)
-    await assert.rejects(adapter.readStatus('fixture-4'), error)
+    sim.setResponse(fixture)
+    await adapter.refresh()
+    sim.setResponse(reply, code)
+    await assert.rejects(adapter.refresh())
+    assert.equal(adapter.snapshot(), undefined)
   }
-  sim.setFault(undefined)
-  const badDevice = {
-    ...fixture.devices[0],
-    cartridge_data: { broken: { cartridgeEstimatedVolumeDispensed_mL: '125' } },
-  }
-  sim.setReply({ count: 1, devices: [badDevice] })
-  await assert.rejects(adapter.list(), /Malformed PreForm device reply/)
-  assert.deepEqual(sim.requests, Array(6).fill('GET /v1/device/list/'))
+  assert.deepEqual(sim.requests, Array(8).fill('GET /devices/'))
 })

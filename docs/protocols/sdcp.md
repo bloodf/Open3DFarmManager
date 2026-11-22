@@ -1,15 +1,23 @@
 # Elegoo SDCP
 
-SDCP v3 discovery sends `M99999` over UDP 3000. The response may contain attributes directly in `Data` or under `Data.Attributes`. The adapter probes a locally configured IPv4 address and uses the same address for WebSocket TCP 3030 at `/websocket`. It ignores advertised addresses and checks the UDP sender, board, response topic, command and request ID. These checks correlate traffic. SDCP v3 LAN has no transport encryption or device authentication. Keep this transport within the Connector's locally provisioned LAN boundary. [CBD SDCP v3 specification](https://github.com/cbd-tech/SDCP-Smart-Device-Control-Protocol-V3.0.0)
+The registered read-only Connector uses UDP discovery with `M99999`. It accepts
+flat `Data` from the matching IPv4 sender. WebSocket status requires an allowed
+model and an explicit v3.0.0 identity. The adapter polls with command 0 every two
+seconds while connected at `/websocket` on TCP 3030 by default. It accepts
+status frames matching the board ID and status topic without requiring a command
+acknowledgment or request ID. SDCP LAN traffic is unauthenticated and unencrypted.
+[CBD SDCP v3 specification](https://github.com/cbd-tech/SDCP-Smart-Device-Control-Protocol-V3.0.0)
 
-Status uses command 0 and waits for both its acknowledgment and a board-scoped status frame. On stock Saturn 4 Ultra 16K V1.5.6, history uses command 320 and returns task IDs. The connector rejects history on stock Centauri Carbon V1.1.46 before sending a command because command 320 has not been verified on that firmware. Each call opens a socket, sends one request and closes on success or failure. No background polling or reconnect runs inside the adapter. Status preserves wire fields, including model-specific temperatures, fan telemetry, layer counters, resin wear counters and printer-reported errors when present. Missing fields stay absent. Consumers must interpret job states and tick units by model. Resin v3 defines ticks in milliseconds, while the stock Centauri evidence reports seconds. A resin wear counter measures component use and cannot supply resin consumption. [CBD SDCP v3 specification](https://github.com/cbd-tech/SDCP-Smart-Device-Control-Protocol-V3.0.0), [Centauri firmware observations](https://github.com/bjan/pycentauri/blob/main/docs/PROTOCOL.md)
+The runtime exposes normalized state, valid layer counters and layer progress.
+Malformed or mismatched frames do not update the snapshot. Errors, disconnects
+and expiry make status unavailable. Dispatch and control are disabled.
 
 | Model                                 | Protocol and firmware evidence                                                                                            | Adapter coverage                                                                                                                 |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | Centauri Carbon                       | Stock V1.1.46 SDCP v3. Discovery may omit the version. Uses board ID, source 1 and epoch milliseconds in requests.        | Discovery, raw job state, nozzle, bed, chamber and fan values when reported and local MJPEG URL on V1.1.46.                      |
 | Saturn 4 Ultra 16K                    | Stock V1.5.6 SDCP v3. Firmware observation includes nested discovery attributes, status, history and RTSP camera control. | Discovery, raw job state, reported resin sensors, wear counters and errors, history IDs on V1.5.6. RTSP session control pending. |
-| Saturn 4 Ultra (12K)                  | SDCP v3 monitoring observed by community clients. Firmware-specific qualification pending.                                | Discovery and raw status candidate when v3 is explicitly reported.                                                               |
-| Mars 5 Ultra                          | SDCP v3 monitoring reported by a community integration. Firmware-specific qualification pending.                          | Discovery and raw status candidate when v3 is explicitly reported.                                                               |
+| Saturn 4 Ultra (12K)                  | SDCP v3 monitoring observed by community clients. Firmware-specific qualification pending.                                | Runtime supports normalized status and layer progress when v3 is explicit.                                                       |
+| Mars 5 Ultra                          | SDCP v3 monitoring reported by a community integration. Firmware-specific qualification pending.                          | Runtime supports normalized status and layer progress when v3 is explicit.                                                       |
 | Saturn 3 Ultra                        | Legacy SDCP over MQTT documented by a client with device examples.                                                        | Unsupported.                                                                                                                     |
 | Mars 4 Ultra                          | Community client identifies the legacy v1 MQTT family. Exact firmware coverage pending.                                   | Unsupported.                                                                                                                     |
 | Jupiter 2                             | Wire protocol and firmware evidence insufficient.                                                                         | Unsupported.                                                                                                                     |
@@ -19,10 +27,16 @@ Status uses command 0 and waits for both its acknowledgment and a board-scoped s
 
 Model evidence comes from [Centauri firmware observations](https://github.com/bjan/pycentauri/blob/main/docs/PROTOCOL.md), [Saturn 16K V1.5.6 probes](https://github.com/alfiedennen/sdcp-saturn-4-ultra), [Saturn 12K monitoring client](https://github.com/jeroenwalter/SdcpMonitor), [Mars 5 Ultra integration](https://github.com/LM1LC3N7/gladys-elegoo/blob/main/docs/en.md), [legacy Saturn client](https://github.com/JacobZwang/elegoo-saturn-4-ultra), [legacy SDCP library](https://github.com/blakejrobinson/sdcp), and the [resin catalog](../fullfarmmanager/catalog-resin.md). The implementation is original. Fixtures are synthetic examples based on public wire evidence.
 
-## Pending integration
+## Coverage gaps
 
-- Add local endpoint and board pinning in `packages/connector/src/control/printer-binding.ts` and register discovery and status in `packages/connector/src/runtime/background-discovery.ts` and `packages/connector/src/runtime/collect.ts`. Map status into the shared schema with model-specific units and preserve absent fields. Add independently observed firmware captures before qualifying models.
-- Add camera media handling in `packages/connector/src/camera/` and deliver it through WebRTC. The Centauri URL is available as metadata. Validate MJPEG delivery and resin RTSP acquisition and release against fixtures before exposing camera capability.
-- Add signed, state-gated job controls through `packages/connector/src/runtime/pause-driver-router.ts` and file transfer through `packages/connector/src/runtime/file-targets.ts` and `packages/connector/src/runtime/file-upload.ts`. Upload, start, pause, stop, resume, temperature and fan writes are outside the implemented read-only slice. Acknowledgments alone cannot prove observed job transitions. Handle uncertain outcomes without repeating commands. Test the separate upload handshakes per firmware.
-- Add model and firmware capability entries in `docs/fullfarmmanager/catalog-resin.md` and `docs/fullfarmmanager/catalog-fdm.md`. Use the qualified capabilities in `apps/farm/app/` to render state and gate controls. Material identification, measured consumption, normalized alerts and detailed history still require independent evidence and shared mappings.
-- Keep every model unqualified until the owner checks matching hardware and firmware. Keep older MQTT SDCP and Centauri Carbon 2 as independent protocol work.
+Nested discovery attributes observed in Saturn 16K probes need separate
+qualification. The Saturn loopback fixture uses the runtime's flat format.
+Centauri V1.1.46 uses a different status shape and can omit the protocol version.
+The retained Centauri fixture verifies that an explicit v3 version does not
+override the model gate.
+
+The runtime does not expose history command 320, camera, raw temperature, fan
+or release-film readings, or material and resin consumption. The Saturn probes
+provide firmware-specific evidence for history and RTSP. The Centauri notes
+describe local MJPEG and different tick units. These observations do not
+qualify any hardware through the Connector.

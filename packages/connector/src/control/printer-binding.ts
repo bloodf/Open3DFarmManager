@@ -120,13 +120,18 @@ const ReadonlyAssignment = Assignment.omit({ moonraker_origin: true }).extend({
   id: z.string().min(1).max(128),
   revision: z.number().int().positive(),
 })
+const SdcpAssignment = Assignment.omit({ moonraker_origin: true }).extend({
+  backend: z.enum(['sdcp', 'formlabs']),
+})
 const readonlyBindings = new WeakMap<
   PrinterBinding,
-  z.infer<typeof ReadonlyAssignment>
+  z.infer<typeof ReadonlyAssignment> | z.infer<typeof SdcpAssignment>
 >()
 /** Read-only handles deliberately have no Moonraker command mapping. */
 export function provisionReadonlyPrinter(input: unknown): PrinterBinding {
-  const value = Object.freeze(ReadonlyAssignment.parse(input))
+  const value = Object.freeze(
+    z.union([ReadonlyAssignment, SdcpAssignment]).parse(input),
+  )
   const binding = new BoundPrinter()
   readonlyBindings.set(binding, value)
   return binding

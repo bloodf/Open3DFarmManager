@@ -1,4 +1,10 @@
 import { MAX_HEARTBEAT_HEALTH_BYTES } from '@open3dfarmmanager/farm-protocol'
+import { join } from 'node:path'
+import {
+  openQueueCollectionJournal,
+  unavailableQueueCollectionJournal,
+  type QueueCollectionJournal,
+} from '../control/queue-collection-journal.ts'
 import type { MacroParamMap } from '../moonraker/control-macros.ts'
 import { createPrinterDetailSources } from './printer-detail-session.ts'
 import {
@@ -8,6 +14,17 @@ import {
 } from './background-discovery.ts'
 import { decodeApiEnvelopeFrame } from '../../../farm-protocol/src/api-envelope.ts'
 import { createRuntimeLogger } from './log.ts'
+import { openFilamentRunJournal } from '../control/filament-run-journal.ts'
+import { createFilamentRunAccounting } from '../spoolman/filament-run.ts'
+import {
+  createActiveSpoolReader,
+  createFilamentRunTracker,
+  type FilamentRunTracker,
+} from '../spoolman/filament-run-tracker.ts'
+import { createActiveSpoolAssignmentStore } from '../spoolman/active-assignments.ts'
+import { readSpoolmanAuthorization } from '../spoolman/credential.ts'
+import { declareSnapmakerU1Printers } from '../moonraker/u1-tools.ts'
+import { registerMoonrakerPendingDispatch } from '../moonraker/pending-dispatch.ts'
 import type { Logger } from '../../../shared/src/log.ts'
 import type { TrustedKeyAuthority } from '../auth/trusted-key-store.ts'
 import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
@@ -36,7 +53,12 @@ import {
   readBambuPrinterBinding,
   readCrealityPrinterBinding,
 } from '../control/printer-binding.ts'
-import { moonrakerWebUiOrigin } from '../config/moonraker.ts'
+import {
+  moonrakerAuthHeaders,
+  moonrakerSession,
+  moonrakerWebUiOrigin,
+  validateMoonrakerInput,
+} from '../config/moonraker.ts'
 import { crealityWebUiOrigin } from '../config/creality.ts'
 import { isLoopbackBindAddress } from '../config/rtc.ts'
 import type {
@@ -69,6 +91,12 @@ type AgentDiagnostic =
   | { kind: 'pause-audit-failed' }
   | { kind: 'pause-authority-confirm-refused' }
   | { kind: 'credential-expired' }
+  | {
+      kind: 'filament-run'
+      status: 'applied' | 'uncertain' | 'rejected' | 'unknown' | 'record-only'
+      reason: string | null
+    }
+  | { kind: 'filament-run-failed' }
   | { kind: 'readonly-admitted' }
   | { kind: 'readonly-listening' }
   | { kind: 'readonly-terminal'; reason: string }
@@ -258,10 +286,142 @@ async function runConnectorAgentOnce(
   // checked against what each printer itself reported. Never stops the agent.
   const printerProfiles = createPrinterProfiles()
   const jobLinks = createLibraryJobLinks()
+  // Bed-collection hold (durable): a run OpenFarm started is held when it
+  // finishes until an operator confirms the plate is clear. An unreadable
+  // journal refuses every OpenFarm start.
+  let collection: QueueCollectionJournal
+  try {
+    collection = openQueueCollectionJournal(
+      join(input.dataDirectory, 'queue-collection.json'),
+    )
+  } catch (error) {
+    logger.warn('queue-collection-unavailable', { error })
+    collection = unavailableQueueCollectionJournal()
+  }
+  // Locally declared Snapmaker U1 printers get the U1 tool mapping and
+  // command capability set; withdrawn when this run ends.
+  const moonrakerPrinters =
+    'printers' in config.collection ? config.collection.printers : []
+  const withdrawU1 = declareSnapmakerU1Printers(moonrakerPrinters)
+  // A job already finished on connect is reported only when OpenFarm has a
+  // pending dispatch on that printer; otherwise the history import owns it.
+  const rememberedStarts = new Map<string, number>()
+  const withdrawPendingDispatch = registerMoonrakerPendingDispatch(
+    (printerKey) =>
+      rememberedStarts.has(printerKey) ||
+      collection.read(printerKey).dispatchedAt !== undefined,
+  )
+  // Filament run accounting (#664): only with a configured Spoolman. Every
+  // run this process watched finish is journaled once; debits are never
+  // retried. An unreadable journal disables accounting, never collection.
+  let filamentRuns: FilamentRunTracker | undefined
+  const spoolman =
+    'spoolman' in config.collection ? config.collection.spoolman : undefined
+  if (spoolman)
+    try {
+      const journal = openFilamentRunJournal({
+        path: join(input.dataDirectory, 'filament-runs.json'),
+      })
+      const authorization = readSpoolmanAuthorization(
+        spoolman.credentialFile,
+        spoolman.origin,
+      )
+      const accounting = createFilamentRunAccounting({
+        journal,
+        origin: spoolman.origin,
+        ...(authorization ? { authorization } : {}),
+      })
+      const moonraker = new Map(
+        moonrakerPrinters.map((printer) => {
+          const selected = validateMoonrakerInput({
+            assignment: printer,
+            allowedOrigins: config.collection.allowedOrigins,
+            limits: config.collection.limits,
+          })
+          return [
+            selected.printerKey,
+            {
+              origin: selected.origin,
+              async headers() {
+                const session = moonrakerSession(
+                  selected.origin,
+                  selected.limits,
+                )
+                return session
+                  ? await session.getAuthHeaders()
+                  : moonrakerAuthHeaders(selected.origin, selected.limits)
+              },
+            },
+          ] as const
+        }),
+      )
+      filamentRuns = createFilamentRunTracker({
+        accounting,
+        readSpools: createActiveSpoolReader({
+          moonraker,
+          assignments: createActiveSpoolAssignmentStore(
+            spoolman.assignmentsFile ??
+              join(input.dataDirectory, 'active-spool-assignments.json'),
+          ),
+        }),
+        signal,
+        onOutcome(printerKey, outcomes) {
+          for (const outcome of outcomes) {
+            logger.info('filament-run', {
+              printerKey,
+              tool: outcome.tool,
+              status: outcome.status,
+              reason: outcome.reason,
+              duplicate: outcome.duplicate,
+            })
+            if (outcome.status !== 'pending' && !outcome.duplicate)
+              diagnostic({
+                kind: 'filament-run',
+                status: outcome.status,
+                reason: outcome.reason,
+              })
+          }
+        },
+        onError(printerKey, error) {
+          logger.warn('filament-run-failed', { printerKey, error })
+          diagnostic({ kind: 'filament-run-failed' })
+        },
+      })
+    } catch (error) {
+      logger.warn('filament-run-unavailable', { error })
+    }
   const libraryLinks = {
-    remember: jobLinks.remember,
+    remember(...args: Parameters<typeof jobLinks.remember>) {
+      rememberedStarts.delete(args[0])
+      rememberedStarts.set(args[0], args[2] ?? Date.now())
+      while (rememberedStarts.size > 64)
+        rememberedStarts.delete(rememberedStarts.keys().next().value!)
+      jobLinks.remember(...args)
+    },
     attach(printer: Parameters<typeof jobLinks.attach>[0]) {
       printerProfiles.observe(printer)
+      try {
+        filamentRuns?.observe(printer)
+      } catch {
+        // Accounting never stops collection.
+      }
+      if (
+        printer.lastJob &&
+        printer.state !== 'printing' &&
+        printer.state !== 'paused'
+      ) {
+        // A previous job's repeated end never consumes a newer start.
+        if (
+          printer.lastJob.endedAt >=
+          (rememberedStarts.get(printer.printerKey) ?? Infinity)
+        )
+          rememberedStarts.delete(printer.printerKey)
+        try {
+          collection.finished(printer.printerKey, printer.lastJob.endedAt)
+        } catch {
+          // The journal fails closed: starts are refused until it recovers.
+        }
+      }
       return jobLinks.attach(printer)
     },
   }
@@ -634,6 +794,7 @@ async function runConnectorAgentOnce(
           freshness: offline.freshness,
           apiHandlers,
           libraryLinks,
+          collection,
           libraryPrint(assignmentId) {
             const key = refs.find(
               (ref) => ref.assignmentId === assignmentId,
@@ -852,6 +1013,9 @@ async function runConnectorAgentOnce(
     }
     snapshots?.close()
     await Promise.all(tasks)
+    await filamentRuns?.idle()
+    withdrawU1()
+    withdrawPendingDispatch()
     try {
       queue.close()
     } catch (error) {

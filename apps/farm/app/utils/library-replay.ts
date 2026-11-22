@@ -56,6 +56,7 @@ export async function sendWithoutSession(): Promise<ReplayResult> {
 /** The replay dialog's view of a stored library version. */
 export function libraryReplaySource(version: LibraryVersion): ReplaySource {
   return {
+    versionId: version.id,
     sha256: version.sha256,
     name: version.originalName,
     kind: version.kind,

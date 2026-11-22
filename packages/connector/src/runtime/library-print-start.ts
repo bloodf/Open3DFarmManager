@@ -20,6 +20,7 @@ import type {
   PauseDriver,
   PreparedPauseDriver,
 } from '../control/pause-dispatcher.ts'
+import type { LibraryJobStart } from './library-job-links.ts'
 import type { PrinterBinding } from '../control/printer-binding.ts'
 import type { LibraryStore } from './library-store.ts'
 import { LibraryStoreError } from './library-store.ts'
@@ -211,7 +212,13 @@ export function createLibraryPrintStarter(config: {
         return refuse('incompatible', [
           'Placa e mapeamento do AMS valem só para impressoras Bambu.',
         ])
-      if (!input.authorize()) throw new Error('unauthorized')
+      const requireAuthorization = () => {
+        if (!input.authorize())
+          throw Object.assign(new Error('unauthorized'), {
+            refusal: 'state',
+          })
+      }
+      requireAuthorization()
 
       let release = () => {}
       try {
@@ -286,7 +293,7 @@ export function createLibraryPrintStarter(config: {
           )
 
         // Same order as a job delivery: authorize, upload, authorize, start once.
-        if (!input.authorize()) throw new Error('unauthorized')
+        requireAuthorization()
         await upload({
           target,
           filePath: path,
@@ -295,7 +302,7 @@ export function createLibraryPrintStarter(config: {
           authorize: input.authorize,
         })
         signal.throwIfAborted()
-        if (!input.authorize()) throw new Error('unauthorized')
+        requireAuthorization()
         await input.start(name, {
           ...(args.plate === undefined ? {} : { plate: args.plate }),
           ...(args.ams_mapping ? { ams_mapping: [...args.ams_mapping] } : {}),
@@ -311,7 +318,7 @@ export function createLibraryPrintStarter(config: {
 type ExecuteRequest = Parameters<NonNullable<PauseDriver['execute']>>[2]
 
 /** What a library start printed, so the finished job links to it (#385). */
-export type LibraryPrintLink = { name: string; sha256: string; plate?: number }
+export type LibraryPrintLink = LibraryJobStart
 
 /** A refusal the dispatcher records as not sent: nothing reached the printer. */
 function driverRefusal(result: Extract<LibraryPrintResult, { ok: false }>) {
@@ -341,7 +348,11 @@ export function withLibraryPrint<D extends PreparedPauseDriver>(
     starter: ReturnType<typeof createLibraryPrintStarter> | undefined
     /** Upload target of the locally provisioned printer behind a binding. */
     targetFor(binding: PrinterBinding): FileUploadTarget | undefined
-    remember?(binding: PrinterBinding, link: LibraryPrintLink): void
+    remember?(
+      binding: PrinterBinding,
+      link: LibraryPrintLink,
+      sentAt: number,
+    ): void
   },
 ): D {
   const { starter } = config
@@ -390,17 +401,31 @@ export function withLibraryPrint<D extends PreparedPauseDriver>(
           !signal.aborted && request.stillAuthorized?.() === true,
         async start(name, extra) {
           started.set(binding, name)
-          rpc = await execute('start_print', { file: name, ...extra }, request)
+          rpc = await execute(
+            'start_print',
+            { file: name, ...extra },
+            {
+              ...request,
+              beforeSend() {
+                if (!request.beforeSend()) return false
+                config.remember?.(
+                  binding,
+                  {
+                    name,
+                    sha256: parsed.data.sha256,
+                    ...(parsed.data.plate === undefined
+                      ? {}
+                      : { plate: parsed.data.plate }),
+                  },
+                  Date.now(),
+                )
+                return true
+              },
+            },
+          )
         },
       })
       if (!outcome.ok) throw driverRefusal(outcome)
-      config.remember?.(binding, {
-        name: outcome.name,
-        sha256: parsed.data.sha256,
-        ...(parsed.data.plate === undefined
-          ? {}
-          : { plate: parsed.data.plate }),
-      })
       return rpc!
     },
     async waitForPaused(

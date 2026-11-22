@@ -1,4 +1,5 @@
 import WebSocket from 'ws'
+import { resolveCrealityEndpoint } from '../discovery/creality.ts'
 
 export interface CrealityTelemetry {
   state?: 'idle' | 'printing' | 'paused' | 'error'
@@ -173,6 +174,9 @@ export function decodeCrealityStatus(
 export function createCrealityTelemetryClient(options: {
   host: string
   port?: number
+  httpsPort?: number | undefined
+  caFile?: string | undefined
+  onError?: (reason: string) => void
   onTelemetry: (report: CrealityTelemetry) => void
   onDisconnect?: () => void
   reconnectDelayMs?: number
@@ -196,18 +200,36 @@ export function createCrealityTelemetryClient(options: {
   let stopped = false
   let attempt = 0
   let timer: ReturnType<typeof setTimeout> | undefined
-  let socket: WebSocket
+  let socket: WebSocket | undefined
+  let selectedEndpoint:
+    Awaited<ReturnType<typeof resolveCrealityEndpoint>> | undefined
   let resolveDone: () => void = () => {}
   const done = new Promise<void>((resolve) => {
     resolveDone = resolve
   })
-  function connect() {
+  async function connect() {
+    let endpoint: Awaited<ReturnType<typeof resolveCrealityEndpoint>>
+    try {
+      endpoint = selectedEndpoint ?? (await resolveCrealityEndpoint(options))
+      selectedEndpoint = endpoint
+    } catch (error) {
+      if (stopped) return
+      options.onError?.(error instanceof Error ? error.message : String(error))
+      stopped = true
+      resolveDone()
+      return
+    }
+    if (stopped) return
     const host = options.host.includes(':') ? `[${options.host}]` : options.host
-    socket = new WebSocket(`ws://${host}:${port}`, {
-      maxPayload: 65536,
-      handshakeTimeout: 5000,
-      perMessageDeflate: false,
-    })
+    socket = new WebSocket(
+      `${endpoint.secure ? 'wss' : 'ws'}://${host}:${endpoint.port}`,
+      {
+        ...(endpoint.ca ? { ca: endpoint.ca } : {}),
+        maxPayload: 65536,
+        handshakeTimeout: 5000,
+        perMessageDeflate: false,
+      },
+    )
     socket.on('error', () => {})
     socket.on('message', (data, binary) => {
       if (stopped || binary) return
@@ -227,7 +249,7 @@ export function createCrealityTelemetryClient(options: {
         return
       }
       timer = setTimeout(
-        connect,
+        () => void connect(),
         Math.min(cap, base * 2 ** Math.min(attempt++, 20)),
       )
     })
@@ -236,11 +258,11 @@ export function createCrealityTelemetryClient(options: {
     if (!stopped) {
       stopped = true
       clearTimeout(timer)
-      if (socket.readyState === WebSocket.CLOSED) resolveDone()
+      if (!socket || socket.readyState === WebSocket.CLOSED) resolveDone()
       else socket.terminate()
     }
     return done
   }
-  connect()
+  void connect()
   return { close, done }
 }

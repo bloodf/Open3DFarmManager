@@ -891,6 +891,138 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /jobs/{jobId}/eligibility:
+    get:
+      operationId: getJobEligibility
+      tags: [Jobs]
+      summary: Check dispatch eligibility for a submitted job
+      security:
+        - clientCredentials: ['jobs:read']
+        - clientCredentials: ['jobs:start']
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: printerId
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '200':
+          description: Connector observation for the job's assigned printer.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [jobId, printerId, plate, eligible, reasons]
+                properties:
+                  jobId:
+                    $ref: '#/components/schemas/Uuid'
+                  printerId:
+                    $ref: '#/components/schemas/Uuid'
+                  plate:
+                    type: object
+                    required: [state, observedAt]
+                    properties:
+                      state:
+                        type: string
+                        enum: [awaiting-collection, operator-confirmed, unknown]
+                      observedAt:
+                        type: integer
+                        description: Connector observation time in Unix milliseconds.
+                      attemptId:
+                        type: string
+                  eligible:
+                    type: boolean
+                    description: Advisory result. The Connector rechecks at execution.
+                  reasons:
+                    type: array
+                    items:
+                      type: string
+                      enum: [job-not-pending, printer-busy, printer-not-ready, awaiting-collection, plate-state-uncertain]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+  /jobs/{jobId}/plate:
+    get:
+      operationId: getJobPlate
+      tags: [Jobs]
+      summary: Read the Connector’s plate observation
+      security:
+        - clientCredentials: ['jobs:read']
+        - clientCredentials: ['jobs:start']
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: printerId
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '200':
+          description: Connector observation for the job's assigned printer.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [jobId, printerId, plate]
+                properties:
+                  jobId:
+                    $ref: '#/components/schemas/Uuid'
+                  printerId:
+                    $ref: '#/components/schemas/Uuid'
+                  plate:
+                    type: object
+                    required: [state, observedAt]
+                    properties:
+                      state:
+                        type: string
+                        enum: [awaiting-collection, operator-confirmed, unknown]
+                      observedAt:
+                        type: integer
+                        description: Connector observation time in Unix milliseconds.
+                      attemptId:
+                        type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
   /actions/{actionId}:
     get:
       operationId: getAction

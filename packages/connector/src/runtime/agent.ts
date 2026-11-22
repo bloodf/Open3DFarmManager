@@ -622,7 +622,11 @@ async function runConnectorAgentOnce(
       const { answerApiQuery, createApiQueryReader } =
         await import('./api-query.ts')
       const signalling = config.signalling
-      const readApiQuery = createApiQueryReader(config, input.dataDirectory)
+      const readApiQuery = createApiQueryReader(
+        config,
+        input.dataDirectory,
+        collection,
+      )
       const source = snapshots
       const cameraMedia = config.camera
         ? await (

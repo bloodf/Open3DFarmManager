@@ -29,6 +29,7 @@ import {
   type CommandClaimHandle,
   type CommandJournalHandle,
 } from '../control/command-journal.ts'
+import type { PlateStartGuard } from '../control/queue-collection-hold.ts'
 import type { PreparedPauseDriver } from '../control/pause-dispatcher.ts'
 import {
   readPrinterBinding,
@@ -57,7 +58,8 @@ export type ApiCommandDriver = Pick<
   PreparedPauseDriver,
   'execute' | 'controls' | 'macros' | 'macroParams'
 > &
-  Partial<Pick<PreparedPauseDriver, 'prepare' | 'closeAttempt'>>
+  Partial<Pick<PreparedPauseDriver, 'prepare' | 'closeAttempt'>> &
+  PlateStartGuard
 export type ApiCommandResult =
   /** Unauthenticated, not ours, or a replay: nothing is reported. */
   | {
@@ -239,6 +241,10 @@ export function createApiCommandRunner(config: {
     action: NonNullable<ApiEnvelopeV1['action']>['action'],
     binding: PrinterBinding,
   ): [ApiEnvelopeRefusalCode, string] | null {
+    if (action === 'start_print' || action === 'start_library_print') {
+      const plate = config.driver.plateStartRefusal?.(binding)
+      if (plate) return ['wrong-state', plate]
+    }
     const observed = config.observe(binding)
     if (
       !observed ||
@@ -478,7 +484,7 @@ export function createApiCommandRunner(config: {
             ),
         })
         if (!outcome.ok && !attempted)
-          lastRefusal = [
+          lastRefusal ??= [
             outcome.code === 'checksum-mismatch' ||
             outcome.code === 'unsupported'
               ? outcome.code

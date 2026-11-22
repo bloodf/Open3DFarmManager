@@ -1,8 +1,11 @@
+import { z } from 'zod'
+import type { QueueCollectionJournal } from '../control/queue-collection-journal.ts'
 import {
   ApiQueryFile,
   ApiQueryMacro,
   MAX_API_QUERY_ITEMS,
   MAX_API_QUERY_RESULT_BYTES,
+  type ApiDispatchObservation,
   type ApiQueryReply,
   type ApiQueryRequest,
   type ApiQueryResult,
@@ -20,6 +23,7 @@ import { moonrakerQueryClient } from './api-query-moonraker.ts'
 export function createApiQueryReader(
   config: AgentRuntimeConfig,
   dataDirectory: string,
+  collectionJournal?: QueueCollectionJournal,
 ) {
   return async (query: ApiQueryRequest, signal: AbortSignal) => {
     const binding = config.bindingFor(query.assignment_id)
@@ -44,6 +48,14 @@ export function createApiQueryReader(
         selected.limits,
         signal,
       )
+      if (query.kind === 'dispatch') {
+        return {
+          dispatch: await readDispatchObservation(
+            () => client.request('printer.objects.query.dispatch'),
+            () => collectionJournal?.read(assignment.printer_key),
+          ),
+        }
+      }
       if (query.kind === 'macros') {
         const { objects } = MoonrakerObjectList.parse(
           await client.request('printer.objects.list'),
@@ -52,7 +64,7 @@ export function createApiQueryReader(
       }
       return { files: { backend: 'moonraker' as const, client } }
     }
-    if (query.kind === 'macros') return undefined
+    if (query.kind !== 'files') return undefined
     const files = createFileTargets({
       config,
       assignmentId: assignment.assignment_id,
@@ -63,8 +75,65 @@ export function createApiQueryReader(
   }
 }
 
+const DispatchStatus = z.object({
+  status: z.object({
+    webhooks: z.object({ state: z.string() }),
+    print_stats: z.object({ state: z.string() }),
+  }),
+})
+
+export async function readDispatchObservation(
+  query: () => Promise<unknown>,
+  readCollection: () => ReturnType<QueueCollectionJournal['read']> | undefined,
+  now: () => number = Date.now,
+): Promise<ApiDispatchObservation> {
+  const { status } = DispatchStatus.parse(await query())
+  const state = status.print_stats.state
+  const busy = state === 'printing' || state === 'paused'
+  const printerState =
+    status.webhooks.state !== 'ready'
+      ? 'not-ready'
+      : busy
+        ? 'busy'
+        : ['standby', 'complete', 'cancelled'].includes(state)
+          ? 'idle'
+          : 'not-ready'
+  const observedAt = now()
+  try {
+    const collection = readCollection()
+    const awaiting = collection?.attempts.findLast(
+      (attempt) => attempt.status === 'awaiting-collection',
+    )
+    if (awaiting)
+      return {
+        printerState,
+        observedAt,
+        plateState: 'awaiting-collection',
+        attemptId: awaiting.id,
+      }
+    const latest = collection?.attempts.at(-1)
+    if (
+      printerState === 'idle' &&
+      collection?.dispatchedAt === undefined &&
+      latest?.status === 'collected'
+    )
+      return {
+        printerState,
+        observedAt,
+        plateState: 'operator-confirmed',
+        attemptId: latest.id,
+      }
+  } catch {
+    // A failed journal cannot establish clearance.
+  }
+  return { printerState, observedAt, plateState: 'unknown' }
+}
+
 type QuerySource =
-  { files: FileListTarget } | { macros: readonly string[] } | undefined
+  | { files: FileListTarget }
+  | { macros: readonly string[] }
+  | { dispatch: ApiDispatchObservation }
+  | undefined
 
 export async function answerApiQuery(
   query: ApiQueryRequest,
@@ -83,6 +152,12 @@ export async function answerApiQuery(
       wire = JSON.stringify({
         kind: 'error',
         error: 'unsupported',
+      } satisfies ApiQueryResult)
+    } else if (query.kind === 'dispatch' && 'dispatch' in source) {
+      wire = JSON.stringify({
+        kind: 'dispatch',
+        data: [source.dispatch],
+        nextOffset: null,
       } satisfies ApiQueryResult)
     } else if (query.kind === 'files' && 'files' in source) {
       const entries = await readPrinterFiles(source.files, {
@@ -134,7 +209,7 @@ export async function answerApiQuery(
 }
 
 function pageWire(
-  page: Exclude<ApiQueryResult, { kind: 'error' }>,
+  page: Extract<ApiQueryResult, { kind: 'files' | 'macros' }>,
   query: ApiQueryRequest,
 ) {
   const total = Math.min(page.data.length, MAX_API_QUERY_ITEMS)

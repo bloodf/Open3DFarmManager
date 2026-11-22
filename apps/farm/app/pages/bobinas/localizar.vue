@@ -15,6 +15,7 @@ import {
   filterSpools,
   type FinderFilters,
 } from '../../components/spool-finder/finder-filter.ts'
+import { loadFinderSpools } from '../../components/spool-finder/finder-load.ts'
 import {
   fetchSpools,
   useSpoolFeaturePage,
@@ -29,8 +30,9 @@ const spools = ref<SpoolItem[]>([])
 const canWrite = ref(false)
 const filters = ref<FinderFilters>({ ...EMPTY_FINDER_FILTERS })
 
-async function load(id: string) {
-  const list = await fetchSpools(id)
+async function load(id: string, current: () => boolean) {
+  const list = await loadFinderSpools(id, current, fetchSpools)
+  if (!list) return
   spools.value = list.items
   canWrite.value = list.canWrite
 }

@@ -21,7 +21,7 @@ export async function testPostgresIntegrationDelivery(
 ) {
   const checks: string[] = []
   const check = (name: string) => checks.push(name)
-  const clock = { now: 5_000_000 }
+  const clock = { now: Date.now() }
   const store = new PostgresIntegrationDelivery(runtime)
   const sent: string[] = []
   const inbox: EnvelopeInbox & { mode: 'sent' | 'no-inbox' | 'throw' } = {

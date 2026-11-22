@@ -29,7 +29,7 @@ const file = {
 export async function testPostgresIntegrationJobs(admin: Sql, runtime: Sql) {
   const checks: string[] = []
   const check = (name: string) => checks.push(name)
-  const clock = { now: 7_000_000 }
+  const clock = { now: Date.now() }
   const store = new PostgresIntegrationJobs(runtime)
   const deliveryStore = new PostgresIntegrationDelivery(runtime)
   const sent: string[] = []

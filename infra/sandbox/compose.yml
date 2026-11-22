@@ -1,5 +1,5 @@
 x-node: &node
-  image: node:24.22.2-bookworm-slim@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9
+  image: node:22.23.5-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee
   profiles: [sandbox]
   working_dir: /workspace
   user: '${SANDBOX_UID:?}:${SANDBOX_GID:?}'
@@ -9,7 +9,7 @@ x-node: &node
   security_opt: [no-new-privileges:true]
 services:
   postgres:
-    image: postgres:17@sha256:f4c66b820c6f974249089d3d16d86a3698eae11e8746eb6644b2271031e91232
+    image: postgres:17@sha256:0d938e975177bef9f1f61f3f9dbcf2e0aa0a139568f66d3415ed8892eb97f6ac
     profiles: [sandbox]
     environment:
       POSTGRES_USER: sandbox_bootstrap

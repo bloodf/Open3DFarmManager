@@ -1,8 +1,8 @@
 <script setup lang="ts">
+import type { ReplaySend } from '../../utils/replay-live.ts'
 import { computed, ref, watch } from 'vue'
 import Dialog from '../ui/Dialog.vue'
 import Button from '../ui/Button.vue'
-import type { LibraryPrintArgs } from '../../../../../packages/farm-protocol/src/control-actions.ts'
 import { locationLabel, safeColour } from '../../utils/library-view.ts'
 import { replayOutcomeLocks } from '../../utils/replay-outcome.ts'
 import {
@@ -28,7 +28,7 @@ const props = defineProps<{
   preferredPrinter?: string
   preferredPlate?: number
   /** Sends the signed `start_library_print` over the live session. Never retried here. */
-  send: (printerKey: string, args: LibraryPrintArgs) => Promise<ReplayResult>
+  send: ReplaySend
 }>()
 const open = defineModel<boolean>({ required: true })
 
@@ -113,8 +113,14 @@ async function confirm() {
   const printer = selected.value
   if (!printer || problem.value || sending.value || result.value) return
   sending.value = true
+  const { sha256, versionId } = props.source
+  const itemId = props.itemId
+  const lockKey = outcomeLockKey()
+  const chosenPlate = plate.value
+  const chosenMapping = mapping.value.join(',')
+  let settled: ReplayResult
   try {
-    result.value = await props.send(
+    settled = await props.send(
       printer.key,
       buildArgs({
         printer,
@@ -123,15 +129,24 @@ async function confirm() {
         mapping: mapping.value,
         bedClear: bedClear.value,
       }),
+      () =>
+        open.value &&
+        props.itemId === itemId &&
+        props.source.sha256 === sha256 &&
+        props.source.versionId === versionId &&
+        selectedKey.value === printer.key &&
+        plate.value === chosenPlate &&
+        mapping.value.join(',') === chosenMapping &&
+        !problem.value,
+      versionId,
     )
-    replayOutcomeLocks.record(outcomeLockKey(), result.value)
   } catch {
-    // The command may have left the browser: report it as uncertain, never resend.
-    result.value = { outcome: 'outcome-unknown' }
-    replayOutcomeLocks.record(outcomeLockKey(), result.value)
+    settled = { outcome: 'outcome-unknown' }
   } finally {
     sending.value = false
   }
+  replayOutcomeLocks.record(lockKey, settled)
+  if (outcomeLockKey() === lockKey) result.value = settled
 }
 
 function confirmPrinterChecked() {

@@ -398,9 +398,10 @@ async function runAssignmentControl(
           return undefined
         }
       },
-      remember(binding, link) {
+      remember(binding, link, sentAt) {
         const mapping = readPrinterBinding(binding)
-        if (mapping) input.libraryLinks?.remember(mapping.printer_key, link)
+        if (mapping)
+          input.libraryLinks?.remember(mapping.printer_key, link, sentAt)
       },
     })
     const browserDriver = hold(libraryDriver)

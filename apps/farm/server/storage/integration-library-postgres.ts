@@ -126,10 +126,12 @@ export class PostgresIntegrationLibrary implements IntegrationLibraryStore {
         plateCount: number
       }[]
     >`
-      SELECT id::text AS "id", farm_id::text AS "farmId", sha256, size_bytes::float8 AS "sizeBytes",
-        original_name AS "originalName", storage_location AS "storageLocation", plate_count AS "plateCount"
-      FROM farm.library_versions
-      WHERE id = ${versionId}::uuid AND deleted_at IS NULL`
+      SELECT v.id::text AS "id", v.farm_id::text AS "farmId", v.sha256, v.size_bytes::float8 AS "sizeBytes",
+        v.original_name AS "originalName", v.storage_location AS "storageLocation", v.plate_count AS "plateCount"
+      FROM farm.library_versions v
+      JOIN farm.library_blobs b ON b.farm_id = v.farm_id AND b.sha256 = v.sha256
+        AND b.storage_location = v.storage_location AND b.location_agent_id = v.location_agent_id
+      WHERE v.id = ${versionId}::uuid AND v.deleted_at IS NULL AND b.purged_at IS NULL`
     const row = rows[0]
     if (!row) return null
     return {

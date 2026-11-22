@@ -57,10 +57,12 @@ test('Qidi Moonraker reads and upload over loopback', async (t) => {
   }
   await adapter.upload(file)
   assert.equal(simulator.uploads.length, 1)
-  assert.match(simulator.uploads[0], /name="root"\r\n\r\ngcodes/)
-  assert.match(simulator.uploads[0], /filename="fixture.gcode"/)
-  assert.match(simulator.uploads[0], /; simulator fixture/)
-  assert.doesNotMatch(simulator.uploads[0], /name="print"/)
+  const [upload] = simulator.uploads
+  assert.ok(typeof upload === 'string')
+  assert.match(upload, /name="root"\r\n\r\ngcodes/)
+  assert.match(upload, /filename="fixture.gcode"/)
+  assert.match(upload, /; simulator fixture/)
+  assert.doesNotMatch(upload, /name="print"/)
 
   const anonymous = createQidiAdapter({ origin })
   await assert.rejects(anonymous.discover(), { reason: 'unauthorized' })

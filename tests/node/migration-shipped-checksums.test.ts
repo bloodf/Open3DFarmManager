@@ -2,7 +2,10 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { executableMigrationSql } from '../../scripts/db/migrations.ts'
+import {
+  executableMigrationSql,
+  loadMigrationCatalog,
+} from '../../scripts/db/migrations.ts'
 
 const id = '0080_integration_library_api'
 const shippedSql = readFileSync(
@@ -45,5 +48,29 @@ test('the constraint lookup shim leaves other migrations untouched', () => {
   assert.equal(
     executableMigrationSql(otherMigration, 'down'),
     otherMigration.down,
+  )
+})
+
+test('0090 retains its shipped catalog checksum and declares network_deleted only at rollback execution', async () => {
+  const retention = (await loadMigrationCatalog()).find(
+    ({ id }) => id === '0090_review_601_retention',
+  )
+  assert.ok(retention)
+  assert.equal(
+    retention.checksum,
+    '0285bb12f92bcef3e28efa7250193fb5021531fcb08b6e0d2381319416c5c191',
+  )
+  const executableDown = executableMigrationSql(retention, 'down')
+  const declaration = '  network_deleted integer;\n'
+  assert.ok(executableDown.includes(`${declaration}BEGIN\n`))
+  assert.equal(executableDown.replace(declaration, ''), retention.down)
+  assert.equal(executableMigrationSql(retention, 'up'), retention.up)
+  assert.throws(
+    () =>
+      executableMigrationSql(
+        { ...retention, down: retention.down + '\n' },
+        'down',
+      ),
+    /Shipped 0090_review_601_retention down SQL changed/,
   )
 })

@@ -544,17 +544,15 @@ function cancelPause(event: Event) {
               embedded
             />
           </template>
-          <template #local-link>
+          <template #local-link="{ row }">
             <a
-              :href="displayLocalOrigin(inspectedRow) ?? undefined"
+              :href="displayLocalOrigin(row) ?? undefined"
               target="_blank"
               rel="noopener noreferrer"
               referrerpolicy="no-referrer"
-              :aria-describedby="`local-help-${inspectedRow.assignment.assignmentId}`"
+              :aria-describedby="`local-help-${row.assignment.assignmentId}`"
               >Abrir interface local de
-              <span class="opaque">{{
-                inspectedRow.assignment.printerKey
-              }}</span></a
+              <span class="opaque">{{ row.assignment.printerKey }}</span></a
             >
           </template>
           <FarmCardControls

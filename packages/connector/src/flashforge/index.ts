@@ -71,13 +71,10 @@ export function discoverFlashforge(input: Endpoint) {
             data.subarray(0x92, 0x112).toString().split('\0')[0] ?? ''
           if (!validCredential(serialNumber))
             throw new Error('Invalid Flashforge serial number')
-          const identity = {
-            model: model(data.readUInt16BE(0x88)),
-            serialNumber,
-          }
+          const verifiedModel = model(data.readUInt16BE(0x88))
           clearTimeout(timer)
           socket.close()
-          resolve(identity)
+          resolve({ model: verifiedModel, serialNumber })
         } catch (error) {
           finish(
             error instanceof Error

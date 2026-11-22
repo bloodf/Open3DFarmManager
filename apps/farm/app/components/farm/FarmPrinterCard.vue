@@ -292,7 +292,7 @@ function dateLabel(time: number) {
         @setup="emit('setup')"
         @save="emit('save')"
         @cancel="emit('cancel')"
-        ><slot name="local-link"
+        ><slot name="local-link" :row="row"
       /></FarmLocalInterface>
       <slot />
     </article>

@@ -86,7 +86,7 @@ const canApproveConnectors = computed(
   () => currentRole.value === 'owner' || currentRole.value === 'admin',
 )
 
-const links = computed(() => [
+const pageLinks = computed(() => [
   { to: '/', label: 'Início' },
   { to: '/farm', label: 'Minha farm' },
   { to: '/impressoras', label: 'Impressoras' },
@@ -161,11 +161,11 @@ const activeModule = computed(() =>
     ),
   ),
 )
-const sectionLinks = computed(() => {
+const links = computed(() => {
   const paths = activeModule.value?.paths
   return paths
-    ? links.value.filter((link) => paths.includes(link.to))
-    : links.value
+    ? pageLinks.value.filter((link) => paths.includes(link.to))
+    : pageLinks.value
 })
 const sectionCollapsed = ref(false)
 onMounted(() => {
@@ -180,7 +180,7 @@ watch(sectionCollapsed, (collapsed) => {
   } catch {}
 })
 const section = computed(() =>
-  links.value.find(
+  pageLinks.value.find(
     ({ to }) => to === route.path.split('/').slice(0, 2).join('/'),
   ),
 )
@@ -192,7 +192,7 @@ const paletteGroups = computed(() => {
   return [
     {
       label: 'Páginas',
-      items: links.value.filter(({ label }) => matches(label)),
+      items: pageLinks.value.filter(({ label }) => matches(label)),
     },
     {
       label: 'Impressoras',
@@ -393,8 +393,8 @@ async function refreshAccount() {
         </template>
       </details>
     </header>
-    <aside class="rail" aria-label="Módulos">
-      <nav aria-label="Módulos">
+    <aside class="rail">
+      <nav aria-label="Navegação principal">
         <NuxtLink
           v-for="item in modules"
           :key="item.to"
@@ -423,11 +423,16 @@ async function refreshAccount() {
       >
         {{ activeModule?.label ?? 'Navegação' }}
       </button>
-      <ShellNavigation
-        v-if="!sectionCollapsed"
-        :links="sectionLinks"
-        :path="route.path"
-      />
+      <nav v-if="!sectionCollapsed" aria-label="Navegação da seção">
+        <NuxtLink
+          v-for="link in links"
+          :key="link.to"
+          :to="link.to"
+          :aria-current="route.path === link.to ? 'page' : undefined"
+        >
+          {{ link.label }}
+        </NuxtLink>
+      </nav>
     </aside>
     <div id="conteudo-shell" class="content" tabindex="-1">
       <div v-if="section && section.to !== '/'" class="breadcrumbs">
@@ -471,7 +476,7 @@ async function refreshAccount() {
     </footer>
     <Dialog v-model="drawer" class="drawer" title="Menu">
       <ShellNavigation
-        :links="links"
+        :links="pageLinks"
         :path="route.path"
         @navigate="drawer = false"
       />

@@ -6,6 +6,7 @@ import {
   ControlArguments,
   ExtendedControlAction,
   controlRoleAllowed,
+  IDLE_ONLY_CONTROL_ACTIONS,
 } from '../../packages/farm-protocol/src/control-actions.ts'
 import { PrinterState } from '../../packages/farm-protocol/src/state.ts'
 import {
@@ -200,6 +201,10 @@ async function fixture(
   cleanup.push(() => closeCommandJournal(journal))
   const remote = await pauseFixture({
     initialState: action === 'resume' ? 'paused' : 'printing',
+    // Idle-only actions (#605) are dispatched from a stopped printer.
+    ...(IDLE_ONLY_CONTROL_ACTIONS.has(action)
+      ? { initialState: 'standby' as never }
+      : {}),
     ...mode,
   })
   cleanup.push(async () => {

@@ -7,5 +7,10 @@ export default defineNuxtConfig({
   extends: farm,
   srcDir: `${farm}/app`,
   runtimeConfig: { connectorSignalling: { enabled: true } },
-  nitro: { preset: 'node-server' },
+  nitro: {
+    preset: 'node-server',
+    ...(process.env.SANDBOX_OUTPUT_DIR
+      ? { output: { dir: process.env.SANDBOX_OUTPUT_DIR } }
+      : {}),
+  },
 })

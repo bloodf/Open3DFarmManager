@@ -4,7 +4,6 @@
 // loopback discovery responders of the vendor simulators; everything else is
 // the real `configure` runtime in its own process.
 import { spawn, type ChildProcess } from 'node:child_process'
-import { once } from 'node:events'
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -34,6 +33,26 @@ export type Configurator = Readonly<{
   log(): string
   close(): Promise<void>
 }>
+
+async function waitForChildExit(
+  child: ChildProcess,
+  timeoutMs: number,
+): Promise<boolean> {
+  if (child.exitCode !== null || child.signalCode !== null) return true
+  return new Promise<boolean>((resolve) => {
+    const finish = (didExit: boolean) => {
+      clearTimeout(timer)
+      child.off('exit', onExit)
+      child.off('error', onError)
+      resolve(didExit || child.exitCode !== null || child.signalCode !== null)
+    }
+    const onExit = () => finish(true)
+    const onError = () => finish(true)
+    const timer = setTimeout(() => finish(false), timeoutMs)
+    child.once('exit', onExit)
+    child.once('error', onError)
+  })
+}
 
 type ConfiguratorInput = Parameters<typeof startConfigurator>[0]
 
@@ -115,181 +134,201 @@ export async function startConfigurator(input: {
   const root = await realpath(
     await mkdtemp(join(await realpath(tmpdir()), 'journey-configurator-')),
   )
-  const paired = input.paired
-  const dataDirectory = paired
-    ? await realpath(paired.dataDirectory)
-    : join(root, 'identity')
-  const { identity, claim } = paired
-    ? { identity: loadOrCreateIdentity(dataDirectory), claim: paired.claim }
-    : await pairConfigurator(input, dataDirectory)
-  if (claim.farm_id !== input.farmId)
-    throw new Error('Configurator Connector belongs to another farm')
+  let child: ChildProcess | undefined
+  try {
+    const paired = input.paired
+    const dataDirectory = paired
+      ? await realpath(paired.dataDirectory)
+      : join(root, 'identity')
+    const { identity, claim } = paired
+      ? { identity: loadOrCreateIdentity(dataDirectory), claim: paired.claim }
+      : await pairConfigurator(input, dataDirectory)
+    if (claim.farm_id !== input.farmId)
+      throw new Error('Configurator Connector belongs to another farm')
 
-  const credentialPath = join(root, 'credential.json')
-  const provisioningPath = join(root, 'provisioning.json')
-  const runtimeConfigPath = join(root, 'runtime.json')
-  const assignments: ConfiguratorPrinter[] = []
-  if (input.initialPrinters?.length) {
-    const printersPath = `/api/farms/${input.farmId}/printers`
-    for (const printer of input.initialPrinters) {
-      const registration = (await pagePost(input.ownerPage, printersPath, {
-        agentId: claim.agent_id,
-        printerKey: printer.printerKey,
-        confirmedLocalConfiguration: true,
-      })) as { assignmentId?: unknown }
-      if (typeof registration.assignmentId !== 'string')
-        throw new Error('Configurator initial printer assignment failed')
-      assignments.push(
-        Object.freeze({
-          assignmentId: registration.assignmentId,
+    const credentialPath = join(root, 'credential.json')
+    const provisioningPath = join(root, 'provisioning.json')
+    const runtimeConfigPath = join(root, 'runtime.json')
+    const assignments: ConfiguratorPrinter[] = []
+    if (input.initialPrinters?.length) {
+      const printersPath = `/api/farms/${input.farmId}/printers`
+      for (const printer of input.initialPrinters) {
+        const registration = (await pagePost(input.ownerPage, printersPath, {
           agentId: claim.agent_id,
           printerKey: printer.printerKey,
-          origin: printer.origin,
+          confirmedLocalConfiguration: true,
+        })) as { assignmentId?: unknown }
+        if (typeof registration.assignmentId !== 'string')
+          throw new Error('Configurator initial printer assignment failed')
+        assignments.push(
+          Object.freeze({
+            assignmentId: registration.assignmentId,
+            agentId: claim.agent_id,
+            printerKey: printer.printerKey,
+            origin: printer.origin,
+          }),
+        )
+      }
+      await writeFile(
+        runtimeConfigPath,
+        JSON.stringify({
+          version: 1,
+          collection: {
+            version: 1,
+            allowedOrigins: [...new Set(assignments.map((p) => p.origin))],
+            printers: assignments.map((p) => ({
+              printerKey: p.printerKey,
+              origin: p.origin,
+            })),
+            limits: { staleAfterMs: 5000 },
+          },
+          assignments: assignments.map((p) => ({
+            assignment_id: p.assignmentId,
+            agent_id: p.agentId,
+            farm_id: input.farmId,
+            printer_key: p.printerKey,
+            moonraker_origin: p.origin,
+          })),
+          telemetry: {
+            endpoint: input.origin + '/api/connector/telemetry',
+            audience: input.audience,
+            retryMinMs: 1000,
+            retryMaxMs: 1000,
+          },
+          signalling: {
+            endpoint:
+              input.origin.replace('https:', 'wss:') +
+              '/api/signalling/connector',
+            origin: input.origin,
+            audience: input.audience,
+            retryMinMs: 1000,
+            retryMaxMs: 1000,
+          },
+          rtc: { bindAddress: '127.0.0.1' },
         }),
+        { mode: 0o600, flag: 'wx' },
       )
     }
     await writeFile(
-      runtimeConfigPath,
+      credentialPath,
       JSON.stringify({
         version: 1,
-        collection: {
-          version: 1,
-          allowedOrigins: [...new Set(assignments.map((p) => p.origin))],
-          printers: assignments.map((p) => ({
-            printerKey: p.printerKey,
-            origin: p.origin,
-          })),
-          limits: { staleAfterMs: 5000 },
-        },
-        assignments: assignments.map((p) => ({
-          assignment_id: p.assignmentId,
-          agent_id: p.agentId,
-          farm_id: input.farmId,
-          printer_key: p.printerKey,
-          moonraker_origin: p.origin,
-        })),
-        telemetry: {
-          endpoint: input.origin + '/api/connector/telemetry',
-          audience: input.audience,
-          retryMinMs: 1000,
-          retryMaxMs: 1000,
-        },
-        signalling: {
-          endpoint:
-            input.origin.replace('https:', 'wss:') +
-            '/api/signalling/connector',
-          origin: input.origin,
-          audience: input.audience,
-          retryMinMs: 1000,
-          retryMaxMs: 1000,
+        expected_fingerprint: identity.fingerprint,
+        approval: claim,
+      }),
+      { mode: 0o600, flag: 'wx' },
+    )
+    await writeFile(
+      provisioningPath,
+      JSON.stringify({
+        version: 1,
+        mode: 'configuration-provisioning',
+        farm_id: input.farmId,
+        agent_id: claim.agent_id,
+        farmOrigin: input.origin,
+        credentialAudience: input.audience,
+        stateDirectory: join(root, 'state'),
+        runtimeConfigPath,
+        printerNetworks: input.printerNetworks ?? ['172.30.78.0/24'],
+        managedBridge: null,
+        runtimeTemplate: {
+          telemetry: {
+            endpoint: input.origin + '/api/connector/telemetry',
+            audience: input.audience,
+          },
+          signalling: {
+            endpoint:
+              input.origin.replace('https:', 'wss:') +
+              '/api/signalling/connector',
+            origin: input.origin,
+            audience: input.audience,
+          },
+          rtc: { bindAddress: '127.0.0.1' },
         },
         rtc: { bindAddress: '127.0.0.1' },
       }),
       { mode: 0o600, flag: 'wx' },
     )
-  }
-  await writeFile(
-    credentialPath,
-    JSON.stringify({
-      version: 1,
-      expected_fingerprint: identity.fingerprint,
-      approval: claim,
-    }),
-    { mode: 0o600, flag: 'wx' },
-  )
-  await writeFile(
-    provisioningPath,
-    JSON.stringify({
-      version: 1,
-      mode: 'configuration-provisioning',
-      farm_id: input.farmId,
-      agent_id: claim.agent_id,
-      farmOrigin: input.origin,
-      credentialAudience: input.audience,
-      stateDirectory: join(root, 'state'),
-      runtimeConfigPath,
-      printerNetworks: input.printerNetworks ?? ['172.30.78.0/24'],
-      managedBridge: null,
-      runtimeTemplate: {
-        telemetry: {
-          endpoint: input.origin + '/api/connector/telemetry',
-          audience: input.audience,
-        },
-        signalling: {
-          endpoint:
-            input.origin.replace('https:', 'wss:') +
-            '/api/signalling/connector',
-          origin: input.origin,
-          audience: input.audience,
-        },
-        rtc: { bindAddress: '127.0.0.1' },
-      },
-      rtc: { bindAddress: '127.0.0.1' },
-    }),
-    { mode: 0o600, flag: 'wx' },
-  )
 
-  let tail = ''
-  let configReady = false
-  let readonlyReady = assignments.length === 0
-  const collect = (chunk: Buffer) => {
-    tail = (tail + chunk.toString('utf8')).slice(-8192)
-    if (tail.includes('"configuration-signalling","state":"ready"'))
-      configReady = true
-    if (tail.includes('"kind":"readonly-listening"')) readonlyReady = true
-  }
-  const child: ChildProcess = spawn(
-    process.execPath,
-    [new URL('./configurator-child.ts', import.meta.url).pathname],
-    {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: {
-        NODE_OPTIONS: process.env.OPENFARM_NETWORK_GUARD_PRELOAD ?? '',
-        NODE_EXTRA_CA_CERTS: input.certificatePath,
-        NODE_TLS_REJECT_UNAUTHORIZED: '1',
-        WS_NO_BUFFER_UTIL: '1',
-        WS_NO_UTF_8_VALIDATE: '1',
-        JOURNEY_CONFIG_CHILD: 'yes',
-        JOURNEY_CONFIG_PROVISIONING: provisioningPath,
-        JOURNEY_CONFIG_CREDENTIAL: credentialPath,
-        JOURNEY_CONFIG_DATA: dataDirectory,
-        JOURNEY_CONFIG_PROBES: JSON.stringify(input.probes),
-        PATH: process.env.PATH ?? '',
-      },
-    },
-  )
-  child.stdout?.on('data', collect)
-  child.stderr?.on('data', collect)
-  // Hand it over once it has opened its signalling (a loaded host needs time).
-  const deadline = Date.now() + 5 * 60_000
-  while (!(configReady && readonlyReady)) {
-    if (child.exitCode !== null || Date.now() > deadline) {
-      child.kill('SIGKILL')
-      throw new Error('Configurator did not become ready: ' + tail)
+    let tail = ''
+    let configReady = false
+    let readonlyReady = assignments.length === 0
+    let startupError: Error | undefined
+    const collect = (chunk: Buffer) => {
+      tail = (tail + chunk.toString('utf8')).slice(-8192)
+      if (tail.includes('"configuration-signalling","state":"ready"'))
+        configReady = true
+      if (tail.includes('"kind":"readonly-listening"')) readonlyReady = true
     }
-    await new Promise((resolve) => setTimeout(resolve, 500))
-  }
-  let closed: Promise<void> | undefined
-  return Object.freeze({
-    agentId: claim.agent_id,
-    fingerprint: identity.fingerprint,
-    assignments: Object.freeze(assignments),
-    log: () => tail,
-    close: () =>
-      (closed ??= (async () => {
-        const alive = () => child.exitCode === null && child.signalCode === null
-        if (alive()) child.kill('SIGTERM')
-        if (alive())
-          await Promise.race([
-            once(child, 'exit'),
-            new Promise((resolve) => setTimeout(resolve, 8000)),
-          ])
-        if (alive()) {
+    child = spawn(
+      process.execPath,
+      [new URL('./configurator-child.ts', import.meta.url).pathname],
+      {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: {
+          NODE_OPTIONS: process.env.OPENFARM_NETWORK_GUARD_PRELOAD ?? '',
+          NODE_EXTRA_CA_CERTS: input.certificatePath,
+          NODE_TLS_REJECT_UNAUTHORIZED: '1',
+          WS_NO_BUFFER_UTIL: '1',
+          WS_NO_UTF_8_VALIDATE: '1',
+          JOURNEY_CONFIG_CHILD: 'yes',
+          JOURNEY_CONFIG_PROVISIONING: provisioningPath,
+          JOURNEY_CONFIG_CREDENTIAL: credentialPath,
+          JOURNEY_CONFIG_DATA: dataDirectory,
+          JOURNEY_CONFIG_PROBES: JSON.stringify(input.probes),
+          PATH: process.env.PATH ?? '',
+        },
+      },
+    )
+    child.stdout?.on('data', collect)
+    child.stderr?.on('data', collect)
+    child.once('error', (error) => {
+      startupError = error
+    })
+    // Hand it over once it has opened its signalling (a loaded host needs time).
+    const deadline = Date.now() + 5 * 60_000
+    while (!(configReady && readonlyReady)) {
+      if (
+        child.exitCode !== null ||
+        child.signalCode !== null ||
+        startupError !== undefined ||
+        Date.now() > deadline
+      ) {
+        if (child.exitCode === null && child.signalCode === null)
           child.kill('SIGKILL')
-          await once(child, 'exit')
-        }
-        // The configurator owns its private state directory.
-        await rm(root, { recursive: true, force: true })
-      })()),
-  })
+        throw new Error(
+          'Configurator did not become ready: ' +
+            (startupError?.message ?? tail),
+        )
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500))
+    }
+    let closed: Promise<void> | undefined
+    const startedChild = child
+    return Object.freeze({
+      agentId: claim.agent_id,
+      fingerprint: identity.fingerprint,
+      assignments: Object.freeze(assignments),
+      log: () => tail,
+      close: () =>
+        (closed ??= (async () => {
+          const alive = () =>
+            startedChild.exitCode === null && startedChild.signalCode === null
+          if (alive()) startedChild.kill('SIGTERM')
+          if (alive() && !(await waitForChildExit(startedChild, 8000))) {
+            startedChild.kill('SIGKILL')
+            await waitForChildExit(startedChild, 8000)
+          }
+          // The configurator owns its private state directory.
+          await rm(root, { recursive: true, force: true })
+        })()),
+    })
+  } catch (error) {
+    if (child && child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGKILL')
+      await waitForChildExit(child, 8000)
+    }
+    await rm(root, { recursive: true, force: true })
+    throw error
+  }
 }

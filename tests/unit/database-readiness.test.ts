@@ -19,6 +19,8 @@ import {
 } from '../../apps/farm/server/utils/database/phase.ts'
 import { beginDatabaseStartup } from '../../apps/farm/server/utils/database/lifecycle.ts'
 import { signallingSocketHooks } from '../../apps/farm/server/services/signalling-routes.ts'
+import { IncomingMessage } from 'node:http'
+import { PassThrough } from 'node:stream'
 
 const catalog = migrationCatalog([
   { name: '0001_a.up.sql', sql: 'SELECT 1' },
@@ -309,17 +311,23 @@ describe('gate and phase', () => {
   })
   test('WebSocket upgrade is refused and destroyed while not ready', async () => {
     const lookup = vi.fn()
-    const destroy = vi.fn()
-    const request = { socket: { destroy } }
+    const socket = new PassThrough()
+    const destroy = vi.spyOn(socket, 'destroy')
+    const request = new IncomingMessage(socket as never)
     setDatabasePhase('starting')
-    const response = await signallingSocketHooks(
-      'connector',
-      'read-only',
-      lookup as never,
-    ).upgrade(request)
-    expect(response).toBeInstanceOf(Response)
-    expect((response as Response).status).toBe(503)
-    expect(lookup).not.toHaveBeenCalled()
+    try {
+      const response = await signallingSocketHooks(
+        'connector',
+        'read-only',
+        lookup as never,
+      ).upgrade({ _req: request })
+      expect(response).toBeInstanceOf(Response)
+      expect((response as Response).status).toBe(503)
+      expect(destroy).toHaveBeenCalled()
+      expect(lookup).not.toHaveBeenCalled()
+    } finally {
+      socket.destroy()
+    }
   })
 })
 

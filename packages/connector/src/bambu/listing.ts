@@ -59,11 +59,13 @@ const MONTHS = [
   'Dec',
 ]
 const RECENT_LIST_WINDOW_MS = 183 * 24 * 60 * 60 * 1000
+const NEXT_YEAR_SKEW_MS = 24 * 60 * 60 * 1000
 
 /**
  * Bambu's Unix LIST rows omit the timezone and, for recent files, the year.
  * Interpret them as UTC. An inferred date more than 183 days ahead belongs
- * to the previous year. This leaves room for timezone and clock skew.
+ * to the previous year. Near the UTC year boundary, a next-year date up to
+ * 24 hours ahead can reflect the printer's timezone or clock skew.
  *
  * Simulated coverage only. Protocol observations:
  * https://github.com/sksat/bambu-rs/blob/main/docs/protocol.md#ftp-capabilities-implicit-ftps-port-990
@@ -76,6 +78,9 @@ export function parseBambuUnixListing(
   const files: BambuFile[] = []
   const latestRecentDate = new Date(
     now.getTime() + RECENT_LIST_WINDOW_MS,
+  ).toISOString()
+  const latestSkewDate = new Date(
+    now.getTime() + NEXT_YEAR_SKEW_MS,
   ).toISOString()
   const year = now.getUTCFullYear()
   for (const line of listing.split(/\r?\n/)) {
@@ -105,8 +110,11 @@ export function parseBambuUnixListing(
     const recent = yearOrTime.includes(':')
     const date = `${String(month).padStart(2, '0')}-${day.padStart(2, '0')}T${recent ? yearOrTime : '00:00'}:00.000Z`
     let modifiedAt = `${recent ? year : yearOrTime}-${date}`
-    if (recent && modifiedAt > latestRecentDate)
-      modifiedAt = `${year - 1}-${date}`
+    if (recent) {
+      const nextYearDate = `${year + 1}-${date}`
+      if (modifiedAt > latestRecentDate) modifiedAt = `${year - 1}-${date}`
+      else if (nextYearDate <= latestSkewDate) modifiedAt = nextYearDate
+    }
     const time = new Date(modifiedAt)
     if (!Number.isFinite(time.getTime()) || time.toISOString() !== modifiedAt)
       continue

@@ -77,6 +77,79 @@ test('keeps the current year for Unix LIST times ahead of UTC on leap day', () =
   )
 })
 
+test('uses the next year for Unix LIST times within a day of the UTC year boundary', () => {
+  const listing = [
+    '-rw-r--r-- 1 root root 6 Jan 1 07:30 morning.gcode',
+    '-rw-r--r-- 1 root root 7 Jan 1 00:05 midnight.gcode',
+    '-rw-r--r-- 1 root root 8 Jan 1 23:30 at skew limit.gcode',
+    '-rw-r--r-- 1 root root 9 Jan 1 23:31 beyond skew limit.gcode',
+    '-rw-r--r-- 1 root root 10 Jan 1 2026 explicit.gcode',
+  ].join('\r\n')
+  assert.deepEqual(
+    parseBambuUnixListing(listing, /\.gcode$/, new Date('2026-12-31T23:30Z')),
+    [
+      {
+        name: 'at skew limit.gcode',
+        size: 8,
+        modifiedAt: '2027-01-01T23:30:00.000Z',
+      },
+      {
+        name: 'morning.gcode',
+        size: 6,
+        modifiedAt: '2027-01-01T07:30:00.000Z',
+      },
+      {
+        name: 'midnight.gcode',
+        size: 7,
+        modifiedAt: '2027-01-01T00:05:00.000Z',
+      },
+      {
+        name: 'beyond skew limit.gcode',
+        size: 9,
+        modifiedAt: '2026-01-01T23:31:00.000Z',
+      },
+      {
+        name: 'explicit.gcode',
+        size: 10,
+        modifiedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ],
+  )
+  assert.deepEqual(
+    parseBambuUnixListing(
+      '-rw-r--r-- 1 root root 7 Jan 1 00:05 midnight.gcode',
+      /\.gcode$/,
+      new Date('2026-12-31T23:58Z'),
+    ),
+    [
+      {
+        name: 'midnight.gcode',
+        size: 7,
+        modifiedAt: '2027-01-01T00:05:00.000Z',
+      },
+    ],
+  )
+})
+
+test('does not advance distant Unix LIST dates into the next year', () => {
+  assert.deepEqual(
+    parseBambuUnixListing(
+      '-rw-r--r-- 1 root root 6 Jan 1 12:00 older.gcode',
+      /\.gcode$/,
+      new Date('2026-07-03T00:01Z'),
+    ),
+    [{ name: 'older.gcode', size: 6, modifiedAt: '2026-01-01T12:00:00.000Z' }],
+  )
+  assert.deepEqual(
+    parseBambuUnixListing(
+      '-rw-r--r-- 1 root root 7 Feb 29 00:00 invalid leap day.gcode',
+      /\.gcode$/,
+      new Date('2027-08-30T00:00Z'),
+    ),
+    [],
+  )
+})
+
 test('uses the previous year only beyond the 183-day Unix LIST cutoff', () => {
   const listing = [
     '-rw-r--r-- 1 root root 6 Jul 3 00:00 at cutoff.gcode',

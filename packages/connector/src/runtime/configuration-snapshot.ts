@@ -11,10 +11,23 @@ import { z } from 'zod'
  */
 const Loose = z.record(z.string(), z.unknown())
 const Runtime = z.looseObject({
-  version: z.union([z.literal(1), z.literal(2), z.literal(5), z.literal(6)]),
+  version: z.union([
+    z.literal(1),
+    z.literal(2),
+    z.literal(5),
+    z.literal(6),
+    z.literal(7),
+  ]),
   collection: z.looseObject({
-    version: z.union([z.literal(1), z.literal(2), z.literal(5), z.literal(6)]),
+    version: z.union([
+      z.literal(1),
+      z.literal(2),
+      z.literal(5),
+      z.literal(6),
+      z.literal(7),
+    ]),
     printers: z.array(Loose).optional(),
+    formlabs: z.strictObject({ printers: z.array(Loose) }).optional(),
     sdcp: z.strictObject({ printers: z.array(Loose) }).optional(),
     anycubic: z.strictObject({ printers: z.array(Loose) }).optional(),
     kobralink: z
@@ -48,6 +61,24 @@ export function collectableRuntime(
   const filteredCollection = {
     ...runtime.collection,
     ...(moonrakerPrinters ? { printers: moonrakerPrinters } : {}),
+  }
+  if (runtime.collection.formlabs) {
+    const printers = runtime.collection.formlabs.printers.filter(
+      (p) => !hidden.has(String(p.printerKey)),
+    )
+    if (printers.length)
+      return {
+        ...runtime,
+        collection: { ...filteredCollection, formlabs: { printers } },
+        assignments,
+      }
+    const { formlabs: _removed, ...collection } = filteredCollection
+    return {
+      ...runtime,
+      version: 1,
+      collection: { ...collection, version: 1 },
+      assignments,
+    }
   }
   if (runtime.collection.sdcp) {
     const printers = runtime.collection.sdcp.printers.filter(

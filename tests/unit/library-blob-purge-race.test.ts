@@ -1,4 +1,5 @@
-import { mkdtemp } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
@@ -133,8 +134,7 @@ function createBlobLockQueue() {
 
 function createRaceSql(state: State): Sql {
   const blobLocks = createBlobLockQueue()
-  let txDepth = 0
-  let txId: symbol | null = null
+  const transaction = new AsyncLocalStorage<symbol>()
 
   const joinVersion = (v: Version) => {
     const blob = state.blobs.find(
@@ -169,6 +169,7 @@ function createRaceSql(state: State): Sql {
     if (text.startsWith('SET LOCAL')) return []
     if (text.includes('pg_advisory_xact_lock')) {
       const key = String(params[0] ?? '')
+      const txId = transaction.getStore()
       if (key.startsWith('library-blob:') && txId) {
         await blobLocks.acquire(txId)
         if (state.pauseAfterBlobLock) {
@@ -299,14 +300,38 @@ function createRaceSql(state: State): Sql {
     }
     if (text.includes('FROM farm.library_versions v JOIN farm.library_blobs b'))
       return [joinVersion(state.versions.at(-1)!)]
-    if (text.startsWith('SELECT b.farm_id') || text.includes('GROUP BY'))
-      return [{ fragment: true }]
-    if (text.startsWith('UPDATE farm.library_versions')) return []
     if (text.includes('HAVING')) {
       return state.blobs
         .filter((b) => b.purgedAt === null)
         .map((b) => factsFor(state, b))
         .filter((f) => isPurgeable(f, NOW, 3_600_000))
+    }
+    if (text.startsWith('SELECT b.farm_id')) {
+      const [farmId, hash, location, agentId] = params.slice(1) as [
+        string,
+        string,
+        'server' | 'connector',
+        string | null,
+      ]
+      const blob = state.blobs.find(
+        (entry) =>
+          entry.farmId === farmId &&
+          entry.sha256 === hash &&
+          entry.location === location &&
+          entry.agentId === agentId &&
+          entry.purgedAt === null,
+      )
+      return blob ? [factsFor(state, blob)] : []
+    }
+    if (text.startsWith('UPDATE farm.library_versions')) return []
+    if (text.startsWith('SELECT 1 FROM farm.library_blobs WHERE sha256=')) {
+      const hit = state.blobs.some(
+        (b) =>
+          b.sha256 === params[0] &&
+          b.location === 'server' &&
+          b.purgedAt === null,
+      )
+      return hit ? [{}] : []
     }
     if (text.includes('b.sha256=')) {
       const [, farmId, hash] = params as [unknown, string, string]
@@ -326,16 +351,15 @@ function createRaceSql(state: State): Sql {
       blob.purgedAt = now
       return [{ '?column?': 1 }]
     }
-    if (text.startsWith('SELECT 1 FROM farm.library_blobs WHERE sha256=')) {
-      const hit = state.blobs.some(
-        (b) =>
-          b.sha256 === params[0] &&
-          b.location === 'server' &&
-          b.purgedAt === null,
-      )
-      return hit ? [{}] : []
-    }
-    if (text.startsWith('SELECT DISTINCT sha256')) return []
+    if (text.startsWith('SELECT DISTINCT sha256'))
+      return state.blobs
+        .filter(
+          (blob) =>
+            blob.location === 'server' &&
+            blob.purgedAt === null &&
+            (params[0] as string[]).includes(blob.sha256),
+        )
+        .map((blob) => ({ sha256: blob.sha256 }))
     throw new Error(`unexpected statement: ${text}`)
   }
 
@@ -359,17 +383,13 @@ function createRaceSql(state: State): Sql {
     json: (value: unknown) => ({ [JSON_VAL]: value }),
     begin: async <T>(work: (tx: typeof query) => Promise<T>) => {
       const id = Symbol('tx')
-      const outer = txId
-      const depth = txDepth
-      txId = id
-      txDepth++
-      try {
-        return await work(sql)
-      } finally {
-        txDepth--
-        if (txDepth === 0) blobLocks.release(id)
-        txId = outer
-      }
+      return transaction.run(id, async () => {
+        try {
+          return await work(sql)
+        } finally {
+          blobLocks.release(id)
+        }
+      })
     },
   })
   return sql as unknown as Sql
@@ -415,44 +435,57 @@ describe('library blob purge race (#607)', () => {
       retentionDays: { [FARM_A]: 30, [FARM_B]: 30 },
     }
     const dir = await mkdtemp(join(tmpdir(), 'openfarm-blob-race-'))
-    const blobs = await createBlobStore(dir)
-    await blobs.put(
-      (async function* () {
-        yield Buffer.from(content)
-      })(),
-    )
-    const sql = createRaceSql(state)
-    const store = new PostgresLibrary(sql, () => NOW)
-    let retentionDone!: Promise<void>
-    state.pauseAfterBlobLock = async () => {
-      retentionDone = runLibraryRetention(
-        { sql, blobs, clock: () => NOW },
-        { batchSize: 50 },
-      ).then(() => undefined)
+    try {
+      const blobs = await createBlobStore(dir)
+      await blobs.put(
+        (async function* () {
+          yield Buffer.from(content)
+        })(),
+      )
+      const sql = createRaceSql(state)
+      const store = new PostgresLibrary(sql, () => NOW)
+      let retentionDone: ReturnType<typeof runLibraryRetention> | undefined
+      state.pauseAfterBlobLock = async () => {
+        retentionDone = runLibraryRetention(
+          { sql, blobs, clock: () => NOW },
+          { batchSize: 50 },
+        )
+      }
+      const upload = store.addVersion({
+        sessionRecordId: SESSION,
+        policy: { idleTimeoutMs: 60_000 },
+        farmId: FARM_B,
+        version: {
+          title: 'B title',
+          sha256: hash,
+          sizeBytes: content.length,
+          location: 'server',
+          originalName: 'b.gcode',
+          kind: 'gcode',
+          plateCount: 1,
+          metadata: {},
+        },
+      })
+      const added = await upload
+      if (!retentionDone)
+        throw new Error('retention did not start after the upload lock')
+      const retention = await retentionDone
+      expect(retention).toMatchObject({ blobsPurged: 1, failed: 0 })
+      expect(added.ok).toBe(true)
+      if (!added.ok) throw new Error('upload failed')
+      expect(
+        state.blobs.some(
+          (b) =>
+            b.farmId === FARM_B && b.sha256 === hash && b.purgedAt === null,
+        ),
+      ).toBe(true)
+      expect(
+        state.blobs.find((b) => b.farmId === FARM_A && b.sha256 === hash)
+          ?.purgedAt,
+      ).toBe(NOW)
+      expect((await blobs.list()).some((f) => f.sha256 === hash)).toBe(true)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
     }
-    const upload = store.addVersion({
-      sessionRecordId: SESSION,
-      policy: { idleTimeoutMs: 60_000 },
-      farmId: FARM_B,
-      version: {
-        title: 'B title',
-        sha256: hash,
-        sizeBytes: content.length,
-        location: 'server',
-        originalName: 'b.gcode',
-        kind: 'gcode',
-        plateCount: 1,
-        metadata: {},
-      },
-    })
-    const [added] = await Promise.all([upload, retentionDone!])
-    expect(added.ok).toBe(true)
-    if (!added.ok) throw new Error('upload failed')
-    expect(
-      state.blobs.some(
-        (b) => b.farmId === FARM_B && b.sha256 === hash && b.purgedAt === null,
-      ),
-    ).toBe(true)
-    expect((await blobs.list()).some((f) => f.sha256 === hash)).toBe(true)
   })
 })

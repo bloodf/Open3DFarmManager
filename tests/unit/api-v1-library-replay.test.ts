@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('nuxt/server', async () =>
@@ -226,13 +227,28 @@ describe('library replay', () => {
         libraryVersionId: versionId,
         status: 'queued',
       })
-      expect(['server', 'connector']).toContain(job.storageMode)
-      const command = [...world.envelopes.commands.values()].find(
-        (entry) => entry.kind === 'action',
+      const expectedMode =
+        versionId === ids.versionServer ? 'server' : 'connector'
+      expect(job.storageMode).toBe(expectedMode)
+      const record = [...world.envelopes.rows.values()].find(
+        (entry) => entry.resourceId === job.id,
       )
+      expect(record).toBeDefined()
+      const command = record && world.envelopes.commands.get(record.cmdId)
       expect(command).toMatchObject({
         kind: 'action',
-        action: { action: 'start_library_print' },
+        action: {
+          action: 'start_library_print',
+          args: {
+            sha256: createHash('sha256')
+              .update(
+                versionId === ids.versionServer
+                  ? 'server.gcode'
+                  : 'older.gcode',
+              )
+              .digest('hex'),
+          },
+        },
       })
     }
     const otherFarm = await call({

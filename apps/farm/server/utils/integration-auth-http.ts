@@ -243,6 +243,11 @@ const policies: RoutePolicy[] = [
     scopes: ['library:write'],
   },
   { method: 'GET', path: /^\/library\/[^/]+$/, scopes: ['library:read'] },
+  {
+    method: 'GET',
+    path: /^\/jobs\/[^/]+\/(eligibility|plate)$/,
+    scopes: ['jobs:read', 'jobs:start'],
+  },
   { method: 'GET', path: /^\/jobs$/, scopes: ['jobs:read'] },
   {
     method: 'GET',

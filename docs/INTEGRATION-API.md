@@ -118,6 +118,16 @@ prints the stored file and refuses a printer the file does not fit.
 
 ### Plate checks at dispatch
 
+Read `GET /jobs/{jobId}/eligibility?printerId={printerId}` for an advisory
+eligibility decision and its reasons. Use
+`GET /jobs/{jobId}/plate?printerId={printerId}` for the plate observation alone.
+Both reads accept `jobs:read` or `jobs:start` and require the job's assigned
+printer. For Moonraker, the Connector combines live printer state with its
+collection journal. The plate state is `awaiting-collection`,
+`operator-confirmed`, or `unknown`. An available attempt ID identifies the
+journal entry. Eligibility requires a pending job, an idle printer and a
+confirmed plate.
+
 For a signed start, the Connector checks its local collection journal before
 staging the file and again at the printer send boundary. A start refused with
 `wrong-state` may include `awaiting-collection` when a completed run still

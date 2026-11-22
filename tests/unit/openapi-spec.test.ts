@@ -106,6 +106,8 @@ describe('integration API v1 OpenAPI spec', () => {
         '/library/{itemId}',
         '/jobs',
         '/jobs/{jobId}',
+        '/jobs/{jobId}/eligibility',
+        '/jobs/{jobId}/plate',
         '/actions/{actionId}',
         '/webhooks',
         '/webhooks/{webhookId}',

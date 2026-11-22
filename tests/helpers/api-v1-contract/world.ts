@@ -102,6 +102,10 @@ type InboxResult =
       nextOffset: number | null
     }
   | { kind: 'macros'; data: { name: string }[]; nextOffset: number | null }
+  | Extract<
+      import('../../../packages/farm-protocol/src/api-query.ts').ApiQueryResult,
+      { kind: 'dispatch' }
+    >
   | {
       kind: 'error'
       error: 'unsupported' | 'connector-unavailable' | 'connector-timeout'

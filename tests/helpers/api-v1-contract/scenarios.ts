@@ -97,6 +97,51 @@ async function asApp(
   return send({ ...input(app), token })
 }
 
+function dispatchFixture(view: 'eligibility' | 'plate'): Fixture {
+  const request = (id: string, printerId: string = P): CallInput => ({
+    method: 'GET',
+    path: `/jobs/${id}/${view}?printerId=${printerId}`,
+  })
+  const failure = (
+    error: 'unsupported' | 'connector-unavailable' | 'connector-timeout',
+  ) => ({
+    name: error,
+    run: (world: World) => {
+      world.inbox = { kind: 'error', error }
+      return asApp(world, farm(['jobs:read']), (app) =>
+        request(world.seedJob(app).id),
+      )
+    },
+  })
+  return {
+    scopes: ['jobs:read'],
+    success: '200',
+    valid: (world, app) => {
+      world.inbox = {
+        kind: 'dispatch',
+        data: [
+          {
+            printerState: 'idle',
+            plateState: 'operator-confirmed',
+            attemptId: '100',
+            observedAt: 200,
+          },
+        ],
+        nextOffset: null,
+      }
+      return request(world.seedJob(app).id)
+    },
+    bad: (world, app) => request(world.seedJob(app).id, 'invalid'),
+    missing: () => request(ids.unknown),
+    fault: 'jobs-runtime',
+    extra: {
+      '422': [failure('unsupported')],
+      '503': [failure('connector-unavailable')],
+      '504': [failure('connector-timeout')],
+    },
+  }
+}
+
 export const fixtures: Record<string, Fixture> = {
   'GET /openapi.json': {
     scopes: [],
@@ -661,6 +706,8 @@ export const fixtures: Record<string, Fixture> = {
     missing: () => ({ method: 'GET', path: `/jobs?farmId=${ids.unknown}` }),
     fault: 'pool',
   },
+  'GET /jobs/{jobId}/eligibility': dispatchFixture('eligibility'),
+  'GET /jobs/{jobId}/plate': dispatchFixture('plate'),
   'GET /jobs/{jobId}': {
     scopes: ['jobs:read'],
     success: '200',

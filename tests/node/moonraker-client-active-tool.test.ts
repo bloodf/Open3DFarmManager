@@ -5,6 +5,7 @@ import {
   openMoonrakerClient,
   type MoonrakerCompleteObservation,
 } from '../../packages/connector/src/moonraker/client.ts'
+import { SNAPMAKER_U1_STATUS_OBJECTS } from '../../packages/connector/src/moonraker/u1-tools.ts'
 import {
   createMoonrakerSubscription,
   type RawMoonrakerObservation,
@@ -370,6 +371,41 @@ test('an overlapping active-tool query clears a stale nozzle reading', async () 
   } finally {
     controller.abort()
     await subscription.done
+    await service.stop()
+  }
+})
+
+test('discovery keeps the fields a Snapmaker U1 subscription already selected', async () => {
+  const service = await moonraker(
+    ['toolhead', 'extruder', 'extruder1', 'extruder2', 'extruder3'],
+    {
+      status: (rpc) =>
+        rpc.params?.objects?.toolhead
+          ? { toolhead: { extruder: 'extruder2' } }
+          : {},
+    },
+  )
+  const controller = new AbortController()
+  const seen: MoonrakerCompleteObservation[] = []
+  const client = openMoonrakerClient({
+    origin: service.origin,
+    limits,
+    signal: controller.signal,
+    discoverObjects: true,
+    extraObjects: SNAPMAKER_U1_STATUS_OBJECTS,
+    onStatus() {},
+    onComplete: (value) => seen.push(value),
+  })
+  try {
+    await until(() => seen.some((o) => o.activeToolQuery))
+    const objects = queries(service.rpcs)[0]?.params?.objects
+    for (const name of ['extruder', 'extruder1', 'extruder2', 'extruder3'])
+      assert.deepEqual(objects?.[name], ['temperature', 'target'], name)
+    assert.deepEqual(objects?.toolhead, ['extruder'])
+  } finally {
+    controller.abort()
+    client.close()
+    await client.closed
     await service.stop()
   }
 })

@@ -1,12 +1,32 @@
 import { createServer } from 'node:net'
+import type { Socket } from 'node:net'
 import type { AddressInfo } from 'node:net'
 import { describe, expect, it } from 'vitest'
+import { afterEach } from 'vitest'
 import { verifyRtsp } from '../../packages/sim-tools/src/rtsp.ts'
 
 const sdp = 'v=0\r\nm=video 0 RTP/AVP 96\r\na=control:trackID=0\r\n'
 
+const fixtureCleanup: Array<() => Promise<void>> = []
+afterEach(async () => {
+  for (const cleanup of fixtureCleanup.splice(0)) await cleanup()
+})
+
 function fakeRtsp(describeStatus = '200 OK', split = false, packets = 5) {
+  const sockets = new Set<Socket>()
+  const timers = new Set<ReturnType<typeof globalThis.setTimeout>>()
+  const setTimeout = (callback: () => void, delayMs: number) => {
+    let timer: ReturnType<typeof globalThis.setTimeout>
+    timer = globalThis.setTimeout(() => {
+      timers.delete(timer)
+      callback()
+    }, delayMs)
+    timers.add(timer)
+    return timer
+  }
   const server = createServer((socket) => {
+    sockets.add(socket)
+    socket.once('close', () => sockets.delete(socket))
     socket.on('data', (data) => {
       const text = data.toString()
       const cseq = /CSeq: (\d+)/.exec(text)?.[1]
@@ -29,6 +49,16 @@ function fakeRtsp(describeStatus = '200 OK', split = false, packets = 5) {
           setTimeout(() => socket.write(bytes.subarray(9)), 40)
         } else socket.write(bytes)
       }
+    })
+  })
+  const closed = new Promise<void>((resolve) => server.once('close', resolve))
+  server.once('listening', () => {
+    fixtureCleanup.push(async () => {
+      for (const timer of timers) clearTimeout(timer)
+      timers.clear()
+      for (const socket of sockets) socket.destroy()
+      if (server.listening) server.close()
+      await closed
     })
   })
   return new Promise<{ url: string; close: () => void }>((resolve) =>

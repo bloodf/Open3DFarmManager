@@ -37,8 +37,10 @@ type HistoryIdentity = {
 export async function integrationHistoryJobIds(
   sql: Sql,
   rows: HistoryIdentity[],
+  appId?: string,
 ) {
-  if (!rows.length) return new Map<string, string>()
+  // A history row on its own carries no verified integration-app identity.
+  if (!appId || !rows.length) return new Map<string, string>()
   const links = await sql<{ id: string; jobId: string }[]>`
     SELECT r.id, min(e.resource_id::text) AS "jobId"
     FROM jsonb_to_recordset(${sql.json(
@@ -53,6 +55,7 @@ export async function integrationHistoryJobIds(
     )}::jsonb) AS r(id text, farm uuid, printer uuid, agent uuid, outcome text, ended text)
     JOIN farm.integration_envelopes e
       ON e.farm_id = r.farm AND e.printer_assignment_id = r.printer AND e.agent_id = r.agent
+      AND e.app_id = ${appId}::uuid
       AND e.kind = 'job' AND e.status = r.outcome
       AND (e.history_entry_id = r.id OR e.result_detail = ${detailPrefix} || r.ended)
     GROUP BY r.id HAVING count(*) = 1`

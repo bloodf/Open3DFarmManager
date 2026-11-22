@@ -1,4 +1,10 @@
 import { MAX_HEARTBEAT_HEALTH_BYTES } from '@open3dfarmmanager/farm-protocol'
+import { join } from 'node:path'
+import {
+  openQueueCollectionJournal,
+  unavailableQueueCollectionJournal,
+  type QueueCollectionJournal,
+} from '../control/queue-collection-journal.ts'
 import type { MacroParamMap } from '../moonraker/control-macros.ts'
 import { createPrinterDetailSources } from './printer-detail-session.ts'
 import {
@@ -258,10 +264,32 @@ async function runConnectorAgentOnce(
   // checked against what each printer itself reported. Never stops the agent.
   const printerProfiles = createPrinterProfiles()
   const jobLinks = createLibraryJobLinks()
+  // Bed-collection hold (durable): a run OpenFarm started is held when it
+  // finishes until an operator confirms the plate is clear. An unreadable
+  // journal refuses every OpenFarm start.
+  let collection: QueueCollectionJournal
+  try {
+    collection = openQueueCollectionJournal(
+      join(input.dataDirectory, 'queue-collection.json'),
+    )
+  } catch (error) {
+    logger.warn('queue-collection-unavailable', { error })
+    collection = unavailableQueueCollectionJournal()
+  }
   const libraryLinks = {
     remember: jobLinks.remember,
     attach(printer: Parameters<typeof jobLinks.attach>[0]) {
       printerProfiles.observe(printer)
+      if (
+        printer.lastJob &&
+        printer.state !== 'printing' &&
+        printer.state !== 'paused'
+      )
+        try {
+          collection.finished(printer.printerKey, printer.lastJob.endedAt)
+        } catch {
+          // The journal fails closed: starts are refused until it recovers.
+        }
       return jobLinks.attach(printer)
     },
   }
@@ -634,6 +662,7 @@ async function runConnectorAgentOnce(
           freshness: offline.freshness,
           apiHandlers,
           libraryLinks,
+          collection,
           libraryPrint(assignmentId) {
             const key = refs.find(
               (ref) => ref.assignmentId === assignmentId,

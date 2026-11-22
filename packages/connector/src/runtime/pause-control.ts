@@ -1,5 +1,8 @@
 import type { MacroParamMap } from '../moonraker/control-macros.ts'
-import { readPrinterBinding } from '../control/printer-binding.ts'
+import {
+  readPrinterBinding,
+  type PrinterBinding,
+} from '../control/printer-binding.ts'
 import { receiveApiCommand } from './api-command.ts'
 import {
   decodeApiEnvelopeFrame,
@@ -46,6 +49,8 @@ import { createPauseDriverRouter } from './pause-driver-router.ts'
 import { createFileTargets } from './file-targets.ts'
 import type { FileUploadTarget } from './file-upload.ts'
 import { withLibraryPrint } from './library-print-start.ts'
+import { withCollectionHold } from '../control/queue-collection-hold.ts'
+import type { QueueCollectionJournal } from '../control/queue-collection-journal.ts'
 import { runSignallingLifecycle } from './signalling.ts'
 
 export type PauseControlDiagnostic =
@@ -169,6 +174,8 @@ type PauseControlInput = {
   libraryLinks?: Parameters<typeof receiveApiCommand>[0]['libraryLinks']
   /** True while local storage is degraded: commands are refused with `storage`. */
   storageDegraded?: () => boolean
+  /** Durable bed-collection hold: OpenFarm starts wait for `confirm_collection`. */
+  collection?: QueueCollectionJournal
   /** Transport seam for tests. Defaults to the authenticated pause client. */
   createClient?: (
     scope: PauseConnectorSignallingScope,
@@ -368,7 +375,19 @@ async function runAssignmentControl(
     // The browser path starts library prints with the same starter as the
     // API path (#386); the API path keeps the plain router and its own steps.
     const libraryPrint = input.libraryPrint?.(assignmentId)
-    const browserDriver = withLibraryPrint(router, {
+    const collectionKey = (binding: PrinterBinding) =>
+      binding === printerBinding
+        ? readPrinterBinding(binding)?.printer_key
+        : undefined
+    const hold = <D extends typeof router>(driver: D): D =>
+      input.collection
+        ? withCollectionHold(driver, {
+            journal: input.collection,
+            printerKey: collectionKey,
+          })
+        : driver
+    const apiDriver = hold(router)
+    const libraryDriver = withLibraryPrint(router, {
       starter: libraryPrint,
       targetFor(binding) {
         const mapping = readPrinterBinding(binding)
@@ -384,6 +403,7 @@ async function runAssignmentControl(
         if (mapping) input.libraryLinks?.remember(mapping.printer_key, link)
       },
     })
+    const browserDriver = hold(libraryDriver)
     input.onMacroParams?.((id) => {
       const binding = config.bindingFor(id)
       return binding ? router.macroParams?.(binding) : undefined
@@ -438,7 +458,7 @@ async function runAssignmentControl(
           keys: trustedKeys,
           journal,
           clock,
-          driver: router,
+          driver: apiDriver,
           ...(libraryPrint ? { libraryPrint } : {}),
           ...(input.libraryLinks ? { libraryLinks: input.libraryLinks } : {}),
           jobFiles: {

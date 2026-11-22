@@ -222,6 +222,8 @@ export function getPrinterActionButtons(
  * never instead of it: the code does not change what happened to the command.
  */
 export const RESULT_CODE_HINTS: Record<ControlResultCode, string> = {
+  'awaiting-collection':
+    'O trabalho anterior ainda está na placa. Retire as peças e use Confirmar placa livre antes de enviar o próximo trabalho.',
   'bambu-authorization-required':
     'A impressora Bambu recusou o comando porque o controle de autorização do firmware está ativo. No painel da impressora, ative o modo Somente LAN (LAN Only) e o Modo Desenvolvedor (Developer Mode) e tente novamente.',
   'cache-full':

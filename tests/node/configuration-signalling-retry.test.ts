@@ -8,7 +8,9 @@ import { createConfigurationSignallingClient } from '../../packages/connector/sr
 
 test('closing after config.retry clears its timer without another send', async () => {
   const id = randomUUID()
-  const identity = new ConnectorIdentity(generateKeyPairSync('ed25519').privateKey)
+  const identity = new ConnectorIdentity(
+    generateKeyPairSync('ed25519').privateKey,
+  )
   const sent: string[] = []
   let handlers: { message(raw: unknown): void; close(): void } | undefined
   let closed = false
@@ -21,7 +23,9 @@ test('closing after config.retry clears its timer without another send', async (
       closed = true
       handlers?.close()
     },
-    bind(value) { handlers = value },
+    bind(value) {
+      handlers = value
+    },
   }
   const client = createConfigurationSignallingClient({
     identity,
@@ -30,7 +34,14 @@ test('closing after config.retry clears its timer without another send', async (
     farmId: randomUUID(),
     agentId: randomUUID(),
     credential: () => ({ token: 'a.b.c', jti: id }),
-    runtime: () => ({ revision: () => 0, revokeAll() {}, openSession() { throw new Error('unused') } }) as never,
+    runtime: () =>
+      ({
+        revision: () => 0,
+        revokeAll() {},
+        openSession() {
+          throw new Error('unused')
+        },
+      }) as never,
     socket: async () => socket,
     retryMinMs: 60_000,
   })
@@ -39,9 +50,13 @@ test('closing after config.retry clears its timer without another send', async (
   for (let i = 0; i < 100 && sent.length === 0; i++)
     await new Promise((resolve) => setTimeout(resolve, 2))
   assert.equal(sent.length, 1)
-  handlers?.message(encodeConfigurationSignallingServerFrame({
-    v: 1, t: 'config.retry', retry_after_ms: 25,
-  }))
+  handlers?.message(
+    encodeConfigurationSignallingServerFrame({
+      v: 1,
+      t: 'config.retry',
+      retry_after_ms: 25,
+    }),
+  )
   await new Promise((resolve) => setTimeout(resolve, 5))
   handlers?.close()
   const sendsAtClose = sent.length

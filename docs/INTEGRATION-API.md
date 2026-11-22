@@ -26,7 +26,7 @@ Owners can grant one or more scopes across a farm or limit them to a printer ass
 | ------------------ | --------------------------------------------------------------------------------- |
 | `printers:read`    | Read printers and their status.                                                   |
 | `files:read`       | List files stored on printers.                                                    |
-| `inventory:read`   | Read Spoolman inventory snapshots.                                                |
+| `inventory:read`   | Read Spoolman inventory snapshots and the resin ledger (lots, vats, usage).       |
 | `jobs:read`        | Read job history and API-submitted jobs.                                          |
 | `jobs:start`       | Submit print jobs.                                                                |
 | `control:basic`    | Pause, resume and cancel.                                                         |
@@ -35,13 +35,14 @@ Owners can grant one or more scopes across a farm or limit them to a printer ass
 | `jobs:write`       | Start a library replay on a granted printer.                                      |
 | `library:read`     | Read library files and the storage mode.                                          |
 | `library:write`    | Upload library files and set the storage mode.                                    |
-| `environment:read` | Read enclosure and room environment readings. Reserved: no endpoint uses it yet.  |
+| `environment:read` | Read enclosure and room environment and power measurements.                       |
 | `plates:confirm`   | Confirm that a printer's build plate is clear. Reserved: no endpoint uses it yet. |
 | `alerts:write`     | Raise integration alerts for a farm. Reserved: no endpoint uses it yet.           |
 | `camera:view`      | View printer camera snapshots. Reserved: no endpoint uses it yet.                 |
 
 Owners can grant the reserved scopes and tokens can carry them, but they
-authorize nothing until an endpoint that requires them ships. Any command an
+authorize nothing until an endpoint that requires them ships (`environment:read`
+is already used by `GET /environment/measurements`). Any command an
 endpoint later accepts under these scopes still travels as an issuer-signed
 envelope that the Connector enforces and may refuse with a reason.
 
@@ -96,6 +97,51 @@ Other read operations include printer files (`files:read`), macros
 (`control:extended`), job history (`jobs:read`) and individual job/action
 status. File and macro listing are answered live by the Connector and may be
 unavailable even when the printer list and status projection are readable.
+
+## Resin and environment reads
+
+Both are read-only. Switching, pairing and safety controls stay in OpenFarm and
+are never reachable through these routes.
+
+### Resin lots, vats and usage
+
+`GET /resin/lots`, `GET /resin/vats` and `GET /resin/usage` require
+`inventory:read`. They read the farm resin ledger: a farm-wide grant covers
+every printer of the farm, a printer grant only its printer. Printers without
+ledger entries are not listed. Pagination is by printer (`limit` counts printers;
+follow `nextCursor`).
+
+- Every quantity carries `source` and `observedAt`. `manual` is an operator
+  record; `measured` is what the Connector reported. `observedAt` is when that
+  ledger entry was recorded or reported.
+- Unknown stays unknown: a bottle or vat without a recorded amount has
+  `quantity: null` and `quantityState: "unknown"`. It is never `0`.
+- The ledger has no lot register: `lotRef` is the label given to the bottle.
+  The current vat (`current: true`) is the newest vat change; a reading taken
+  before that vat's latest change is not applied to it.
+- `/resin/usage` returns observed `readings` (newest first, at most 50 per
+  printer) and `runs` (the last 20 finished runs). The ledger never ties a
+  reading to a run, so each run has `consumption: { "state": "unknown" }`.
+  Consumption is not estimated and never derived from a filament slot; compare
+  measured readings and their `observedAt` yourself.
+
+### Environment measurements
+
+`GET /environment/measurements` requires `environment:read`, with the same
+grant scoping and pagination as printers. Each printer lists `temperature`,
+`humidity`, `air` and `power` measurements. A measurement is:
+
+- `known`: `value`, `unit` and `lastObservedAt`.
+- `unknown`: `reason` (`never-observed`, `offline` or `stale`) and, when
+  something was seen before, `lastObservedAt`. A reading older than 60 seconds
+  is `stale` and its old value is not returned.
+- `unsupported`: the device does not report this measurement.
+
+Today the Connector reports only the chamber fan speed (`air`, percent) to the
+farm; `temperature`, `humidity` and `power` are `unsupported` until it observes
+chamber/enclosure sensors and Moonraker sensors or power devices. Each printer
+carries its `printerId`, `farmId`, `printerKey`, `displayName` and `location`,
+so a storage warning can link to the responsible farm device.
 
 ## Start and track a job
 

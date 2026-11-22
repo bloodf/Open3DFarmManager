@@ -66,6 +66,10 @@ tags:
     description: Printers, their status, files and macros.
   - name: Inventory
     description: Read-only filament inventory mirrored from Spoolman.
+  - name: Environment
+    description: Read-only farm-authorised environment and power measurements.
+  - name: Resin
+    description: Read-only resin lots, vats and run references from the resin ledger.
   - name: Jobs
     description: Job history and API-submitted print jobs.
   - name: Actions
@@ -514,6 +518,54 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /environment/measurements:
+    get:
+      operationId: listEnvironmentMeasurements
+      tags: [Environment]
+      summary: Environment measurements of granted printers
+      description: |
+        Temperature, humidity, air/extraction and power measurements per printer,
+        each with a `known`, `unknown` or `unsupported` state and the last time
+        the Connector observed it. Today only `air` (chamber fan speed in
+        percent) is reported by the Connector; `temperature`, `humidity` and
+        `power` report `unsupported` until it observes them. A reading older than
+        60 seconds, from an offline printer or from a printer that never
+        reported is `unknown`, never the old value. Read-only: switching,
+        pairing and safety controls stay in OpenFarm. Pagination is by printer.
+      security:
+        - clientCredentials: ['environment:read']
+      parameters:
+        - $ref: '#/components/parameters/FarmIdFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page of printers with their measurements.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvironmentMeasurementsPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /inventory:
     get:
       operationId: listInventory
@@ -934,6 +986,148 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /resin/lots:
+    get:
+      operationId: listResinLots
+      tags: [Resin]
+      summary: Resin bottles (lots) of granted printers
+      description: |
+        Read-only ledger of the printers covered by the grant: a farm-wide
+        `inventory:read` grant covers every printer of the farm, a printer grant
+        only its printer. Only printers with ledger entries are listed;
+        pagination is by printer. `source` is `manual` for operator records and
+        `measured` for what the Connector reported. Unknown stays unknown: a
+        quantity that was never recorded is `null` with `quantityState` `unknown`,
+        never zero. The ledger has no lot register, so a lot is the label given
+        to the bottle.
+      security:
+        - clientCredentials: ['inventory:read']
+      parameters:
+        - $ref: '#/components/parameters/FarmIdFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page of printers with their resin lots.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResinLotsPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /resin/usage:
+    get:
+      operationId: listResinUsage
+      tags: [Resin]
+      summary: Resin readings and run references of granted printers
+      description: |
+        Observed resin amounts (newest first, at most 50 per printer) and the
+        last finished runs (at most 20 per printer). The ledger never links a
+        reading to a run, so every run reports `consumption.state` `unknown`:
+        consumption is not estimated, and is never derived from a filament
+        slot. Compare measured readings yourself, noting their `observedAt`.
+        Same grant scope, `source` and pagination rules as `/resin/lots`.
+      security:
+        - clientCredentials: ['inventory:read']
+      parameters:
+        - $ref: '#/components/parameters/FarmIdFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page of printers with their readings and runs.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResinUsagePage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /resin/vats:
+    get:
+      operationId: listResinVats
+      tags: [Resin]
+      summary: Resin vats of granted printers
+      description: |
+        Read-only ledger of the printers covered by the grant: a farm-wide
+        `inventory:read` grant covers every printer of the farm, a printer grant
+        only its printer. Only printers with ledger entries are listed;
+        pagination is by printer. `source` is `manual` for operator records and
+        `measured` for what the Connector reported. Unknown stays unknown: a
+        quantity that was never recorded is `null` with `quantityState` `unknown`,
+        never zero. The current vat is the newest vat change; a reading taken before the
+        vat's latest change is not applied to it.
+      security:
+        - clientCredentials: ['inventory:read']
+      parameters:
+        - $ref: '#/components/parameters/FarmIdFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page of printers with their resin vats.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResinVatsPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /webhooks:
     get:
       operationId: listWebhooks
@@ -1266,7 +1460,7 @@ components:
           scopes:
             printers:read: Read printers and their status.
             files:read: List files stored on printers.
-            inventory:read: Read Spoolman inventory snapshots.
+            inventory:read: Read Spoolman inventory snapshots and the resin ledger (lots, vats, usage).
             jobs:read: Read job history and API-submitted jobs.
             jobs:start: Submit print jobs.
             jobs:write: Start a library replay on a granted printer.
@@ -1275,7 +1469,7 @@ components:
             events:subscribe: Manage webhook subscriptions and receive events.
             library:read: Read library files and the storage mode.
             library:write: Upload library files and set the storage mode.
-            environment:read: Read enclosure and room environment readings. Reserved; no endpoint uses it yet.
+            environment:read: Read enclosure and room environment and power measurements.
             plates:confirm: Confirm that a printer's build plate is clear. Reserved; no endpoint uses it yet.
             alerts:write: Raise integration alerts for a farm. Reserved; no endpoint uses it yet.
             camera:view: View printer camera snapshots. Reserved; no endpoint uses it yet.
@@ -2000,6 +2194,210 @@ components:
               maxItems: 100
               items:
                 $ref: '#/components/schemas/InventorySnapshot'
+    ResinSource:
+      type: string
+      enum: [manual, measured]
+      description: '`manual` was recorded by an operator, `measured` was reported by the Connector.'
+    ResinQuantity:
+      type: object
+      required: [quantity, unit, quantityState, source, observedAt]
+      properties:
+        quantity:
+          type: [number, 'null']
+          minimum: 0
+          description: Amount in `unit`; `null` while unknown, never zero.
+        unit:
+          type: string
+          const: ml
+        quantityState:
+          type: string
+          enum: [known, unknown]
+        source:
+          $ref: '#/components/schemas/ResinSource'
+        observedAt:
+          $ref: '#/components/schemas/TimestampMs'
+    ResinPrinterRef:
+      type: object
+      required: [printerId, farmId, printerKey]
+      properties:
+        printerId:
+          $ref: '#/components/schemas/Uuid'
+        farmId:
+          $ref: '#/components/schemas/Uuid'
+        printerKey:
+          type: string
+    ResinLot:
+      allOf:
+        - $ref: '#/components/schemas/ResinQuantity'
+        - type: object
+          required: [lotRef]
+          properties:
+            lotRef:
+              type: string
+              description: The label given to the bottle.
+    ResinVat:
+      allOf:
+        - $ref: '#/components/schemas/ResinQuantity'
+        - type: object
+          required: [vatRef, current]
+          properties:
+            vatRef:
+              type: string
+            current:
+              type: boolean
+    ResinReading:
+      type: object
+      required: [target, ref, quantity, unit, source, observedAt]
+      properties:
+        target:
+          type: string
+          enum: [vat, bottle]
+        ref:
+          type: string
+        quantity:
+          type: number
+          minimum: 0
+        unit:
+          type: string
+          const: ml
+        source:
+          $ref: '#/components/schemas/ResinSource'
+        observedAt:
+          $ref: '#/components/schemas/TimestampMs'
+    ResinRunConsumption:
+      type: object
+      required: [runRef, outcome, endedAt, consumption]
+      properties:
+        runRef:
+          type: string
+        outcome:
+          type: string
+          enum: [completed, cancelled, failed]
+        endedAt:
+          $ref: '#/components/schemas/TimestampMs'
+        consumption:
+          type: object
+          required: [state]
+          properties:
+            state:
+              type: string
+              const: unknown
+    ResinLotsPage:
+      allOf:
+        - $ref: '#/components/schemas/PageInfo'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              maxItems: 100
+              items:
+                allOf:
+                  - $ref: '#/components/schemas/ResinPrinterRef'
+                  - type: object
+                    required: [lots]
+                    properties:
+                      lots:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ResinLot'
+    ResinVatsPage:
+      allOf:
+        - $ref: '#/components/schemas/PageInfo'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              maxItems: 100
+              items:
+                allOf:
+                  - $ref: '#/components/schemas/ResinPrinterRef'
+                  - type: object
+                    required: [vats]
+                    properties:
+                      vats:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ResinVat'
+    ResinUsagePage:
+      allOf:
+        - $ref: '#/components/schemas/PageInfo'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              maxItems: 100
+              items:
+                allOf:
+                  - $ref: '#/components/schemas/ResinPrinterRef'
+                  - type: object
+                    required: [readings, runs]
+                    properties:
+                      readings:
+                        type: array
+                        maxItems: 50
+                        items:
+                          $ref: '#/components/schemas/ResinReading'
+                      runs:
+                        type: array
+                        maxItems: 20
+                        items:
+                          $ref: '#/components/schemas/ResinRunConsumption'
+    EnvironmentMeasurement:
+      type: object
+      required: [kind, state]
+      properties:
+        kind:
+          type: string
+          enum: [temperature, humidity, air, power]
+        state:
+          type: string
+          enum: [known, unknown, unsupported]
+        value:
+          description: Present only when `state` is `known`. `air` is the chamber fan speed in percent.
+          oneOf:
+            - type: number
+            - type: boolean
+        unit:
+          type: string
+          enum: [percent, celsius, boolean]
+        lastObservedAt:
+          $ref: '#/components/schemas/TimestampMs'
+        reason:
+          type: string
+          enum: [never-observed, offline, stale]
+          description: Present when `state` is `unknown`.
+    EnvironmentPrinter:
+      type: object
+      required: [printerId, farmId, printerKey, measurements]
+      properties:
+        printerId:
+          $ref: '#/components/schemas/Uuid'
+        farmId:
+          $ref: '#/components/schemas/Uuid'
+        printerKey:
+          type: string
+        displayName:
+          type: string
+        location:
+          type: string
+        measurements:
+          type: array
+          items:
+            $ref: '#/components/schemas/EnvironmentMeasurement'
+    EnvironmentMeasurementsPage:
+      allOf:
+        - $ref: '#/components/schemas/PageInfo'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              maxItems: 100
+              items:
+                $ref: '#/components/schemas/EnvironmentPrinter'
     FilamentUsage:
       type: object
       additionalProperties: false

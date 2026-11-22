@@ -87,8 +87,10 @@ export function createFormlabsAdapter(origin: string, timeoutMs = 10_000) {
   async function read(path: string, body?: object) {
     const response = await fetch(new URL(path, endpoint), {
       method: body ? 'POST' : 'GET',
-      headers: body ? { 'content-type': 'application/json' } : undefined,
-      body: body && JSON.stringify(body),
+      ...(body && {
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
       redirect: 'manual',
       signal: AbortSignal.timeout(timeoutMs),
     })

@@ -184,12 +184,3 @@ export async function closeIntegrationJobsRuntime() {
   active = undefined
   await closing?.pool.end({ timeout: 3 })
 }
-
-/** Read history even on installations that disable API job submission. */
-export async function integrationJobHistoryPool() {
-  if (
-    !integrationJobsConfig.safeParse(useRuntimeConfig().integrationJobs).success
-  )
-    return null
-  return (await integrationJobsRuntime()).pool
-}

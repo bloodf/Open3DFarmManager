@@ -1,4 +1,5 @@
 import type { Sql } from 'postgres'
+import { useRuntimeConfig } from 'nuxt/server'
 import { SpoolInventory } from '@open3dfarmmanager/farm-protocol'
 import { uuidPattern, type IntegrationPrincipal } from './integration-auth.ts'
 
@@ -187,9 +188,17 @@ export async function listIntegrationJobs(
   // This path can also run with only the read API enabled. The integration
   // jobs runtime owns the separate role allowed to read envelope receipts.
   if (linkSql === undefined && page.length) {
-    const { integrationJobHistoryPool } =
-      await import('./integration-jobs-runtime.ts')
-    linkSql = await integrationJobHistoryPool()
+    const config = useRuntimeConfig().integrationJobs
+    if (
+      typeof config === 'object' &&
+      config !== null &&
+      'enabled' in config &&
+      config.enabled === true
+    ) {
+      const { integrationJobsRuntime } =
+        await import('./integration-jobs-runtime.ts')
+      linkSql = (await integrationJobsRuntime()).pool
+    }
   }
   const jobIds = linkSql
     ? await integrationHistoryJobIds(linkSql, page)

@@ -6,6 +6,7 @@ import {
   assertCameraPlaying,
 } from './signalling-farm-camera.ts'
 import type { CameraFixture } from './signalling-snapshot-camera-fixture.ts'
+import { visibleWithinReadOnlyDeadline } from './read-only-deadline.ts'
 
 /** Mirrors REOPEN_MAX_MS in apps/farm/app/utils/farm-view.ts (#121). */
 const REOPEN_BACKOFF_CAP_MS = 30_000
@@ -109,22 +110,21 @@ export async function testAuthenticatedFarmPage(input: {
         })
       : undefined
     // Issue #8: read-only within 10 s of losing the direct connection.
-    const closureWait = 10000
     const sockets: number[] = []
     page.on('websocket', () => sockets.push(performance.now()))
     const closedAt = performance.now()
     await (input.closure === 'disconnect'
       ? fixture.disconnectSignalling()
       : fixture.revokeConnector())
-    await expect(
-      row.getByText(
-        'Conexão direta indisponível. Exibindo a última observação.',
-        { exact: true },
-      ),
-    ).toBeVisible({ timeout: closureWait })
-    await input.note(
-      `farm-page-readonly-after-ms:${Math.round(performance.now() - closedAt)}`,
+    const elapsed = await visibleWithinReadOnlyDeadline(closedAt, (timeout) =>
+      expect(
+        row.getByText(
+          'Conexão direta indisponível. Exibindo a última observação.',
+          { exact: true },
+        ),
+      ).toBeVisible({ timeout }),
     )
+    await input.note(`farm-page-readonly-after-ms:${Math.round(elapsed)}`)
     await expect(pauseButton).toBeDisabled()
     if (farmPause) {
       // Stale: the reason names the lost live connection, and nothing is sent.

@@ -41,6 +41,12 @@ export interface PostgresBinaries {
 
 let cachedBinaries: PostgresBinaries | undefined
 
+function assertPgIdent(value: string): string {
+  if (!/^[a-z_][a-z0-9_]{0,62}$/.test(value))
+    throw new Error('Invalid PostgreSQL identifier')
+  return value
+}
+
 function reportCleanupFailure(context: string, error: unknown): void {
   process.emitWarning(
     `${context}: ${error instanceof Error ? error.message : String(error)}`,
@@ -193,6 +199,7 @@ export function disposablePostgres(
   let logPath: string | undefined
   let systemId: string | undefined
   let testDbName: string | undefined
+  let ownedRole: string | undefined
   let rootSql: Sql | undefined
 
   return {
@@ -280,28 +287,51 @@ export function disposablePostgres(
           connection: { application_name: name, statement_timeout: 10000 },
         })
       } else if (testDatabaseUrl) {
-        // Provider: existing superuser URL (OPENFARM_TEST_DATABASE_URL)
+        // Provider: existing superuser URL (OPENFARM_TEST_DATABASE_URL).
+        // The fixture role is task-owned and removed with its database.
         const parsed = new URL(testDatabaseUrl)
         port = Number(parsed.port || 5432)
+        if (!Number.isInteger(port) || port < 1 || port > 65535)
+          throw new Error('Invalid existing cluster port')
         rootSql = postgres(testDatabaseUrl, { max: 1, onnotice: () => {} })
-        testDbName = `o3dfm_test_${randomBytes(4).toString('hex')}`
-        await rootSql.unsafe(
-          `DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'fixture') THEN CREATE ROLE fixture WITH SUPERUSER LOGIN; END IF; END $$;`,
-        )
-        await rootSql.unsafe(`CREATE DATABASE "${testDbName}" OWNER fixture`)
-        ledger({ resource: 'database', name: testDbName, url: testDatabaseUrl })
-        sql = postgres({
-          host: parsed.hostname,
-          port,
-          onnotice: () => {},
-          database: testDbName,
-          username: 'fixture',
-          password: '',
-          ssl: false,
-          max: 4,
-          connect_timeout: 3,
-          connection: { application_name: name, statement_timeout: 10000 },
-        })
+        const databaseName = `o3dfm_test_${randomBytes(4).toString('hex')}`
+        const roleName = `o3dfm_fixture_${randomBytes(4).toString('hex')}`
+        testDbName = databaseName
+        try {
+          await rootSql.unsafe(
+            `CREATE ROLE "${assertPgIdent(roleName)}" WITH SUPERUSER LOGIN`,
+          )
+          ownedRole = roleName
+          await rootSql.unsafe(
+            `CREATE DATABASE "${assertPgIdent(databaseName)}" OWNER "${assertPgIdent(roleName)}"`,
+          )
+          ledger({
+            resource: 'database',
+            name: databaseName,
+            host: parsed.hostname,
+            port,
+          })
+          sql = postgres({
+            host: parsed.hostname,
+            port,
+            onnotice: () => {},
+            database: databaseName,
+            username: roleName,
+            password: '',
+            ssl: false,
+            max: 4,
+            connect_timeout: 3,
+            connection: { application_name: name, statement_timeout: 10000 },
+          })
+        } catch (error) {
+          await this.stop().catch((cleanupError) => {
+            reportCleanupFailure(
+              'Could not clean up failed existing cluster',
+              cleanupError,
+            )
+          })
+          throw error
+        }
       } else {
         // Default provider: throwaway cluster made with initdb + pg_ctl on loopback
         const bins = findPostgresBin()
@@ -556,10 +586,22 @@ log_timezone = 'UTC'
           }
         } else if (testDatabaseUrl && rootSql) {
           if (testDbName) {
-            await rootSql.unsafe(`DROP DATABASE IF EXISTS "${testDbName}"`)
+            await rootSql.unsafe(
+              `DROP DATABASE IF EXISTS "${assertPgIdent(testDbName)}" WITH (FORCE)`,
+            )
             ledger({ removed: 'database', name: testDbName })
+            testDbName = undefined
           }
-          await rootSql.end()
+          if (ownedRole) {
+            await rootSql.unsafe(
+              `DROP ROLE IF EXISTS "${assertPgIdent(ownedRole)}"`,
+            )
+            ledger({ removed: 'role', name: ownedRole })
+            ownedRole = undefined
+          }
+          const root = rootSql
+          rootSql = undefined
+          await root.end()
         } else {
           // Local cluster: stop pg_ctl and remove temp data directory
           if (dataDir && existsSync(dataDir)) {

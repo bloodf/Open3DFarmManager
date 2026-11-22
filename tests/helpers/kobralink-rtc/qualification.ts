@@ -228,6 +228,42 @@ export function leasePhase(
 
 export type Secret = Readonly<{ label: string; value: string }>
 
+const REVOKED_AUTHORITY_ALERT = /Autorização recusada ou revogada/
+
+/** Baseline bridge and printer secrets are not a substitute for Connector state. */
+export function secretSetAccepted(input: {
+  secrets: number
+  connectorSecrets: number
+  truncated: boolean
+}): boolean {
+  return input.secrets >= 4 && input.connectorSecrets >= 1 && !input.truncated
+}
+
+/**
+ * A revoked-authority attempt counts only with a denied submission or the
+ * withdrawn-authority alert. A click that never ran does not.
+ */
+export function deniedAuthorityObserved(input: {
+  stage: string
+  alert: string
+  channelOut: readonly string[]
+  authorityStatuses: readonly number[]
+  nothingCreated: boolean
+}): boolean {
+  const deniedStatus = input.authorityStatuses.some(
+    (status) => status === 400 || status === 401 || status === 403,
+  )
+  const accepted = input.authorityStatuses.some((status) => status === 200)
+  return (
+    (deniedStatus || REVOKED_AUTHORITY_ALERT.test(input.alert)) &&
+    input.stage !== 'prepared' &&
+    input.stage !== 'confirmed' &&
+    !input.channelOut.some((frame) => frame !== 'proof') &&
+    !accepted &&
+    input.nothingCreated
+  )
+}
+
 const SENSITIVE_KEY =
   /pass|secret|token|cookie|session|private|credential|authorization|api.?key|mqtt/i
 

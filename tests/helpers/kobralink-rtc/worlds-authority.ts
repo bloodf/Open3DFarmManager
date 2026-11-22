@@ -31,6 +31,7 @@ import {
   openPrinters,
   shot,
 } from './ui.ts'
+import { deniedAuthorityObserved } from './qualification.ts'
 
 const PENDING_KEY = 'openfarm:kobra-x-pending-op'
 const AUTHORITY = /^\/api\/configuration-authority\/(challenges|capabilities)$/
@@ -49,24 +50,25 @@ async function deniedPrepare(ctx: WorldContext, actor: Actor, lease: boolean) {
     page,
     lease ? 'fresh' : 'now',
     click(page, TEXT.prepare),
-  ).catch(async () => ({
-    stage: await currentStage(page),
-    alert: '',
-    remainingMs: -1,
-  }))
+  )
   const channel = channelSince(observer, from)
-  const http = httpSince(observer, from).filter(
-    (line) => AUTHORITY.test(line.split(' ')[1] ?? '') && line.endsWith(' 200'),
+  const authorityLines = httpSince(observer, from).filter((line) =>
+    AUTHORITY.test(line.split(' ')[1] ?? ''),
+  )
+  const authorityStatuses = authorityLines.map((line) =>
+    Number(line.split(' ').at(-1)),
   )
   const counts = await ctx.counts()
+  const accepted = authorityStatuses.filter((status) => status === 200).length
   return {
-    ok:
-      attempt.stage !== 'prepared' &&
-      attempt.stage !== 'confirmed' &&
-      !channel.out.some((frame) => frame !== 'proof') &&
-      http.length === 0 &&
-      nothing(counts),
-    detail: `stage=${attempt.stage} alert=${attempt.alert.slice(0, 90)} channel-out=${channel.out.join(',') || 'none'} authority-200=${http.length} ${describeCounts(counts)}`,
+    ok: deniedAuthorityObserved({
+      stage: attempt.stage,
+      alert: attempt.alert,
+      channelOut: channel.out,
+      authorityStatuses,
+      nothingCreated: nothing(counts),
+    }),
+    detail: `stage=${attempt.stage} alert=${attempt.alert.slice(0, 90)} channel-out=${channel.out.join(',') || 'none'} authority-200=${accepted} ${describeCounts(counts)}`,
   }
 }
 

@@ -30,7 +30,10 @@ async function browserKey(): Promise<TrustedBrowserKey> {
     true,
     ['sign', 'verify'],
   )
-  const { kty, crv, x, y } = await crypto.subtle.exportKey('jwk', pair.publicKey)
+  const { kty, crv, x, y } = await crypto.subtle.exportKey(
+    'jwk',
+    pair.publicKey,
+  )
   const key = await validateBrowserDevicePublicKey({ kty, crv, x, y })
   return {
     key_id: randomUUID(),
@@ -81,7 +84,11 @@ describe('trusted-key publisher farm capacity', () => {
     const publisher = createTrustedKeyPublisher({
       source,
       inboxes,
-      signer: { issuer: issuerName, kid: issuer.kid, signingKey: pair.privateKey },
+      signer: {
+        issuer: issuerName,
+        kid: issuer.kid,
+        signingKey: pair.privateKey,
+      },
       clock: { wall: () => wall },
       timers: { every: () => () => {} },
     })
@@ -106,7 +113,9 @@ describe('trusted-key publisher farm capacity', () => {
     const before = sent.get(target) ?? []
     expect(before.length).toBeGreaterThan(0)
     const live = decodeTrustedKeySetFrame(before.at(-1)!).key_set
-    expect(live.browser_keys.map((key) => key.key_id)).toEqual([approved.key_id])
+    expect(live.browser_keys.map((key) => key.key_id)).toEqual([
+      approved.key_id,
+    ])
 
     rows.set(target, [])
     wall += 1

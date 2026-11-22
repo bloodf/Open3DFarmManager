@@ -704,6 +704,53 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /inventory/spools:
+    get:
+      operationId: listObservedSpools
+      tags: [Inventory]
+      summary: Page spool observations from Connector snapshots
+      description: |
+        Requires a farm-wide inventory grant. Each observation is bounded;
+        partial snapshots omit spools and updates may change page membership.
+      security:
+        - clientCredentials: ['inventory:read']
+      parameters:
+        - $ref: '#/components/parameters/FarmIdFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Page of observed spools.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, nextCursor]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      required: [farmId, connectorId, observedAt, stale, partial, spool]
+                      properties:
+                        farmId: { type: string, format: uuid }
+                        connectorId: { type: string, format: uuid }
+                        observedAt: { type: integer, description: Unix milliseconds }
+                        stale: { type: boolean }
+                        partial: { type: boolean }
+                        spool:
+                          $ref: '#/components/schemas/Spool'
+                  nextCursor: { type: [string, 'null'] }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /library:
     get:
       operationId: listLibrary

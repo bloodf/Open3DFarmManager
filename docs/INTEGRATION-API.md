@@ -85,6 +85,16 @@ be a bounded subset of `total`. The Connector's Spoolman setup, active spool
 sources, usage calculation and read-only behaviour are described in
 [SPOOLMAN-INTEGRATION.md](SPOOLMAN-INTEGRATION.md).
 
+### Observed spool page
+
+`GET /inventory/spools` requires a farm-wide `inventory:read` grant. It
+accepts `farmId`, `limit` (1–100), and an opaque `cursor`, returning `data`
+and `nextCursor`. Each item includes the Connector, observation time, stale
+and partial flags, and one spool summary. This pages the latest bounded
+Connector observations; a partial snapshot omits spools, and a changing
+snapshot can change page membership between requests. IDs are scoped to the
+Connector's Spoolman service and may be absent in older observations.
+
 ### Spool snapshot identity
 
 New Connector observations include `spoolId` for each spool. The ID belongs

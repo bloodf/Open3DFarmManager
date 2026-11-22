@@ -486,18 +486,13 @@ function seedScoped(server: Awaited<ReturnType<typeof fixture>>, now: number) {
 
 test('predicate waits stop after a signalled child closes', async () => {
   const child = job(['-e', "process.kill(process.pid, 'SIGKILL')"])
-  let predicate = false
-  const timer = setTimeout(() => {
-    predicate = true
-  }, 100)
   let result: Awaited<ReturnType<typeof child.finish>> | undefined
   try {
-    await expect(child.until(() => predicate)).rejects.toThrow(
+    await expect(child.until(() => false)).rejects.toThrow(
       /Agent exited before the fixture condition/,
     )
     result = await child.finish()
   } finally {
-    clearTimeout(timer)
     await child.close()
   }
   if (!result) throw new Error('child wait did not finish')

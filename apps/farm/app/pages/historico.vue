@@ -23,6 +23,7 @@ type Farm = { farmId: string }
 const farms = ref<Farm[]>([])
 const farmId = ref('')
 const printerKey = ref('')
+const outcome = ref('all')
 const jobs = ref<JobHistoryItem[]>([])
 const nextBefore = ref<string | null>(null)
 const pending = ref(true)
@@ -38,7 +39,9 @@ const outcomeTone = {
   failed: 'error',
 } as const
 const rows = computed(() =>
-  jobs.value.map((job) => ({ ...jobHistoryRow(job), job })),
+  jobs.value
+    .filter((job) => outcome.value === 'all' || job.outcome === outcome.value)
+    .map((job) => ({ ...jobHistoryRow(job), job })),
 )
 // Replay: printers and the live signed session are read when a row is opened.
 const live = useReplayLive(farmId)
@@ -171,7 +174,7 @@ onBeforeUnmount(cancel)
 
 <template>
   <main id="conteudo" class="history-page">
-    <header class="page-header">
+    <header class="page-header" role="presentation">
       <p class="eyebrow">Open3DFarmManager</p>
       <h1>Histórico de trabalhos</h1>
       <p class="intro">
@@ -231,6 +234,15 @@ onBeforeUnmount(cancel)
             :disabled="pending"
           />
         </div>
+        <div class="field">
+          <label for="outcome">Resultado dos trabalhos carregados</label>
+          <select id="outcome" v-model="outcome">
+            <option value="all">Todos</option>
+            <option value="completed">Concluído</option>
+            <option value="cancelled">Cancelado</option>
+            <option value="failed">Falhou</option>
+          </select>
+        </div>
         <Button type="submit" :disabled="pending || !farmId">
           Atualizar histórico
         </Button>
@@ -242,7 +254,7 @@ onBeforeUnmount(cancel)
     </div>
     <p v-else-if="pending" class="panel" role="status">{{ status }}</p>
     <EmptyState
-      v-else-if="!error && !rows.length"
+      v-else-if="!error && !jobs.length"
       :title="
         farmId
           ? 'Nenhum trabalho finalizado'
@@ -260,6 +272,46 @@ onBeforeUnmount(cancel)
     >
       <NuxtLink v-if="farmId" to="/impressoras">Ver impressoras</NuxtLink>
     </EmptyState>
+    <section
+      v-if="jobs.length"
+      class="results"
+      aria-labelledby="summary-heading"
+    >
+      <h2 id="summary-heading">Resultados dos trabalhos carregados</h2>
+      <p class="count">
+        Quantidade de trabalhos por resultado, nas páginas carregadas; não
+        representa todo o histórico.
+      </p>
+      <ul class="summary-list">
+        <li
+          v-for="kind in ['completed', 'cancelled', 'failed'] as const"
+          :key="kind"
+        >
+          {{
+            {
+              completed: 'Concluídos',
+              cancelled: 'Cancelados',
+              failed: 'Falharam',
+            }[kind]
+          }}:
+          <strong
+            >{{
+              jobs.filter((job) => job.outcome === kind).length
+            }}
+            trabalhos</strong
+          >
+        </li>
+      </ul>
+    </section>
+    <div v-if="jobs.length && !rows.length" class="panel">
+      <p>Nenhum trabalho carregado corresponde ao resultado selecionado.</p>
+      <Button
+        v-if="nextBefore"
+        :disabled="pending"
+        @click="loadJobs(nextBefore)"
+        >Carregar mais</Button
+      >
+    </div>
     <section
       v-if="rows.length"
       class="results"
@@ -419,6 +471,13 @@ input:disabled {
 .loading {
   display: grid;
   gap: var(--space-3);
+}
+.summary-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  padding: 0;
+  list-style: none;
 }
 .count {
   margin: 0 0 var(--space-3);

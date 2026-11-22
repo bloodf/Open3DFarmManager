@@ -2,6 +2,7 @@
 import { selectedFarm } from '../utils/farm-request-guard.ts'
 import { formatWeight } from '../utils/ui-format.ts'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import Button from '../components/ui/Button.vue'
 import Card from '../components/ui/Card.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -39,7 +40,21 @@ type Settings = {
   retentionDays: number
 }
 
-const route = useRoute()
+const route = (() => {
+  try {
+    return (
+      useRoute() ?? {
+        // The standalone browser harness mounts pages without a Vue Router.
+        query: Object.fromEntries(new URLSearchParams(window.location.search)),
+      }
+    )
+  } catch {
+    // The standalone browser harness mounts pages without a Vue Router.
+    return {
+      query: Object.fromEntries(new URLSearchParams(window.location.search)),
+    }
+  }
+})()
 const farmId = ref('')
 const items = ref<LibraryItem[]>([])
 const nextCursor = ref<string | null>(null)

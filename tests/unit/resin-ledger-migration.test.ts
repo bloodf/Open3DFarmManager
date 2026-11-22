@@ -35,3 +35,16 @@ describe('migration 0092 resin ledger', () => {
     expect(up).not.toMatch(/volume_ml[^,]*DEFAULT/i)
   })
 })
+
+describe('resin panel', () => {
+  test('a failed ledger read is a status, not an alert, so the printer page stays alert-free', async () => {
+    const panel = await readFile(
+      new URL(
+        '../../apps/farm/app/components/resin/ResinLedgerPanel.vue',
+        import.meta.url,
+      ),
+      'utf8',
+    )
+    expect(panel).not.toMatch(/role="alert"/)
+  })
+})

@@ -73,7 +73,7 @@ async function submit() {
 <template>
   <section class="panel resin-ledger" aria-labelledby="resin-ledger-title">
     <h2 id="resin-ledger-title">Resina</h2>
-    <p v-if="loadError" role="alert">{{ loadError }}</p>
+    <p v-if="loadError" role="status">{{ loadError }}</p>
     <template v-else-if="summary">
       <dl class="resin-summary">
         <div>

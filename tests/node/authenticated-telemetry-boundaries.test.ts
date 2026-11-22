@@ -4,7 +4,12 @@ import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { test } from 'node:test'
 import { gzipSync } from 'node:zlib'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { createAuthenticatedTelemetrySender } from '../../packages/connector/src/cloud/authenticated-http-telemetry.ts'
+import { TelemetryQueue } from '../../packages/connector/src/cloud/queue.ts'
+import { drainTelemetryOnce } from '../../packages/connector/src/cloud/drain.ts'
 
 const id = '00000000-0000-4000-8000-000000000001'
 const body = JSON.stringify([
@@ -281,3 +286,184 @@ test('one hundred IDs fit the authenticated response and endpoint is captured', 
     await new Promise<void>((resolve) => server.close(() => resolve()))
   }
 })
+
+// Coverage moved from the removed prototype sender tests (#609).
+
+async function listen(handler: Parameters<typeof createServer>[1]) {
+  const instance = createServer(handler)
+  instance.listen(0, '127.0.0.1')
+  await once(instance, 'listening')
+  const address = instance.address()
+  if (!address || typeof address === 'string') throw Error('No port')
+  return {
+    endpoint: `http://127.0.0.1:${address.port}/api/connector/telemetry`,
+    close: async () => {
+      instance.closeAllConnections()
+      await new Promise<void>((resolve) => instance.close(() => resolve()))
+    },
+  }
+}
+
+test('loopback HTTP requires the explicit test opt-in and throwing configuration stays redacted', () => {
+  const base = {
+    timeoutMs: 1000,
+    token: 'aaa.bbb.ccc',
+    agentId: id,
+    farmId: id,
+    audience: 'synthetic',
+    identity: { signTelemetryProof: () => 'A'.repeat(86) },
+  }
+  assert.throws(
+    () =>
+      createAuthenticatedTelemetrySender({
+        ...base,
+        endpoint: 'http://127.0.0.1/api/connector/telemetry',
+      }),
+    /Invalid telemetry transport configuration/,
+  )
+  const marker = 'SYNTHETIC_PRIVATE_CONFIG_MARKER'
+  assert.throws(
+    () =>
+      createAuthenticatedTelemetrySender({
+        ...base,
+        get endpoint(): string {
+          throw new Error(marker)
+        },
+      }),
+    (error: Error) => {
+      assert.equal(error.message, 'Invalid telemetry transport configuration')
+      assert.equal('cause' in error, false)
+      assert.equal(JSON.stringify(error).includes(marker), false)
+      return true
+    },
+  )
+})
+
+test('non-telemetry outbound payloads fail before any request', async () => {
+  let requests = 0
+  const http = await listen((req, res) => {
+    requests++
+    req.resume()
+    res.end()
+  })
+  try {
+    for (const payload of ['{"action":"pause"}', '[]', 'not json'])
+      await assert.rejects(
+        make(http.endpoint)(payload, new AbortController().signal),
+        /Telemetry transport failed/,
+      )
+    assert.equal(requests, 0)
+  } finally {
+    await http.close()
+  }
+})
+
+test(
+  'deadline closes a stalled response and caller abort retains the queued batch then releases the slot',
+  { timeout: 5000 },
+  async () => {
+    let closed!: () => void
+    const closeObserved = new Promise<void>((resolve) => {
+      closed = resolve
+    })
+    let started!: () => void
+    const ready = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    const http = await listen((req, res) => {
+      req.resume()
+      res.on('close', closed)
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.write('{')
+      started()
+    })
+    const directory = mkdtempSync(join(tmpdir(), 'open3d-auth-abort-'))
+    const queue = new TelemetryQueue(directory, 1000)
+    try {
+      await assert.rejects(
+        make(http.endpoint, 50)(body, new AbortController().signal),
+        /Telemetry transport failed/,
+      )
+      await closeObserved
+      queue.enqueue(JSON.parse(body)[0].state, 1000)
+      const controller = new AbortController()
+      const attempt = drainTelemetryOnce(
+        queue,
+        make(http.endpoint),
+        () => 1000,
+        controller.signal,
+      )
+      await ready
+      controller.abort()
+      assert.equal((await attempt).status, 'retained')
+      assert.equal(queue.depth, 1)
+      let result
+      for (let i = 0; i < 100; i++) {
+        result = await drainTelemetryOnce(
+          queue,
+          async (raw) =>
+            JSON.parse(raw).map((row: { eventId: string }) => row.eventId),
+          () => 1000,
+          new AbortController().signal,
+        )
+        if (result.status === 'delivered') break
+        await new Promise((resolve) => setTimeout(resolve, 5))
+      }
+      assert.equal(result?.status, 'delivered')
+    } finally {
+      queue.close()
+      rmSync(directory, { recursive: true, force: true })
+      await http.close()
+    }
+  },
+)
+
+test(
+  'redirects and URL-shaped printer data never contact another origin and retain the queued batch',
+  { timeout: 5000 },
+  async () => {
+    let status = 301
+    let targetCalls = 0
+    let originCalls = 0
+    const target = await listen((req, res) => {
+      req.resume()
+      targetCalls++
+      res.end()
+    })
+    const origin = await listen((req, res) => {
+      req.resume()
+      originCalls++
+      res.writeHead(status, { location: target.endpoint })
+      res.end()
+    })
+    const directory = mkdtempSync(join(tmpdir(), 'open3d-auth-redirect-'))
+    const queue = new TelemetryQueue(directory, 1000)
+    try {
+      const eventId = queue.enqueue(
+        { ...JSON.parse(body)[0].state, printerKey: target.endpoint },
+        1000,
+      ).eventId
+      const send = make(origin.endpoint)
+      for (status of [301, 302, 303, 307, 308]) {
+        const result = await drainTelemetryOnce(
+          queue,
+          send,
+          () => 1000,
+          new AbortController().signal,
+        )
+        assert.equal(result.status, 'retained')
+        assert.deepEqual(
+          queue.batch(1000).records.map((record) => record.eventId),
+          [eventId],
+        )
+      }
+      assert.equal(originCalls, 5)
+      assert.equal(targetCalls, 0)
+    } finally {
+      queue.close()
+      rmSync(directory, { recursive: true, force: true })
+      await origin.close()
+      await target.close()
+    }
+  },
+)

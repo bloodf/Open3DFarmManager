@@ -1,6 +1,8 @@
+> Historical record: the unauthenticated prototype was removed in #609. The Connector uses the authenticated telemetry client.
+
 # Local HTTP transport security review
 
-Reviewed the endpoint/configuration boundary, native fetch invocation, redirect policy, response reader and acknowledgement parser in `packages/connector/src/cloud/http-telemetry.ts`. All verification uses synthetic values and loopback HTTP servers. No production host, real device or DNS configuration was contacted or changed.
+Reviewed the endpoint/configuration boundary, native fetch invocation, redirect policy, response reader and acknowledgement parser in the former unauthenticated telemetry adapter. All verification uses synthetic values and loopback HTTP servers. No production host, real device or DNS configuration was contacted or changed.
 
 ## Reproduced and corrected
 

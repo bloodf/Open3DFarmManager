@@ -8,6 +8,7 @@ import {
 import { authRuntime, type AuthRuntime } from '../utils/auth/runtime.ts'
 import { inventoryUuid } from '../storage/postgres-connector-inventory.ts'
 import { spoolLibraryRuntime } from '../utils/spool-library/runtime.ts'
+import { spoolFinderScan } from '../utils/spool-library/finder-http.ts'
 import type {
   Result,
   SpoolLibraryAccess,
@@ -297,9 +298,12 @@ function throwLegacyError(
 
 export async function spoolLibraryResource(
   event: HttpEvent,
-  target: SpoolLibraryTarget,
+  target: SpoolLibraryTarget | { farmId: string; resource: 'finder' },
   dependencies?: SpoolLibraryHttpDependencies,
 ) {
+  if (target.resource === 'finder')
+    return spoolFinderScan(event, target.farmId, dependencies)
+
   authResponse(event)
   event.res.headers.set('Referrer-Policy', 'no-referrer')
   if (!inventoryUuid.test(target.farmId)) throw invalid('Farm inválida.')

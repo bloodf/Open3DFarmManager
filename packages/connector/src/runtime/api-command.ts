@@ -564,6 +564,8 @@ export async function receiveApiCommand(
   },
 ) {
   const { envelope } = decodeApiEnvelopeFrame(frame.wire)
+  const hasSignedGrant =
+    envelope.scope !== undefined || envelope.grant_epoch !== undefined
   const authority = createOfflineAuthority()
   const wall = config.clock.wallNow()
   const mono = config.clock.monotonicNow()
@@ -584,12 +586,15 @@ export async function receiveApiCommand(
               grant_id: id,
               app_id: envelope.app_id,
               farm_id: envelope.farm_id,
-              scopes: envelope.scope === frame.scope ? [envelope.scope] : [],
+              scopes:
+                !hasSignedGrant || envelope.scope === frame.scope
+                  ? [frame.scope]
+                  : [],
               revoked:
-                envelope.grant_epoch === undefined ||
-                envelope.scope === undefined ||
-                envelope.grant_epoch !== envelope.issued_at ||
-                frame.confirmed_at < envelope.grant_epoch,
+                hasSignedGrant &&
+                (envelope.scope === undefined ||
+                  envelope.grant_epoch !== envelope.issued_at ||
+                  frame.confirmed_at < envelope.grant_epoch),
             }
           : undefined,
       freshness: {

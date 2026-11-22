@@ -1,0 +1,21 @@
+{
+  "code": 0,
+  "detail": {
+    "pid": "0024",
+    "firmwareVersion": "v5.1.8",
+    "status": "printing",
+    "printFileName": "fixture.gcode",
+    "printProgress": 0.25,
+    "rightTemp": 205,
+    "rightTargetTemp": 210,
+    "platTemp": 58,
+    "platTargetTemp": 60,
+    "rightFilamentType": "PLA",
+    "estimatedRightWeight": 12.5,
+    "coolingFanSpeed": 70,
+    "internalFanStatus": "open",
+    "externalFanStatus": "close",
+    "errorCode": "E0048",
+    "cameraStreamUrl": "http://127.0.0.1:8080/?action=stream"
+  }
+}

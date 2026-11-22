@@ -139,6 +139,8 @@ export function createFilamentRunAccounting(input: {
     else if (tool === 'unknown') reason = 'tool-unresolved'
     else if (!start) reason = 'no-active-spool'
     else if (end?.spoolId !== start.spoolId) reason = 'spool-changed'
+    // Who reports the usage changed mid-run: debiting could double count.
+    else if (end.source !== start.source) reason = 'spool-changed'
     else if (!amount) reason = 'usage-missing'
     else if (start.source === 'moonraker' && end.source === 'moonraker') {
       status = 'record-only'

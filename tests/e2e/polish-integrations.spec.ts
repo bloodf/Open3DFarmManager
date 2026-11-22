@@ -885,15 +885,16 @@ test('connectors: the heading takes focus and keyboard order is heading, account
   await expect(
     page.getByRole('heading', { name: 'Connectors da farm' }),
   ).toBeFocused()
+  const farmSelect = page.getByLabel('Selecione uma farm', { exact: true })
+  await expect(farmSelect).toBeVisible()
+  await expect(farmSelect).toBeEnabled()
   const account = page.getByRole('navigation', { name: 'Conta' })
   for (const name of ['Início', 'Aprovar Connector', 'Sair da conta']) {
     await page.keyboard.press('Tab')
     await expect(account.getByRole('link', { name })).toBeFocused()
   }
   await page.keyboard.press('Tab')
-  await expect(
-    page.getByLabel('Selecione uma farm', { exact: true }),
-  ).toBeFocused()
+  await expect(farmSelect).toBeFocused()
 })
 
 test('connectors: revocation needs the checkbox, sends the fingerprint and can be cancelled', async ({

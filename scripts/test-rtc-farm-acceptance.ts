@@ -41,6 +41,8 @@ const env = process.env
 const checkout = new URL('..', import.meta.url).pathname.replace(/\/$/, '')
 if (process.argv.length === 3 && process.argv[2] === '--all')
   process.exit(await runAllAcceptance(checkout))
+if (process.argv.length === 3 && process.argv[2] === '--network-fault')
+  process.exit(await runAllAcceptance(checkout, { networkFaultOnly: true }))
 const pgDocker = env.OPENFARM_PG === 'docker'
 const image = env.RTC_FARM_TEST_IMAGE
 const dbPort =

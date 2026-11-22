@@ -123,6 +123,25 @@ containerized Klipper, Spoolman and MediaMTX, and remote integration CI for
 separate runs. The owner-run checklist covers physical printer operation,
 physical camera and LAN checks, and supervised pause and recovery.
 
+## Docker network-fault job (Simulator workflow)
+
+The dispatch-only [Simulator](../.github/workflows/sim.yml) workflow includes a
+`network-fault` job on `ubuntu-24.04`. It sets `OPENFARM_SIM=docker` and runs
+only the three Docker topology profiles (NAT, netem, UDP-block) via:
+
+```sh
+node scripts/test-rtc-farm-acceptance.ts --network-fault
+```
+
+That flag skips browser RTC rows, the farm build and outage suites. It never
+contacts hardware. The E13.1 owner hardware row stays deferred and named in the
+summary. The job uploads `sim-diagnostics/network-fault/` (including
+`summary.json` and evidence) as the `sim-network-fault` artifact.
+
+Dispatch from the Actions tab (or `gh workflow run sim.yml`). The coordinator
+records the run result after the dispatch completes. Expected wall time is about
+15–25 minutes on a cold runner (router image build plus one repeat per profile).
+
 ## Acceptance scope still required
 
 - **Runtime and database:** built application with PostgreSQL readiness, reversible journal-verified migrations, validated configuration and structured diagnostics. Run the final integrated CI on the exact candidate head.

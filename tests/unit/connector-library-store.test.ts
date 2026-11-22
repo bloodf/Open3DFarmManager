@@ -270,7 +270,7 @@ describe('quota', () => {
 
 describe('retention (same rules as server mode)', () => {
   test('keep-newest-N soft-deletes older versions, then the window purges unpinned ones', async () => {
-    const { store, clock } = await open({ keepVersions: 1 })
+    const { store, directory, clock } = await open({ keepVersions: 1 })
     const v1 = meta('v1.gcode', { version_number: 1 })
     const v2 = meta('v2.gcode', { version_number: 2 })
     await store.put(bytes('one'), { meta: v1 })
@@ -294,6 +294,7 @@ describe('retention (same rules as server mode)', () => {
       (await store.list()).map((f) => [f.name, f.state]),
     )
     expect(states).toEqual({ 'v1.gcode': 'removed', 'v2.gcode': 'stored' })
+    expect(await stored(directory)).toEqual([sha('two')])
   })
 
   test('pinned versions are never trimmed or purged; identical bytes uploaded again restore a removed version', async () => {

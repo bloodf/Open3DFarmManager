@@ -16,9 +16,7 @@ import {
 
 const FARM = '11111111-1111-4111-8111-111111111111'
 
-function mockStorage(
-  active: Map<string, string>,
-): SpoolLibraryStorage {
+function mockStorage(active: Map<string, string>): SpoolLibraryStorage {
   return {
     async withScope(authority, work) {
       if (authority.kind !== 'legacy-credential')

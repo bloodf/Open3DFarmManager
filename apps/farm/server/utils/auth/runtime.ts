@@ -100,7 +100,10 @@ export function authRuntime(): AuthRuntime {
       oidc: new PostgresOidc(sql),
       identities: new PostgresIdentities(sql),
       signInRules: new PostgresSignInRules(sql),
-      signInProviders: new PostgresSignInProviderStore(sql, credentialKeyring(config)),
+      signInProviders: new PostgresSignInProviderStore(
+        sql,
+        credentialKeyring(config),
+      ),
       bootstrapTokenDigest:
         'bootstrapToken' in config &&
         typeof config.bootstrapToken === 'string' &&

@@ -1,4 +1,7 @@
-import { credentialReadKey, credentialWriteKey } from '../sealed-credential-key.ts'
+import {
+  credentialReadKey,
+  credentialWriteKey,
+} from '../sealed-credential-key.ts'
 import {
   createCipheriv,
   createDecipheriv,
@@ -65,10 +68,7 @@ export function openBambuCloudSecret(
   const key = deriveKey(read.key)
   const ciphertext = read.ciphertext
   const tag = ciphertext.subarray(ciphertext.length - TAG_BYTES)
-  const data = ciphertext.subarray(
-    0,
-    ciphertext.length - TAG_BYTES,
-  )
+  const data = ciphertext.subarray(0, ciphertext.length - TAG_BYTES)
   const decipher = createDecipheriv(ALG, key, sealed.nonce)
   decipher.setAuthTag(tag)
   return Buffer.concat([decipher.update(data), decipher.final()]).toString(

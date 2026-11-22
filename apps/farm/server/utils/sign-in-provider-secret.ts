@@ -1,4 +1,7 @@
-import { credentialReadKey, credentialWriteKey } from './sealed-credential-key.ts'
+import {
+  credentialReadKey,
+  credentialWriteKey,
+} from './sealed-credential-key.ts'
 import {
   createCipheriv,
   createDecipheriv,

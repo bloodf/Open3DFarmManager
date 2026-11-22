@@ -29,6 +29,29 @@ function loopbackOrigin(name: string, value: string) {
   return value
 }
 
+const farmPageEnv = {
+  SIGNALLING_HTTPS_RTC_FIXTURE: 'yes',
+  SIGNALLING_HTTPS_RTC_RUNTIME: 'yes',
+  SIGNALLING_HTTPS_FARM_PAGE: 'yes',
+}
+const printingEnv = {
+  ...farmPageEnv,
+  SIGNALLING_HTTPS_FARM_PAUSE: 'yes',
+  SIGNALLING_HTTPS_SIM_PRINTING_PAUSE: 'sv06',
+}
+const inventoryEvidence = [
+  'PASS real generated Nitro HTTPS/WSS admission and authenticated RTC status/closure fixture',
+  'authenticated-farm-page-simulator-inventory-and-readonly-degradation',
+  'farm-page-simulator-observed:',
+  'farm-page-simulator-spools:',
+  'farm-page-readonly-after-ms:',
+]
+const printingEvidence = [
+  'farm-page-printing-pause-outcome:',
+  'farm-page-printing-pause-agreement-no-retry-resumed',
+  'PASS real generated Nitro HTTPS/WSS farm page signed pause over WebRTC to the printing simulator',
+]
+
 export function simulatorRtcFarmScenarios(
   env: NodeJS.ProcessEnv = process.env,
 ): Record<string, RtcFarmScenario> {
@@ -39,95 +62,55 @@ export function simulatorRtcFarmScenarios(
     throw new Error(
       'Set both RTC_FARM_TEST_SIM_MOONRAKER and RTC_FARM_TEST_SIM_SPOOLMAN',
     )
+  const sources = {
+    SIGNALLING_HTTPS_SIM_MOONRAKER: loopbackOrigin(
+      'RTC_FARM_TEST_SIM_MOONRAKER',
+      moonraker,
+    ),
+    SIGNALLING_HTTPS_SIM_SPOOLMAN: loopbackOrigin(
+      'RTC_FARM_TEST_SIM_SPOOLMAN',
+      spoolman,
+    ),
+  }
   return {
     ...(env.RTC_FARM_TEST_SIM_PRINTING_PAUSE === 'sv06'
       ? {
           'farm-page-printing-pause': {
             resources: ['printing-simulator'],
             env: {
-              SIGNALLING_HTTPS_RTC_FIXTURE: 'yes',
-              SIGNALLING_HTTPS_RTC_RUNTIME: 'yes',
-              SIGNALLING_HTTPS_FARM_PAGE: 'yes',
-              SIGNALLING_HTTPS_FARM_PAUSE: 'yes',
-              SIGNALLING_HTTPS_SIM_PRINTING_PAUSE: 'sv06',
+              ...printingEnv,
+              ...sources,
               SIGNALLING_HTTPS_SIM_CONTAINER:
                 env.RTC_FARM_TEST_SIM_CONTAINER ?? '',
-              SIGNALLING_HTTPS_SIM_MOONRAKER: loopbackOrigin(
-                'RTC_FARM_TEST_SIM_MOONRAKER',
-                moonraker,
-              ),
-              SIGNALLING_HTTPS_SIM_SPOOLMAN: loopbackOrigin(
-                'RTC_FARM_TEST_SIM_SPOOLMAN',
-                spoolman,
-              ),
             },
-            expect: [
-              'farm-page-printing-pause-outcome:',
-              'farm-page-printing-pause-agreement-no-retry-resumed',
-              'PASS real generated Nitro HTTPS/WSS',
-            ],
+            expect: printingEvidence,
           },
         }
       : {}),
-    // login → paired Connector on a genuine simulator → live state, tool and bed
-    // temperatures and the Spoolman inventory → disconnect → read-only ≤10 s
     'farm-page-simulator-inventory': {
-      env: {
-        SIGNALLING_HTTPS_RTC_FIXTURE: 'yes',
-        SIGNALLING_HTTPS_RTC_RUNTIME: 'yes',
-        SIGNALLING_HTTPS_FARM_PAGE: 'yes',
-        SIGNALLING_HTTPS_SIM_MOONRAKER: loopbackOrigin(
-          'RTC_FARM_TEST_SIM_MOONRAKER',
-          moonraker,
-        ),
-        SIGNALLING_HTTPS_SIM_SPOOLMAN: loopbackOrigin(
-          'RTC_FARM_TEST_SIM_SPOOLMAN',
-          spoolman,
-        ),
-      },
-      expect: [
-        'PASS real generated Nitro HTTPS/WSS admission and authenticated RTC status/closure fixture',
-        'authenticated-farm-page-simulator-inventory-and-readonly-degradation',
-        'farm-page-simulator-observed:',
-        'farm-page-simulator-spools:',
-        'farm-page-readonly-after-ms:',
-      ],
+      env: { ...farmPageEnv, ...sources },
+      expect: inventoryEvidence,
     },
   }
 }
 
-export const mockSimulatorRtcFarmScenarios: Record<string, RtcFarmScenario> =
-  Object.fromEntries(
-    Object.entries(
-      simulatorRtcFarmScenarios({
-        RTC_FARM_TEST_SIM_MOONRAKER: 'http://127.0.0.1:1',
-        RTC_FARM_TEST_SIM_SPOOLMAN: 'http://127.0.0.1:1',
-        RTC_FARM_TEST_SIM_PRINTING_PAUSE: 'sv06',
-      }),
-    ).map(([name, row]) => [
-      name,
-      {
-        ...row,
-        resources: ['mock-simulator'],
-        expect:
-          name === 'farm-page-simulator-inventory'
-            ? [
-                ...row.expect,
-                'farm-page-printer-ui-origin-link',
-                'farm-page-tablet-grid',
-                'printers-page-tablet-grid',
-              ]
-            : row.expect,
-        env: {
-          ...row.env,
-          SIGNALLING_HTTPS_SIM_MOONRAKER: '',
-          SIGNALLING_HTTPS_SIM_SPOOLMAN: '',
-          SIGNALLING_HTTPS_MOCK_SIMULATOR:
-            name === 'farm-page-printing-pause' ? 'sv06' : 'u1',
-        },
-      },
-    ]),
-  )
+export const mockSimulatorRtcFarmScenarios: Record<string, RtcFarmScenario> = {
+  'farm-page-printing-pause': {
+    resources: ['mock-simulator'],
+    env: { ...printingEnv, SIGNALLING_HTTPS_MOCK_SIMULATOR: 'sv06' },
+    expect: printingEvidence,
+  },
+  'farm-page-simulator-inventory': {
+    resources: ['mock-simulator'],
+    env: { ...farmPageEnv, SIGNALLING_HTTPS_MOCK_SIMULATOR: 'u1' },
+    expect: [
+      ...inventoryEvidence,
+      'farm-page-printer-ui-origin-link',
+      'farm-page-tablet-grid',
+      'printers-page-tablet-grid',
+    ],
+  },
+}
 
 /**
  * Inside the Connector fixture child: the opted-in simulator origins, after a

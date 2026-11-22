@@ -69,7 +69,8 @@ export function rowPassed(
   rows: { row: string; passed: boolean }[] | undefined,
   row: string,
 ) {
-  return rows?.find((entry) => entry.row === row)?.passed
+  const attempts = rows?.filter((entry) => entry.row === row)
+  return attempts?.length ? attempts.every((entry) => entry.passed) : undefined
 }
 
 export function parseLastJson(output: string): unknown {
@@ -204,6 +205,16 @@ export async function runAllAcceptance(checkout: string) {
       passed: false,
       detail: 'Suite exited nonzero after every selected row passed',
     })
+
+  const flagRemoval = await execute('farmview-flag-removed', process.execPath, [
+    '--test',
+    'tests/node/no-farmview-flag.test.ts',
+  ])
+  rows.push({
+    suite: 'source-contract',
+    row: 'farmview-flag-removed',
+    passed: flagRemoval.code === 0,
+  })
 
   // Outage acceptance consumes the same checkout's built farm artifact. Build
   // once here so the outage runner never silently uses a stale .output tree.

@@ -52,7 +52,9 @@ export async function testSimulatorFarmPage(input: {
       row.getByText('Conexão direta autenticada', { exact: true }),
     ).toBeVisible({ timeout: 15000 })
     // A genuine idle simulator: state and both observed temperatures.
-    await expect(row.getByText('Ociosa', { exact: true })).toBeVisible()
+    await expect(
+      row.locator('dt:text-is("Último estado informado") + dd'),
+    ).toHaveText('Ociosa')
     const temperatures = row.locator(
       'dl[aria-label="Temperaturas observadas"] dd',
     )
@@ -60,7 +62,7 @@ export async function testSimulatorFarmPage(input: {
     const readings = await temperatures.allInnerTexts()
     for (const reading of readings) assert.match(reading, /^-?[\d.,]+ °C$/)
     await expect(
-      row.getByRole('button', { name: 'Pausar impressão', exact: true }),
+      row.getByRole('button', { name: /^Pausar(?: impressão)?$/ }),
     ).toBeDisabled()
     await input.note(
       'farm-page-simulator-observed:' +
@@ -105,7 +107,7 @@ export async function testSimulatorFarmPage(input: {
       `farm-page-readonly-after-ms:${Math.round(performance.now() - closedAt)}`,
     )
     await expect(
-      row.getByRole('button', { name: 'Pausar impressão', exact: true }),
+      row.getByRole('button', { name: /^Pausar(?: impressão)?$/ }),
     ).toBeDisabled()
     if (input.mockOrigin) {
       const printers = await page.goto(fixture.origin + '/impressoras', {
@@ -115,6 +117,9 @@ export async function testSimulatorFarmPage(input: {
       await expect(
         page.getByRole('heading', { name: 'Impressoras da farm', exact: true }),
       ).toBeVisible()
+      await page
+        .getByLabel('Farm', { exact: true })
+        .selectOption(fixture.farmId)
       await assertTabletGrid(page, '.setup-columns')
       await input.note('printers-page-tablet-grid')
     }

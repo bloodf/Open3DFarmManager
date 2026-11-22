@@ -185,8 +185,7 @@ export async function testPrintingPausePage(input: {
           row.getByText('Conexão direta autenticada', { exact: true }),
         ).toBeVisible({ timeout: 15000 })
         const button = row.getByRole('button', {
-          name: 'Pausar',
-          exact: true,
+          name: /^Pausar(?: impressão)?$/,
         })
         await expect(button).toBeEnabled()
         await button.click()
@@ -205,7 +204,9 @@ export async function testPrintingPausePage(input: {
         await expect(dialog.getByRole('status')).toHaveText(PAUSED_UI, {
           timeout: 10000,
         })
-        await expect(row.getByText('Pausada', { exact: true })).toBeVisible()
+        await expect(
+          row.locator('dt:text-is("Último estado informado") + dd'),
+        ).toHaveText('Pausada')
         await expect(button).toBeDisabled()
         await expect.poll(state).toBe('paused')
       },
@@ -227,7 +228,9 @@ export async function testPrintingPausePage(input: {
             exact: true,
           }),
         })
-        await expect(row.getByText('Imprimindo', { exact: true })).toBeVisible()
+        await expect(
+          row.locator('dt:text-is("Último estado informado") + dd'),
+        ).toHaveText('Imprimindo')
         await page.waitForTimeout(2000)
       },
       note: input.note,

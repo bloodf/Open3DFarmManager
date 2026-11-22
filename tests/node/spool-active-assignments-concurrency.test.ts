@@ -18,7 +18,9 @@ test('concurrent spool assignments for different slots both persist', async () =
 
     await Promise.all(assignments.map((assignment) => store.assign(assignment)))
 
-    const expected = [...assignments].sort((a, b) => a.slot.localeCompare(b.slot))
+    const expected = [...assignments].sort((a, b) =>
+      a.slot.localeCompare(b.slot),
+    )
     assert.deepEqual(
       (await store.list()).sort((a, b) => a.slot.localeCompare(b.slot)),
       expected,

@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { join, resolve } from 'node:path'
 
 const app = fileURLToPath(new URL('../', import.meta.url))
-const tokenFile = fileURLToPath(new URL('./main.css', import.meta.url))
+const tokenFile = fileURLToPath(new URL('./tokens/tokens.css', import.meta.url))
 const targets = process.argv.slice(2)
 
 function check(path) {

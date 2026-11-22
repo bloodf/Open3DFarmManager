@@ -184,8 +184,8 @@ select {
 }
 .emergency {
   font-weight: bold;
-  border: 3px solid #a00;
-  color: #900;
+  border: 3px solid var(--state-error-color);
+  color: var(--state-error-color);
 }
 :focus-visible {
   outline: 3px solid currentColor;

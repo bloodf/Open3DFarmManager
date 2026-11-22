@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { mkdir } from 'node:fs/promises'
 import AxeBuilder from '@axe-core/playwright'
 import { randomUUID } from 'node:crypto'
 
@@ -84,8 +85,12 @@ for (const width of [320, 375, 768, 1024, 1280]) {
       page.getByLabel('Connector aprovado para a impressora'),
     ).toBeFocused()
     await page.keyboard.press('Tab')
+    const evidenceDir = process.env.KOBRALINK_UI_EVIDENCE
+    if (evidenceDir) await mkdir(evidenceDir, { recursive: true })
     await page.screenshot({
-      path: `${process.env.KOBRALINK_UI_EVIDENCE ?? '/tmp'}/kobra-missing-key-${width}.png`,
+      path: evidenceDir
+        ? `${evidenceDir}/kobra-missing-key-${width}.png`
+        : test.info().outputPath(`kobra-missing-key-${width}.png`),
       fullPage: true,
     })
   })

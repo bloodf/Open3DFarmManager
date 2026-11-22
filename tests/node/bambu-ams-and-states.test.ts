@@ -48,6 +48,8 @@ test('publishes start_print AMS mapping through the validated MQTT transport', a
     assert.deepEqual(remote.requests[0], {
       command: 'project_file',
       sequence_id: '0',
+      ams_mapping: [0, 2],
+      use_ams: true,
     })
   } finally {
     controller.abort()

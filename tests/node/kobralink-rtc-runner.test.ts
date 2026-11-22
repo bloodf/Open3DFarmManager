@@ -504,6 +504,11 @@ test('network capture reads only complete undrained bodies, never a prefix', asy
     res.write('x'.repeat(1_100_000))
     res.end(SECRET)
   }).listen(0, '127.0.0.1')
+  t.after(async () => {
+    server.closeAllConnections()
+    if (server.listening)
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+  })
   await new Promise((resolve) => server.once('listening', resolve))
   const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
   const browser = await launchBrowser()
@@ -573,6 +578,11 @@ test('network capture keeps a finished body the page navigated away from', async
     res.setHeader('content-type', 'application/json')
     res.end('{"me":"finished-then-navigated"}')
   }).listen(0, '127.0.0.1')
+  t.after(async () => {
+    server.closeAllConnections()
+    if (server.listening)
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+  })
   await new Promise((resolve) => server.once('listening', resolve))
   const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
   const browser = await launchBrowser()
@@ -604,7 +614,7 @@ test('network capture keeps a finished body the page navigated away from', async
   }
 })
 
-test('a body read in the same tick as a reload is still captured whole', async () => {
+test('a body read in the same tick as a reload is still captured whole', async (t) => {
   // Run b83850cd: /api/auth/me finished, the page reloaded at once and
   // Chromium had dropped the body before `getResponseBody` reached it.
   const server = createServer((req, res) => {
@@ -612,9 +622,15 @@ test('a body read in the same tick as a reload is still captured whole', async (
     res.setHeader('content-type', 'application/json')
     res.end('{"me":"read-then-reloaded"}')
   }).listen(0, '127.0.0.1')
+  t.after(async () => {
+    server.closeAllConnections()
+    if (server.listening)
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+  })
   await new Promise((resolve) => server.once('listening', resolve))
   const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
   const evidence = await mkdtemp(join(tmpdir(), 'kobralink-observe-'))
+  t.after(() => rm(evidence, { recursive: true, force: true }))
   const browser = await launchBrowser()
   try {
     for (let round = 0; round < 5; round++) {
@@ -678,12 +694,19 @@ test('single-UI result is derived only from manifest-matching run files', async 
     return buildSingleUiResult({ manifest, files })
   }
   const all = SINGLE_UI_REQUIRED.map((check) => line(check))
-  const passing = build([
-    ...all,
-    line('browser_secrets_absent/browser-inspection-complete', false),
-  ])
+  const passing = build(all)
   assert.equal(passing.status, 'pass')
   assert.deepEqual(verifySingleUi(passing), [])
+  const incomplete = build([
+    ...all.filter((entry) => !entry.includes('browser-inspection-complete')),
+    line('browser_secrets_absent/browser-inspection-complete', false),
+  ])
+  assert.equal(incomplete.status, 'fail')
+  assert.ok(
+    verifySingleUi(incomplete).some((problem) =>
+      problem.includes('browser-inspection-complete'),
+    ),
+  )
   // A failed repetition, a missing check or a failed world never passes.
   const failed = build([...all, line(SINGLE_UI_REQUIRED[7], false)])
   assert.equal(failed.status, 'fail')

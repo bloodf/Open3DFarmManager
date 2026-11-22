@@ -132,8 +132,15 @@ test('rg verifies no chromium.launch outside tests/helpers/browser.ts', () => {
   )
 })
 
-test('CI workflow no longer runs playwright install', () => {
+test('the code CI jobs do not install a separate Playwright browser', () => {
   const ciPath = join(root, '.github/workflows/ci.yml')
   const content = readFileSync(ciPath, 'utf8')
-  assert.doesNotMatch(content, /playwright\s+install/)
+  for (const name of ['code', 'code-node22']) {
+    const match = new RegExp(
+      `^  ${name}:\\s*\\n([\\s\\S]*?)(?=^  [a-z0-9_-]+:\\s*$)`,
+      'm',
+    ).exec(content)
+    assert.ok(match, `expected ${name} CI job`)
+    assert.doesNotMatch(match[1], /playwright\s+install/)
+  }
 })

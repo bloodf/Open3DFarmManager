@@ -4,19 +4,18 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
-  openSync,
-  closeSync,
   readFileSync,
   rmdirSync,
   unlinkSync,
   writeFileSync,
+  rmSync,
 } from 'node:fs'
 import { request } from 'node:https'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout } from 'node:timers/promises'
 import postgres from 'postgres'
 import { seedSandbox } from './sandbox-seed.ts'
+import { acquireSandboxLock, sandboxState } from './sandbox-support.ts'
 
 const action = process.argv[2]
 if (process.argv.length > 3 || (action && !['stop', 'down'].includes(action))) {
@@ -29,7 +28,7 @@ if (uid === undefined || gid === undefined)
 const project =
   'o3dfm-sandbox-' +
   createHash('sha256').update(process.cwd()).digest('hex').slice(0, 12)
-const state = join(tmpdir(), project + '-' + uid)
+const state = sandboxState(project, uid)
 mkdirSync(state, { mode: 0o700, recursive: true })
 // Bind-mounted for the Connector only; create it here so Docker does not
 // invent a root-owned directory on first start.
@@ -47,7 +46,7 @@ if (
     'O diretório local do sandbox deve ser privado e pertencer ao usuário atual.',
   )
 const lock = join(state, 'lock')
-const fd = openSync(lock, 'wx', 0o600)
+const releaseLock = acquireSandboxLock(lock)
 try {
   const endpoint =
     process.env.DOCKER_HOST ??
@@ -59,10 +58,14 @@ try {
   if (!endpoint.startsWith('unix://'))
     throw new Error('O sandbox requer um daemon Docker local.')
   const passwordFile = join(state, 'db-password')
-  if (!existsSync(passwordFile))
+  const resetMarker = join(state, 'reset-containers')
+  if (!existsSync(passwordFile)) {
+    writeFileSync(resetMarker, '', { mode: 0o600 })
     writeFileSync(passwordFile, randomBytes(24).toString('hex'), {
       mode: 0o600,
     })
+  }
+  const resetContainers = existsSync(resetMarker)
   const password = readFileSync(passwordFile, 'utf8')
   const docker = (args: string[], capture = false) =>
     execFileSync(
@@ -118,6 +121,7 @@ try {
       ])
       docker(['down', '--volumes'])
       rmdirSync(databaseDir)
+      rmSync(join(state, 'connector-data'), { recursive: true, force: true })
     } else docker(['stop'])
     if (action === 'down')
       for (const file of ['client.json', 'seed-started']) {
@@ -168,7 +172,17 @@ try {
         ['run', 'build', '-w', '@open3dfarmmanager/connector'],
         { stdio: 'inherit' },
       )
-    docker(['up', '-d', '--wait', '--no-recreate', 'postgres', 'klipper'])
+    // A surviving Compose volume may still point at an older temporary state path.
+    if (resetContainers) docker(['down', '--volumes'])
+    docker([
+      'up',
+      '-d',
+      '--wait',
+      resetContainers ? '--force-recreate' : '--no-recreate',
+      'postgres',
+      'klipper',
+    ])
+    if (resetContainers) unlinkSync(resetMarker)
     const port = (service: string, internal: number) => {
       const mapped = docker(['port', service, String(internal)], true).trim()
       const publicPort = Number(
@@ -243,6 +257,5 @@ try {
     )
   }
 } finally {
-  closeSync(fd)
-  unlinkSync(lock)
+  releaseLock()
 }

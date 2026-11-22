@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import {
   createServer as createHttpsServer,
@@ -42,15 +42,16 @@ test(
       isolated: true,
       through: false,
     })
-    const sim = await startMoonrakerMock({
-      initial: { state: 'standby', printDuration: 42, totalDuration: 45 },
-      maxWsConnections: 8,
-    })
+    let sim: Awaited<ReturnType<typeof startMoonrakerMock>> | undefined
     const children: ChildProcess[] = []
     let fileServer: ReturnType<typeof createHttpsServer> | undefined
     let bambu: Awaited<ReturnType<typeof startBambuSimulator>> | undefined
     let logs = ''
     try {
+      sim = await startMoonrakerMock({
+        initial: { state: 'standby', printDuration: 42, totalDuration: 45 },
+        maxWsConnections: 8,
+      })
       await mkdir(join(state, 'connector-data'))
       const sql = await pg.start()
       const port = await getFreePort()
@@ -143,11 +144,20 @@ test(
       assert.equal(env.NUXT_INTEGRATION_JOBS_ENABLED, 'true')
       const cert = readFileSync(join(state, 'tls.crt'))
       const key = readFileSync(join(state, 'tls.key'))
-      if (!existsSync('infra/sandbox/.output/server/index.mjs'))
-        execFileSync('npx', ['nuxt', 'build', 'infra/sandbox'], {
-          stdio: 'ignore',
-          timeout: 120_000,
-        })
+      const output = join(state, 'sandbox-output')
+      const serverBundle = join(output, 'server', 'index.mjs')
+      await mkdir(join(output, 'server'), { recursive: true })
+      // A stale bundle must never be reused by this integration test.
+      await writeFile(serverBundle, "throw new Error('stale sandbox bundle')\n")
+      execFileSync('npx', ['nuxt', 'build', 'infra/sandbox'], {
+        env: { ...process.env, SANDBOX_OUTPUT_DIR: output },
+        stdio: 'ignore',
+        timeout: 120_000,
+      })
+      assert.doesNotMatch(
+        await readFile(serverBundle, 'utf8'),
+        /stale sandbox bundle/,
+      )
       const launch = (args: string[], extra: NodeJS.ProcessEnv) => {
         const child = spawn(process.execPath, args, {
           env: { ...process.env, ...extra },
@@ -162,7 +172,7 @@ test(
         })
         return child
       }
-      launch(['infra/sandbox/.output/server/index.mjs'], {
+      launch([serverBundle], {
         ...env,
         NITRO_HOST: '127.0.0.1',
         NITRO_PORT: String(port),
@@ -283,7 +293,7 @@ test(
       assert.equal(submit.status, 202, JSON.stringify(submit.body))
       await wait(
         'simulator start',
-        async () => sim.control.model().state === 'printing',
+        async () => sim!.control.model().state === 'printing',
       )
       const stop = await call(`${base}/actions`, {
         method: 'POST',
@@ -297,7 +307,7 @@ test(
       assert.equal(stop.status, 202, JSON.stringify(stop.body))
       await wait(
         'simulator stop',
-        async () => sim.control.model().state === 'cancelled',
+        async () => sim!.control.model().state === 'cancelled',
       )
       const files = await call(`${base}/files`, { headers })
       assert.equal(files.status, 200)
@@ -371,17 +381,26 @@ test(
       for (const child of children) child.kill('SIGTERM')
       await Promise.all(
         children.map((child) =>
-          child.exitCode === null
+          child.exitCode === null && child.signalCode === null
             ? once(child, 'exit').catch(() => {})
             : undefined,
         ),
       )
-      if (fileServer)
-        await new Promise<void>((resolve) => fileServer!.close(() => resolve()))
-      await bambu?.close()
-      await sim.close()
-      await pg.stop()
+      const cleanup = await Promise.allSettled([
+        fileServer
+          ? new Promise<void>((resolve) => fileServer!.close(() => resolve()))
+          : undefined,
+        bambu?.close(),
+        sim?.close(),
+        pg.stop(),
+      ])
       await rm(state, { recursive: true, force: true })
+      const failures = cleanup.filter((result) => result.status === 'rejected')
+      if (failures.length)
+        throw new AggregateError(
+          failures.map((result) => result.reason),
+          'sandbox cleanup failed',
+        )
     }
   },
 )

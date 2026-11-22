@@ -2,6 +2,8 @@ import { createHash, randomUUID } from 'node:crypto'
 import { createWriteStream } from 'node:fs'
 import { mkdir, unlink } from 'node:fs/promises'
 import { get } from 'node:https'
+import { lookup } from 'node:dns/promises'
+import { isIP } from 'node:net'
 import { join } from 'node:path'
 import { Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
@@ -15,11 +17,30 @@ import {
 
 export class JobFileError extends Error {
   readonly reason:
-    'unsupported' | 'checksum-mismatch' | 'too-large' | 'download-failed'
+    'unsupported' | 'checksum-mismatch' | 'too-large' | 'download-failed' | 'download-refused'
   constructor(reason: JobFileError['reason']) {
     super(reason)
     this.reason = reason
   }
+}
+
+function isUnsafeAddress(address: string): boolean {
+  const version = isIP(address)
+  if (version === 4) {
+    const [a, b] = address.split('.').map(Number)
+    return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) ||
+      (a === 172 && b! >= 16 && b! <= 31) || (a === 192 && b === 168) ||
+      (a === 100 && b! >= 64 && b! <= 127) || a! >= 224
+  }
+  if (version === 6) {
+    const normalized = address.toLowerCase()
+    return normalized === '::' || normalized === '::1' ||
+      normalized.startsWith('fc') || normalized.startsWith('fd') ||
+      /^fe[89ab]/.test(normalized) || normalized.startsWith('ff') ||
+      normalized.startsWith('::ffff:127.') || normalized.startsWith('::ffff:10.') ||
+      normalized.startsWith('::ffff:192.168.') || normalized.startsWith('::ffff:169.254.')
+  }
+  return true
 }
 
 /** Call only after validating the signed envelope and local printer authority. */
@@ -53,11 +74,43 @@ export async function fetchJobFile(input: {
     for (;;) {
       if (url.protocol !== 'https:' || url.username || url.password)
         throw new JobFileError('download-failed')
+      let pinnedLookup: { address: string; family: number } | undefined
+      if (redirects > 0) {
+        try {
+          const addresses = await lookup(url.hostname, { all: true, verbatim: true })
+          if (!addresses.length || addresses.some(({ address }) => isUnsafeAddress(address)))
+            throw new Error('unsafe address')
+          pinnedLookup = addresses[0]
+        } catch {
+          throw new JobFileError('download-refused')
+        }
+      }
       const response = await new Promise<import('node:http').IncomingMessage>(
         (resolve, reject) => {
           const request = get(
             url,
-            { signal, ...(input.ca ? { ca: input.ca } : {}) },
+            {
+              signal,
+              ...(input.ca ? { ca: input.ca } : {}),
+              ...(pinnedLookup
+                ? {
+                    lookup: (
+                      _hostname: string,
+                      _options: unknown,
+                      callback: (
+                        error: NodeJS.ErrnoException | null,
+                        address: string,
+                        family: number,
+                      ) => void,
+                    ) =>
+                      callback(
+                        null,
+                        pinnedLookup!.address,
+                        pinnedLookup!.family,
+                      ),
+                  }
+                : {}),
+            },
             resolve,
           )
           request.on('error', reject)
@@ -70,7 +123,7 @@ export async function fetchJobFile(input: {
         response.headers.location
       ) {
         response.destroy()
-        if (++redirects > 5) throw new JobFileError('download-failed')
+        if (++redirects > 5) throw new JobFileError('download-refused')
         url = new URL(response.headers.location, url)
         continue
       }

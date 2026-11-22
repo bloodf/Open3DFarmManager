@@ -40,12 +40,11 @@ function view({ description, ...row }: Webhook) {
 
 export class PostgresWebhooks {
   private readonly sql: Sql
+  private readonly secretKey: string
 
-  constructor(
-    sql: Sql,
-    private readonly secretKey: string,
-  ) {
+  constructor(sql: Sql, secretKey: string) {
     this.sql = sql
+    this.secretKey = secretKey
   }
 
   async sandbox(appId: string) {

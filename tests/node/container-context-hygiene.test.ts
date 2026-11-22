@@ -164,21 +164,27 @@ test('sandbox bambu has no state mount; app and connector get only needed files'
   )
 
   const app = mapping(services.app)
-  assert.deepEqual(volumeList(app).toSorted(), [
-    '../..:/workspace:ro',
-    sandboxFileMount('app.env'),
-    sandboxFileMount('keys.json'),
-    sandboxFileMount('tls.crt'),
-    sandboxFileMount('tls.key'),
-  ].toSorted())
+  assert.deepEqual(
+    volumeList(app).toSorted(),
+    [
+      '../..:/workspace:ro',
+      sandboxFileMount('app.env'),
+      sandboxFileMount('keys.json'),
+      sandboxFileMount('tls.crt'),
+      sandboxFileMount('tls.key'),
+    ].toSorted(),
+  )
 
   const connector = mapping(services.connector)
-  assert.deepEqual(volumeList(connector).toSorted(), [
-    '../..:/workspace:ro',
-    sandboxFileMount('bambu-credential.json'),
-    sandboxFileMount('connector-data', 'rw'),
-    sandboxFileMount('credential.json'),
-    sandboxFileMount('runtime.json'),
-    sandboxFileMount('tls.crt'),
-  ].toSorted())
+  assert.deepEqual(
+    volumeList(connector).toSorted(),
+    [
+      '../..:/workspace:ro',
+      sandboxFileMount('bambu-credential.json'),
+      sandboxFileMount('connector-data', 'rw'),
+      sandboxFileMount('credential.json'),
+      sandboxFileMount('runtime.json'),
+      sandboxFileMount('tls.crt'),
+    ].toSorted(),
+  )
 })

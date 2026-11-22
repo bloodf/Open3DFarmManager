@@ -39,7 +39,7 @@ export async function createRuntimeMoonrakerFixture() {
   let simRequests = 0,
     queued = 0
   let mockInstance: MoonrakerMockInstance | undefined
-  // Farm-page pause row: pause control is configured and a second socket allowed.
+  // Farm-page pause row: the acquisition and pause driver use separate sockets.
   const farmPause = process.env.SIGNALLING_HTTPS_FARM_PAUSE === 'yes'
   const pauseKey = process.env.SIGNALLING_HTTPS_PAUSE_PUBLIC_KEY
   const apiEnvelopeKey = process.env.SIGNALLING_HTTPS_API_ENVELOPE_PUBLIC_KEY
@@ -201,7 +201,10 @@ export async function createRuntimeMoonrakerFixture() {
       // The ready check above is the simulator's first request; the runtime
       // readiness wait expects requests > 0, which the synthetic server would
       // otherwise provide.
-      if (sim) simRequests++
+      if (sim) {
+        simRequests++
+        port = Number(new URL(sim.moonraker).port)
+      }
       const moon = sim?.moonraker ?? moonraker?.origin ?? ''
       const camera = cameraFixtureFromEnv()
       const configPath = join(directory, 'runtime.json'),

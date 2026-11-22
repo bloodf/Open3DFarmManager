@@ -352,7 +352,11 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
   if (closure !== 'disconnect' && closure !== 'revocation')
     throw Error('Invalid RTC closure scenario')
   const mockProfile = process.env.SIGNALLING_HTTPS_MOCK_SIMULATOR
-  if (mockProfile && mockProfile !== 'sv06' && mockProfile !== 'u1')
+  if (
+    mockProfile !== undefined &&
+    mockProfile !== 'sv06' &&
+    mockProfile !== 'u1'
+  )
     throw Error('Invalid in-process simulator profile')
   let mockMoonraker: Awaited<ReturnType<typeof startMoonrakerMock>> | undefined
   let mockSpoolman: Awaited<ReturnType<typeof startSpoolmanMock>> | undefined

@@ -97,12 +97,20 @@ export function simulatorRtcFarmScenarios(
 export const mockSimulatorRtcFarmScenarios: Record<string, RtcFarmScenario> = {
   'farm-page-printing-pause': {
     resources: ['mock-simulator'],
-    env: { ...printingEnv, SIGNALLING_HTTPS_MOCK_SIMULATOR: 'sv06' },
+    env: {
+      ...printingEnv,
+      SIGNALLING_HTTPS_MOCK_SIMULATOR: 'sv06',
+      SIGNALLING_HTTPS_RTC_PACKAGED: 'yes',
+    },
     expect: printingEvidence,
   },
   'farm-page-simulator-inventory': {
     resources: ['mock-simulator'],
-    env: { ...farmPageEnv, SIGNALLING_HTTPS_MOCK_SIMULATOR: 'u1' },
+    env: {
+      ...farmPageEnv,
+      SIGNALLING_HTTPS_MOCK_SIMULATOR: 'u1',
+      SIGNALLING_HTTPS_RTC_PACKAGED: 'yes',
+    },
     expect: [
       ...inventoryEvidence,
       'farm-page-printer-ui-origin-link',

@@ -29,6 +29,17 @@ export async function startCameraMock(
   )
   const sps = nals.find((n) => (n[0]! & 31) === 7)!
   const pps = nals.find((n) => (n[0]! & 31) === 8)!
+  // The fixed Annex B clip has two slices per picture and no AUDs. A first
+  // slice encodes first_mb_in_slice = 0 as the first set bit after the header.
+  const accessUnits: Buffer[][] = [[]]
+  let hasSlice = false
+  for (const nal of nals) {
+    const type = nal[0]! & 31
+    const isSlice = type === 1 || type === 5
+    if (isSlice && hasSlice && nal[1]! & 0x80) accessUnits.push([])
+    accessUnits.at(-1)!.push(nal)
+    hasSlice ||= isSlice
+  }
   const token = options.token ?? 'camera-token'
   const state = { stall: false, disconnect: false }
   const sockets = new Set<Socket>()
@@ -39,6 +50,7 @@ export async function startCameraMock(
     socket.once('close', () => sockets.delete(socket))
     let buffer = ''
     let sequence = 0
+    let unitIndex = 0
     let timestamp = 0
     let timer: ReturnType<typeof setInterval> | undefined
     socket.once('close', () => {
@@ -57,13 +69,17 @@ export async function startCameraMock(
         const cseq = /CSeq:\s*(\d+)/i.exec(request)?.[1] ?? '1'
         let body = ''
         let headers = ''
-        if (method === 'DESCRIBE') {
-          body = `v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=Mock camera\r\nt=0 0\r\nm=video 0 RTP/AVP 96\r\na=rtpmap:96 H264/90000\r\na=fmtp:96 packetization-mode=1;profile-level-id=${sps.subarray(1, 4).toString('hex')};sprop-parameter-sets=${sps.toString('base64')},${pps.toString('base64')}\r\na=control:trackID=0\r\n`
+        if (method === 'OPTIONS') {
+          headers =
+            'Public: OPTIONS, DESCRIBE, SETUP, PLAY, GET_PARAMETER, TEARDOWN\r\n'
+        } else if (method === 'DESCRIBE') {
+          body = `v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=Mock camera\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\na=control:*\r\nm=video 0 RTP/AVP 96\r\na=rtpmap:96 H264/90000\r\na=fmtp:96 packetization-mode=1;profile-level-id=${sps.subarray(1, 4).toString('hex')};sprop-parameter-sets=${sps.toString('base64')},${pps.toString('base64')}\r\na=control:trackID=0\r\n`
           headers = `Content-Type: application/sdp\r\nContent-Length: ${Buffer.byteLength(body)}\r\n`
         } else if (method === 'SETUP')
           headers =
             'Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\nSession: mock\r\n'
-        else if (method === 'PLAY') headers = 'Session: mock\r\n'
+        else if (['PLAY', 'GET_PARAMETER', 'TEARDOWN'].includes(method ?? ''))
+          headers = 'Session: mock\r\n'
         else {
           socket.write(
             `RTSP/1.0 405 Method Not Allowed\r\nCSeq: ${cseq}\r\n\r\n`,
@@ -80,7 +96,9 @@ export async function startCameraMock(
               return
             }
             if (state.stall) return
-            for (const nal of nals) {
+            const accessUnit = accessUnits[unitIndex]!
+            unitIndex = (unitIndex + 1) % accessUnits.length
+            for (const [nalIndex, nal] of accessUnit.entries()) {
               const fragments: Buffer[] = []
               if (nal.length <= 1200) fragments.push(nal)
               else
@@ -101,7 +119,12 @@ export async function startCameraMock(
               for (const [index, payload] of fragments.entries()) {
                 const rtp = Buffer.alloc(12)
                 rtp[0] = 0x80
-                rtp[1] = 96 | (index === fragments.length - 1 ? 0x80 : 0)
+                rtp[1] =
+                  96 |
+                  (nalIndex === accessUnit.length - 1 &&
+                  index === fragments.length - 1
+                    ? 0x80
+                    : 0)
                 rtp.writeUInt16BE(sequence++ & 0xffff, 2)
                 rtp.writeUInt32BE(timestamp >>> 0, 4)
                 rtp.writeUInt32BE(1, 8)
@@ -110,10 +133,10 @@ export async function startCameraMock(
                 head.writeUInt16BE(rtp.length + payload.length, 2)
                 socket.write(Buffer.concat([head, rtp, payload]))
               }
-              timestamp += 18000
             }
+            timestamp += 18000
           }
-          timer = setInterval(send, 1000)
+          timer = setInterval(send, 200)
           timers.add(timer)
           send()
         }

@@ -336,6 +336,25 @@ try {
   await sql.end({ timeout: 3 })
   sql = undefined
 
+  if (
+    scenarios.some(({ env }) => env.SIGNALLING_HTTPS_RTC_PACKAGED === 'yes')
+  ) {
+    assert.equal(
+      await run(
+        'build-connector',
+        'npm',
+        ['run', 'build', '-w', '@open3dfarmmanager/connector'],
+        {
+          cwd: checkout,
+          env: childEnv,
+          timeoutMs: 120000,
+        },
+      ),
+      0,
+      'Connector build failed',
+    )
+  }
+
   // Sealed signalling build layer, entirely inside the private work directory.
   const layer = join(workDir, 'layer')
   const harness = join(checkout, 'scripts/test-signalling-https.ts')

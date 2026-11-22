@@ -14,11 +14,13 @@ const GCODE = Buffer.from('; jornada Bambu\nG28\nG1 X10 Y10 F3000\n')
 const UNKNOWN =
   'Resultado desconhecido. Verifique a impressora antes de tentar novamente.'
 const NOT_SENT = /Nenhum comando foi enviado\./
+const BROWSER_CANCELLED =
+  'Operação cancelada neste navegador. Confira o estado da impressora e seus arquivos antes de tentar novamente.'
 // The page reports a file operation it could not finish (failed session, or
 // cancelled because the live view blinked) with one of these.
 const FILES_UNDONE = [
   'Não foi possível concluir pela conexão direta. Verifique a impressora antes de tentar novamente.',
-  'Operação cancelada neste navegador. Confira o estado da impressora e seus arquivos antes de tentar novamente.',
+  BROWSER_CANCELLED,
 ]
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
@@ -340,13 +342,20 @@ if (journeyEnabled())
         await block.getByLabel('Ventilador').selectOption('part')
         await block.getByLabel('Velocidade em %').fill('50')
       })
-      await extendedCommand(page, 'Referenciar eixos')
       await extendedCommand(page, 'Definir luz', async (block) => {
         await block.getByLabel('Luz').selectOption('on')
       })
       await extendedCommand(page, 'Definir velocidade', async (block) => {
         await block.getByLabel('Velocidade').selectOption('sport')
       })
+      await lifecycle(
+        page,
+        'Cancelar',
+        'Confirmar cancelamento',
+        'Impressão cancelada. O Connector confirmou o cancelamento.',
+      )
+      expect(simulator().gcodeState).toBe('IDLE')
+      await extendedCommand(page, 'Referenciar eixos')
       // Bambu loads into a named AMS tray (AMS 1, tray 1 is tray 0).
       await filamentCommand(page, 'Carregar filamento', async (section) => {
         await section.getByLabel('Bandeja AMS').selectOption('0')
@@ -364,14 +373,7 @@ if (journeyEnabled())
         expect(
           simulator().requests.map((request) => request.command),
         ).toContain(name)
-      await lifecycle(
-        page,
-        'Cancelar',
-        'Confirmar cancelamento',
-        'Impressão cancelada. O Connector confirmou o cancelamento.',
-      )
-      expect(simulator().gcodeState).toBe('IDLE')
-
+      simulator().control.setFtpsMlsdRejection(502)
       await page.goto(journey.origin + '/arquivos', {
         waitUntil: 'domcontentloaded',
       })
@@ -427,16 +429,25 @@ if (journeyEnabled())
         () => true,
       )
       await expect(fileOption).toHaveCount(1, { timeout: 45_000 })
+      expect(simulator().ftpsListingRequests.slice(-2)).toEqual([
+        'MLSD',
+        'LIST',
+      ])
       // The listing session has ended; start in the next one. The page clears
       // its confirmation whenever the live view blips, so confirm last.
       await controlInbox()
       await page.locator('#files-existing').selectOption(FILE)
       await page.getByRole('checkbox').check()
       await page.getByRole('button', { name: 'Iniciar impressão' }).click()
-      await expect(status).toHaveText(UNKNOWN, { timeout: 60_000 })
-      expect(simulator().requests.map((request) => request.command)).toContain(
-        'project_file',
+      // The live view can close while the browser is waiting for the result.
+      // The simulator must still receive exactly one start request.
+      await expect(status).toHaveText(
+        new RegExp(`^(${[UNKNOWN, BROWSER_CANCELLED].map(escape).join('|')})$`),
+        { timeout: 60_000 },
       )
+      const printRequests = () =>
+        simulator().requests.filter(({ command }) => command === 'project_file')
+      await expect.poll(() => printRequests().length).toBe(1)
 
       const farmRow = await journey.openFarm()
       await expect(farmRow.getByText('Concluído', { exact: true })).toBeVisible(
@@ -447,6 +458,7 @@ if (journeyEnabled())
       await expect(farmRow.getByLabel('Último trabalho')).toContainText(FILE)
       expect(simulator().gcodeState).toBe('FINISH')
       await historyEntry(page, 'Concluído')
+      expect(printRequests()).toHaveLength(1)
       expect(journey.simulatorObservation()).toMatchObject({ failure: false })
     })
   })

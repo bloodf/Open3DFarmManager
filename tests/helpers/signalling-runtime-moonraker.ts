@@ -39,7 +39,7 @@ export async function createRuntimeMoonrakerFixture() {
   let simRequests = 0,
     queued = 0
   let mockInstance: MoonrakerMockInstance | undefined
-  // Farm-page pause row: the acquisition and pause driver use separate sockets.
+  // Farm-page pause row: pause control is configured and a second socket allowed.
   const farmPause = process.env.SIGNALLING_HTTPS_FARM_PAUSE === 'yes'
   const pauseKey = process.env.SIGNALLING_HTTPS_PAUSE_PUBLIC_KEY
   const apiEnvelopeKey = process.env.SIGNALLING_HTTPS_API_ENVELOPE_PUBLIC_KEY

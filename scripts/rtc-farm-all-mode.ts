@@ -275,6 +275,12 @@ export async function runAllAcceptance(checkout: string) {
     })
   }
 
+  deferred.push({
+    suite: 'hardware',
+    row: 'E13.1-owner-hardware-acceptance',
+    detail:
+      'Manual physical-printer checklist in docs/HARDWARE-ACCEPTANCE-CHECKLIST.md',
+  })
   const summary = buildAcceptanceSummary(commit, rows)
   const summaryPath =
     env.RTC_FARM_TEST_ALL_SUMMARY ?? join(evidence, 'summary.json')

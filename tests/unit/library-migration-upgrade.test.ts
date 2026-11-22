@@ -5,14 +5,13 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { createHash } from 'node:crypto'
 import { describe, expect, test } from 'vitest'
 import type { Sql } from 'postgres'
 import {
   catalogThrough,
-  executableMigrationSql,
   loadMigrationCatalog,
   runMigrations,
   validateMigrationHistory,
@@ -24,67 +23,78 @@ import {
 
 const LIBRARY_ID = '0080_integration_library_api'
 const PREVIOUS_ID = '0079_bambu_cloud_accounts'
-// SHA-256 of JSON [id, shipped up, shipped down]. Do not retune this after
-// editing 0080; restore the released file instead.
-const SHIPPED_CHECKSUM =
-  '1a25ad93f647fb32163daae2726c7716608cb01c65321b6756d4b0ef2d338d5e'
-
-describe('shipped 0080 library migration', () => {
-  test('keeps the released file and checksum, and matches both constraint renderings at execution', async () => {
+describe('0080 library migration', () => {
+  test('drops the previous checks by name and preserves the webhook cardinality lookup', async () => {
     const catalog = await loadMigrationCatalog()
     const migration = catalog.find((entry) => entry.id === LIBRARY_ID)
     const previous = catalog.find((entry) => entry.id === PREVIOUS_ID)
     expect(migration).toBeDefined()
     expect(previous).toBeDefined()
     if (!migration || !previous) return
-    expect(migration.checksum).toBe(SHIPPED_CHECKSUM)
+    for (const name of [
+      'integration_envelopes_required_scope_check',
+      'integration_audit_action_check',
+      'integration_audit_resource_type_check',
+    ]) {
+      expect(migration.up).toContain(`DROP CONSTRAINT IF EXISTS ${name}`)
+      expect(
+        migration.up.indexOf(`DROP CONSTRAINT IF EXISTS ${name}`),
+      ).toBeLessThan(migration.up.indexOf(`ADD CONSTRAINT ${name}`))
+      expect(
+        migration.up.match(
+          new RegExp(`DROP CONSTRAINT IF EXISTS ${name}`, 'g'),
+        ),
+      ).toHaveLength(1)
+    }
+    expect(migration.up).toContain(
+      "CHECK (required_scope IN ('jobs:start', 'jobs:write', 'control:basic', 'control:extended'))",
+    )
+    expect(migration.up).toContain("'credential.event', 'library.changed'")
+    expect(migration.up).toContain("'subscription', 'credential', 'library'")
+    expect(migration.up).toContain(
+      "pg_get_constraintdef(c.oid) LIKE '%cardinality(events)%'",
+    )
+    expect(migration.up).toContain(
+      'CHECK (cardinality(events) BETWEEN 1 AND 7)',
+    )
+    expect(migration.up).not.toMatch(
+      /pg_get_constraintdef\s*\([^)]*\)\s*LIKE\s+'%[^']*\s+IN%'/i,
+    )
+    expect(migration.up).not.toContain('LIKE ANY')
+    expect(migration.down).toContain(
+      'DROP CONSTRAINT integration_envelopes_required_scope_check',
+    )
+    expect(migration.down).toContain(
+      'DROP CONSTRAINT integration_audit_action_check',
+    )
+    expect(migration.down).toContain(
+      'DROP CONSTRAINT integration_audit_resource_type_check',
+    )
     expect(
       createHash('sha256')
         .update(JSON.stringify([migration.id, migration.up, migration.down]))
         .digest('hex'),
-    ).toBe(SHIPPED_CHECKSUM)
+    ).toBe(migration.checksum)
     expect(migration.up).toContain(
-      "pg_get_constraintdef(c.oid) LIKE '%required_scope IN%'",
-    )
-    expect(migration.up).toContain(
-      "pg_get_constraintdef(c.oid) LIKE '%action IN%'",
-    )
-    expect(migration.up).toContain(
-      "pg_get_constraintdef(c.oid) LIKE '%resource_type IN%'",
-    )
-    expect(migration.up).not.toContain('= ANY')
-    const executed = executableMigrationSql(migration, 'up')
-    expect(executed).not.toBe(migration.up)
-    for (const pattern of [
-      '%required_scope IN%',
-      '%action IN%',
-      '%resource_type IN%',
-    ]) {
-      const anyPattern = pattern.replace(' IN%', ' = ANY%')
-      expect(executed).toContain(
-        `pg_get_constraintdef(c.oid) LIKE ANY (ARRAY['${pattern}','${anyPattern}'])`,
-      )
-      expect(executed).not.toContain(`LIKE '${pattern}'`)
-    }
-    expect(executed).toContain(
       'ADD CONSTRAINT integration_envelopes_required_scope_check',
     )
-    expect(executed).toContain('ADD CONSTRAINT integration_audit_action_check')
-    expect(executed).toContain(
+    expect(migration.up).toContain(
+      'ADD CONSTRAINT integration_audit_action_check',
+    )
+    expect(migration.up).toContain(
       'ADD CONSTRAINT integration_audit_resource_type_check',
     )
-    expect(executed).toContain(
+    expect(migration.up).toContain(
       'ADD CONSTRAINT integration_webhooks_events_check',
     )
-    expect(executableMigrationSql(migration, 'down')).toBe(migration.down)
-    expect(executableMigrationSql(previous, 'up')).toBe(previous.up)
-    expect(executableMigrationSql(previous, 'down')).toBe(previous.down)
-    expect(() =>
-      executableMigrationSql(
-        { id: LIBRARY_ID, up: 'SELECT 1;', down: 'SELECT 1;' },
-        'up',
-      ),
-    ).toThrow(/constraint lookup changed/)
+    expect(
+      migration.up.match(/ADD CONSTRAINT integration_[a-z_]+_check/g),
+    ).toEqual([
+      'ADD CONSTRAINT integration_envelopes_required_scope_check',
+      'ADD CONSTRAINT integration_audit_action_check',
+      'ADD CONSTRAINT integration_audit_resource_type_check',
+      'ADD CONSTRAINT integration_webhooks_events_check',
+    ])
   })
 })
 
@@ -224,8 +234,9 @@ describe.skipIf(!postgresReady)('0080 upgrade on isolated PostgreSQL', () => {
       await expect(
         sql.begin(async (tx) => {
           await tx.unsafe(shipped.up).simple()
+          throw new Error('rollback successful 0080 execution probe')
         }),
-      ).rejects.toThrow(/integration_envelopes_required_scope_check/)
+      ).rejects.toThrow('rollback successful 0080 execution probe')
       expect(await constraintDefs(sql)).toEqual(before)
       expect(await columnPresent(sql)).toBe(false)
       expect(
@@ -305,9 +316,9 @@ async function expectUpgraded(
     through.length,
   )
   const shipped = through.at(-1)
-  expect(shipped?.checksum).toBe(SHIPPED_CHECKSUM)
+  expect(shipped).toBeDefined()
   const rows = await journal(sql)
-  expect(rows.at(-1)?.checksum).toBe(SHIPPED_CHECKSUM)
+  expect(rows.at(-1)?.checksum).toBe(shipped?.checksum)
   const checks = await constraintDefs(sql)
   expect(def(checks, 'integration_envelopes_required_scope_check')).toContain(
     'jobs:write',

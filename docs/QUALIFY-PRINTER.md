@@ -26,7 +26,7 @@ The tool performs strictly read-only diagnostics:
 | `moonraker` / `klipper` | Moonraker, Klipper (Fluidd, Mainsail) | `7125`       | WebSocket JSON-RPC       | Yes (gcodes root)        | Yes (HTTP snapshot/stream)        |
 | `bambu` / `bambulab`    | Bambu Lab (X1, P1, A1, H2 series)     | `8883`       | MQTTS over TLS           | Yes (Passive FTPS :990)  | Yes (TLS JPEG :6000 / RTSPS :322) |
 | `creality`              | Creality K1/K2, Ender-3 V3/V4         | `9999`       | WebSocket JSON telemetry | N/A (Stock WS)           | Yes (MJPEG :8080)                 |
-| `anycubic`              | Anycubic Kobra 3/4, LAN mode          | `8883`       | MQTTS over TLS           | N/A (LAN MQTT)           | N/A                               |
+| `anycubic`              | Anycubic Kobra 3/4, LAN mode          | `9883`       | MQTTS over TLS           | N/A (LAN MQTT)           | N/A                               |
 | `kobralink`             | Anycubic Kobra X via KobraLink        | `18910`      | HTTP REST bridge         | N/A                      | N/A                               |
 | `kobra-x`               | Anycubic Kobra X, native LAN          | `9883`       | MQTTS + HTTP `/info`     | Yes (native `listLocal`) | Camera URL reachability           |
 
@@ -83,7 +83,9 @@ Credentials may be stored in a JSON file:
 }
 ```
 
-### Anycubic / KobraLink (`anycubic.json`)
+### Anycubic LAN (`anycubic.json`)
+
+The `anycubic` default is `9883`, matching the generic Anycubic LAN connector configuration and its TLS MQTT client. This is a transport default, not evidence that a particular printer supports it; use `--port` for a different LAN broker. Native Kobra X qualification uses the separate `kobra-x` vendor.
 
 ```json
 {
@@ -91,6 +93,19 @@ Credentials may be stored in a JSON file:
   "password": "your-password"
 }
 ```
+
+### KobraLink (`kobralink.json`)
+
+Bridge authentication requires an email and password:
+
+```json
+{
+  "email": "operator@example.com",
+  "password": "your-bridge-password"
+}
+```
+
+Missing credentials and bridge request failures appear in `telemetry.reason` and the unreachable qualification summary. Identity stays empty until the bridge returns printer identity data.
 
 ## JSON Report Structure
 

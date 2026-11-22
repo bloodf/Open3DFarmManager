@@ -678,12 +678,19 @@ test('single-UI result is derived only from manifest-matching run files', async 
     return buildSingleUiResult({ manifest, files })
   }
   const all = SINGLE_UI_REQUIRED.map((check) => line(check))
-  const passing = build([
-    ...all,
-    line('browser_secrets_absent/browser-inspection-complete', false),
-  ])
+  const passing = build(all)
   assert.equal(passing.status, 'pass')
   assert.deepEqual(verifySingleUi(passing), [])
+  const incomplete = build([
+    ...all.filter((entry) => !entry.includes('browser-inspection-complete')),
+    line('browser_secrets_absent/browser-inspection-complete', false),
+  ])
+  assert.equal(incomplete.status, 'fail')
+  assert.ok(
+    verifySingleUi(incomplete).some((problem) =>
+      problem.includes('browser-inspection-complete'),
+    ),
+  )
   // A failed repetition, a missing check or a failed world never passes.
   const failed = build([...all, line(SINGLE_UI_REQUIRED[7], false)])
   assert.equal(failed.status, 'fail')

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { expect } from '@playwright/test'
 import type { ProvisionedSignallingFixture } from './signalling-https-fixture-contract.ts'
+import { visibleWithinReadOnlyDeadline } from './read-only-deadline.ts'
 
 const seed = JSON.parse(
   readFileSync(
@@ -97,15 +98,15 @@ export async function testSimulatorFarmPage(input: {
     // Issue #8: read-only within 10 s of losing the direct connection.
     const closedAt = performance.now()
     await fixture.disconnectSignalling()
-    await expect(
-      row.getByText(
-        'Conexão direta indisponível. Exibindo a última observação.',
-        { exact: true },
-      ),
-    ).toBeVisible({ timeout: 10000 })
-    await input.note(
-      `farm-page-readonly-after-ms:${Math.round(performance.now() - closedAt)}`,
+    const elapsed = await visibleWithinReadOnlyDeadline(closedAt, (timeout) =>
+      expect(
+        row.getByText(
+          'Conexão direta indisponível. Exibindo a última observação.',
+          { exact: true },
+        ),
+      ).toBeVisible({ timeout }),
     )
+    await input.note(`farm-page-readonly-after-ms:${Math.round(elapsed)}`)
     await expect(
       row.getByRole('button', { name: /^Pausar(?: impressão)?$/ }),
     ).toBeDisabled()

@@ -512,6 +512,37 @@ function suite(title: string) {
       })
     })
 
+    test('shows the remaining print time reported over Anycubic LAN', async () => {
+      test.setTimeout(8 * 60_000)
+      await step(async () => {
+        const journey = started()
+        const sim = simulator()
+        const page = journey.ownerPage
+        journey.setTelemetryUpload(false)
+        const remaining = printerRow(page)
+          .getByLabel('Trabalho atual')
+          .getByText('Tempo restante estimado', { exact: true })
+          .locator('xpath=following-sibling::dd[1]')
+        const expectRemaining = (text: string) =>
+          expect(async () => {
+            await live(page)
+            await expect(remaining).toHaveText(text, { timeout: 10_000 })
+            await expect(remaining).toBeVisible()
+          }).toPass({ timeout: 300_000 })
+
+        try {
+          sim.setRemainingMinutes(92)
+          await journey.openFarm(page)
+          await expectRemaining('1 h 32 min')
+          sim.setRemainingMinutes(0)
+          await expectRemaining('0 h 0 min')
+        } finally {
+          sim.setRemainingMinutes(undefined)
+          journey.setTelemetryUpload(true)
+        }
+      })
+    })
+
     for (const extra of EXTENDED) extendedTest(extra)
 
     test('pause, resume and cancel reach the simulator', async () => {

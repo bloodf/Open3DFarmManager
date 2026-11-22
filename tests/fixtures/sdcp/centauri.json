@@ -1,0 +1,16 @@
+{
+  "Id": "aabbcc",
+  "Data": {
+    "MachineName": "Centauri Carbon",
+    "MainboardID": "c001",
+    "FirmwareVersion": "V1.1.46"
+  },
+  "fixtureStatus": {
+    "CurrenStatus": 1,
+    "TempOfNozzle": 212.3,
+    "TempTargetNozzle": 215,
+    "TempOfHotbed": 57.9,
+    "CurrentFanSpeed": { "ModelFan": 58 },
+    "PrintInfo": { "Status": 13, "CurrentLayer": 34, "TotalLayer": 438 }
+  }
+}

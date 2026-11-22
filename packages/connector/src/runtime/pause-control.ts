@@ -1,6 +1,10 @@
 import type { MacroParamMap } from '../moonraker/control-macros.ts'
 import { readPrinterBinding } from '../control/printer-binding.ts'
 import { receiveApiCommand } from './api-command.ts'
+import {
+  decodeApiEnvelopeFrame,
+  encodeApiEnvelopeResultFrame,
+} from '../../farm-protocol/src/api-envelope.ts'
 import { PAUSE_POLICY_HARD_MAXIMUMS } from '../../../farm-protocol/src/pause-capability.ts'
 import {
   controlEffectMatches,
@@ -92,6 +96,28 @@ export const PAUSE_CLOSE_STALL_MS = 10000
 
 function label(reason: string): string {
   return /^[a-zA-Z0-9:_-]{1,80}$/.test(reason) ? reason : 'unclassified'
+}
+
+function refuseApiCommand(
+  frame: Parameters<typeof receiveApiCommand>[1],
+  inbox: Parameters<typeof receiveApiCommand>[2],
+  code: 'printer-busy' | 'not-ready' | 'unsupported',
+) {
+  try {
+    const { envelope } = decodeApiEnvelopeFrame(frame.wire)
+    inbox.report(
+      encodeApiEnvelopeResultFrame({
+        v: 1,
+        t: 'api-envelope.result',
+        cmd_id: envelope.cmd_id,
+        outcome: 'refused',
+        refusal_code: code,
+        at: Date.now(),
+      }),
+    )
+  } catch {
+    // Reporting a refusal must not disrupt inbox processing.
+  }
 }
 
 /**
@@ -390,86 +416,93 @@ async function runAssignmentControl(
         : {}),
       bindingFor: (id) => (id === assignmentId ? printerBinding : undefined),
     })
-    if (trustedKeys)
-      input.apiHandlers?.set(assignmentId, (frame, inbox) => {
-        if (input.signal.aborted || apiWork.size >= 8) return
-        let beforeWrite: ControlObservation | null = null
-        const work = receiveApiCommand(
-          {
-            farmId: credential.farm_id,
-            agentId: credential.agent_id,
-            keys: trustedKeys,
-            journal,
-            clock,
-            driver: router,
-            ...(libraryPrint ? { libraryPrint } : {}),
-            ...(input.libraryLinks ? { libraryLinks: input.libraryLinks } : {}),
-            jobFiles: {
-              directory: join(input.dataDirectory, 'job-file-staging'),
-              targetFor: uploadTargetFor,
-            },
-            printer: (id) => (id === assignmentId ? printerBinding : undefined),
-            observe() {
-              const now = clock.monotonicNow()
-              const maxAge = PAUSE_POLICY_HARD_MAXIMUMS.freshStateMs
-              if (
-                !observation ||
-                observation.receivedMono > now ||
-                now - observation.readyObservedMono > maxAge ||
-                now - observation.printStateObservedMono > maxAge
-              )
-                return null
-              beforeWrite = observation
-              return observation
-            },
-            async confirmEffect(
-              { action, args },
-              { binding, sentMono, signal },
-            ) {
-              const before = beforeWrite
-              if (!before) return false
-              const after = await router.waitForPaused({
-                action: action as ControlAction,
-                args,
-                binding,
-                signal,
-                after: {
-                  connectionGeneration: before.connectionGeneration,
-                  sequence: before.sequence,
-                  sentMono,
-                },
-              })
-              const now = clock.monotonicNow()
-              const maxAge = PAUSE_POLICY_HARD_MAXIMUMS.freshStateMs
-              return (
-                !!after &&
-                after.ready &&
-                after.assignmentId === before.assignmentId &&
-                after.printerKey === before.printerKey &&
-                after.connectionGeneration === before.connectionGeneration &&
-                after.sequence > before.sequence &&
-                after.receivedMono <= now &&
-                after.receivedMono > sentMono &&
-                after.printStateObservedMono > sentMono &&
-                after.readyObservedMono <= after.receivedMono &&
-                after.printStateObservedMono <= after.receivedMono &&
-                now - after.readyObservedMono <= maxAge &&
-                now - after.printStateObservedMono <= maxAge &&
-                (after.effect === undefined ||
-                  now - after.effect.observedMono <= maxAge) &&
-                controlEffectMatches(action, args, after, sentMono)
-              )
-            },
-            ...(input.storageDegraded
-              ? { storageDegraded: input.storageDegraded }
-              : {}),
+    input.apiHandlers?.set(assignmentId, (frame, inbox) => {
+      if (!trustedKeys) {
+        refuseApiCommand(frame, inbox, 'unsupported')
+        return
+      }
+      if (input.signal.aborted) {
+        refuseApiCommand(frame, inbox, 'not-ready')
+        return
+      }
+      if (apiWork.size >= 8) {
+        refuseApiCommand(frame, inbox, 'printer-busy')
+        return
+      }
+      let beforeWrite: ControlObservation | null = null
+      const work = receiveApiCommand(
+        {
+          farmId: credential.farm_id,
+          agentId: credential.agent_id,
+          keys: trustedKeys,
+          journal,
+          clock,
+          driver: router,
+          ...(libraryPrint ? { libraryPrint } : {}),
+          ...(input.libraryLinks ? { libraryLinks: input.libraryLinks } : {}),
+          jobFiles: {
+            directory: join(input.dataDirectory, 'job-file-staging'),
+            targetFor: uploadTargetFor,
           },
-          { ...frame },
-          { ...inbox, signal: AbortSignal.any([input.signal, inbox.signal]) },
-        ).catch(() => {})
-        apiWork.add(work)
-        void work.then(() => apiWork.delete(work))
-      })
+          printer: (id) => (id === assignmentId ? printerBinding : undefined),
+          observe() {
+            const now = clock.monotonicNow()
+            const maxAge = PAUSE_POLICY_HARD_MAXIMUMS.freshStateMs
+            if (
+              !observation ||
+              observation.receivedMono > now ||
+              now - observation.readyObservedMono > maxAge ||
+              now - observation.printStateObservedMono > maxAge
+            )
+              return null
+            beforeWrite = observation
+            return observation
+          },
+          async confirmEffect({ action, args }, { binding, sentMono, signal }) {
+            const before = beforeWrite
+            if (!before) return false
+            const after = await router.waitForPaused({
+              action: action as ControlAction,
+              args,
+              binding,
+              signal,
+              after: {
+                connectionGeneration: before.connectionGeneration,
+                sequence: before.sequence,
+                sentMono,
+              },
+            })
+            const now = clock.monotonicNow()
+            const maxAge = PAUSE_POLICY_HARD_MAXIMUMS.freshStateMs
+            return (
+              !!after &&
+              after.ready &&
+              after.assignmentId === before.assignmentId &&
+              after.printerKey === before.printerKey &&
+              after.connectionGeneration === before.connectionGeneration &&
+              after.sequence > before.sequence &&
+              after.receivedMono <= now &&
+              after.receivedMono > sentMono &&
+              after.printStateObservedMono > sentMono &&
+              after.readyObservedMono <= after.receivedMono &&
+              after.printStateObservedMono <= after.receivedMono &&
+              now - after.readyObservedMono <= maxAge &&
+              now - after.printStateObservedMono <= maxAge &&
+              (after.effect === undefined ||
+                now - after.effect.observedMono <= maxAge) &&
+              controlEffectMatches(action, args, after, sentMono)
+            )
+          },
+          ...(input.storageDegraded
+            ? { storageDegraded: input.storageDegraded }
+            : {}),
+        },
+        { ...frame },
+        { ...inbox, signal: AbortSignal.any([input.signal, inbox.signal]) },
+      ).catch(() => {})
+      apiWork.add(work)
+      void work.then(() => apiWork.delete(work))
+    })
   } catch (error) {
     // Nothing reached the journal yet: release it before failing.
     input.onMacroParams?.(() => undefined)

@@ -1,6 +1,6 @@
 import { createError, defineEventHandler, getRouterParam } from 'nuxt/server'
 import { connectorPairing } from '../../../../../services/connector-pairing.ts'
-import { inventoryUuid } from '../../../../../storage/postgres-connector-inventory.ts'
+import { inventoryUuid } from '../../../../../utils/inventory-uuid.ts'
 export default defineEventHandler((event) => {
   const farmId = getRouterParam(event, 'farmId')
   const agentId = getRouterParam(event, 'agentId')

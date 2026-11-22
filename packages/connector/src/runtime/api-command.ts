@@ -38,6 +38,7 @@ import { controlWithinLimits, type ControlLimits } from './control-limits.ts'
 import { fetchJobFile, JobFileError } from './job-file-fetch.ts'
 import { supportsFileUpload, type FileUploadTarget } from './file-upload.ts'
 import type { createLibraryPrintStarter } from './library-print-start.ts'
+import { watchApiJob } from './api-job-lifecycle.ts'
 import type { LibraryJobLinks } from './library-job-links.ts'
 
 /** A grant as last confirmed by the server; `freshness` bounds how long it is trusted offline. */
@@ -125,9 +126,10 @@ export function createApiCommandRunner(config: {
   })
   function send(
     envelope: ApiEnvelopeV1,
-    outcome: 'refused' | 'completed' | 'started',
+    outcome: 'refused' | 'completed' | 'started' | 'cancelled' | 'failed',
     code?: ApiEnvelopeRefusalCode,
     detail?: string,
+    endedAt?: number,
   ) {
     try {
       config.report(
@@ -138,7 +140,10 @@ export function createApiCommandRunner(config: {
           outcome,
           ...(code ? { refusal_code: code } : {}),
           ...(detail ? { detail } : {}),
-          at: config.clock.wallNow(),
+          // PostgreSQL identity IDs have no leading zero. The Farm resolves
+          // this timestamp reference against the telemetry history row.
+          ...(endedAt === undefined ? {} : { history_entry_id: `0${endedAt}` }),
+          at: endedAt ?? config.clock.wallNow(),
         }),
       )
     } catch {
@@ -352,6 +357,7 @@ export function createApiCommandRunner(config: {
     let confirmed = true
     let threw = false
     let prepared = false
+    let jobWatch: ReturnType<typeof watchApiJob> | undefined
     const deadline = AbortSignal.timeout(
       Math.max(
         1,
@@ -505,7 +511,17 @@ export function createApiCommandRunner(config: {
           directory: config.jobFiles.directory,
           signal,
           authorize,
-          start: () => executeDriver(),
+          start: (filename) =>
+            executeDriver(request, (at) => {
+              if (mapping && target.backend === 'moonraker')
+                jobWatch = watchApiJob(
+                  mapping.printer_key,
+                  filename,
+                  at,
+                  sentMono,
+                  config.signal,
+                )
+            }),
           ...(config.jobFiles.ca ? { ca: config.jobFiles.ca } : {}),
         })
       } else await executeDriver()
@@ -536,6 +552,8 @@ export function createApiCommandRunner(config: {
         threw = true
       }
     }
+    if (threw || signal.aborted || !acknowledged || !confirmed)
+      jobWatch?.dispose()
     if (attempted && !guardCalled) {
       finishCommand(
         config.journal,
@@ -567,9 +585,16 @@ export function createApiCommandRunner(config: {
       )
       return { kind: 'outcome-unknown' }
     }
-    if (!finishCommand(config.journal, receipt, 'applied', 'rpc-acknowledged'))
+    if (
+      !finishCommand(config.journal, receipt, 'applied', 'rpc-acknowledged')
+    ) {
+      jobWatch?.dispose()
       return { kind: 'outcome-unknown' }
+    }
     send(envelope, envelope.kind === 'job' ? 'started' : 'completed')
+    jobWatch?.confirmed((job) =>
+      send(envelope, job.outcome, undefined, undefined, job.endedAt),
+    )
     return { kind: 'completed' }
   }
 }

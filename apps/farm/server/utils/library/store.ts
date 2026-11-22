@@ -17,7 +17,7 @@ import {
   type StorageMode,
   type StorageUsage,
 } from './quota.ts'
-import { DEFAULT_RETENTION_DAYS } from './retention.ts'
+import { DEFAULT_RETENTION_DAYS, lockLibraryBlob } from './retention.ts'
 
 export { DEFAULT_QUOTA_BYTES } from './quota.ts'
 export { DEFAULT_RETENTION_DAYS }
@@ -387,6 +387,7 @@ export class PostgresLibrary {
         }
         // Serialise concurrent uploads of one farm so item numbers and the quota stay exact.
         await tx`SELECT pg_advisory_xact_lock(hashtextextended(${'library:' + farm}, 0))`
+        await lockLibraryBlob(tx as unknown as Sql, v.sha256)
 
         let item: LibraryItem | undefined
         if (v.itemId !== undefined) {

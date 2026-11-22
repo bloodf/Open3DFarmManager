@@ -61,8 +61,16 @@ describe('integration token limiter', () => {
     let now = 0
     const limits = new IntegrationLimits(() => now)
     for (let index = 0; index < 10_000; index++)
-      limits.take(`client-${index}`, 30)
-    now = 1
+      for (let attempt = 0; attempt < 30; attempt++)
+        limits.take(`client-${index}`, 30)
     expect(limits.take('new-client', 30).allowed).toBe(true)
+    expect(limits.take('client-0', 30)).toMatchObject({
+      allowed: true,
+      remaining: 29,
+    })
+    expect(limits.take('client-9999', 30)).toMatchObject({
+      allowed: false,
+      remaining: 0,
+    })
   })
 })

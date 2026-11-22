@@ -93,7 +93,7 @@ function job(args: string[], env = {}) {
       return output
     },
     get exited() {
-      return child.exitCode !== null
+      return child.exitCode !== null || child.signalCode !== null
     },
     finish,
     // Waits for the agent's own output or fixture events, never a fixed
@@ -101,7 +101,7 @@ function job(args: string[], env = {}) {
     // fails at once with the agent's output.
     async until(predicate: () => boolean) {
       while (!predicate()) {
-        if (child.exitCode !== null) {
+        if (child.exitCode !== null || child.signalCode !== null) {
           // Output written just before exit may still be in the pipe.
           await reading
           if (predicate()) return
@@ -113,11 +113,13 @@ function job(args: string[], env = {}) {
       }
     },
     async stop() {
-      if (child.exitCode === null) child.kill('SIGTERM')
+      if (child.exitCode === null && child.signalCode === null)
+        child.kill('SIGTERM')
       return finish()
     },
     async close() {
-      if (child.exitCode === null) child.kill('SIGKILL')
+      if (child.exitCode === null && child.signalCode === null)
+        child.kill('SIGKILL')
       await finish()
     },
   }
@@ -481,6 +483,26 @@ function seedScoped(server: Awaited<ReturnType<typeof fixture>>, now: number) {
     now,
   })
 }
+
+test('predicate waits stop after a signalled child closes', async () => {
+  const child = job(['-e', "process.kill(process.pid, 'SIGKILL')"])
+  let predicate = false
+  const timer = setTimeout(() => {
+    predicate = true
+  }, 100)
+  let result: Awaited<ReturnType<typeof child.finish>> | undefined
+  try {
+    await expect(child.until(() => predicate)).rejects.toThrow(
+      /Agent exited before the fixture condition/,
+    )
+    result = await child.finish()
+  } finally {
+    clearTimeout(timer)
+    await child.close()
+  }
+  if (!result) throw new Error('child wait did not finish')
+  expect(result.code).toBeNull()
+})
 
 test('actual run composes default WSS retries with collection and joins on SIGTERM', async () => {
   const server = await fixture(true)

@@ -7,12 +7,10 @@ changes to live settings or bypassing reviews and branch protection.
 
 ## GitHub Actions
 
-`Checks` and `Simulator` run only through `workflow_dispatch`. Their jobs, security
-restrictions, permissions, concurrency cancellation, and timeouts remain intact.
-Pushes and pull requests no longer start their dependency installs, development
-tests, builds, browser tests, Docker builds, or simulators automatically after this
-policy reaches the relevant branch. Older branches retain their old triggers until
-updated. Existing queued or running jobs require separate live containment.
+`Checks` runs on pull requests and pushes to `main`; its E2E job remains available
+only through `workflow_dispatch`. `Simulator` also remains dispatch-only. Their
+security restrictions, permissions, concurrency cancellation, and timeouts remain
+intact.
 
 Local lint, affected unit tests, security regression coverage, and objective review
 of the exact proposed revision remain required. Use the repository's existing local

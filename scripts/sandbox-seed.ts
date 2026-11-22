@@ -6,17 +6,29 @@ import { IntegrationAppsService } from '../apps/farm/server/services/integration
 import { PostgresIntegrationApps } from '../apps/farm/server/storage/integration-apps-postgres.ts'
 import { loadOrCreateIdentity } from '../packages/connector/src/identity/store.ts'
 import { syntheticBambuCertificate } from '../infra/sandbox/bambu-synthetic-identity.ts'
+import { API_ENVELOPE_ISSUER } from '../packages/farm-protocol/src/api-envelope.ts'
+import {
+  encodeTrustedKeySetFrame,
+  signTrustedKeySet,
+} from '../packages/farm-protocol/src/trusted-keys.ts'
 import {
   enrollConnector,
   ENROLLMENT,
 } from '../tests/helpers/connector-enrollment.ts'
 import { loadMigrationCatalog, runMigrations } from './db/migrations.ts'
 
-const origin = 'https://app:3000'
-const moonraker = 'http://klipper:7125'
 const printerKeys = ['sandbox-klipper', 'sandbox-bambu']
 
-export async function seedSandbox(admin: Sql, databaseUrl: URL, state: string) {
+export async function seedSandbox(
+  admin: Sql,
+  databaseUrl: URL,
+  state: string,
+  options: { origin?: string; moonraker?: string; local?: boolean } = {},
+) {
+  const origin = options.origin ?? 'https://app:3000'
+  const moonraker = options.moonraker ?? 'http://klipper:7125'
+  const sandboxPath = (name: string) =>
+    options.local ? join(state, name) : `/sandbox/${name}`
   const write = (name: string, value: object | string) =>
     writeFile(
       join(state, name),
@@ -30,6 +42,9 @@ export async function seedSandbox(admin: Sql, databaseUrl: URL, state: string) {
     sandbox_owner: 'farm_printer_ownership',
     sandbox_telemetry: 'farm_connector_telemetry_writer',
     sandbox_integrations: 'farm_integration_apps',
+    sandbox_auth: 'farm_password_auth',
+    sandbox_signal: 'farm_signalling_reader',
+    sandbox_signal_proof: 'farm_connector_credential_acceptor',
     sandbox_jobs: undefined,
     sandbox_verify: undefined,
   }
@@ -92,7 +107,15 @@ export async function seedSandbox(admin: Sql, databaseUrl: URL, state: string) {
     const grant = await api.createGrant(owner!.account_id, {
       appId: app.id,
       farmId: enrolled.farmId,
-      scopes: ['printers:read', 'inventory:read'],
+      scopes: [
+        'printers:read',
+        'inventory:read',
+        'files:read',
+        'jobs:read',
+        'jobs:start',
+        'control:basic',
+        'control:extended',
+      ],
     })
     if (typeof grant !== 'object') throw new Error(grant)
     const issued = await api.issueCredential(owner!.account_id, app.id)
@@ -104,6 +127,44 @@ export async function seedSandbox(admin: Sql, databaseUrl: URL, state: string) {
       agent_id: enrolled.agentId,
       printer_key: printerKeys[index],
     })
+    const publicKeySpki = Buffer.from(
+      await crypto.subtle.exportKey('spki', envelopeKeys.publicKey),
+    ).toString('base64url')
+    const signer = await crypto.subtle.importKey(
+      'pkcs8',
+      Buffer.from(envelopeSigningKey, 'base64url'),
+      'Ed25519',
+      false,
+      ['sign'],
+    )
+    const keySet = await signTrustedKeySet(
+      {
+        v: 1,
+        purpose: 'trusted-key-set',
+        farm_id: enrolled.farmId,
+        version: 1,
+        issued_at: Date.now(),
+        issuer: API_ENVELOPE_ISSUER,
+        kid: envelopeKid,
+        issuer_keys: [
+          {
+            issuer: API_ENVELOPE_ISSUER,
+            kid: envelopeKid,
+            public_key_spki: publicKeySpki,
+          },
+        ],
+        browser_keys: [],
+      },
+      signer,
+    )
+    await write(
+      'connector-data/trusted-keys.json',
+      encodeTrustedKeySetFrame({
+        v: 1,
+        t: 'trusted-keys.set',
+        key_set: keySet,
+      }),
+    )
     await write('runtime.json', {
       version: 3,
       collection: {
@@ -118,8 +179,11 @@ export async function seedSandbox(admin: Sql, databaseUrl: URL, state: string) {
               host: '127.0.0.1',
               port: 9999,
               serial: 'SYNTHETIC',
+              control: true,
+              model: 'synthetic',
+              ftpsPort: 9998,
               allowedEndpoints: [{ host: '127.0.0.1', port: 9999 }],
-              credentialFile: '/sandbox/bambu-credential.json',
+              credentialFile: sandboxPath('bambu-credential.json'),
               pinSha256: new X509Certificate(
                 syntheticBambuCertificate,
               ).fingerprint256
@@ -133,6 +197,29 @@ export async function seedSandbox(admin: Sql, databaseUrl: URL, state: string) {
         { ...assignment(0), moonraker_origin: moonraker },
         assignment(1),
       ],
+      signalling: {
+        endpoint:
+          origin.replace(/^https:/, 'wss:') + '/api/signalling/connector',
+        origin,
+        audience: ENROLLMENT.audience,
+      },
+      pause: {
+        version: 1,
+        issuers: [
+          { issuer: API_ENVELOPE_ISSUER, kid: envelopeKid, publicKeySpki },
+        ],
+        control: {
+          assignmentIds: enrolled.assignments.map((item) => item.assignmentId),
+        },
+        signalling: {
+          endpoint:
+            origin.replace(/^https:/, 'wss:') +
+            '/api/signalling/pause-connector',
+          origin,
+          audience: 'open3dfarmmanager:pause',
+          credentialAudience: ENROLLMENT.audience,
+        },
+      },
       telemetry: {
         endpoint: origin + '/api/connector/telemetry',
         audience: ENROLLMENT.audience,
@@ -149,8 +236,10 @@ export async function seedSandbox(admin: Sql, databaseUrl: URL, state: string) {
 
     const internalUrl = (role: string) => {
       const url = new URL(urls.get(role)!.href)
-      url.hostname = 'postgres'
-      url.port = '5432'
+      if (!options.local) {
+        url.hostname = 'postgres'
+        url.port = '5432'
+      }
       return url.href
     }
     await write(
@@ -161,15 +250,35 @@ export async function seedSandbox(admin: Sql, databaseUrl: URL, state: string) {
         'NITRO_PORT=3000',
         'NUXT_DATABASE_ENABLED=true',
         'NUXT_DATABASE_MIGRATIONS=verify',
-        'NUXT_DATABASE_MIGRATIONS_DIR=/workspace/infra/db/migrations',
+        'NUXT_DATABASE_MIGRATIONS_DIR=' +
+          (options.local
+            ? join(process.cwd(), 'infra/db/migrations')
+            : '/workspace/infra/db/migrations'),
         'NUXT_DATABASE_DATABASE_URL=' + internalUrl('sandbox_verify'),
+        'NUXT_AUTH_ENABLED=true',
+        'NUXT_AUTH_ORIGIN=' + origin,
+        'NUXT_AUTH_SESSION_SECRET=' + randomBytes(32).toString('hex'),
+        'NUXT_AUTH_DATABASE_URL=' + internalUrl('sandbox_auth'),
+        'NUXT_CONNECTOR_SIGNALLING_ENABLED=true',
+        'NUXT_CONNECTOR_SIGNALLING_ORIGIN=' + origin,
+        'NUXT_CONNECTOR_SIGNALLING_ISSUER=' + ENROLLMENT.issuer,
+        'NUXT_CONNECTOR_SIGNALLING_AUDIENCE=' + ENROLLMENT.audience,
+        'NUXT_CONNECTOR_SIGNALLING_READER_DATABASE_URL=' +
+          internalUrl('sandbox_signal'),
+        'NUXT_CONNECTOR_SIGNALLING_PROOF_DATABASE_URL=' +
+          internalUrl('sandbox_signal_proof'),
+        'NUXT_CONNECTOR_SIGNALLING_PUBLIC_KEY_REGISTRY_PATH=' +
+          sandboxPath('keys.json'),
+        'NUXT_CONNECTOR_SIGNALLING_TOKEN_TTL_SECONDS=' + ENROLLMENT.ttlSeconds,
+        'NUXT_CONNECTOR_SIGNALLING_PROOF_TTL_MS=8000',
         'NUXT_CONNECTOR_TELEMETRY_ENABLED=true',
         'NUXT_CONNECTOR_TELEMETRY_DATABASE_URL=' +
           internalUrl('sandbox_telemetry'),
         'NUXT_CONNECTOR_TELEMETRY_ORIGIN=' + origin,
         'NUXT_CONNECTOR_TELEMETRY_ISSUER=' + ENROLLMENT.issuer,
         'NUXT_CONNECTOR_TELEMETRY_AUDIENCE=' + ENROLLMENT.audience,
-        'NUXT_CONNECTOR_TELEMETRY_PUBLIC_KEY_REGISTRY_PATH=/sandbox/keys.json',
+        'NUXT_CONNECTOR_TELEMETRY_PUBLIC_KEY_REGISTRY_PATH=' +
+          sandboxPath('keys.json'),
         'NUXT_CONNECTOR_TELEMETRY_TOKEN_TTL_SECONDS=' + ENROLLMENT.ttlSeconds,
         'NUXT_CONNECTOR_TELEMETRY_PROOF_TTL_MS=30000',
         'NUXT_CONNECTOR_TELEMETRY_BODY_TIMEOUT_MS=5000',
@@ -179,6 +288,7 @@ export async function seedSandbox(admin: Sql, databaseUrl: URL, state: string) {
         'NUXT_INTEGRATION_AUTH_SIGNING_KEY=' +
           randomBytes(32).toString('base64url'),
         'NUXT_INTEGRATION_JOBS_DATABASE_URL=' + internalUrl('sandbox_jobs'),
+        'NUXT_INTEGRATION_JOBS_ENABLED=true',
         'NUXT_INTEGRATION_JOBS_ENVELOPE_SIGNING_KEY=' + envelopeSigningKey,
         'NUXT_INTEGRATION_JOBS_ENVELOPE_KID=' + envelopeKid,
       ].join('\n') + '\n',

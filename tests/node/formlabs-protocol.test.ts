@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createServer } from 'node:http'
 import { test } from 'node:test'
 import {
   connectFormlabs,
@@ -60,3 +61,41 @@ test('clears the previous reading after denial, redirect or invalid lists', asyn
   }
   assert.deepEqual(sim.requests, Array(8).fill('GET /devices/'))
 })
+
+for (const fault of ['disconnect', 'incomplete'] as const) {
+  test(`clears Formlabs snapshot on ${fault}`, async (t) => {
+    let fail = false
+    const requests: string[] = []
+    const server = createServer((req, res) => {
+      requests.push(`${req.method} ${req.url}`)
+      if (!fail) {
+        res.end(JSON.stringify(fixture))
+        return
+      }
+      if (fault === 'disconnect') {
+        req.socket.destroy()
+        return
+      }
+      res.writeHead(200, { 'Content-Length': '1000' })
+      res.write('{')
+      res.socket?.destroy()
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    t.after(
+      () =>
+        new Promise<void>((resolve, reject) =>
+          server.close((err) => (err ? reject(err) : resolve())),
+        ),
+    )
+    const adapter = connectFormlabs({
+      host: '127.0.0.1',
+      port: (server.address() as { port: number }).port,
+      timeoutMs: 500,
+    })
+    await adapter.refresh()
+    fail = true
+    await assert.rejects(adapter.refresh(), TypeError)
+    assert.equal(adapter.snapshot(), undefined)
+    assert.deepEqual(requests, ['GET /devices/', 'GET /devices/'])
+  })
+}

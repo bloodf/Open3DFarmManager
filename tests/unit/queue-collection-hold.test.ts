@@ -168,7 +168,7 @@ describe('queue collection hold', () => {
     await hold.run('start_print')
     // The previous run is still reported until the new one ends.
     journal.finished('printer-a', 500)
-    expect(journal.blocked('printer-a')).toBe(false)
+    expect(journal.awaiting('printer-a')).toEqual([])
     journal.finished('printer-a', 2_000)
     expect(journal.blocked('printer-a')).toBe(true)
   })
@@ -182,7 +182,6 @@ describe('queue collection hold', () => {
       printerKey: () => 'printer-a',
       clock: () => 1_000,
     })
-    journal.dispatched('printer-a', 0)
     const result = await driver.execute!(
       'start_print',
       {},
@@ -190,7 +189,7 @@ describe('queue collection hold', () => {
         binding,
         beforeSend() {
           // A completion observed between the check and the send.
-          if (!finishDuringGuard) journal.finished('printer-a', 3_000)
+          if (!finishDuringGuard) journal.complete('printer-a', '3000')
           finishDuringGuard = true
           return true
         },
@@ -207,6 +206,25 @@ describe('queue collection hold', () => {
     // Other actions keep working.
     await closed.run('pause')
     expect(closed.sent).toEqual(['pause'])
+  })
+
+  it('blocks another start while the sent run has no terminal observation', async () => {
+    const journal = openQueueCollectionJournal(journalPath())
+    const hold = held(journal, () => 100)
+    await hold.run('start_print')
+    expect((await refusal(hold.run('start_print'))).refusal).toBe('state')
+    journal.finished('printer-a', 150)
+    expect(journal.awaiting('printer-a')).toEqual(['150'])
+    expect(hold.sent).toEqual(['start_print'])
+  })
+
+  it('does not record a start refused at the send guard', async () => {
+    const journal = openQueueCollectionJournal(journalPath())
+    const hold = held(journal, () => 100)
+    await hold.run('start_print', {}, false)
+    journal.finished('printer-a', 200)
+    expect(journal.blocked('printer-a')).toBe(false)
+    expect(journal.awaiting('printer-a')).toEqual([])
   })
 
   it('refuses a corrupt journal file at open', () => {

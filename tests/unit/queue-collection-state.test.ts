@@ -4,6 +4,8 @@ import {
   awaitsCollection,
   confirmCollection,
   observeCompletedAttempt,
+  observeDispatch,
+  observeFinishedRun,
 } from '../../packages/connector/src/control/queue-collection.ts'
 
 describe('collection attempt state', () => {
@@ -26,4 +28,11 @@ describe('collection attempt state', () => {
     expect(awaitsCollection(confirmCollection(state, 'run-1'))).toBe(true)
     expect(() => confirmCollection(state, 'unknown')).toThrow()
   })
+})
+
+it('retains the first dispatch when a second is observed before its finish', () => {
+  const state = observeDispatch(observeDispatch({ attempts: [] }, 100), 200)
+  expect(observeFinishedRun(state, 150).attempts).toEqual([
+    { id: '150', status: 'awaiting-collection' },
+  ])
 })

@@ -206,5 +206,5 @@ test('sandbox postgres data is a bind volume under the private state dir', () =>
     'utf8',
   )
   assert.match(script, /join\(state, 'database'\)/)
-  assert.match(script, /rmSync\(databaseDir/)
+  assert.match(script, /rmdirSync\(databaseDir/)
 })

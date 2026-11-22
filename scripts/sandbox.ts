@@ -7,7 +7,7 @@ import {
   openSync,
   closeSync,
   readFileSync,
-  rmSync,
+  rmdirSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
@@ -100,7 +100,7 @@ try {
     if (action === 'down') {
       // The postgres image chowns its data to uid 999, so empty the bind
       // directory from inside a container (after stopping postgres), then
-      // remove it. Runs before `down --volumes`, which would drop the volume.
+      // rmdir it (empty, but unreadable to us). Runs before `down --volumes`, which would drop the volume.
       docker(['stop'])
       docker([
         'run',
@@ -117,7 +117,7 @@ try {
         '-delete',
       ])
       docker(['down', '--volumes'])
-      rmSync(databaseDir, { recursive: true, force: true })
+      rmdirSync(databaseDir)
     } else docker(['stop'])
     if (action === 'down')
       for (const file of ['client.json', 'seed-started']) {

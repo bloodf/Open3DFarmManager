@@ -106,10 +106,15 @@ for run in $(seq 1 "$repeats"); do
     apply_fault
     # The lan namespace must not reach the host gateway on the lan bridge.
     dc exec -T lan-gw iptables -C OUTPUT -d "10.$NETFAULT_OCTET.32.1" -j DROP
-    result=$(dc --profile "$scenario" run --rm -T -e PROBE_BIND="$bind" connector | tail -1)
+    # The topology is already running with the fault applied. Starting
+    # dependencies again can recreate the router and discard those rules.
+    result=$(dc --profile "$scenario" run --no-deps --rm -T -e PROBE_BIND="$bind" connector | tail -1)
     # A crashed probe prints a stack trace, not a JSON object.
     [[ $result == '{'* ]] || { echo 'Probe produced no JSON' >&2; exit 1; }
-      RESULT="$result" SCENARIO="$scenario" BIND="$bind" node "$here/validate-result.mjs"
+    if ! RESULT="$result" SCENARIO="$scenario" BIND="$bind" node "$here/validate-result.mjs"; then
+      printf 'Probe result (%s, %s): %s\n' "$scenario" "$bind" "$result" >&2
+      exit 1
+    fi
     browser=$(dc logs --no-log-prefix browser | grep '"event":"channel"' | tail -1 || true)
     printf '{"scenario":"%s","run":%s,"connector":%s,"browser":%s}\n' \
       "$scenario" "$run" "$result" "${browser:-null}" | tee -a "$out/$scenario.jsonl"

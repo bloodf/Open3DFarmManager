@@ -1,0 +1,39 @@
+{
+  "info": {
+    "result": {
+      "moonraker_version": "v0.8.0",
+      "klippy_connected": true,
+      "klippy_state": "ready"
+    }
+  },
+  "state": {
+    "result": {
+      "eventtime": 10.25,
+      "status": {
+        "webhooks": { "state": "ready", "state_message": "Printer is ready" },
+        "print_stats": {
+          "state": "printing",
+          "filename": "fixture.gcode",
+          "filament_used": 123.4
+        },
+        "virtual_sdcard": { "progress": 0.25 },
+        "extruder": { "temperature": 205.1, "target": 210 },
+        "heater_bed": { "temperature": 59.8, "target": 60 },
+        "fan": { "speed": 0.5 }
+      }
+    }
+  },
+  "history": {
+    "result": {
+      "count": 1,
+      "jobs": [
+        {
+          "job_id": "000001",
+          "filename": "older.gcode",
+          "status": "completed",
+          "filament_used": 164
+        }
+      ]
+    }
+  }
+}

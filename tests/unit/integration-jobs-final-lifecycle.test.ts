@@ -8,7 +8,10 @@ import { join } from 'node:path'
 import type { Sql } from 'postgres'
 import { expect, test } from 'vitest'
 import { listIntegrationJobs } from '../../apps/farm/server/utils/integration-read.ts'
-import { PostgresIntegrationJobDelivery } from '../../apps/farm/server/storage/integration-jobs-history.ts'
+import {
+  integrationHistoryJobIds,
+  PostgresIntegrationJobDelivery,
+} from '../../apps/farm/server/storage/integration-jobs-history.ts'
 import { startMoonrakerMock } from '../../packages/sim-tools/src/mocks/moonraker-mock.ts'
 import {
   API_ENVELOPE_ISSUER,
@@ -24,6 +27,7 @@ import {
   openCommandJournal,
 } from '../../packages/connector/src/control/command-journal.ts'
 import { createPrinterBindingRegistry } from '../../packages/connector/src/control/printer-binding.ts'
+import { openApiJobLifecycle } from '../../packages/connector/src/runtime/api-job-lifecycle.ts'
 import { createApiCommandRunner } from '../../packages/connector/src/runtime/api-command.ts'
 import {
   collectIntoQueue,
@@ -66,11 +70,17 @@ test.each([
     const queue = new TelemetryQueue(join(directory, 'queue'), Date.now())
     const journal = openCommandJournal({ directory, clock: Date.now })
     const abort = new AbortController()
+    const inbox = new AbortController()
+    const jobJournal = join(directory, 'api-jobs.json')
+    let apiJobs = openApiJobLifecycle({ path: jobJournal })
     let observation: RawPrinterObservation | undefined
     const diagnostics: Diagnostic[] = []
     const printerKey = 'api-job-fixture'
     const collect = collectIntoQueue({
       queue,
+      get apiJobs() {
+        return apiJobs
+      },
       signal: abort.signal,
       config: {
         version: 1,
@@ -126,7 +136,11 @@ test.each([
         moonraker_origin: mock.origin,
       })
       const reports: ReturnType<typeof decodeApiEnvelopeResultFrame>[] = []
-      const runner = createApiCommandRunner({
+      const report = async (wire: string) => {
+        reports.push(decodeApiEnvelopeResultFrame(wire))
+      }
+      const detach = apiJobs.attach(report)
+      const runnerConfig: Parameters<typeof createApiCommandRunner>[0] = {
         farmId,
         agentId,
         keys: { issuer: () => issuer.publicKey },
@@ -141,7 +155,8 @@ test.each([
           freshness: authority.freshness,
         },
         journal,
-        signal: abort.signal,
+        signal: inbox.signal,
+        apiJobs,
         clock,
         printer: () => binding,
         observe: () =>
@@ -173,7 +188,8 @@ test.each([
           ca: cert,
           targetFor: () => ({ backend: 'moonraker', origin: mock.origin }),
         },
-      })
+      }
+      let runner = createApiCommandRunner(runnerConfig)
       const envelope = await signApiEnvelope(
         {
           v: 1,
@@ -214,6 +230,23 @@ test.each([
       await expect
         .poll(() => observation?.status?.print_stats.state)
         .toBe('printing')
+      inbox.abort()
+      detach()
+      if (outcome !== 'uncertain') {
+        const lost = diagnostics.length
+        observation = undefined
+        mock.control.disconnectClients()
+        await expect
+          .poll(() =>
+            diagnostics.slice(lost).some(({ kind }) => kind === 'unavailable'),
+          )
+          .toBe(true)
+        if (outcome === 'cancelled')
+          apiJobs = openApiJobLifecycle({ path: jobJournal })
+        await expect
+          .poll(() => String(observation?.status?.print_stats.state))
+          .toBe('printing')
+      }
       mock.control.update({
         state: terminal,
         progress: terminal === 'complete' ? 1 : 0.5,
@@ -236,11 +269,19 @@ test.each([
         kind: 'unavailable',
         reason: 'invalid-response',
       })
+      runner = createApiCommandRunner({
+        ...runnerConfig,
+        apiJobs,
+        signal: new AbortController().signal,
+      })
       expect((await runner.run(wire)).kind).toBe('dropped')
       if (outcome === 'uncertain') {
         expect(reports).toEqual([])
         return
       }
+      expect(reports.map((report) => report.outcome)).toEqual(['started'])
+      apiJobs.attach(report)
+      await expect.poll(() => reports.length).toBe(2)
       expect(reports.map((report) => report.outcome)).toEqual([
         'started',
         outcome,
@@ -263,7 +304,13 @@ test.each([
       })
       expect(storedDetail).toBe(`telemetry-ended-at:${last?.endedAt}`)
       const list = Object.assign(
-        async (_query: TemplateStringsArray, rows: unknown, prefix: string) => {
+        async (
+          query: TemplateStringsArray,
+          rows: unknown,
+          requestingAppId: string,
+          prefix: string,
+        ) => {
+          expect(query.join('?')).toContain('e.app_id = ?::uuid')
           expect(rows).toEqual([
             {
               id: '17',
@@ -282,7 +329,8 @@ test.each([
               ended: String(last!.endedAt - 1),
             },
           ])
-          return storedDetail === prefix + last?.endedAt
+          return requestingAppId === appId &&
+            storedDetail === prefix + last?.endedAt
             ? [{ id: '17', jobId }]
             : []
         },
@@ -295,12 +343,12 @@ test.each([
         agentId,
         outcome,
         filename: last?.filename,
-        endedAt: last?.endedAt,
+        endedAt: last!.endedAt,
         printDurationSeconds: null,
         totalDurationSeconds: null,
         filamentUsage: null,
       }
-      const page = await listIntegrationJobs(
+      const unscoped = await listIntegrationJobs(
         (async () => [
           historyRow,
           { ...historyRow, id: '16', endedAt: last!.endedAt - 1 },
@@ -315,6 +363,23 @@ test.each([
           cursor: null,
         },
         list,
+      )
+      expect(unscoped.data[0]).toMatchObject({ id: '17', outcome })
+      expect(unscoped.data[0]).not.toHaveProperty('jobId')
+      const rows = [
+        historyRow,
+        { ...historyRow, id: '16', endedAt: last!.endedAt - 1 },
+      ]
+      const ownLinks = await integrationHistoryJobIds(list, rows, appId)
+      const page = {
+        data: unscoped.data.map((entry) => {
+          const jobId = ownLinks.get(entry.id)
+          return jobId ? { ...entry, jobId } : entry
+        }),
+      }
+      expect(ownLinks).toEqual(new Map([['17', jobId]]))
+      expect(await integrationHistoryJobIds(list, rows, randomUUID())).toEqual(
+        new Map(),
       )
       expect(page.data[0]).toMatchObject({ id: '17', jobId, outcome })
       expect(page.data[1]).not.toHaveProperty('jobId')

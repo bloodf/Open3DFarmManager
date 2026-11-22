@@ -1,3 +1,4 @@
+import type { ApiJobLifecycle } from './api-job-lifecycle.ts'
 import type { MoonrakerLinkHealth } from '../moonraker/subscription.ts'
 import { readMoonrakerFirmware } from '../moonraker/firmware.ts'
 import { readMoonrakerMachineProfile } from '../machine-profile/moonraker.ts'
@@ -107,6 +108,7 @@ export async function collectLocalTelemetry(input: {
 
 /** Caller owns the already-open queue and its scope/close lifecycle. */
 export async function collectIntoQueue(input: {
+  apiJobs?: ApiJobLifecycle
   controlsFor?: (
     printerKey: string,
   ) => readonly ExtendedControlAction[] | undefined
@@ -351,6 +353,7 @@ export async function collectIntoQueue(input: {
         limits: config.limits,
         signal,
         onRawObservation(value) {
+          input.apiJobs?.observe(value)
           latest = value
           const at = performance.now()
           if (
@@ -542,6 +545,9 @@ export async function collectIntoQueue(input: {
               ? { ...event, printer: { ...event.printer, machine } }
               : event,
           )
+          if (event.kind === 'unavailable')
+            input.apiJobs?.unavailable(assignment.printerKey)
+          else if (!signal.aborted) input.apiJobs?.record(event.printer)
           if (!history) return
           if (event.kind === 'unavailable') history.reconnecting()
           else history.observe(event.printer.state)

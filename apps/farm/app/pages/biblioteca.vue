@@ -39,7 +39,6 @@ type Settings = {
   retentionDays: number
 }
 
-const route = useRoute()
 const farmId = ref('')
 const items = ref<LibraryItem[]>([])
 const nextCursor = ref<string | null>(null)
@@ -156,7 +155,11 @@ async function start() {
       retry: 0,
       timeout: 15_000,
     })
-    farmId.value = selectedFarm(page.farms, route.query.farm)?.farmId ?? ''
+    farmId.value =
+      selectedFarm(
+        page.farms,
+        new URLSearchParams(window.location.search).get('farm'),
+      )?.farmId ?? ''
     if (!farmId.value) {
       noFarm.value = true
       loading.value = false

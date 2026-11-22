@@ -6,6 +6,7 @@ import {
 } from './temperature-observation.ts'
 import { moonrakerLastJob } from './normalize.ts'
 import { parseMoonrakerSnapshot } from './parse.ts'
+import { hasMoonrakerPendingDispatch } from './pending-dispatch.ts'
 import {
   SNAPMAKER_U1_STATUS_OBJECTS,
   isSnapmakerU1Model,
@@ -156,6 +157,11 @@ export function createMoonrakerSubscription(input: {
   discoverObjects?: boolean
   /** Request job fields and report the last job this subscription watched end. */
   jobFields?: boolean
+  /**
+   * Whether OpenFarm has a pending dispatch for this printer. Defaults to the
+   * registered resolvers (see `pending-dispatch.ts`).
+   */
+  hasPendingDispatch?: () => boolean
   linkHealth?: MoonrakerLinkHealth
   onEvent: (event: MoonrakerEvent) => void
   onRawObservation?: (observation: RawMoonrakerObservation) => void
@@ -201,8 +207,10 @@ export function createMoonrakerSubscription(input: {
     }
   }
   let epoch = 0
-  // Keep the first terminal snapshot or the latest watched finish. Reconnects
-  // must not assign a new end time to terminal status that Moonraker retains.
+  // Keep the latest watched finish, or a first terminal snapshot when OpenFarm
+  // has a pending dispatch on this printer; other unwatched ends come from the
+  // history import. Reconnects must not assign a new end time to terminal
+  // status that Moonraker retains.
   let lastJob: PrinterState['lastJob']
   let hasObservedStatus = false
   async function run() {
@@ -335,7 +343,13 @@ export function createMoonrakerSubscription(input: {
                 ? null
                 : (materials.find((tool) => tool.active)?.slot ?? null),
             )
-        } else if (watchingJob || firstObservation) {
+        } else if (
+          watchingJob ||
+          (firstObservation &&
+            (input.hasPendingDispatch
+              ? input.hasPendingDispatch()
+              : hasMoonrakerPendingDispatch(printerKey)))
+        ) {
           const ended = moonrakerLastJob(
             value.status,
             parsed.printer.observedAt,

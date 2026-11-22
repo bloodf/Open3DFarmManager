@@ -24,6 +24,7 @@ import {
 import { createActiveSpoolAssignmentStore } from '../spoolman/active-assignments.ts'
 import { readSpoolmanAuthorization } from '../spoolman/credential.ts'
 import { declareSnapmakerU1Printers } from '../moonraker/u1-tools.ts'
+import { registerMoonrakerPendingDispatch } from '../moonraker/pending-dispatch.ts'
 import type { Logger } from '../../../shared/src/log.ts'
 import type { TrustedKeyAuthority } from '../auth/trusted-key-store.ts'
 import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
@@ -302,6 +303,14 @@ async function runConnectorAgentOnce(
   const moonrakerPrinters =
     'printers' in config.collection ? config.collection.printers : []
   const withdrawU1 = declareSnapmakerU1Printers(moonrakerPrinters)
+  // A job already finished on connect is reported only when OpenFarm has a
+  // pending dispatch on that printer; otherwise the history import owns it.
+  const rememberedStarts = new Map<string, number>()
+  const withdrawPendingDispatch = registerMoonrakerPendingDispatch(
+    (printerKey) =>
+      rememberedStarts.has(printerKey) ||
+      collection.read(printerKey).dispatchedAt !== undefined,
+  )
   // Filament run accounting (#664): only with a configured Spoolman. Every
   // run this process watched finish is journaled once; debits are never
   // retried. An unreadable journal disables accounting, never collection.
@@ -382,7 +391,13 @@ async function runConnectorAgentOnce(
       logger.warn('filament-run-unavailable', { error })
     }
   const libraryLinks = {
-    remember: jobLinks.remember,
+    remember(...args: Parameters<typeof jobLinks.remember>) {
+      rememberedStarts.delete(args[0])
+      rememberedStarts.set(args[0], args[2] ?? Date.now())
+      while (rememberedStarts.size > 64)
+        rememberedStarts.delete(rememberedStarts.keys().next().value!)
+      jobLinks.remember(...args)
+    },
     attach(printer: Parameters<typeof jobLinks.attach>[0]) {
       printerProfiles.observe(printer)
       try {
@@ -394,12 +409,19 @@ async function runConnectorAgentOnce(
         printer.lastJob &&
         printer.state !== 'printing' &&
         printer.state !== 'paused'
-      )
+      ) {
+        // A previous job's repeated end never consumes a newer start.
+        if (
+          printer.lastJob.endedAt >=
+          (rememberedStarts.get(printer.printerKey) ?? Infinity)
+        )
+          rememberedStarts.delete(printer.printerKey)
         try {
           collection.finished(printer.printerKey, printer.lastJob.endedAt)
         } catch {
           // The journal fails closed: starts are refused until it recovers.
         }
+      }
       return jobLinks.attach(printer)
     },
   }
@@ -993,6 +1015,7 @@ async function runConnectorAgentOnce(
     await Promise.all(tasks)
     await filamentRuns?.idle()
     withdrawU1()
+    withdrawPendingDispatch()
     try {
       queue.close()
     } catch (error) {

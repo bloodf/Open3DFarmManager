@@ -12,7 +12,8 @@ export const CrealityBinding = z.strictObject({
     .min(1)
     .max(253)
     .regex(/^[a-zA-Z0-9.:-]+$/),
-  port: z.number().int().min(1).max(65535).optional(),
+  /** Legacy WebSocket port; secure transport is decided at connect time. */
+  port: z.number().int().min(1).max(65535).default(9999),
   transport: z.enum(['ws', 'wss']).optional(),
   httpsPort: z.number().int().min(1).max(65535).optional(),
   caFile: z.string().min(1).max(4096).optional(),
@@ -60,10 +61,7 @@ export function parseCollectorConfig(input: unknown) {
   if (config.printers.length + config.creality.printers.length > 16)
     throw Error('Collector capacity exceeded')
   for (const binding of config.creality.printers) {
-    const endpoint = JSON.stringify([
-      binding.host.toLowerCase(),
-      binding.port ?? 9999,
-    ])
+    const endpoint = JSON.stringify([binding.host.toLowerCase(), binding.port])
     if (keys.has(binding.printerKey) || endpoints.has(endpoint))
       throw Error('Duplicate collector target')
     keys.add(binding.printerKey)

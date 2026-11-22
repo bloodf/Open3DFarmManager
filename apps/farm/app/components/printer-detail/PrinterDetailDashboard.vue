@@ -404,6 +404,12 @@ const heaterReason = computed(
   min-width: 0;
   overflow-wrap: anywhere;
 }
+.printer-detail :deep(dd),
+.printer-detail :deep(output),
+.printer-detail :deep(progress) {
+  font-family: var(--ops-font-mono);
+  font-variant-numeric: tabular-nums;
+}
 .printer-detail__status {
   display: flex;
   flex-wrap: wrap;

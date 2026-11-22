@@ -172,11 +172,24 @@ function dateLabel(time: number) {
           </div>
         </dl>
         <FarmMaterials :materials="row.observation.state.materials" />
+        <p
+          v-if="
+            row.connection !== 'authenticated' ||
+            observationAge(row.observation, liveNow()).stale
+          "
+        >
+          A atribuição de bobina está indisponível sem dados atuais e conexão
+          direta.
+        </p>
         <ActiveSpoolAssign
           v-if="farmId"
           :farm-id="farmId"
           :printer-key="row.assignment.printerKey"
           :slots="activeSpoolSlots(row)"
+          :busy="
+            row.connection !== 'authenticated' ||
+            observationAge(row.observation, liveNow()).stale
+          "
           :moonraker-managed="moonrakerActiveSpool(row)"
         />
         <FarmEnvironment

@@ -92,11 +92,18 @@ describe('spool inventory schema', () => {
 })
 
 describe('tolerant browser parsing', () => {
-  const base = { t: 'snapshot' as const, seq: 1, printers: [] }
+  const printer = {
+    printerKey: 'printer-a',
+    state: 'idle' as const,
+    observedAt: 1,
+    progress: 0,
+  }
+  const base = { t: 'snapshot' as const, seq: 1, printers: [printer] }
   test('drops only an invalid inventory and keeps printers', () => {
     const bad = { ...inventory, spools: [{ ...spool, extra: 1 }] }
     const result = parseStatusMessageTolerant({ ...base, inventory: bad })
     expect(result.success && result.data).toEqual(base)
+    expect(result.success && result.data.printers).toEqual([printer])
     expect(StatusMessage.safeParse({ ...base, inventory: bad }).success).toBe(
       false,
     )

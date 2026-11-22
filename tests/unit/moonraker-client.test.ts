@@ -907,7 +907,7 @@ test('raw complete query has one pending request and <=1s timeout before epoch i
       'raw',
       undefined,
       evidence,
-      { unavailable: 2, deadlineMs: 6000 },
+      { unavailable: 2, deadlineMs: 3500 },
     )
     expect(evidence.completedBy).toBe('unavailable')
     expect(service.rpcs.length).toBe(2)

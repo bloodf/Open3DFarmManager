@@ -91,12 +91,14 @@ function fixture(
   const profiles = new Map<string, Stored>()
   const writes: unknown[][] = []
   const active = [assignmentId, quietId]
+  const allAssignments = [...active, revokedId]
   const rows = (
     id: string | null,
     after: string | null,
     limit: number,
+    includeRevoked = false,
   ): unknown[] =>
-    active
+    (includeRevoked ? allAssignments : active)
       .filter((a) => (id === null || a === id) && (after === null || a > after))
       .slice(0, limit)
       .map((a) => {
@@ -142,7 +144,11 @@ function fixture(
       return role ? [{ role, revoked_at: null }] : []
     }
     if (statement.startsWith('SELECT id FROM farm.printer_assignments'))
-      return args[1] !== undefined && active.includes(String(args[1]))
+      return args[1] !== undefined &&
+        (statement.includes('revoked_at IS NULL')
+          ? active
+          : allAssignments
+        ).includes(String(args[1]))
         ? [{ id: args[1] }]
         : []
     if (statement.includes('FROM farm.printer_assignments a LEFT JOIN')) {
@@ -151,6 +157,7 @@ function fixture(
         (args[1] as string | null) ?? null,
         (args[3] as string | null) ?? null,
         Number(args[5]),
+        !statement.includes('a.revoked_at IS NULL'),
       )
     }
     if (statement.startsWith('INSERT INTO farm.printer_profiles')) {

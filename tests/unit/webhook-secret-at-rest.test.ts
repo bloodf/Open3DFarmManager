@@ -38,10 +38,12 @@ describe('webhook signing secret at rest', () => {
     )
     expect(insert).toBeDefined()
     expect(JSON.stringify(insert)).not.toContain(returnedSecret)
-
-    const sealed = sealWebhookSecret(returnedSecret, master)
-    expect(sealed).not.toContain(returnedSecret)
-    const delivery = openWebhookSecret(sealed, master)
+    expect(String(insert![0])).toContain('signing_secret')
+    const secretBinding = insert!
+      .slice(1)
+      .find((value) => typeof value === 'string' && value.startsWith('O3W1.'))
+    expect(secretBinding).toBeTypeOf('string')
+    const delivery = openWebhookSecret(String(secretBinding), master)
     expect(delivery.secret).toBe(returnedSecret)
     const timestamp = '123'
     const body = '{}'

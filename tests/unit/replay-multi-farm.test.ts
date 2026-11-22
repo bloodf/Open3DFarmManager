@@ -33,13 +33,23 @@ beforeEach(() => {
 it('selects farm B and sends only to its live printer', async () => {
   const farm = ref('B')
   const live = useReplayLive(farm)
-  ready.value = { scope: null, rows: [], keys: {} }
+  ready.value = {
+    scope: { farmId: 'A' },
+    rows: [{ assignment: { printerKey: 'printer-shared' } }],
+    keys: { 'printer-shared': { live: true } },
+  }
   await nextTick()
   expect(selectFarm).toHaveBeenLastCalledWith('B')
+  expect(await live.send('printer-shared', { sha256: 'a'.repeat(64) })).toEqual(
+    {
+      outcome: 'not-sent',
+    },
+  )
+  expect(connectFiles).not.toHaveBeenCalled()
   ready.value = {
     scope: { farmId: 'B' },
     rows: [{ assignment: { printerKey: 'printer-b' } }],
-    keys: {},
+    keys: { 'printer-b': { live: true } },
   }
   index.mockReturnValue(new Map([['printer-b', { live: true }]]))
   expect(live.liveFor('printer-a')).toBeUndefined()

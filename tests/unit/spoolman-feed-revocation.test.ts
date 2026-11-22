@@ -3,6 +3,7 @@ import {
   issueLegacyToken,
   parseLegacyToken,
 } from '../../apps/farm/server/storage/spool-library-credential.ts'
+import { PostgresSpoolLibrary } from '../../apps/farm/server/storage/postgres-spool-library.ts'
 import {
   SpoolFeedBus,
   spoolFeedBus,
@@ -115,15 +116,56 @@ test('revoking a credential closes its open feeds and leaves sibling feeds open'
 
 test('process-wide bus closes feeds when a legacy credential is revoked', async () => {
   const issued = issueLegacyToken()
-  const active = new Map([[issued.credentialId, FARM]])
+  const sibling = issueLegacyToken()
+  const active = new Map([
+    [issued.credentialId, FARM],
+    [sibling.credentialId, FARM],
+  ])
   const hooks = createSpoolFeedHooks({
     storage: async () => mockStorage(active),
     bus: spoolFeedBus,
   })
   const feed = await openFeed(hooks, issued.token, '/api/v1/')
+  const siblingFeed = await openFeed(hooks, sibling.token, '/api/v1/')
   expect(feed.closed).toEqual([])
+  expect(siblingFeed.closed).toEqual([])
 
-  // Same call site postgres revoke uses after a successful tombstone write.
-  spoolFeedBus.closeCredential(issued.credentialId)
+  const sql = Object.assign(
+    async (parts: TemplateStringsArray) => {
+      const statement = parts.join('?')
+      if (statement.includes('FROM farm.session_accounts'))
+        return [{ id: 'account', sessionVersion: 0, disabled: false }]
+      if (statement.includes('FROM farm.account_sessions'))
+        return [
+          {
+            id: 'session',
+            accountId: 'account',
+            accountVersion: 0,
+            createdAt: 0,
+            lastSeenAt: 10,
+            absoluteExpiresAt: 1000,
+            revokedAt: null,
+          },
+        ]
+      if (statement.includes('FROM farm.memberships'))
+        return [{ role: 'owner', revoked_at: null }]
+      if (statement.includes('UPDATE farm.spool_library_credentials'))
+        return [{ id: issued.credentialId }]
+      return []
+    },
+    { begin: async (work: (tx: unknown) => unknown) => work(sql) },
+  )
+  const storage = new PostgresSpoolLibrary(sql as never, () => 20)
+  expect(
+    await storage.revokeLegacyCredential({
+      credentialId: issued.credentialId,
+      farmId: FARM,
+      sessionRecordId: 'session',
+      policy: { idleTimeoutMs: 60_000 },
+    }),
+  ).toEqual({ ok: true, value: true })
   expect(feed.closed).toEqual([{ code: 4401, reason: 'Unauthorized' }])
+  expect(siblingFeed.closed).toEqual([])
+  spoolFeedBus.closeCredential(sibling.credentialId)
+  expect(spoolFeedBus.hasSubscribers(FARM)).toBe(false)
 })

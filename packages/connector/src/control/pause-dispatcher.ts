@@ -849,7 +849,11 @@ export function createPauseDispatcher(config: {
             interrupted('deadline')
             return
           }
-          if (command.action === 'config_write') {
+          // A collection confirmation is a local journal write: no printer effect to observe.
+          if (
+            command.action === 'config_write' ||
+            command.action === 'confirm_collection'
+          ) {
             finalize('applied', 'applied', 'applied', now.wall)
             return
           }

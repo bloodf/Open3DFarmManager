@@ -31,6 +31,7 @@ export function actionsForControlRole(
         'set_factor',
         'queue_op',
         'start_library_print',
+        'confirm_collection',
       ].includes(action),
   ),
 ): ExtendedControlAction[] {

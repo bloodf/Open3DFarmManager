@@ -28,6 +28,8 @@ export async function startBambuFtpsSim(options: BambuFtpsSimOptions) {
   }
   const sockets = new Set<TLSSocket>()
   const passiveServers = new Set<TlsServer>()
+  const listingRequests: string[] = []
+  let mlsdRejection: 502 | 550 | undefined
 
   function track(socket: TLSSocket) {
     sockets.add(socket)
@@ -80,13 +82,22 @@ export async function startBambuFtpsSim(options: BambuFtpsSimOptions) {
             : '530 invalid credentials\r\n',
         )
       else if (line === 'PASV') openPassive()
-      else if (line === 'MLSD' || line === 'MLSD /timelapse') {
+      else if (/^(MLSD|LIST)( \/timelapse)?$/.test(line)) {
+        listingRequests.push(line)
+        const mlsd = line.startsWith('MLSD')
+        if (mlsd && mlsdRejection !== undefined) {
+          control.write(`${mlsdRejection} Listing command rejected\r\n`)
+          return
+        }
         control.write('150 Opening protected data connection\r\n')
         withDataSocket((socket) => {
-          const listing = [...(line === 'MLSD' ? uploads : timelapse)]
-            .map(
-              ([name, data]) =>
-                `type=file;size=${data.length};modify=20261118000000; ${name}\r\n`,
+          const listing = [
+            ...(line.endsWith(' /timelapse') ? timelapse : uploads),
+          ]
+            .map(([name, data]) =>
+              mlsd
+                ? `type=file;size=${data.length};modify=20261118000000; ${name}\r\n`
+                : `-rw-r--r-- 1 root root ${data.length} Nov 18 2026 ${name}\r\n`,
             )
             .join('')
           socket.end(listing, () => {
@@ -162,6 +173,10 @@ export async function startBambuFtpsSim(options: BambuFtpsSimOptions) {
   let closing: Promise<void> | undefined
   return {
     port: address.port,
+    listingRequests,
+    setMlsdRejection(code: 502 | 550) {
+      mlsdRejection = code
+    },
     close() {
       closing ??= (async () => {
         for (const socket of sockets) socket.destroy()

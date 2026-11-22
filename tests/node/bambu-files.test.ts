@@ -1,10 +1,14 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash, X509Certificate } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import {
   listBambuFiles,
   parseBambuListing,
 } from '../../packages/connector/src/bambu/files.ts'
+import { bambuFtps } from '../../packages/connector/src/bambu/ftps-ops.ts'
+import { parseBambuUnixListing } from '../../packages/connector/src/bambu/listing.ts'
+import { startBambuFtpsSim } from '../../packages/sim-tools/src/bambu-ftps-sim.ts'
 import { fixture } from '../fixtures/bambu-ftps/server.ts'
 
 test('filters and sorts MLSD files and limits results', () => {
@@ -25,6 +29,94 @@ test('filters and sorts MLSD files and limits results', () => {
     size: 10,
     modifiedAt: '2027-01-01T00:00:00.000Z',
   })
+})
+
+test('parses regular Unix LIST files and resolves a recent date across New Year', () => {
+  const listing = [
+    '-rw-r--r-- 1 root root 42 Dec 31 23:59 latest print.gcode.3mf',
+    '-rw-r--r-- 1 root root 6 Feb 29 2024 leap.gcode',
+    '-rw-r--r-- 1 root root 6 Feb 29 2025 invalid.gcode',
+    '-rw-r--r-- 1 root root 6 Dec 31 24:02 invalid.gcode',
+    '-rw-r--r-- 1 root root 6 Dec 31 2025 ../escaped.gcode',
+    '-rw-r--r-- 1 root root 9007199254740992 Dec 31 2025 too-large.gcode',
+    '-rw-r--r-- 1 root root 6 Dec 31 2025 file.txt',
+    'drwxr-xr-x 1 root root 6 Dec 31 2025 dir.gcode',
+    'lrwxr-xr-x 1 root root 6 Dec 31 2025 link -> other.gcode',
+  ].join('\r\n')
+  assert.deepEqual(
+    parseBambuUnixListing(
+      listing,
+      /\.(3mf|gcode)$/i,
+      new Date('2026-01-01T00:00Z'),
+    ),
+    [
+      {
+        name: 'latest print.gcode.3mf',
+        size: 42,
+        modifiedAt: '2025-12-31T23:59:00.000Z',
+      },
+      { name: 'leap.gcode', size: 6, modifiedAt: '2024-02-29T00:00:00.000Z' },
+    ],
+  )
+})
+
+test('lists print and timelapse files over TLS when the Bambu simulator rejects MLSD', async (t) => {
+  const host = '127.0.0.1'
+  const accessCode = 'synthetic'
+  const cert = readFileSync(
+    new URL('../fixtures/bambu-ftps/cert.pem', import.meta.url),
+  )
+  const key = readFileSync(
+    new URL('../fixtures/bambu-ftps/key.pem', import.meta.url),
+  )
+  const simulator = await startBambuFtpsSim({
+    host,
+    port: 0,
+    accessCode,
+    key,
+    cert,
+    uploads: new Map([
+      ['part one.gcode.3mf', Buffer.alloc(42)],
+      ['ignore.mp4', Buffer.alloc(5)],
+    ]),
+    timelapse: new Map([['print.mp4', Buffer.alloc(12)]]),
+  })
+  t.after(() => simulator.close())
+  const options = {
+    host,
+    port: simulator.port,
+    serial: 'TEST',
+    accessCode,
+    trust: {
+      pinSha256: createHash('sha256')
+        .update(new X509Certificate(cert).raw)
+        .digest('hex'),
+    },
+    signal: AbortSignal.timeout(3000),
+  }
+
+  simulator.setMlsdRejection(502)
+  const modifiedAt = '2026-11-18T00:00:00.000Z'
+  assert.deepEqual(await listBambuFiles(options), [
+    { name: 'part one.gcode.3mf', size: 42, modifiedAt },
+  ])
+  assert.deepEqual(
+    await bambuFtps(options, { op: 'list', folder: 'timelapse' }),
+    {
+      op: 'list',
+      files: [{ name: 'print.mp4', size: 12, modifiedAt }],
+    },
+  )
+  assert.deepEqual(simulator.listingRequests, [
+    'MLSD',
+    'LIST',
+    'MLSD /timelapse',
+    'LIST /timelapse',
+  ])
+
+  simulator.setMlsdRejection(550)
+  await assert.rejects(listBambuFiles(options), /FTPS request rejected/)
+  assert.deepEqual(simulator.listingRequests.slice(4), ['MLSD'])
 })
 
 test('rejects invalid credentials against fixture', async () => {
@@ -51,7 +143,6 @@ test('rejects invalid credentials against fixture', async () => {
 
 test('lists files over protected passive FTPS', async () => {
   const { createServer } = await import('node:tls')
-  const { readFileSync } = await import('node:fs')
   const cert = readFileSync(
     new URL('../fixtures/bambu-ftps/cert.pem', import.meta.url),
   )

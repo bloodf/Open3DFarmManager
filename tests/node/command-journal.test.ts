@@ -84,12 +84,36 @@ test('durable claim excludes replay and printer replacement; unresolved survives
       reason: 'assignment-busy',
     })
     assert.equal(markWriteStarted(f.journal, first.receipt), true)
+    const second = openCommandJournal({
+      directory: f.directory,
+      clock: () => 1000,
+    })
+    try {
+      assert.deepEqual(
+        claimCommand(second, {
+          command,
+          printerKey: 'printer-1',
+          wireSha256: 'a'.repeat(64),
+        }),
+        { ok: false, reason: 'replay' },
+      )
+    } finally {
+      closeCommandJournal(second)
+    }
     closeCommandJournal(f.journal)
     const reopened = openCommandJournal({
       directory: f.directory,
       clock: () => 1000,
     })
     try {
+      assert.deepEqual(
+        claimCommand(reopened, {
+          command,
+          printerKey: 'printer-1',
+          wireSha256: 'a'.repeat(64),
+        }),
+        { ok: false, reason: 'replay' },
+      )
       assert.equal(
         readCommandOutcome(reopened, command.cmd_id)?.status,
         'outcome-unknown',
@@ -185,6 +209,9 @@ test('capacity, rate and backwards clock fail closed without evicting active row
       ok: false,
       reason: 'rate-limited',
     })
+    assert.ok(
+      f.claim(f.command({ assignment_id: randomUUID() }), 'printer-2').ok,
+    )
     f.setNow(999)
     assert.deepEqual(f.claim(), { ok: false, reason: 'clock-regressed' })
   } finally {
@@ -194,8 +221,9 @@ test('capacity, rate and backwards clock fail closed without evicting active row
   const j = openCommandJournal({ directory, clock: () => 1000, capacity: 1 })
   const other = fixture()
   try {
+    const original = other.command()
     const a = claimCommand(j, {
-      command: other.command(),
+      command: original,
       printerKey: 'a',
       wireSha256: 'a'.repeat(64),
     })
@@ -207,6 +235,14 @@ test('capacity, rate and backwards clock fail closed without evicting active row
         wireSha256: 'b'.repeat(64),
       }),
       { ok: false, reason: 'capacity' },
+    )
+    assert.deepEqual(
+      claimCommand(j, {
+        command: original,
+        printerKey: 'a',
+        wireSha256: 'a'.repeat(64),
+      }),
+      { ok: false, reason: 'replay' },
     )
   } finally {
     closeCommandJournal(j)

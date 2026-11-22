@@ -25,12 +25,12 @@ import {
   linkSync,
   symlinkSync,
   lstatSync,
+  chmodSync,
 } from 'node:fs'
 import { join } from 'node:path'
 import { availableParallelism, loadavg, tmpdir } from 'node:os'
 import { loadExistingIdentity } from '../../packages/connector/src/identity/store.ts'
 import { TelemetryQueue } from '../../packages/connector/src/cloud/queue.ts'
-import { PersistentReplayStore } from '../../packages/connector/src/auth/replay.ts'
 const scratch = () => mkdtempSync(join(tmpdir(), 'open3d-security-regression-'))
 const state = {
   printerKey: 'synthetic',
@@ -86,18 +86,35 @@ test('queue append rejects a substituted hard link without modifying the target'
     rmSync(dir, { recursive: true, force: true })
   }
 })
-test('dangling SQLite sidecar symlinks are rejected before SQLite opens them', () => {
+test('unsafe journal paths and dangling SQLite sidecars are rejected before SQLite opens them', () => {
+  for (const suffix of ['', '-wal', '-shm']) {
+    const dir = scratch()
+    try {
+      const target = join(dir, 'outside')
+      if (!suffix) writeFileSync(target, 'UNCHANGED')
+      symlinkSync(target, join(dir, `pause-commands.sqlite${suffix}`))
+      assert.throws(
+        () => openCommandJournal({ directory: dir, clock: () => 1000 }),
+        /private regular storage/,
+      )
+      if (suffix) assert.equal(existsSync(target), false)
+      else assert.equal(readFileSync(target, 'utf8'), 'UNCHANGED')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
+})
+
+test('journal rejects a non-private storage directory', () => {
+  if (process.platform === 'win32') return
   const dir = scratch()
-  let store: PersistentReplayStore | undefined
   try {
-    const target = join(dir, 'outside-wal')
-    symlinkSync(target, join(dir, 'replay.sqlite-wal'))
-    assert.throws(() => {
-      store = new PersistentReplayStore(dir)
-    }, /private files/)
-    assert.equal(existsSync(target), false)
+    chmodSync(dir, 0o755)
+    assert.throws(
+      () => openCommandJournal({ directory: dir, clock: () => 1000 }),
+      /private regular storage/,
+    )
   } finally {
-    store?.close()
     rmSync(dir, { recursive: true, force: true })
   }
 })

@@ -111,7 +111,6 @@ test('connector build targets node22 and built CLI runs cleanly without Experime
 
 test('connector SQLite modules suppress only the node:sqlite ExperimentalWarning on stderr', () => {
   const probeScript = `
-    import './packages/connector/src/auth/replay.ts';
     import './packages/connector/src/control/command-journal.ts';
     process.emitWarning('custom non-sqlite warning', 'CustomWarning');
   `

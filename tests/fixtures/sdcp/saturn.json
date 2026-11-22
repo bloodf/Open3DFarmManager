@@ -1,0 +1,22 @@
+{
+  "Id": "aabbdd",
+  "Data": {
+    "MachineName": "Saturn 4 Ultra 16K",
+    "MainboardID": "a004",
+    "MainboardIP": "127.0.0.1",
+    "ProtocolVersion": "V3.0.0",
+    "FirmwareVersion": "V1.5.6",
+    "Name": "Synthetic Saturn"
+  },
+  "fixtureStatus": {
+    "CurrentStatus": [1],
+    "TempOfUVLED": 31.5,
+    "ReleaseFilm": 27,
+    "PrintInfo": {
+      "Status": 5,
+      "CurrentLayer": 20,
+      "TotalLayer": 200,
+      "ErrorNumber": 0
+    }
+  }
+}

@@ -17,7 +17,7 @@ import {
   spawn,
   type ChildProcess,
 } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { appendFileSync, existsSync, rmSync } from 'node:fs'
 import { copyFile, mkdir, readFile, rm, statfs } from 'node:fs/promises'
@@ -86,7 +86,9 @@ const camera = scenarios.some((row) => row.resources?.includes('rtsp-camera'))
   : undefined
 if (
   camera &&
-  (!isAbsolute(camera.helper) ||
+  ((!camera.helper && isDockerSim()) ||
+    (camera.helper && !isAbsolute(camera.helper)) ||
+    (snapshotCamera && !camera.helper) ||
     (!snapshotCamera &&
       (!Number.isInteger(camera.port) ||
         camera.port < 1024 ||
@@ -129,6 +131,10 @@ const ALLOWED_ENV = [
   'LC_ALL',
   'TZ',
   'PLAYWRIGHT_BROWSERS_PATH',
+  'OPENFARM_BROWSER',
+  'OPENFARM_CHROME_PATH',
+  'LD_LIBRARY_PATH',
+  'FONTCONFIG_FILE',
   'XDG_CACHE_HOME',
 ]
 const childEnv: NodeJS.ProcessEnv = Object.fromEntries(
@@ -330,6 +336,25 @@ try {
   await sql.end({ timeout: 3 })
   sql = undefined
 
+  if (
+    scenarios.some(({ env }) => env.SIGNALLING_HTTPS_RTC_PACKAGED === 'yes')
+  ) {
+    assert.equal(
+      await run(
+        'build-connector',
+        'npm',
+        ['run', 'build', '-w', '@open3dfarmmanager/connector'],
+        {
+          cwd: checkout,
+          env: childEnv,
+          timeoutMs: 120000,
+        },
+      ),
+      0,
+      'Connector build failed',
+    )
+  }
+
   // Sealed signalling build layer, entirely inside the private work directory.
   const layer = join(workDir, 'layer')
   const harness = join(checkout, 'scripts/test-signalling-https.ts')
@@ -382,7 +407,36 @@ try {
     'Layer seal failed',
   )
 
-  if (camera)
+  if (camera) {
+    let builtHelperSha256: string | undefined
+    if (!camera.helper) {
+      camera.helper = join(workDir, 'built-rtsp-ingest')
+      assert.equal(
+        await run(
+          'build-rtsp-helper',
+          'go',
+          [
+            'build',
+            '-mod=readonly',
+            '-trimpath',
+            '-buildvcs=false',
+            '-o',
+            camera.helper,
+            './cmd/rtsp-ingest',
+          ],
+          {
+            cwd: join(checkout, 'tools/rtsp-ingest'),
+            env: { ...env, CGO_ENABLED: '0' },
+            timeoutMs: 300000,
+          },
+        ),
+        0,
+        'RTSP helper build failed',
+      )
+      builtHelperSha256 = createHash('sha256')
+        .update(await readFile(camera.helper))
+        .digest('hex')
+    }
     rtsp = snapshotCamera
       ? await startSnapshotCamera({
           workDir,
@@ -395,8 +449,10 @@ try {
           project: name + '-rtsp',
           port: camera.port,
           helper: camera.helper,
+          builtHelperSha256,
           ledger,
         })
+  }
   for (let attempt = 1; attempt <= runs; attempt++)
     for (const scenario of scenarios) {
       const rowLedger = join(workDir, `${attempt}-${scenario.name}.ledger`)

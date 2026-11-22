@@ -973,7 +973,9 @@ if (mode === '--prepare-layer') {
     if (!failed && !failures.length)
       await note(
         farmPause
-          ? 'PASS real generated Nitro HTTPS/WSS farm page signed pause over WebRTC to synthetic Moonraker'
+          ? process.env.SIGNALLING_HTTPS_SIM_PRINTING_PAUSE === 'sv06'
+            ? 'PASS real generated Nitro HTTPS/WSS farm page signed pause over WebRTC to the printing simulator'
+            : 'PASS real generated Nitro HTTPS/WSS farm page signed pause over WebRTC to synthetic Moonraker'
           : pauseRtcFixture
             ? 'PASS real generated Nitro HTTPS pause issuer and authenticated pause RTC fixture'
             : pauseFixture

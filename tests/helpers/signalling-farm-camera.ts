@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
+import { readlinkSync } from 'node:fs'
+import { basename } from 'node:path'
 import { expect, type Locator, type Page } from '@playwright/test'
 
 async function frames(video: Locator) {
@@ -54,10 +56,31 @@ export async function assertCameraPlaying(input: {
   return { region, video }
 }
 
-const helperProcesses = (helperPath: string) =>
-  execFileSync('ps', ['-eo', 'args'], { encoding: 'utf8' })
+function helperProcesses(helperPath: string) {
+  if (process.platform !== 'linux')
+    return execFileSync('ps', ['-eo', 'args'], { encoding: 'utf8' })
+      .split('\n')
+      .filter(
+        (line) => line === helperPath || line.startsWith(helperPath + ' '),
+      ).length
+
+  // Avoid buffering other processes' potentially long command lines.
+  const name = basename(helperPath).slice(0, 15)
+  return execFileSync('ps', ['-eo', 'pid=,comm='], { encoding: 'utf8' })
     .split('\n')
-    .filter((line) => line.startsWith(helperPath)).length
+    .filter((line) => {
+      const [pid, command] = line.trim().split(/\s+/, 2)
+      if (command !== name) return false
+      try {
+        return readlinkSync(`/proc/${pid}/exe`) === helperPath
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code
+        if (code === 'ENOENT' || code === 'ESRCH' || code === 'EACCES')
+          return false
+        throw error
+      }
+    }).length
+}
 
 /**
  * After revocation: no video element in the page holds a stream (the camera

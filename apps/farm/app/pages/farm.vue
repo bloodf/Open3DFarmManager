@@ -38,6 +38,7 @@ import {
   actionDialogTitle,
 } from '../utils/farm-control.ts'
 import { extendedLabel } from '../utils/farm-control-extended.ts'
+import { COLLECTION_DIALOG_DESCRIPTION } from '../components/farm/collection-hold-view.ts'
 import { farmViewErrorText } from '../utils/farm-view-error.ts'
 import Button from '../components/ui/Button.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -494,7 +495,9 @@ function cancelPause(event: Event) {
                   pauseTarget.action as ControlAction,
                   pauseTarget.printerKey,
                 )
-              : 'Confirme o comando para esta impressora. Ele será enviado diretamente ao Connector e não será repetido automaticamente.'
+              : pauseTarget.action === 'confirm_collection'
+                ? COLLECTION_DIALOG_DESCRIPTION
+                : 'Confirme o comando para esta impressora. Ele será enviado diretamente ao Connector e não será repetido automaticamente.'
           }}
         </p>
         <p role="status" aria-live="polite">{{ pauseStatus }}</p>
@@ -509,7 +512,9 @@ function cancelPause(event: Event) {
                 ? actionButtonConfirmationLabel(
                     pauseTarget.action as ControlAction,
                   )
-                : 'Confirmar comando'
+                : pauseTarget.action === 'confirm_collection'
+                  ? 'Confirmar placa livre'
+                  : 'Confirmar comando'
             }}
           </button>
           <button

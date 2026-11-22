@@ -105,6 +105,8 @@ export function selectRtcFarmScenarios(list: string | undefined) {
   if (!names.length || new Set(names).size !== names.length)
     throw new Error('Invalid RTC farm scenario list')
   return names.map((name) => {
+    if (!Object.hasOwn(RTC_FARM_SCENARIOS, name))
+      throw new Error('Unknown RTC farm scenario: ' + name)
     const scenario = RTC_FARM_SCENARIOS[name]
     if (!scenario) throw new Error('Unknown RTC farm scenario: ' + name)
     return { name, ...scenario }

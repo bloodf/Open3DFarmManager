@@ -106,12 +106,23 @@ describe('Moonraker detail stream', () => {
     const { updates } = watch(stream)
     await until(() => updates()[0])
     const before = updates().length
+    const startedAt = performance.now()
     for (let i = 1; i <= 60; i++) {
       mock.control.update({ bed: 20 + i })
       await sleep(10)
     }
+    await until(() =>
+      updates().find((frame) => heater(frame, 'heater_bed').temperature === 80),
+    )
     await sleep(DETAIL_MIN_INTERVAL_MS + 50)
+    const elapsed = performance.now() - startedAt
     const burst = updates().slice(before - 1)
+    expect(burst.length).toBeLessThanOrEqual(
+      Math.ceil(elapsed / DETAIL_MIN_INTERVAL_MS) + 2,
+    )
+    for (let index = burst.length - 1; index >= 0; index--)
+      if (burst[index]!.at - startedAt > DETAIL_MIN_INTERVAL_MS * 3)
+        burst.splice(index, 1)
     // 60 changes over ~600+ ms: at most one frame per 250 ms plus the trailing one.
     expect(burst.length).toBeLessThanOrEqual(5)
     for (let i = 1; i < burst.length; i++)

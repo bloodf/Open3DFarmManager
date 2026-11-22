@@ -808,7 +808,9 @@ export function createPauseDispatcher(config: {
                 binding: printerBinding,
                 beforeSend,
                 transportId: command.transport_id,
-                stillAuthorized: () => !live(),
+                stillAuthorized: () =>
+                  !live() &&
+                  (command.action !== 'start_library_print' || !!eligible()),
                 signal: controller.signal,
               })
             : driver.pauseOnce({
@@ -849,7 +851,11 @@ export function createPauseDispatcher(config: {
             interrupted('deadline')
             return
           }
-          if (command.action === 'config_write') {
+          // A collection confirmation is a local journal write: no printer effect to observe.
+          if (
+            command.action === 'config_write' ||
+            command.action === 'confirm_collection'
+          ) {
             finalize('applied', 'applied', 'applied', now.wall)
             return
           }

@@ -27,6 +27,9 @@ jobs:
           sudo apt-get install -y postgresql-17
       - run: bash scripts/test-local-ci.sh
       - run: npm run check:all
+        env:
+          PAUSE_CONTROL_RTC: yes
+          PAUSE_CONTROL_RTC_CASE: valid
       - run: node packages/connector/dist/cli.js --version
   code-node22:
     runs-on: ubuntu-latest
@@ -46,6 +49,19 @@ jobs:
       - run: bash scripts/test-local-ci.sh
       - run: npm run check:all
       - run: node packages/connector/dist/cli.js --version
+  camera-ffmpeg-qualification:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.22.3'
+      - run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
+      - run: npm ci --ignore-scripts
+      - run: node --test tests/node/anycubic-camera.test.ts tests/node/bambu-camera.test.ts
+        env:
+          OPENFARM_CAMERA_FFMPEG_QUALIFY: '1'
   e2e:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -57,6 +73,16 @@ jobs:
           node-version: '24.22.3'
       - run: npm ci --ignore-scripts
       - run: npx playwright install --with-deps chromium
+      - run: |
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --batch --yes --dearmor -o /usr/share/keyrings/postgresql-pgdg.gpg
+          echo "deb [signed-by=/usr/share/keyrings/postgresql-pgdg.gpg] https://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo "$VERSION_CODENAME")-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update -qq && sudo apt-get install -y postgresql-common
+          sudo sed -i 's/^#\? *create_main_cluster.*/create_main_cluster = false/' /etc/postgresql-common/createcluster.conf
+          sudo apt-get install -y postgresql-17
+      - run: npm run build -w @open3dfarmmanager/farm
+      - run: npm run test:e2e:auth-session
+        env:
+          OPENFARM_BROWSER: bundled
       - run: npm run test:e2e
         env:
           OPENFARM_BROWSER: bundled
@@ -105,3 +131,26 @@ jobs:
           npm run test:postgres 2>&1 | tail -c 200000
         env:
           OPENFARM_PG_BIN: /usr/lib/postgresql/17/bin
+  rtc-authenticated-closures:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.22.3'
+      - run: npm ci --ignore-scripts
+      - name: Install PostgreSQL 17 and Chromium dependencies
+        run: |
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --batch --yes --dearmor -o /usr/share/keyrings/postgresql-pgdg.gpg
+          echo 'deb [signed-by=/usr/share/keyrings/postgresql-pgdg.gpg] https://apt.postgresql.org/pub/repos/apt noble-pgdg main' | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq postgresql-common
+          sudo sed -i 's/^#\? *create_main_cluster.*/create_main_cluster = false/' /etc/postgresql-common/createcluster.conf
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq postgresql-17
+          npx playwright install --with-deps chromium
+      - name: Verify authenticated RTC disconnect and revocation receipts
+        run: node --experimental-strip-types scripts/test-rtc-farm-acceptance.ts
+        env:
+          OPENFARM_PG_BIN: /usr/lib/postgresql/17/bin
+          RTC_FARM_TEST_SCENARIOS: farm-page-disconnect,farm-page-revocation

@@ -93,7 +93,8 @@ function headerViolations(response: ResponseSpec, headers: Headers) {
       out.push(`${name}: documented header is missing`)
       continue
     }
-    const typed = schema.type === 'integer' ? Number(value) : value
+    const typed =
+      schema.type === 'integer' && /^\d+$/.test(value) ? Number(value) : value
     out.push(...validateValue(schema, typed, `header ${name}`))
   }
   return out
@@ -413,6 +414,23 @@ describe('documented headers no handler sends yet', () => {
       withHeader,
       'Retry-After is now sent on 503: remove it from unsentHeaders',
     ).toEqual([])
+  })
+
+  it('rejects blank and hexadecimal integer response headers', () => {
+    const response = {
+      status: '429',
+      description: 'test',
+      content: {},
+      headers: [
+        { name: 'Retry-After', schema: { type: 'integer', minimum: 0 } },
+      ],
+    } as ResponseSpec
+    expect(
+      headerViolations(response, new Headers({ 'Retry-After': '' })),
+    ).not.toEqual([])
+    expect(
+      headerViolations(response, new Headers({ 'Retry-After': '0x10' })),
+    ).not.toEqual([])
   })
 })
 

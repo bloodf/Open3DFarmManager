@@ -205,6 +205,24 @@ async function bounded<T>(promise: Promise<T>): Promise<T> {
   }
 }
 
+function waitFor(check: () => boolean): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let poll: ReturnType<typeof setTimeout> | undefined
+    const deadline = setTimeout(() => finish(Error('Test deadline')), 2000)
+    const finish = (error?: Error) => {
+      clearTimeout(deadline)
+      clearTimeout(poll)
+      if (error) reject(error)
+      else resolve()
+    }
+    const inspect = () => {
+      if (check()) finish()
+      else poll = setTimeout(inspect, 5)
+    }
+    inspect()
+  })
+}
+
 type PairOptions = {
   connectorOnData?: (frame: Readonly<PauseDataFrame>) => void
   browserOnData?: (frame: Readonly<PauseDataFrame>) => void
@@ -508,13 +526,7 @@ test(
         p.browser.sendCommand({ t: 'control.command', wire: command.wire }),
         true,
       )
-      await bounded(
-        new Promise<void>((resolve) => {
-          const check = () =>
-            commands.length ? resolve() : setTimeout(check, 5)
-          check()
-        }),
-      )
+      await waitFor(() => commands.length > 0)
       assert.equal(
         p.browser.sendCommand({ t: 'control.command', wire: command.wire }),
         false,
@@ -568,13 +580,7 @@ test(
         }),
       )
       await peer.activate(f.binding)
-      await bounded(
-        new Promise<void>((resolve) => {
-          const check = () =>
-            peer.diagnostics().proofsReady ? resolve() : setTimeout(check, 5)
-          check()
-        }),
-      )
+      await waitFor(() => peer.diagnostics().proofsReady)
       const command = await buildCommand(f)
       assert.equal(
         peer.sendCommand({ t: 'control.command', wire: command.wire }),

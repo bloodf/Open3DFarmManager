@@ -56,6 +56,13 @@ export function liveReplayIndex(
   return index
 }
 
+export type ReplaySend = (
+  printerKey: string,
+  args: LibraryPrintArgs,
+  selectionCurrent?: () => boolean,
+  versionId?: string,
+) => Promise<ReplayResult>
+
 /** A ready control session, as far as the replay send needs it. */
 export type ReplayControl = {
   issueControlCommand(
@@ -66,14 +73,17 @@ export type ReplayControl = {
   dispose(): Promise<void>
 }
 
-/** Retry only a command that was not sent and has no refusal reason. */
+/** Retry only confirmed-unsent attempts that have no explicit refusal. */
 export async function sendLibraryReplay(
   connect: (
     onState: (state: FarmPauseControlState) => void,
   ) => Promise<ReplayControl>,
   args: LibraryPrintArgs,
+  selectionCurrent: () => boolean = () => true,
 ): Promise<ReplayResult> {
   for (let attempt = 0; attempt < 3; attempt++) {
+    if (!selectionCurrent())
+      return { outcome: 'not-sent', code: 'stale-selection' }
     let code: string | undefined
     let result: ReplayResult = { outcome: 'not-sent' }
     let control: ReplayControl | undefined
@@ -82,10 +92,12 @@ export async function sendLibraryReplay(
         if (state.kind === 'settled' && state.code) code = state.code
       })
     } catch {
-      result = { outcome: 'not-sent', ...(code ? { code } : {}) }
+      if (code) return { outcome: 'not-sent', code }
     }
     if (control) {
       try {
+        if (!selectionCurrent())
+          return { outcome: 'not-sent', code: 'stale-selection' }
         const outcome = await control.issueControlCommand(
           'start_library_print',
           args,
@@ -95,7 +107,7 @@ export async function sendLibraryReplay(
         result = { outcome: 'outcome-unknown' }
       } finally {
         control.close()
-        await control.dispose()
+        await control.dispose().catch(() => {})
       }
     }
     if (result.outcome !== 'not-sent' || result.code || attempt === 2)

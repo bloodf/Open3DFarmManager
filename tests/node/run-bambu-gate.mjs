@@ -353,6 +353,7 @@ async function runTest(image, directory, volume, options, label) {
     '--test-concurrency=1',
     '--test-timeout=120000',
     '--test-force-exit',
+    '--test-reporter=tap',
     ...(options.pattern ? [`--test-name-pattern=${options.pattern}`] : []),
     options.file,
   ]
@@ -390,12 +391,26 @@ async function runTest(image, directory, volume, options, label) {
   ])
   const count = (name) =>
     Number(new RegExp(`^# ${name} (\\d+)`, 'm').exec(result.output)?.[1] ?? NaN)
+  const caseLines = result.output.match(/^\s*(?:ok|not ok) \d+ - .+$/gm) ?? []
+  const executed = caseLines.filter(
+    (line) =>
+      !line.includes(`- ${options.file}`) && !/\s# SKIP(?:\s|$)/.test(line),
+  ).length
+  const pass = count('pass')
+  const fail = count('fail')
+  const validReport =
+    Number.isSafeInteger(executed) &&
+    executed > 0 &&
+    Number.isSafeInteger(pass) &&
+    pass === executed &&
+    Number.isSafeInteger(fail)
   return {
-    passed: result.status === 0,
+    passed:
+      result.status === 0 && validReport && fail === 0 && pass === executed,
     status: result.status,
     seconds: (Date.now() - started) / 1000,
-    pass: count('pass'),
-    fail: count('fail'),
+    pass,
+    fail,
     excerpt:
       result.status === 0
         ? ''

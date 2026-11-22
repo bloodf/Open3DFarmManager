@@ -96,6 +96,10 @@ describe('history adapter', () => {
     const jobs = await readDetailHistory(request, signal)
     expect(jobs).toHaveLength(HISTORY_MAX_ITEMS)
     expect(calls).toHaveLength(HISTORY_MAX_ITEMS / HISTORY_PAGE)
+    expect(calls.map((call) => call.start)).toEqual([0, 64, 128, 192])
+    expect(jobs.map(({ id }) => id)).toEqual(
+      Array.from({ length: HISTORY_MAX_ITEMS }, (_, index) => String(index)),
+    )
     expect(jobs[0]).toEqual({
       id: '0',
       file: 'f0.gcode',

@@ -28,6 +28,7 @@ import {
   pinScript,
 } from './control-outputs.ts'
 import { parseQueueOp, queueSupported } from './control-job-queue.ts'
+import { SNAPMAKER_U1_MARKER, SnapmakerU1CommandRefused } from './u1-marker.ts'
 /**
  * Moonraker extended command builder and capability inspection.
  * Translates extended printer actions into Moonraker JSON-RPC calls.
@@ -150,6 +151,8 @@ export function buildMoonrakerCommand(
   args: Record<string, unknown> = {},
   objects: readonly string[] = [],
 ): MoonrakerRpcCall {
+  if (objects.includes(SNAPMAKER_U1_MARKER))
+    throw new SnapmakerU1CommandRefused(action)
   const keys = (allowed: string[]) => {
     for (const key of Object.keys(args)) {
       if (!allowed.includes(key)) {

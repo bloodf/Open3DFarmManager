@@ -18,8 +18,10 @@ describe('farm-scoped requests', () => {
     const third = guard.start('b')
     farm = 'a'
     expect(third()).toBe(false)
+    const pending = guard.start('a')
+    expect(pending()).toBe(true)
     guard.invalidate()
-    expect(first()).toBe(false)
+    expect(pending()).toBe(false)
   })
   it('selects the requested accessible farm and its role', () => {
     const farms = [

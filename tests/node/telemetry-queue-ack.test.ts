@@ -207,12 +207,34 @@ test('SIGKILL at arbitrary points of the ack path never loses or resurrects reco
       )
       let output = ''
       child.stdout.on('data', (chunk) => (output += chunk))
+      const closed = new Promise<{
+        code: number | null
+        signal: NodeJS.Signals | null
+      }>((resolve, reject) => {
+        child.once('error', reject)
+        child.once('close', (code, signal) => resolve({ code, signal }))
+      })
       const target = 5 + ((round * 13) % 100)
-      while (output.split('\n').length - 1 < target)
-        await new Promise((r) => setTimeout(r, 1))
-      const exited = new Promise((r) => child.once('exit', r))
-      child.kill('SIGKILL')
-      await exited
+      try {
+        while (output.split('\n').length - 1 < target) {
+          const completion = await Promise.race([
+            closed.then((result) => ({ result })),
+            new Promise<{ tick: true }>((resolve) =>
+              setTimeout(() => resolve({ tick: true }), 1),
+            ),
+          ])
+          assert.ok(
+            'tick' in completion,
+            'ack child exited before reporting progress',
+          )
+        }
+        child.kill('SIGKILL')
+        await closed
+      } finally {
+        if (child.exitCode === null && child.signalCode === null)
+          child.kill('SIGKILL')
+        await closed
+      }
       const reported = output.split('\n').filter(Boolean)
       const queue = reopenAfterCrash(dir, 3000)
       try {

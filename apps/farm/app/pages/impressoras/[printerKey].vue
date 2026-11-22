@@ -12,6 +12,7 @@ import { useRoute } from 'vue-router'
 import ConfigEditorPanel from '../../components/printer-detail/ConfigEditorPanel.vue'
 import { vendorDetailCatalog } from '../../utils/compatibility/detail-panels.ts'
 import FileManagerPanel from '../../components/printer-detail/FileManagerPanel.vue'
+import ResinLedgerPanel from '../../components/resin/ResinLedgerPanel.vue'
 import PowerPanel from '../../components/printer-detail/PowerPanel.vue'
 import SystemServicesPanel from '../../components/printer-detail/SystemServicesPanel.vue'
 import WebcamsPanel from '../../components/printer-detail/WebcamsPanel.vue'
@@ -1082,6 +1083,13 @@ watch(
         </ul>
       </template>
     </section>
+
+    <ResinLedgerPanel
+      v-if="row && ready?.scope?.farmId"
+      :key="row.assignment.assignmentId"
+      :farm-id="ready.scope.farmId"
+      :printer-key="row.assignment.printerKey"
+    />
 
     <section
       v-if="row && (playback || transfer.kind !== 'idle')"

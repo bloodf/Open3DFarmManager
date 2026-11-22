@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { ReplaySend } from '../../utils/replay-live.ts'
 import { formatDateTime } from '../../utils/ui-format.ts'
 import { computed, ref, watch } from 'vue'
 import Dialog from '../ui/Dialog.vue'
@@ -29,10 +30,7 @@ const props = defineProps<{
   connectors: readonly { agentId: string }[]
   /** Replay needs a live session: without both props the button is not shown. */
   replayPrinters?: readonly ReplayPrinter[]
-  replaySend?: (
-    printerKey: string,
-    args: LibraryPrintArgs,
-  ) => Promise<ReplayResult>
+  replaySend?: ReplaySend
 }>()
 const emit = defineEmits<{ (e: 'changed'): void }>()
 const open = defineModel<boolean>({ required: true })
@@ -55,6 +53,29 @@ function replay(v: LibraryVersion) {
   replayItemId.value = props.item?.id ?? ''
   replayPlate.value = Number(plate.value)
   replaying.value = true
+}
+
+async function sendReplay(
+  printerKey: string,
+  args: LibraryPrintArgs,
+  selectionCurrent?: () => boolean,
+): Promise<ReplayResult> {
+  const versionId = replayVersion.value?.id
+  const itemId = replayItemId.value
+  const stillSelected = () =>
+    props.item?.id === itemId &&
+    replayVersion.value?.id === versionId &&
+    versions.value.some(
+      (entry) =>
+        entry.id === versionId &&
+        entry.sha256 === args.sha256 &&
+        entry.deletedAt === null &&
+        entry.purgedAt === null,
+    ) &&
+    (selectionCurrent?.() ?? true)
+  if (!props.replaySend || !stillSelected())
+    return { outcome: 'not-sent', code: 'stale-selection' }
+  return props.replaySend(printerKey, args, stillSelected, versionId)
 }
 
 const current = computed(
@@ -238,6 +259,7 @@ async function uploaded() {
     :item-id="replayItemId"
     :preferred-plate="replayPlate"
     :source="{
+      versionId: replayVersion.id,
       sha256: replayVersion.sha256,
       name: replayVersion.originalName,
       kind: replayVersion.kind,
@@ -248,7 +270,7 @@ async function uploaded() {
       purged: replayVersion.purgedAt !== null,
     }"
     :printers="replayPrinters"
-    :send="replaySend"
+    :send="sendReplay"
   />
 </template>
 

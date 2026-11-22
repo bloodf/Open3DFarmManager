@@ -1,9 +1,11 @@
 import { checkCompatibility } from '../../../../packages/shared/src/print-file/compatibility.ts'
 import type { LibraryPrintArgs } from '../../../../packages/farm-protocol/src/control-actions.ts'
+import { RESULT_CODE_HINTS } from './farm-control.ts'
 import type { LibraryMetadata, StorageMode } from './library-view.ts'
 
 /** One library version as the replay dialog needs it. */
 export type ReplaySource = {
+  versionId?: string
   sha256: string
   name: string
   kind: 'gcode' | '3mf'
@@ -192,6 +194,10 @@ export function buildArgs(choice: ReplayChoice): LibraryPrintArgs {
 
 /** Plain pt-BR text for each refusal code the Connector may return. */
 export const REFUSAL_TEXT: Record<string, string> = {
+  ...RESULT_CODE_HINTS,
+  'stale-selection': 'A seleção mudou. Confira o arquivo e a impressora.',
+  'library-unavailable': 'Não foi possível verificar a versão na biblioteca.',
+  'webrtc-unavailable': 'A conexão ao vivo com o Connector está indisponível.',
   incompatible: 'O arquivo é incompatível com esta impressora.',
   'download-failed':
     'O Connector não conseguiu baixar o arquivo da biblioteca do servidor.',

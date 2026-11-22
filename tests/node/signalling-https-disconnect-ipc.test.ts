@@ -131,8 +131,13 @@ test('proxy drop waits for tracked stream close and rejects an empty set', async
 
 test('IPC requester times out if no acknowledgement arrives', async () => {
   const child = childFor(
-    `import {requestProxyDisconnect} from ${JSON.stringify(helper)}; try {await requestProxyDisconnect(); process.exitCode=2} catch {if(process.connected) process.disconnect()}`,
+    `import {performance} from 'node:perf_hooks'; import {requestProxyDisconnect} from ${JSON.stringify(helper)}; const started=performance.now(); process.send?.({started:true}); try {await requestProxyDisconnect(); process.exitCode=2} catch (error) {if (!(error instanceof Error) || error.message!=='Fixture IPC timeout' || performance.now()-started<4500) process.exitCode=3; if(process.connected) process.disconnect()}`,
   )
-  child.on('message', () => {})
+  const ready = new Promise<void>((resolve) => {
+    child.on('message', (value) => {
+      if (value && typeof value === 'object' && 'started' in value) resolve()
+    })
+  })
+  await ready
   assert.equal((await closed(child, 7000))[0], 0)
 })

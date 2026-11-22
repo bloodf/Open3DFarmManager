@@ -125,7 +125,14 @@ const wallQuery = computed({
     })
   },
 })
-const rows = computed(() => ready.value?.rows ?? [])
+const rows = computed(() => {
+  const inventory = ready.value?.rows ?? []
+  if (!offlineVisible.value) return inventory
+  const storedIds = new Set(
+    offlineStates.value.map((state) => state.assignmentId),
+  )
+  return inventory.filter((row) => !storedIds.has(row.assignment.assignmentId))
+})
 const facets = computed(() => {
   const fields = [
     { key: 'group', field: 'groupName', label: 'Grupo' },
@@ -350,7 +357,7 @@ function cancelPause(event: Event) {
               <NuxtLink to="/impressoras">Gerenciar atribuições</NuxtLink>
             </EmptyState>
             <form
-              v-if="ready.rows.length"
+              v-if="rows.length"
               role="search"
               aria-label="Filtrar impressoras"
               class="filters"
@@ -360,12 +367,12 @@ function cancelPause(event: Event) {
                 v-model="wallQuery"
                 :facets="facets"
                 :counts="counts"
-                :total="ready.rows.length"
+                :total="rows.length"
                 :visible="renderedRows.length"
               />
             </form>
             <PrinterWallTable
-              v-if="ready.rows.length"
+              v-if="rows.length"
               v-slot="{ rows: wallRows }"
               :rows="renderedRows"
               :live-now="liveNow"

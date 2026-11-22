@@ -160,11 +160,10 @@ export function lastKnownStatesFailureReason(status: number | undefined) {
 /**
  * The assignments the live feed already owns.
  *
- * A live row with no observation yet is still a live row: the feed owns that
- * printer and its stored state must not be shown next to it.
+ * An authenticated row owns its printer even before the first observation.
  */
 export function liveAssignmentIds<
-  Live extends { assignment: { assignmentId: string }; connection?: string },
+  Live extends { assignment: { assignmentId: string }; connection: string },
 >(liveRows: readonly Live[]): ReadonlySet<string> {
   return new Set(
     liveRows
@@ -182,7 +181,7 @@ export function liveAssignmentIds<
  * always one card.
  */
 export function offlineCards<
-  Live extends { assignment: { assignmentId: string }; connection?: string },
+  Live extends { assignment: { assignmentId: string }; connection: string },
 >(
   liveRows: readonly Live[],
   storedStates: readonly LastKnownState[],

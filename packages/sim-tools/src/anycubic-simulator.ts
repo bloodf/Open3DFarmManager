@@ -72,6 +72,7 @@ export async function startAnycubicSimulator({
   // A progress set by the journey controls has no clock to resume from.
   let scripted = false
   let filename: string | undefined
+  let remainingMinutes: number | undefined
   // Targets and switches set by the documented `update` and `light` requests.
   const settings: Record<string, number> = {}
   let light: { type: number; status: number } | undefined
@@ -85,14 +86,28 @@ export async function startAnycubicSimulator({
   let closed = false
 
   function currentReportPayload() {
+    const layer = Math.floor((progress * totalLayers) / 100)
+    const job = {
+      progress,
+      curr_layer: layer,
+      total_layers: totalLayers,
+      ...(filename ? { filename } : {}),
+    }
+    const active = lifecycle === 'printing' || lifecycle === 'paused'
     return {
       print: { gcode_state: gcodeState, mc_percent: 25, ...extended },
       data: {
-        state: lifecycle,
-        progress,
-        curr_layer: Math.floor((progress * totalLayers) / 100),
-        total_layers: totalLayers,
-        ...(filename ? { filename } : {}),
+        ...(remainingMinutes !== undefined && active
+          ? {
+              state: 'busy',
+              project: {
+                ...job,
+                state: 'printing',
+                pause: lifecycle === 'paused' ? 1 : 0,
+                remain_time: remainingMinutes,
+              },
+            }
+          : { state: lifecycle, ...job }),
         // Made up: the simulated heaters reach a target at once.
         ...(settings.target_nozzle_temp !== undefined
           ? { target_nozzle_temp: settings.target_nozzle_temp }
@@ -271,6 +286,7 @@ export async function startAnycubicSimulator({
             stopTimer()
             elapsed = 0
             progress = 0
+            remainingMinutes = undefined
             scripted = false
             filename = raw.data.filename
             lifecycle = 'printing'
@@ -471,6 +487,15 @@ export async function startAnycubicSimulator({
     /** What the `update` and `light` requests last set. */
     get settings() {
       return { ...settings, ...(light ? { light: { ...light } } : {}) }
+    },
+    setRemainingMinutes(minutes: number | undefined) {
+      if (
+        minutes !== undefined &&
+        (!Number.isSafeInteger(minutes) || minutes < 0)
+      )
+        throw new Error('Invalid remaining minutes')
+      remainingMinutes = minutes
+      broadcast()
     },
     get extendedState() {
       return { ...extended }

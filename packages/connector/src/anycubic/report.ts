@@ -1,3 +1,12 @@
+function estimateSeconds(minutes: unknown) {
+  return typeof minutes === 'number' &&
+    Number.isSafeInteger(minutes) &&
+    minutes >= 0 &&
+    Number.isSafeInteger(minutes * 60)
+    ? minutes * 60
+    : undefined
+}
+
 export function decodeAnycubicReport(payload: Buffer) {
   if (payload.length > 65536) return { kind: 'invalid' as const }
   try {
@@ -7,7 +16,28 @@ export function decodeAnycubicReport(payload: Buffer) {
     const data = 'data' in envelope ? envelope.data : envelope
     if (!data || typeof data !== 'object' || Array.isArray(data))
       return { kind: 'invalid' as const }
+    const row = data as Record<string, unknown>
+    const project =
+      row.project &&
+      typeof row.project === 'object' &&
+      !Array.isArray(row.project)
+        ? (row.project as Record<string, unknown>)
+        : undefined
+    // LAN info reports device availability separately from the project phase.
+    let state = row.state
+    if (state === 'free') state = 'idle'
+    if (state === 'busy' || state === undefined) {
+      state = project?.state
+      if (state === 'printing' && project?.pause === 1) state = 'paused'
+      if (state === 'finish') state = 'finished'
+    }
+    const active = state === 'printing' || state === 'paused'
+    const knownState =
+      active || state === 'idle' || state === 'error' || state === 'finished'
+    // Preparation and unrecognized phases provide no terminal job evidence.
+    const estimateBlocked = state !== undefined && !knownState
     const observation: Record<string, unknown> = {}
+    if (knownState) observation.state = state
     const fields = {
       curr_nozzle_temp: 'toolTemperatureCelsius',
       curr_hotbed_temp: 'bedTemperatureCelsius',
@@ -16,7 +46,7 @@ export function decodeAnycubicReport(payload: Buffer) {
       total_layers: 'totalLayer',
     }
     for (const [source, target] of Object.entries(fields)) {
-      const value = (data as Record<string, unknown>)[source]
+      const value = row[source] ?? project?.[source]
       if (
         typeof value === 'number' &&
         Number.isFinite(value) &&
@@ -25,7 +55,16 @@ export function decodeAnycubicReport(payload: Buffer) {
       )
         observation[target] = value
     }
-    const row = data as Record<string, unknown>
+    // Simulator-verified, hardware-unqualified. Kobra 3 LAN reports minutes:
+    // https://github.com/rvanderp3/kobra-connect#known-limitations
+    // The estimate is in info's project or directly in a print progress report:
+    // https://github.com/chrisfore/anycubic_ha_local/blob/main/custom_components/anycubic/anycubic_local/models.py
+    if (active || state === undefined) {
+      const seconds =
+        estimateSeconds(row.remain_time) ??
+        estimateSeconds(project?.remain_time)
+      if (seconds !== undefined) observation.estimatedRemainingSeconds = seconds
+    }
     // LAN field names and ACE slot shape: https://github.com/chrisfore/anycubic_ha_local/blob/main/custom_components/anycubic/anycubic_local/models.py
     const fans: Record<string, number> = {}
     for (const [source, target] of Object.entries({
@@ -124,13 +163,11 @@ export function decodeAnycubicReport(payload: Buffer) {
       }
       if (materials.length <= 17) observation.materials = materials
     }
-    if (typeof row.filename === 'string' && row.filename.length <= 1024)
-      observation.filename = row.filename
-    if (
-      typeof row.state === 'string' &&
-      ['idle', 'printing', 'paused', 'error', 'finished'].includes(row.state)
-    )
-      observation.state = row.state
+    const filename = row.filename ?? project?.filename
+    if (typeof filename === 'string' && filename.length <= 1024)
+      observation.filename = filename
+    if (estimateBlocked)
+      return { kind: 'observation' as const, ...observation, estimateBlocked }
     return Object.keys(observation).length
       ? { kind: 'observation' as const, ...observation }
       : { kind: 'ignored' as const }

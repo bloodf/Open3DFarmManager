@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
 import { randomUUID } from 'node:crypto'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import AxeBuilder from '@axe-core/playwright'
 import { parse } from 'vue/compiler-sfc'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import {
   ControlArguments,
   ExtendedControlAction,
@@ -57,6 +57,12 @@ const idle: MotionState = {
   axisMinimum: [0, 0, 0, 0],
   axisMaximum: [220, 220, 250, 0],
 }
+const journalDirectories = new Set<string>()
+afterEach(() => {
+  for (const directory of journalDirectories)
+    rmSync(directory, { recursive: true, force: true })
+  journalDirectories.clear()
+})
 
 describe('motion arguments', () => {
   it.each([
@@ -682,8 +688,9 @@ describe('MotionPanel keyboard and layout', () => {
 
 describe('command journal', () => {
   it('migrates a v4 journal and records the motion actions', () => {
-    // Scratch directory under the OS temp area; left in place on purpose.
+    // Scratch directory under the OS temp area; removed after this test.
     const directory = mkdtempSync(join(tmpdir(), 'motion-journal-'))
+    journalDirectories.add(directory)
     closeCommandJournal(openCommandJournal({ directory, clock: Date.now }))
     const db = new DatabaseSync(join(directory, 'pause-commands.sqlite'))
     try {

@@ -18,6 +18,7 @@ export const SINGLE_UI_REQUIRED = [
   'inventory_before_live/local-commit-unconfirmed-then-activated',
   'inventory_before_live/live-authenticated-idle',
   'browser_secrets_absent/secret-set-non-empty',
+  'browser_secrets_absent/browser-inspection-complete',
   'browser_secrets_absent/responses-clean',
   'browser_secrets_absent/storage-clean',
   'browser_secrets_absent/console-clean',

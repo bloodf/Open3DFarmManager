@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'vitest'
 import { encode } from 'uqr'
+import { renderSVG } from 'uqr'
 import { labelQr } from '../../apps/farm/server/utils/qr/label.ts'
 
 test('QR matrix encodes its byte payload', () => {
@@ -39,4 +40,8 @@ test('QR matrix encodes its byte payload', () => {
     url,
   )
   assert.match(labelQr(url), /<svg/)
+  const svg = labelQr(url)
+  assert.match(svg, /<svg/)
+  assert.equal(svg, renderSVG(url, { border: 4, ecc: 'M' }))
+  assert.notEqual(svg, labelQr('https://farm.test/other'))
 })

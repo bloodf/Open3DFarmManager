@@ -362,6 +362,57 @@ function credentialJti(token: string): string {
     ).jti
 }
 
+/**
+ * Joins in-flight startup before disposal and opens the late-close barrier
+ * as soon as teardown begins, so a later close cannot take it again.
+ */
+export function createPauseChildLifetime() {
+  let startup = Promise.resolve()
+  let finishStartup = () => {}
+  let disposal: Promise<void> | undefined
+  let barrierOpen = false
+  let openBarrier = () => {
+    barrierOpen = true
+  }
+  const barrier = new Promise<void>((resolve) => {
+    openBarrier = () => {
+      if (barrierOpen) return
+      barrierOpen = true
+      resolve()
+    }
+  })
+  return {
+    get barrierOpen() {
+      return barrierOpen
+    },
+    openStartup() {
+      startup = new Promise<void>((resolve) => {
+        finishStartup = resolve
+      })
+    },
+    finishStartup() {
+      finishStartup()
+    },
+    async holdClose() {
+      if (barrierOpen) return
+      await barrier
+    },
+    releaseClose() {
+      openBarrier()
+    },
+    dispose(cleanup: () => Promise<void>) {
+      if (disposal) return disposal
+      openBarrier()
+      disposal = (async () => {
+        await startup.catch(() => {})
+        openBarrier()
+        await cleanup()
+      })()
+      return disposal
+    },
+  }
+}
+
 export async function run() {
   if (
     process.env.PAUSE_EXECUTION_RTC_CHILD !== 'yes' ||
@@ -400,7 +451,7 @@ export async function run() {
   let prepareCalls = 0
   let closeHeld = false
   let ownerSettled = false
-  let releaseClose: (() => void) | undefined
+  const lifetime = createPauseChildLifetime()
   const aborted = new AbortController()
 
   const fail = (source: z.infer<typeof FailureSource>, rejection?: unknown) => {
@@ -415,17 +466,26 @@ export async function run() {
   const dispose = () => {
     if (disposal) return disposal
     closing = true
+    lifetime.releaseClose()
     releaseCommand?.()
-    aborted.abort()
-    relay?.close()
-    disposal = (async () => {
-      // Keep the journal and simulator alive until actual driver closure settles.
-      // Rejection or a stalled close leaves ownership retained and blocks restart.
-      await Promise.all([client?.dispose(2000), relay?.settled])
-      await moonrakerFixture?.close()
-      if (journal) closeCommandJournal(journal)
-      if (journalDir) rmSync(journalDir, { recursive: true })
-    })()
+    disposal = lifetime.dispose(async () => {
+      releaseCommand?.()
+      lifetime.releaseClose()
+      aborted.abort()
+      relay?.close()
+      try {
+        // Keep the journal and simulator alive until actual driver closure settles.
+        // Rejection or a stalled close leaves ownership retained and blocks restart.
+        await Promise.all([client?.dispose(2000), relay?.settled])
+        await moonrakerFixture?.close()
+      } finally {
+        moonrakerFixture = undefined
+        if (journal) closeCommandJournal(journal)
+        journal = undefined
+        if (journalDir) rmSync(journalDir, { recursive: true, force: true })
+        journalDir = undefined
+      }
+    })
     return disposal
   }
 
@@ -468,243 +528,255 @@ export async function run() {
         if (url.protocol !== 'https:' || url.hostname !== '127.0.0.1')
           throw Error('Only disposable loopback target')
 
-        const publicKey = await crypto.subtle.importKey(
-          'spki',
-          new Uint8Array(Buffer.from(input.issuer.publicKeySpki, 'base64url')),
-          'Ed25519',
-          false,
-          ['verify'],
-        )
-
-        progress.advance('moonraker-starting')
+        lifetime.openStartup()
         try {
-          moonrakerFixture = await pauseFixture()
-        } catch {
-          fail('moonraker-start')
-          throw Error('Moonraker loopback fixture failed')
-        }
-        progress.advance('moonraker-ready')
+          const publicKey = await crypto.subtle.importKey(
+            'spki',
+            new Uint8Array(
+              Buffer.from(input.issuer.publicKeySpki, 'base64url'),
+            ),
+            'Ed25519',
+            false,
+            ['verify'],
+          )
 
-        // Resolve assignment exclusively through local registry; never accept a URL from peer/IPC.
-        const registry = createPrinterBindingRegistry({
-          allowedOrigins: [moonrakerFixture.origin],
-        })
-        const printerBinding = registry.provision({
-          assignment_id: input.assignment.assignmentId,
-          farm_id: input.claim.farm_id,
-          agent_id: input.claim.agent_id,
-          printer_key: input.assignment.printerKey,
-          moonraker_origin: moonrakerFixture.origin,
-        })
+          progress.advance('moonraker-starting')
+          try {
+            moonrakerFixture = await pauseFixture()
+          } catch {
+            fail('moonraker-start')
+            throw Error('Moonraker loopback fixture failed')
+          }
+          progress.advance('moonraker-ready')
 
-        journalDir = mkdtempSync(
-          join(tmpdir(), 'pause-execution-relay-journal-'),
-        )
-        journal = openCommandJournal({
-          directory: journalDir,
-          clock: Date.now,
-        })
+          // Resolve assignment exclusively through local registry; never accept a URL from peer/IPC.
+          const registry = createPrinterBindingRegistry({
+            allowedOrigins: [moonrakerFixture.origin],
+          })
+          const printerBinding = registry.provision({
+            assignment_id: input.assignment.assignmentId,
+            farm_id: input.claim.farm_id,
+            agent_id: input.claim.agent_id,
+            printer_key: input.assignment.printerKey,
+            moonraker_origin: moonrakerFixture.origin,
+          })
 
-        let release: () => void = () => {}
-        const deliveryBarrier =
-          input.barrier === 'none' || input.barrier === 'late-close'
-            ? Promise.resolve()
-            : new Promise<void>((resolve) => {
-                release = resolve
-              })
-        releaseCommand = () => {
-          if (input.barrier === 'stale') wallOffset = 60000
-          if (input.barrier === 'reassigned') registry.retire(printerBinding)
-          if (input.barrier === 'peer-closed') aborted.abort()
-          release()
-        }
-        const router = createPauseDriverRouter({
-          allowedOrigins: [moonrakerFixture.origin],
-          limits: {
-            maxMessageBytes: 4096,
-            connectTimeoutMs: 1500,
-            requestTimeoutMs: 1500,
-            staleAfterMs: 4000,
-            reconnectMinMs: 100,
-            reconnectMaxMs: 100,
-          },
-          clock: { monotonicNow: () => performance.now() },
-          observe: (binding, obs) => {
-            if (obs) latestObservation = obs
-            return relay?.observe(binding, obs) ?? false
-          },
-        })
+          journalDir = mkdtempSync(
+            join(tmpdir(), 'pause-execution-relay-journal-'),
+          )
+          journal = openCommandJournal({
+            directory: journalDir,
+            clock: Date.now,
+          })
 
-        relay = createPauseCommandRelay({
-          authority: {
-            // Always-fresh stub: these tests exercise relay behavior, not offline lifetime.
-            freshness: { freshAt: () => true },
-            issuers: [
-              {
-                issuer: input.issuer.issuer,
-                kid: input.issuer.kid,
-                publicKey,
-              },
-            ],
-          },
-          clock: {
-            wallNow: () => Date.now() + wallOffset,
-            monotonicNow: () => performance.now(),
-          },
-          journal,
-          driver: {
-            ...router,
-            prepare(value) {
-              prepareCalls++
-              return router.prepare(value)
-            },
-            async closeAttempt(binding) {
-              await router.closeAttempt(binding)
-              if (input.barrier === 'late-close') {
-                closeHeld = true
-                await new Promise<void>((resolve) => {
-                  releaseClose = resolve
+          let release: () => void = () => {}
+          const deliveryBarrier =
+            input.barrier === 'none' || input.barrier === 'late-close'
+              ? Promise.resolve()
+              : new Promise<void>((resolve) => {
+                  release = resolve
                 })
-                closeHeld = false
-              }
+          releaseCommand = () => {
+            if (input.barrier === 'stale') wallOffset = 60000
+            if (input.barrier === 'reassigned') registry.retire(printerBinding)
+            if (input.barrier === 'peer-closed') aborted.abort()
+            release()
+          }
+          const router = createPauseDriverRouter({
+            allowedOrigins: [moonrakerFixture.origin],
+            limits: {
+              maxMessageBytes: 4096,
+              connectTimeoutMs: 1500,
+              requestTimeoutMs: 1500,
+              staleAfterMs: 4000,
+              reconnectMinMs: 100,
+              reconnectMaxMs: 100,
             },
-          },
-          bindingFor: (id) =>
-            id === input.assignment.assignmentId ? printerBinding : undefined,
-        })
-        progress.advance('relay-created')
-
-        url.protocol = 'wss:'
-        url.pathname = '/api/signalling/pause-connector'
-
-        client = new PauseConnectorSignallingClient(
-          {
-            url: url.href,
-            origin: input.origin,
-            audience: input.issuer.audience,
-            credentialAudience: input.credentialAudience,
-            agentId: input.claim.agent_id,
-            farmId: input.claim.farm_id,
-            assignmentId: input.assignment.assignmentId,
-            jti: credentialJti(input.claim.device_token),
-            token: input.claim.device_token,
-            identity,
-            accountId: input.accountId,
-            keyId: input.browserKeyId,
-          },
-          {
-            onInboxReady: () => {
-              inboxReady = true
-              progress.advance('inbox-ready')
+            clock: { monotonicNow: () => performance.now() },
+            observe: (binding, obs) => {
+              if (obs) latestObservation = obs
+              return relay?.observe(binding, obs) ?? false
             },
-            onProofsReady: (value) => {
-              if (ready || !relay || closing)
-                throw Error('Unexpected control proofs')
-              ready = value
-              transportId = value.binding.transport_id
-              progress.advance('proofs-ready')
-              progress.advance('relay-open-starting')
+          })
 
-              const opened = relay.openPeer({
-                binding: value.binding,
-                browserProofWire: value.browserProofWire,
-                connectorProofWire: value.connectorProofWire,
-                sendPhase: (message) => client?.sendPhase(message) ?? false,
-                sendResult: (result) => client?.sendResult(result) ?? false,
-                signal: aborted.signal,
-              })
-
-              if (!opened) {
-                fail('relay-open-failed')
-                throw Error('Relay openPeer refused')
-              }
-              progress.advance('relay-open-completed')
+          relay = createPauseCommandRelay({
+            authority: {
+              // Always-fresh stub: these tests exercise relay behavior, not offline lifetime.
+              freshness: { freshAt: () => true },
+              issuers: [
+                {
+                  issuer: input.issuer.issuer,
+                  kid: input.issuer.kid,
+                  publicKey,
+                },
+              ],
             },
-            onPhase: (frame) => {
-              if (!relay || !transportId) return
-              if (frame.t === 'control.capability') {
-                progress.advance('capability-received')
-                void relay
-                  .admitPeer({
-                    transportId,
-                    capabilityWire: frame.wire,
-                  })
-                  .then((res) => {
-                    if (closing) return
-                    if (res.ok) {
-                      capabilityAccepted = true
-                      progress.advance('verifier-accepted')
-                    } else {
-                      fail('verifier-denied', res.reason)
-                    }
-                  })
-                  .catch(() => {
-                    if (!closing) fail('verifier-error')
-                  })
-              } else if (frame.t === 'control.admission-proof') {
-                progress.advance('admission-proof-received')
-                void relay
-                  .admitPeer({
-                    transportId,
-                    admissionProofWire: frame.wire,
-                  })
-                  .then((res) => {
-                    if (closing) return
-                    if (res.ok) {
-                      capabilityAccepted = true
-                      progress.advance('verifier-accepted')
-                    } else {
-                      fail('verifier-denied', res.reason)
-                    }
-                  })
-                  .catch(() => {
-                    if (!closing) fail('verifier-error')
-                  })
-              }
+            clock: {
+              wallNow: () => Date.now() + wallOffset,
+              monotonicNow: () => performance.now(),
             },
-            onData: (frame) => {
-              if (frame.t === 'control.command' && relay && transportId) {
-                commandReceived = true
-                commandsReceived++
-                progress.advance('command-received')
-                try {
-                  const decoded = decodeCommandV2(frame.wire)
-                  lastCommandId = decoded.cmd_id
-                } catch {
-                  // Decoding failure will be handled by relay
+            journal,
+            driver: {
+              ...router,
+              prepare(value) {
+                prepareCalls++
+                return router.prepare(value)
+              },
+              async closeAttempt(binding) {
+                await router.closeAttempt(binding)
+                if (
+                  input.barrier === 'late-close' &&
+                  !closing &&
+                  !lifetime.barrierOpen
+                ) {
+                  closeHeld = true
+                  try {
+                    await lifetime.holdClose()
+                  } finally {
+                    closeHeld = false
+                  }
                 }
-                const owner = relay
-                const peer = transportId
-                void deliveryBarrier
-                  .then(() =>
-                    owner.commandPeer({
-                      transportId: peer,
-                      wire: frame.wire,
-                    }),
-                  )
-                  .then((outcome) => {
-                    lastOutcome = outcome
-                    progress.advance('command-settled')
-                  })
-                  .catch(() => {
-                    if (!closing) fail('command-error')
-                  })
-              }
+              },
             },
-            onTerminal: (reason) => {
-              progress.terminal(reason)
-              if (client) progress.phase(client.snapshot().phase)
-              aborted.abort()
-              if (transportId && relay) relay.closePeer(transportId)
-              if (!closing && !capabilityAccepted) fail('client-terminal')
-              closing = true
-            },
-          },
-        )
+            bindingFor: (id) =>
+              id === input.assignment.assignmentId ? printerBinding : undefined,
+          })
+          progress.advance('relay-created')
 
-        progress.advance('client-starting')
-        void client.start().catch(() => fail('client-start'))
-        output({ kind: 'started' })
+          url.protocol = 'wss:'
+          url.pathname = '/api/signalling/pause-connector'
+
+          client = new PauseConnectorSignallingClient(
+            {
+              url: url.href,
+              origin: input.origin,
+              audience: input.issuer.audience,
+              credentialAudience: input.credentialAudience,
+              agentId: input.claim.agent_id,
+              farmId: input.claim.farm_id,
+              assignmentId: input.assignment.assignmentId,
+              jti: credentialJti(input.claim.device_token),
+              token: input.claim.device_token,
+              identity,
+              accountId: input.accountId,
+              keyId: input.browserKeyId,
+            },
+            {
+              onInboxReady: () => {
+                inboxReady = true
+                progress.advance('inbox-ready')
+              },
+              onProofsReady: (value) => {
+                if (ready || !relay || closing)
+                  throw Error('Unexpected control proofs')
+                ready = value
+                transportId = value.binding.transport_id
+                progress.advance('proofs-ready')
+                progress.advance('relay-open-starting')
+
+                const opened = relay.openPeer({
+                  binding: value.binding,
+                  browserProofWire: value.browserProofWire,
+                  connectorProofWire: value.connectorProofWire,
+                  sendPhase: (message) => client?.sendPhase(message) ?? false,
+                  sendResult: (result) => client?.sendResult(result) ?? false,
+                  signal: aborted.signal,
+                })
+
+                if (!opened) {
+                  fail('relay-open-failed')
+                  throw Error('Relay openPeer refused')
+                }
+                progress.advance('relay-open-completed')
+              },
+              onPhase: (frame) => {
+                if (!relay || !transportId) return
+                if (frame.t === 'control.capability') {
+                  progress.advance('capability-received')
+                  void relay
+                    .admitPeer({
+                      transportId,
+                      capabilityWire: frame.wire,
+                    })
+                    .then((res) => {
+                      if (closing) return
+                      if (res.ok) {
+                        capabilityAccepted = true
+                        progress.advance('verifier-accepted')
+                      } else {
+                        fail('verifier-denied', res.reason)
+                      }
+                    })
+                    .catch(() => {
+                      if (!closing) fail('verifier-error')
+                    })
+                } else if (frame.t === 'control.admission-proof') {
+                  progress.advance('admission-proof-received')
+                  void relay
+                    .admitPeer({
+                      transportId,
+                      admissionProofWire: frame.wire,
+                    })
+                    .then((res) => {
+                      if (closing) return
+                      if (res.ok) {
+                        capabilityAccepted = true
+                        progress.advance('verifier-accepted')
+                      } else {
+                        fail('verifier-denied', res.reason)
+                      }
+                    })
+                    .catch(() => {
+                      if (!closing) fail('verifier-error')
+                    })
+                }
+              },
+              onData: (frame) => {
+                if (frame.t === 'control.command' && relay && transportId) {
+                  commandReceived = true
+                  commandsReceived++
+                  progress.advance('command-received')
+                  try {
+                    const decoded = decodeCommandV2(frame.wire)
+                    lastCommandId = decoded.cmd_id
+                  } catch {
+                    // Decoding failure will be handled by relay
+                  }
+                  const owner = relay
+                  const peer = transportId
+                  void deliveryBarrier
+                    .then(() =>
+                      owner.commandPeer({
+                        transportId: peer,
+                        wire: frame.wire,
+                      }),
+                    )
+                    .then((outcome) => {
+                      lastOutcome = outcome
+                      progress.advance('command-settled')
+                    })
+                    .catch(() => {
+                      if (!closing) fail('command-error')
+                    })
+                }
+              },
+              onTerminal: (reason) => {
+                progress.terminal(reason)
+                if (client) progress.phase(client.snapshot().phase)
+                aborted.abort()
+                if (transportId && relay) relay.closePeer(transportId)
+                if (!closing && !capabilityAccepted) fail('client-terminal')
+                closing = true
+              },
+            },
+          )
+
+          progress.advance('client-starting')
+          void client.start().catch(() => fail('client-start'))
+          output({ kind: 'started' })
+        } finally {
+          lifetime.finishStartup()
+        }
         return
       }
 
@@ -716,7 +788,7 @@ export async function run() {
         output({ kind: 'released' })
         return
       case 'release-close':
-        releaseClose?.()
+        lifetime.releaseClose()
         output({ kind: 'released' })
         return
       case 'release':

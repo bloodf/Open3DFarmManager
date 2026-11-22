@@ -13,11 +13,17 @@ import {
 const openMocks: DiscoveryMockInstance[] = []
 
 afterEach(async () => {
+  let failure: unknown
   while (openMocks.length) {
     const mock = openMocks.pop()
-    await mock?.close()
+    try {
+      await mock?.close()
+    } catch (error) {
+      failure ??= error
+    }
   }
   resetNetworkGuardStats()
+  if (failure) throw failure
 })
 
 async function startGuarded(
@@ -150,6 +156,10 @@ describe('discovery mocks on loopback (#413)', () => {
   test('accepts an injected mDNS socket bound on loopback', async () => {
     await withNetworkGuard(async () => {
       const injected = dgram.createSocket('udp4')
+      openMocks.push({
+        close: async () =>
+          new Promise<void>((resolve) => injected.close(() => resolve())),
+      } as DiscoveryMockInstance)
       injected.on('error', () => {})
       await new Promise<void>((resolve, reject) => {
         injected.once('error', reject)

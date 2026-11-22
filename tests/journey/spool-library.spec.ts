@@ -186,12 +186,18 @@ if (journeyEnabled())
         .click()
       await expect(drying).toContainText('Registro da jornada')
     } finally {
-      await journey?.close()
-      await source.close()
-      if (priorAllowedOrigins === undefined)
-        delete process.env.NUXT_SPOOL_LIBRARY_IMPORT_ALLOWED_ORIGINS
-      else
-        process.env.NUXT_SPOOL_LIBRARY_IMPORT_ALLOWED_ORIGINS =
-          priorAllowedOrigins
+      try {
+        await journey?.close()
+      } finally {
+        try {
+          await source.close()
+        } finally {
+          if (priorAllowedOrigins === undefined)
+            delete process.env.NUXT_SPOOL_LIBRARY_IMPORT_ALLOWED_ORIGINS
+          else
+            process.env.NUXT_SPOOL_LIBRARY_IMPORT_ALLOWED_ORIGINS =
+              priorAllowedOrigins
+        }
+      }
     }
   })

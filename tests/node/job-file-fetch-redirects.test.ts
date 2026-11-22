@@ -3,6 +3,9 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { createServer } from 'node:https'
 import { once } from 'node:events'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   fetchJobFile,
   JobFileError,
@@ -16,16 +19,17 @@ const key = await readFile(
 )
 
 test('refuses redirects to loopback with the generic refusal code', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'job-file-redirect-'))
   const server = createServer({ cert, key }, (_req, res) => {
     res.writeHead(302, { location: 'https://127.0.0.1:1/private' })
     res.end()
   })
-  server.listen(0, '127.0.0.1')
-  await once(server, 'listening')
-  const address = server.address()
-  assert(address && typeof address !== 'string')
 
   try {
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    const address = server.address()
+    assert(address && typeof address !== 'string')
     await assert.rejects(
       fetchJobFile({
         job: {
@@ -35,7 +39,7 @@ test('refuses redirects to loopback with the generic refusal code', async () => 
           display_name: 'test.gcode',
         },
         target: { backend: 'moonraker', origin: 'http://127.0.0.1:1' },
-        directory: '/tmp/job-file-redirect-test',
+        directory,
         signal: new AbortController().signal,
         ca: cert,
         authorize: () => true,
@@ -46,6 +50,11 @@ test('refuses redirects to loopback with the generic refusal code', async () => 
     )
   } finally {
     server.closeAllConnections()
-    await new Promise<void>((resolve) => server.close(() => resolve()))
+    try {
+      if (server.listening)
+        await new Promise<void>((resolve) => server.close(() => resolve()))
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
   }
 })

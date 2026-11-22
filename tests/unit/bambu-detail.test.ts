@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createHash, X509Certificate } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -24,8 +24,15 @@ const ingest = (print: object) =>
 
 type Simulator = Awaited<ReturnType<typeof startBambuSimulator>>
 const simulators: Simulator[] = []
+const directories = new Set<string>()
 afterEach(async () => {
-  await Promise.all(simulators.splice(0).map((sim) => sim.close()))
+  try {
+    await Promise.all(simulators.splice(0).map((sim) => sim.close()))
+  } finally {
+    for (const directory of directories)
+      rmSync(directory, { recursive: true, force: true })
+    directories.clear()
+  }
 })
 async function simulator(options: Parameters<typeof startBambuSimulator>[0]) {
   const sim = await startBambuSimulator({ initialState: 'IDLE', ...options })
@@ -260,6 +267,7 @@ describe('Bambu detail stream over the simulator', () => {
   it('streams one lazy read-only connection and releases it', async () => {
     const sim = await simulator({ initialTargetTemperature: 220 })
     const directory = mkdtempSync(join(tmpdir(), 'bambu-detail-'))
+    directories.add(directory)
     const credentialFile = join(directory, 'credential.json')
     writeFileSync(credentialFile, JSON.stringify({ accessCode: 'secret' }))
     chmodSync(credentialFile, 0o600)

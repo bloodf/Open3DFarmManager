@@ -7,6 +7,7 @@
 // derived from each fixture, and `extra` adds the operation-specific ones.
 import type { IntegrationScope } from '../../../apps/farm/server/services/integration-apps.ts'
 import { call, type CallInput, type CallResult } from './router.ts'
+import { jobIdOf, replayReusedJob } from './replay.ts'
 import { ids, jobBody, type App, type Fault, type World } from './world.ts'
 
 export interface Outcome {
@@ -363,8 +364,17 @@ export const fixtures: Record<string, Fixture> = {
             ...json(jobBody),
             token,
           }
-          await send(request)
-          return send(request)
+          const first = await send(request)
+          const second = await send(request)
+          replayReusedJob({
+            firstStatus: first.result.status,
+            firstId: jobIdOf(first.result.json),
+            secondId: jobIdOf(second.result.json),
+            persisted: world.jobsStore.jobs.filter(
+              (job) => job.appId === app.appId,
+            ).length,
+          })
+          return second
         },
       },
     ],

@@ -135,7 +135,12 @@ export async function startBambuSimulator({
       : { nozzle_diameter: nozzleDiameter }),
   }
   // Commands that act on the printer (pause, resume, stop, gcode, ...), in arrival order.
-  const requests: { command: string; sequence_id: string }[] = []
+  const requests: {
+    command: string
+    sequence_id: string
+    ams_mapping?: unknown
+    use_ams?: unknown
+  }[] = []
   // Read-only queries (get_version). Kept apart from `requests`: the connector's telemetry
   // transport asks for the version as soon as it subscribes, concurrently with the first report,
   // so mixing it into `requests` makes "no command was sent" checks depend on socket timing.
@@ -238,7 +243,14 @@ export async function startBambuSimulator({
         typeof request?.sequence_id !== 'string'
       )
         throw new Error('Invalid request')
-      requests.push({ command, sequence_id: request.sequence_id })
+      requests.push({
+        command,
+        sequence_id: request.sequence_id,
+        ...(request.ams_mapping !== undefined
+          ? { ams_mapping: request.ams_mapping }
+          : {}),
+        ...(request.use_ams !== undefined ? { use_ams: request.use_ams } : {}),
+      })
       if (!confirmCommands) return
 
       if (command === 'gcode_line') {

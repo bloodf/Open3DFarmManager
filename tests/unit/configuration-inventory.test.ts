@@ -152,16 +152,53 @@ it('round trips and requires exact trusted expectations and current time', async
     ).toBe(false)
   for (const [field, value] of Object.entries(expected)) {
     if (field === 'context') continue
+    const replacement =
+      typeof value === 'number'
+        ? field === 'expires_at'
+          ? value - 1
+          : value + 1
+        : BrowserDeviceUuid.safeParse(value).success
+          ? other
+          : field.includes('sha256')
+            ? 'C'.repeat(42) + 'A'
+            : field === 'printer_key'
+              ? String(value).match(/^(?:kobra-x|moonraker|bambu)-/)![0] +
+                'B'.repeat(42) +
+                'A'
+              : 'different-' + String(value)
+    expect(
+      ConfigurationInventoryExpectation.safeParse({
+        ...expected,
+        [field]: replacement,
+      }).success,
+      field,
+    ).toBe(true)
     expect(
       await verifyConfigurationInventoryAck(
         ack,
         keys.publicKey,
-        { ...expected, [field]: typeof value === 'number' ? 2 : 'wrong' },
+        { ...expected, [field]: replacement },
         1000,
       ),
     ).toBe(false)
   }
   for (const field of Object.keys(expected.context)) {
+    const current = expected.context[field as keyof typeof expected.context]
+    const replacement =
+      typeof current === 'string' && current.startsWith('SHA256:')
+        ? 'SHA256:' + 'C'.repeat(42) + 'A'
+        : field.includes('_id') || field === 'credential_jti'
+          ? other
+          : field.includes('sha256') || field.includes('thumbprint')
+            ? 'C'.repeat(42) + 'A'
+            : 'https://other.example'
+    expect(
+      ConfigurationInventoryExpectation.safeParse({
+        ...expected,
+        context: { ...expected.context, [field]: replacement },
+      }).success,
+      field,
+    ).toBe(true)
     expect(
       await verifyConfigurationInventoryAck(
         ack,
@@ -170,10 +207,7 @@ it('round trips and requires exact trusted expectations and current time', async
           ...expected,
           context: {
             ...expected.context,
-            [field]:
-              field.endsWith('_id') || field === 'credential_jti'
-                ? other
-                : 'wrong',
+            [field]: replacement,
           },
         },
         1000,

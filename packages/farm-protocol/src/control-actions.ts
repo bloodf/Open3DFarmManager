@@ -43,6 +43,11 @@ export const ExtendedControlAction = z.enum([
 export type ExtendedControlAction = z.infer<typeof ExtendedControlAction>
 /** Optional, advisory detail of a command result. It never changes the outcome. */
 export const ControlResultCode = z.enum([
+  'signature',
+  'scope',
+  'state',
+  'busy',
+  'guard-denied',
   'bambu-authorization-required',
   'incompatible',
   'download-failed',

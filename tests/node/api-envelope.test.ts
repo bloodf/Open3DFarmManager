@@ -188,7 +188,7 @@ test('signing, verification and frames', async () => {
   // Wrong key, tampering, wrong pinned identity, expiry, future issue.
   assert.deepEqual(await verifyApiEnvelope(signed, other.publicKey, pin), {
     ok: false,
-    reason: 'invalid',
+    reason: 'invalid-signature',
   })
   assert.equal(
     (

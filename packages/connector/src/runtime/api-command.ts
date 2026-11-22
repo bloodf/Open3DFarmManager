@@ -59,7 +59,10 @@ export type ApiCommandDriver = Pick<
   Partial<Pick<PreparedPauseDriver, 'prepare' | 'closeAttempt'>>
 export type ApiCommandResult =
   /** Unauthenticated, not ours, or a replay: nothing is reported. */
-  | { kind: 'dropped'; reason: 'invalid' | 'replay' }
+  | {
+      kind: 'dropped'
+      reason: 'invalid' | 'invalid-signature' | 'invalid-issuer' | 'replay'
+    }
   | { kind: 'refused'; code: ApiEnvelopeRefusalCode; detail?: string }
   | { kind: 'completed' }
   /** The send may have happened; nothing is reported and nothing is retried. */
@@ -263,13 +266,15 @@ export function createApiCommandRunner(config: {
         return { kind: 'dropped', reason: 'invalid' }
       }
       const key = config.keys.issuer(API_ENVELOPE_ISSUER, signed.kid)
-      if (!key) return { kind: 'dropped', reason: 'invalid' }
+      if (!key) return { kind: 'dropped', reason: 'invalid-issuer' }
       const verdict = await verifyApiEnvelope(signed, key, {
         farmId: config.farmId,
         agentId: config.agentId,
         now: config.clock.wallNow(),
       })
       if (!verdict.ok) {
+        if (verdict.reason === 'invalid-signature')
+          return { kind: 'dropped', reason: verdict.reason }
         if (verdict.reason === 'invalid' || verdict.reason === 'identity')
           return { kind: 'dropped', reason: 'invalid' }
         const { signature: _signature, ...claims } = signed
@@ -345,6 +350,7 @@ export function createApiCommandRunner(config: {
     let acknowledged = false
     let attempted = false
     let sentMono = 0
+    let sentAt = 0
     let confirmed = true
     let threw = false
     let prepared = false
@@ -379,11 +385,13 @@ export function createApiCommandRunner(config: {
       if (lastRefusal || signal.aborted || !readPrinterBinding(binding))
         return false
       sentMono = now.mono
+      sentAt = now.wall
       permitted = true
       return true
     }
     const executeDriver = async (
       driverRequest: NonNullable<ApiEnvelopeV1['action']> = request,
+      onSend?: (sentAt: number) => void,
     ) => {
       if (!prepared) {
         await config.driver.prepare?.({ binding, signal })
@@ -400,7 +408,11 @@ export function createApiCommandRunner(config: {
               driverRequest.args,
               {
                 binding,
-                beforeSend,
+                beforeSend() {
+                  if (!beforeSend()) return false
+                  onSend?.(sentAt)
+                  return true
+                },
                 signal,
               },
             )
@@ -440,19 +452,21 @@ export function createApiCommandRunner(config: {
           signal,
           authorize,
           start: (file, extra) =>
-            executeDriver({
-              action: 'start_print',
-              args: { file, ...extra },
-            }),
+            executeDriver(
+              { action: 'start_print', args: { file, ...extra } },
+              (at) => {
+                if (mapping)
+                  config.libraryLinks?.remember(mapping.printer_key, {
+                    name: file,
+                    sha256: parsed.data.sha256,
+                    ...(parsed.data.plate === undefined
+                      ? {}
+                      : { plate: parsed.data.plate }),
+                    sentAt: at,
+                  })
+              },
+            ),
         })
-        if (outcome.ok && mapping)
-          config.libraryLinks?.remember(mapping.printer_key, {
-            name: outcome.name,
-            sha256: parsed.data.sha256,
-            ...(parsed.data.plate === undefined
-              ? {}
-              : { plate: parsed.data.plate }),
-          })
         if (!outcome.ok && !attempted)
           lastRefusal = [
             outcome.code === 'checksum-mismatch' ||
@@ -495,6 +509,15 @@ export function createApiCommandRunner(config: {
         })
       } else await executeDriver()
     } catch (error) {
+      if (
+        !guardCalled &&
+        error instanceof Error &&
+        'resultCode' in error &&
+        error.resultCode === 'awaiting-collection'
+      ) {
+        attempted = false
+        lastRefusal = ['wrong-state', 'awaiting-collection']
+      }
       if (!attempted && error instanceof JobFileError)
         lastRefusal = [
           error.reason === 'checksum-mismatch'

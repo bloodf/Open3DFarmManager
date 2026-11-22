@@ -222,6 +222,11 @@ export function getPrinterActionButtons(
  * never instead of it: the code does not change what happened to the command.
  */
 export const RESULT_CODE_HINTS: Record<ControlResultCode, string> = {
+  signature: 'O Connector não conseguiu verificar a assinatura do comando.',
+  scope: 'Você não tem permissão para enviar este comando.',
+  state: 'O estado atual da impressora impede este comando.',
+  busy: 'A impressora está ocupada.',
+  'guard-denied': 'O Connector recusou o envio do comando.',
   'awaiting-collection':
     'O trabalho anterior ainda está na placa. Retire as peças e use Confirmar placa livre antes de enviar o próximo trabalho.',
   'bambu-authorization-required':

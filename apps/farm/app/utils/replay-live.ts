@@ -56,6 +56,13 @@ export function liveReplayIndex(
   return index
 }
 
+export type ReplaySend = (
+  printerKey: string,
+  args: LibraryPrintArgs,
+  selectionCurrent?: () => boolean,
+  versionId?: string,
+) => Promise<ReplayResult>
+
 /** A ready control session, as far as the replay send needs it. */
 export type ReplayControl = {
   issueControlCommand(
@@ -66,41 +73,40 @@ export type ReplayControl = {
   dispose(): Promise<void>
 }
 
-/** Retry only a command that was not sent and has no refusal reason. */
+/** Open a live session and issue at most one signed command. */
 export async function sendLibraryReplay(
   connect: (
     onState: (state: FarmPauseControlState) => void,
   ) => Promise<ReplayControl>,
   args: LibraryPrintArgs,
+  selectionCurrent: () => boolean = () => true,
 ): Promise<ReplayResult> {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    let code: string | undefined
-    let result: ReplayResult = { outcome: 'not-sent' }
-    let control: ReplayControl | undefined
-    try {
-      control = await connect((state) => {
-        if (state.kind === 'settled' && state.code) code = state.code
-      })
-    } catch {
-      result = { outcome: 'not-sent', ...(code ? { code } : {}) }
-    }
-    if (control) {
-      try {
-        const outcome = await control.issueControlCommand(
-          'start_library_print',
-          args,
-        )
-        result = { outcome: outcome ?? 'not-sent', ...(code ? { code } : {}) }
-      } catch {
-        result = { outcome: 'outcome-unknown' }
-      } finally {
-        control.close()
-        await control.dispose()
-      }
-    }
-    if (result.outcome !== 'not-sent' || result.code || attempt === 2)
-      return result
-    await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)))
+  if (!selectionCurrent())
+    return { outcome: 'not-sent', code: 'stale-selection' }
+  let code: string | undefined
+  let control: ReplayControl
+  try {
+    control = await connect((state) => {
+      if (state.kind === 'settled' && state.code) code = state.code
+    })
+  } catch {
+    return { outcome: 'not-sent', code: code ?? 'webrtc-unavailable' }
   }
-  return { outcome: 'not-sent' }
+  try {
+    if (!selectionCurrent())
+      return { outcome: 'not-sent', code: 'stale-selection' }
+    const outcome = await control.issueControlCommand(
+      'start_library_print',
+      args,
+    )
+    if (outcome === undefined)
+      return { outcome: 'not-sent', code: code ?? 'webrtc-unavailable' }
+    if (outcome === 'not-sent') return { outcome, code: code ?? 'guard-denied' }
+    return { outcome, ...(code ? { code } : {}) }
+  } catch {
+    return { outcome: 'outcome-unknown' }
+  } finally {
+    control.close()
+    await control.dispose().catch(() => {})
+  }
 }

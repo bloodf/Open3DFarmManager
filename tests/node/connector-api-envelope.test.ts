@@ -387,7 +387,7 @@ test('forged, foreign or malformed envelopes are dropped without a report', asyn
   const forged = wire.replace('"pause"', '"cancel"')
   assert.deepEqual(await f.runner.run(forged), {
     kind: 'dropped',
-    reason: 'invalid',
+    reason: 'invalid-signature',
   })
   assert.deepEqual(await f.runner.run('{}'), {
     kind: 'dropped',

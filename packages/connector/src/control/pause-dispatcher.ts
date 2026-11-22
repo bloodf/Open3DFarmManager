@@ -808,7 +808,9 @@ export function createPauseDispatcher(config: {
                 binding: printerBinding,
                 beforeSend,
                 transportId: command.transport_id,
-                stillAuthorized: () => !live(),
+                stillAuthorized: () =>
+                  !live() &&
+                  (command.action !== 'start_library_print' || !!eligible()),
                 signal: controller.signal,
               })
             : driver.pauseOnce({

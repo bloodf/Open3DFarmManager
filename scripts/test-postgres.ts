@@ -277,6 +277,13 @@ export const PG_SUITE_CONTRACTS: Record<string, PgSuiteContract> = {
       admitted: 'TELEMETRY_PRUNE_SYNTHETIC_TEST_DISPOSABLE',
     },
   },
+  'test-postgres-latest-state.ts': {
+    migrations: 'full',
+    fixture: {
+      port: 'LATEST_STATE_SYNTHETIC_TEST_PORT',
+      admitted: 'LATEST_STATE_TEST_DISPOSABLE',
+    },
+  },
   'test-postgres-startup-gating.ts': {
     migrations: 'none',
     fixture: { admitted: 'STARTUP_GATING_DISPOSABLE' },

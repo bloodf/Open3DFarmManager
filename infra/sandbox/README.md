@@ -23,6 +23,9 @@ OPENFARM_INTEGRATION_E2E=1 node --test --test-force-exit tests/node/integration-
 ```
 
 `node scripts/sandbox.ts stop` interrompe os serviços e conserva a fazenda.
+O estado fica em `XDG_STATE_HOME/open3dfarmmanager` ou, se a variável não
+estiver definida, em `~/.local/state/open3dfarmmanager`. Instalações que usavam
+o diretório temporário começam uma nova fazenda nesse local persistente.
 A mudança na configuração inicial exige `node scripts/sandbox.ts down` e uma
 nova execução para recriar uma fazenda de sandbox anterior.
 A credencial inicial do Connector vale uma hora. Quando ela expirar, execute

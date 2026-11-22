@@ -88,9 +88,7 @@ function extractBlock(css: string, selectorPattern: RegExp): string {
 function requireHex(map: Map<string, string>, name: string): string {
   const value = map.get(name)
   if (!value) throw new Error(`Missing token ${name}`)
-  const hex = value.match(
-    /^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/,
-  )
+  const hex = value.match(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/)
   if (!hex) throw new Error(`Token ${name} is not a hex colour: ${value}`)
   return hex[0]!
 }

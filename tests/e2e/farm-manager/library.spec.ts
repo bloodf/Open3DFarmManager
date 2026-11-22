@@ -250,7 +250,35 @@ test('envia e imprime arquivos da biblioteca com armazenamento no servidor e no 
     // Let the Connector observe the running job (the drift keeps snapshots
     // coming) before it ends, so the finished job keeps its library link.
     a!.update({ progress: 0.5 })
-    await page.waitForTimeout(4000)
+    const assignment = farm.printers[0]!
+    const assignmentId = assignment.assignmentId
+    if (!assignmentId) throw new Error('Expected live printer assignment')
+    await expect
+      .poll(
+        async () => {
+          const response = await page.request.get(
+            `${farm.origin}/api/farms/${farm.farmId}/printer-states`,
+          )
+          if (!response.ok()) return false
+          const body = (await response.json()) as {
+            states: Array<{
+              assignmentId: string
+              printerKey: string
+              state: string
+              progress?: number
+            }>
+          }
+          return body.states.some(
+            (state) =>
+              state.assignmentId === assignmentId &&
+              state.printerKey === assignment.printerKey &&
+              state.state === 'printing' &&
+              state.progress === 0.5,
+          )
+        },
+        { timeout: 90_000 },
+      )
+      .toBe(true)
     a!.update({ state: 'complete', progress: 1 })
   })
 

@@ -19,6 +19,7 @@ import { PostgresPrinterOwnership } from '../../apps/farm/server/storage/postgre
 import { loadOrCreateIdentity } from '../../packages/connector/src/identity/store.ts'
 import {
   handlerErrors,
+  interruption,
   startConnector,
   startFakeMoonraker,
   startFarmApp,
@@ -540,7 +541,10 @@ export async function runConnectorOutageScenarios(input: {
 
     await scenario('3-connector-sigkill-after-commit-before-ack', async () => {
       const victim = connector!
-      const held = proxy.holdNextCommit()
+      const held = proxy.holdNextCommit({
+        timeoutMs: 30_000,
+        signal: interruption.signal,
+      })
       await push(3)
       const { eventIds, release } = await held
       const killedPid = victim.child.pid

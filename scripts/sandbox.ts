@@ -80,6 +80,13 @@ try {
           SANDBOX_UID: String(uid),
           SANDBOX_GID: String(gid),
           SANDBOX_DB_PASSWORD: password,
+          SANDBOX_BAMBU_ACCESS_CODE: existsSync(
+            join(state, 'bambu-credential.json'),
+          )
+            ? JSON.parse(
+                readFileSync(join(state, 'bambu-credential.json'), 'utf8'),
+              ).accessCode
+            : '',
         },
         encoding: 'utf8',
         stdio: capture ? ['ignore', 'pipe', 'inherit'] : 'inherit',

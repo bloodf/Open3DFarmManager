@@ -20,7 +20,7 @@ STUN/TURN, no ICE-TCP, fingerprint verification on. It does not mirror
 `disableAutoNegotiation` or `maxMessageSize`, which do not affect reachability. It runs twice per repeat:
 
 - `loopback`: the Connector's current `bindAddress: '127.0.0.1'`, set in
-  `readonly-peer.ts`, `pause-control-peer.ts` and `synthetic-peer.ts`.
+  `readonly-peer.ts` and `pause-control-peer.ts`.
 - `any`: the same options bound to all interfaces.
 
 ### Results (3 repeats each)

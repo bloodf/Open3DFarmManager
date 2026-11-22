@@ -201,9 +201,10 @@ export function createMoonrakerSubscription(input: {
     }
   }
   let epoch = 0
-  // Last job this subscription watched end. Telemetry repeats it until the
-  // next one ends; jobs that ended unwatched come from the history import.
+  // Keep the first terminal snapshot or the latest watched finish. Reconnects
+  // must not assign a new end time to terminal status that Moonraker retains.
   let lastJob: PrinterState['lastJob']
+  let hasObservedStatus = false
   async function run() {
     let backoff = limits.reconnectMinMs
     emit({ kind: 'unavailable', printerKey, reason: 'connecting' })
@@ -259,6 +260,8 @@ export function createMoonrakerSubscription(input: {
         temperatureObservation?: RawMoonrakerObservation['temperatureObservation'],
       ) {
         if (signal.aborted) return
+        const firstObservation = !hasObservedStatus
+        hasObservedStatus = true
         baseline = value
         clearTimeout(staleTimer)
         staleTimer = setTimeout(() => {
@@ -332,7 +335,7 @@ export function createMoonrakerSubscription(input: {
                 ? null
                 : (materials.find((tool) => tool.active)?.slot ?? null),
             )
-        } else if (watchingJob) {
+        } else if (watchingJob || firstObservation) {
           const ended = moonrakerLastJob(
             value.status,
             parsed.printer.observedAt,

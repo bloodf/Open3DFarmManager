@@ -381,12 +381,12 @@ export function createFlashforgeAdapter(
           break
         }
         case 'temperature': {
-          // https://en.fss.flashforge.com/10000/software/2a9ce576d4dc68efa85e202d82bff905.pdf
+          // https://github.com/Parallel-7/flashforge-api-docs/wiki/HTTP-REST-API#temperaturectl_cmd---temperature-control
           if (
             (action.heater !== 'nozzle' && action.heater !== 'bed') ||
             !Number.isInteger(action.celsius) ||
             action.celsius < 0 ||
-            action.celsius > (action.heater === 'nozzle' ? 280 : 110) ||
+            action.celsius > (action.heater === 'nozzle' ? 265 : 110) ||
             !['ready', 'printing', 'pause'].includes(status)
           ) {
             throw new Error('Flashforge temperature denied')

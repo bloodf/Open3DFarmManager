@@ -1,13 +1,18 @@
 import { connect, type TLSSocket } from 'node:tls'
 import { createHash } from 'node:crypto'
-import { parseBambuListing, type BambuFile } from './files.ts'
 import type { BambuListOptions } from './files.ts'
+import {
+  parseBambuListing,
+  parseBambuUnixListing,
+  type BambuFile,
+} from './listing.ts'
 
 /** SD-card folders the detail page may touch. Nothing else is addressable. */
 export type BambuSdFolder = 'root' | 'timelapse'
 const MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024
 const MAX_LISTING_BYTES = 4 * 1024 * 1024
 const SD_NAME = /^[A-Za-z0-9_][A-Za-z0-9_. -]{0,254}$/
+const UNSUPPORTED_COMMAND = [500, 502, 504]
 
 export type BambuFtpsOperation =
   | { op: 'list'; folder: BambuSdFolder }
@@ -27,11 +32,21 @@ const dir = (folder: BambuSdFolder) => (folder === 'root' ? '' : '/timelapse')
 
 /**
  * One FTPS exchange on the Bambu SD card: implicit TLS on the bound host,
- * `bblp` and the access code, pinned or CA-trusted certificate, a single
- * passive data connection to the bound host (never to an address the peer
- * names). Names are plain file names inside one allow-listed folder. A failed
- * exchange is reported to the caller; it is never retried here.
+ * `bblp` and the access code, and a pinned or CA-trusted certificate.
+ * Passive data connections use the bound host. File names are relative to
+ * one allow-listed folder.
+ * Some firmware rejects MLSD but supports LIST. Only an explicit unsupported
+ * reply allows the alternate read-only listing, on a fresh passive connection.
+ * https://github.com/scarlton/open-bambu-networking#file-browser-device--files
  */
+export function bambuFtps(
+  options: BambuListOptions,
+  operation: Extract<BambuFtpsOperation, { op: 'list' }>,
+): Promise<Extract<BambuFtpsResult, { op: 'list' }>>
+export function bambuFtps(
+  options: BambuListOptions,
+  operation: BambuFtpsOperation,
+): Promise<BambuFtpsResult>
 export async function bambuFtps(
   options: BambuListOptions,
   operation: BambuFtpsOperation,
@@ -116,9 +131,10 @@ export async function bambuFtps(
       const next = replies.shift()!
       if (!expected.includes(next.code))
         throw new Error('Bambu FTPS request rejected')
-      return next.text
+      return next
     }
     const command = async (value: string, expected = [200]) => {
+      controller.signal.throwIfAborted()
       control.write(value + '\r\n')
       return reply(expected)
     }
@@ -132,51 +148,70 @@ export async function bambuFtps(
       await command(`DELE ${dir(operation.folder)}/${operation.name}`, [250])
       return { op: 'delete' }
     }
-    const passive = await command('PASV', [227])
-    const match = /\((\d+,\d+,\d+,\d+),(\d+),(\d+)\)/.exec(passive)
-    if (!match || Number(match[2]) > 255 || Number(match[3]) > 255)
-      throw new Error('Invalid FTPS passive response')
-    const port = Number(match[2]) * 256 + Number(match[3])
-    if (!port) throw new Error('Invalid FTPS passive port')
-    const data = await open(port)
-    const limit =
-      operation.op === 'download'
-        ? (operation.maxBytes ?? MAX_DOWNLOAD_BYTES)
-        : MAX_LISTING_BYTES
-    const chunks: Buffer[] = []
-    let bytes = 0
-    data.on('data', (chunk: Buffer) => {
-      bytes += chunk.length
-      if (bytes > limit) controller.abort(new Error('Bambu FTPS too large'))
-      else chunks.push(chunk)
-    })
-    const ended = new Promise<void>((resolve, reject) => {
-      data.once('end', resolve)
-      data.once('error', reject)
-      data.once('close', () => {
-        if (!data.readableEnded) reject(new Error('Data connection closed'))
+    async function transfer(
+      verb: string,
+      limit: number,
+      fallback?: string,
+    ): Promise<{ body: Buffer; verb: string }> {
+      const passive = await command('PASV', [227])
+      const match = /\((\d+,\d+,\d+,\d+),(\d+),(\d+)\)/.exec(passive.text)
+      if (!match || Number(match[2]) > 255 || Number(match[3]) > 255)
+        throw new Error('Invalid FTPS passive response')
+      const port = Number(match[2]) * 256 + Number(match[3])
+      if (!port) throw new Error('Invalid FTPS passive port')
+      const data = await open(port)
+      const chunks: Buffer[] = []
+      let bytes = 0
+      data.on('data', (chunk: Buffer) => {
+        bytes += chunk.length
+        if (bytes > limit) controller.abort(new Error('Bambu FTPS too large'))
+        else chunks.push(chunk)
       })
-    })
-    // A failure before `await ended` must not leave an unhandled rejection.
-    ended.catch(() => {})
-    await command(
-      operation.op === 'list'
-        ? `MLSD${dir(operation.folder) && ` ${dir(operation.folder)}`}`
-        : `RETR ${dir(operation.folder)}/${operation.name}`,
-      [125, 150],
-    )
-    await ended
-    await reply([226])
-    const body = Buffer.concat(chunks)
-    return operation.op === 'list'
-      ? {
-          op: 'list',
-          files: parseBambuListing(
-            body.toString('utf8'),
-            listed[operation.folder],
-          ),
+      const ended = new Promise<void>((resolve, reject) => {
+        data.once('end', resolve)
+        data.once('error', reject)
+        data.once('close', () => {
+          if (!data.readableEnded) reject(new Error('Data connection closed'))
+        })
+      })
+      // A rejection before the transfer starts is handled by the control reply.
+      ended.catch(() => {})
+      try {
+        const start = await command(
+          verb,
+          fallback ? [125, 150, ...UNSUPPORTED_COMMAND] : [125, 150],
+        )
+        if (!fallback || !UNSUPPORTED_COMMAND.includes(start.code)) {
+          await ended
+          await reply([226])
+          controller.signal.throwIfAborted()
+          return { body: Buffer.concat(chunks), verb }
         }
-      : { op: 'download', data: body }
+      } finally {
+        data.destroy()
+      }
+      return transfer(fallback, limit)
+    }
+    const folder = dir(operation.folder)
+    if (operation.op === 'download') {
+      const { body } = await transfer(
+        `RETR ${folder}/${operation.name}`,
+        operation.maxBytes ?? MAX_DOWNLOAD_BYTES,
+      )
+      return { op: 'download', data: body }
+    }
+    const path = folder ? ` ${folder}` : ''
+    const fallback = `LIST${path}`
+    const { body, verb } = await transfer(
+      `MLSD${path}`,
+      MAX_LISTING_BYTES,
+      fallback,
+    )
+    const parse = verb === fallback ? parseBambuUnixListing : parseBambuListing
+    return {
+      op: 'list',
+      files: parse(body.toString('utf8'), listed[operation.folder]),
+    }
   } finally {
     clearTimeout(timer)
     signal.removeEventListener('abort', abort)

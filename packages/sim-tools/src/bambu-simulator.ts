@@ -420,6 +420,7 @@ export async function startBambuSimulator({
     host,
     port: broker.ports.default,
     ftpsPort: ftps.port,
+    ftpsListingRequests: ftps.listingRequests,
     origin: broker.origin,
     ports: broker.ports,
     syntheticTrust,
@@ -431,6 +432,7 @@ export async function startBambuSimulator({
     gcodeLines,
     calls: broker.calls,
     control: {
+      setFtpsMlsdRejection: ftps.setMlsdRejection,
       faults: broker.control.faults,
       scenario,
       publish: broker.control.publish,

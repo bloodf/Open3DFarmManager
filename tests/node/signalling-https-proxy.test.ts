@@ -126,12 +126,20 @@ test('TLS proxy forwards raw upgrade bytes over the actual loopback socket', asy
       const ended = once(client, 'end')
       client.write(expected)
       assert.equal(await received, expected)
-      await Promise.race([
-        ended,
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('response timed out')), 3000),
-        ),
-      ])
+      let responseTimer: ReturnType<typeof setTimeout> | undefined
+      try {
+        await Promise.race([
+          ended,
+          new Promise<never>((_, reject) => {
+            responseTimer = setTimeout(
+              () => reject(new Error('response timed out')),
+              3000,
+            )
+          }),
+        ])
+      } finally {
+        clearTimeout(responseTimer)
+      }
       assert.equal(
         response,
         'HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n',

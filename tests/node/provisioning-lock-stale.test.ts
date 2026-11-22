@@ -17,10 +17,7 @@ function scratch() {
   return dir
 }
 
-function withLock(
-  content: string,
-  run: (path: string) => void,
-): void {
+function withLock(content: string, run: (path: string) => void): void {
   const dir = scratch()
   try {
     const path = join(dir, 'provisioning.lock')

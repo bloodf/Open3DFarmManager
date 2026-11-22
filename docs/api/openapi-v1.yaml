@@ -1275,6 +1275,10 @@ components:
             events:subscribe: Manage webhook subscriptions and receive events.
             library:read: Read library files and the storage mode.
             library:write: Upload library files and set the storage mode.
+            environment:read: Read enclosure and room environment readings. Reserved; no endpoint uses it yet.
+            plates:confirm: Confirm that a printer's build plate is clear. Reserved; no endpoint uses it yet.
+            alerts:write: Raise integration alerts for a farm. Reserved; no endpoint uses it yet.
+            camera:view: View printer camera snapshots. Reserved; no endpoint uses it yet.
   parameters:
     PrinterId:
       name: printerId

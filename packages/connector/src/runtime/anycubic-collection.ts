@@ -52,6 +52,7 @@ export function createAnycubicCollection(input: {
   if (typeof password !== 'string' || !password || password.length > 2048)
     throw Error('Invalid Anycubic credential file')
   let firmwareObservation: RawPrinterObservation['firmwareObservation']
+  let estimateActive = false
   let activeJob = false
   let activeFilename: string | undefined
   // Repeated in every observation until the next job starts, so a telemetry
@@ -63,6 +64,7 @@ export function createAnycubicCollection(input: {
   let times: Partial<Record<keyof PrinterState, number>> = {}
   const invalidate = () => {
     firmwareObservation = undefined
+    estimateActive = false
     activeJob = false
     activeFilename = undefined
     clearTimeout(timer)
@@ -99,14 +101,18 @@ export function createAnycubicCollection(input: {
       const now = performance.now()
       const firmware = mapAnycubicFirmware(JSON.parse(payload.toString('utf8')))
       if (firmware) firmwareObservation = { firmware, observedAtMonoMs: now }
-      if (report.kind === 'ignored' && !firmware) return
       const observation: Record<string, unknown> = report
-      const state = observation.state
-      if (state === 'printing' || state === 'paused') {
+      const { kind, estimateBlocked, ...fields } = observation
+      if (kind === 'ignored' && !firmware) return
+      const state = fields.state
+      const printing = state === 'printing' || state === 'paused'
+      // An explicit phase can withdraw the estimate without ending the job.
+      if (state !== undefined || estimateBlocked) estimateActive = printing
+      if (printing) {
         activeJob = true
         // A new job starts: the previous end is no longer the last one.
         lastJob = undefined
-        const name = observation.filename
+        const name = fields.filename
         if (typeof name === 'string' && name && name.length <= 255)
           activeFilename = name
       } else if (
@@ -126,23 +132,20 @@ export function createAnycubicCollection(input: {
         activeJob = false
         activeFilename = undefined
       }
-      const jobState = state ?? values.state
-      const active = jobState === 'printing' || jobState === 'paused'
       const filenameChanged =
-        typeof observation.filename === 'string' &&
-        observation.filename !== values.filename
+        typeof fields.filename === 'string' &&
+        fields.filename !== values.filename
       const estimateAt = times.estimatedRemainingSeconds
       if (
-        !active ||
+        !estimateActive ||
         filenameChanged ||
         (estimateAt !== undefined && now - estimateAt >= REPORT_FRESHNESS_MS)
       ) {
         delete values.estimatedRemainingSeconds
         delete times.estimatedRemainingSeconds
       }
-      for (const [key, value] of Object.entries(observation)) {
-        if (key === 'kind') continue
-        if (key === 'estimatedRemainingSeconds' && !active) continue
+      for (const [key, value] of Object.entries(fields)) {
+        if (key === 'estimatedRemainingSeconds' && !estimateActive) continue
         values[key] =
           key === 'progress'
             ? Number(value) / 100

@@ -32,3 +32,45 @@ test.each([undefined, null, -1, 1.5, '12', Number.MAX_SAFE_INTEGER])(
     })
   },
 )
+
+test('prefers a valid direct estimate and uses the project estimate when the direct field is invalid', () => {
+  for (const [remain_time, seconds] of [
+    [0, 0],
+    [-1, 540],
+    ['12', 540],
+  ]) {
+    expect(
+      decode({
+        state: 'busy',
+        remain_time,
+        project: { state: 'printing', remain_time: 9 },
+      }),
+    ).toMatchObject({ state: 'printing', estimatedRemainingSeconds: seconds })
+  }
+})
+
+test.each(['checking', 'auto_leveling', 'stoped', 'stopped', 'future_phase'])(
+  'drops the estimate in phase %s from both project and print reports',
+  (state) => {
+    for (const data of [
+      { state: 'busy', project: { state, remain_time: 0 } },
+      { state, remain_time: 0 },
+      { project: { state, remain_time: 0 } },
+    ]) {
+      expect(decode(data)).toEqual({
+        kind: 'observation',
+        estimateBlocked: true,
+      })
+    }
+  },
+)
+
+test('keeps estimates in partial reports and recognizes an explicit project error', () => {
+  expect(decode({ state: 'busy', project: { remain_time: 9 } })).toEqual({
+    kind: 'observation',
+    estimatedRemainingSeconds: 540,
+  })
+  expect(
+    decode({ state: 'busy', project: { state: 'error', remain_time: 0 } }),
+  ).toEqual({ kind: 'observation', state: 'error' })
+})

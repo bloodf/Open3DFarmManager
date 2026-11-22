@@ -1,3 +1,12 @@
+function estimateSeconds(minutes: unknown) {
+  return typeof minutes === 'number' &&
+    Number.isSafeInteger(minutes) &&
+    minutes >= 0 &&
+    Number.isSafeInteger(minutes * 60)
+    ? minutes * 60
+    : undefined
+}
+
 export function decodeAnycubicReport(payload: Buffer) {
   if (payload.length > 65536) return { kind: 'invalid' as const }
   try {
@@ -14,7 +23,21 @@ export function decodeAnycubicReport(payload: Buffer) {
       !Array.isArray(row.project)
         ? (row.project as Record<string, unknown>)
         : undefined
+    // LAN info reports device availability separately from the project phase.
+    let state = row.state
+    if (state === 'free') state = 'idle'
+    if (state === 'busy' || state === undefined) {
+      state = project?.state
+      if (state === 'printing' && project?.pause === 1) state = 'paused'
+      if (state === 'finish') state = 'finished'
+    }
+    const active = state === 'printing' || state === 'paused'
+    const knownState =
+      active || state === 'idle' || state === 'error' || state === 'finished'
+    // Preparation and unrecognized phases provide no terminal job evidence.
+    const estimateBlocked = state !== undefined && !knownState
     const observation: Record<string, unknown> = {}
+    if (knownState) observation.state = state
     const fields = {
       curr_nozzle_temp: 'toolTemperatureCelsius',
       curr_hotbed_temp: 'bedTemperatureCelsius',
@@ -36,14 +59,12 @@ export function decodeAnycubicReport(payload: Buffer) {
     // https://github.com/rvanderp3/kobra-connect#known-limitations
     // The estimate is in info's project or directly in a print progress report:
     // https://github.com/chrisfore/anycubic_ha_local/blob/main/custom_components/anycubic/anycubic_local/models.py
-    const minutes = row.remain_time ?? project?.remain_time
-    if (
-      typeof minutes === 'number' &&
-      Number.isSafeInteger(minutes) &&
-      minutes >= 0 &&
-      Number.isSafeInteger(minutes * 60)
-    )
-      observation.estimatedRemainingSeconds = minutes * 60
+    if (active || state === undefined) {
+      const seconds =
+        estimateSeconds(row.remain_time) ??
+        estimateSeconds(project?.remain_time)
+      if (seconds !== undefined) observation.estimatedRemainingSeconds = seconds
+    }
     // LAN field names and ACE slot shape: https://github.com/chrisfore/anycubic_ha_local/blob/main/custom_components/anycubic/anycubic_local/models.py
     const fans: Record<string, number> = {}
     for (const [source, target] of Object.entries({
@@ -145,19 +166,8 @@ export function decodeAnycubicReport(payload: Buffer) {
     const filename = row.filename ?? project?.filename
     if (typeof filename === 'string' && filename.length <= 1024)
       observation.filename = filename
-    // LAN info reports device availability separately from active job state.
-    let state = row.state
-    if (state === 'free') state = 'idle'
-    if (state === 'busy') {
-      state = project?.state
-      if (state === 'printing' && project?.pause === 1) state = 'paused'
-      if (state === 'finish') state = 'finished'
-    }
-    if (
-      typeof state === 'string' &&
-      ['idle', 'printing', 'paused', 'error', 'finished'].includes(state)
-    )
-      observation.state = state
+    if (estimateBlocked)
+      return { kind: 'observation' as const, ...observation, estimateBlocked }
     return Object.keys(observation).length
       ? { kind: 'observation' as const, ...observation }
       : { kind: 'ignored' as const }

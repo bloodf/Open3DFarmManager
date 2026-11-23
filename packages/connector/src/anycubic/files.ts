@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { openAsBlob, readFileSync } from 'node:fs'
 import { z } from 'zod'
+import { isAnycubicStartFile } from '../../../farm-protocol/src/control-actions.ts'
+import type { PrinterFile } from '../../../farm-protocol/src/file-list.ts'
 import { MAX_FILE_SIZE } from '../../../farm-protocol/src/file-transfer.ts'
 import { parseBoundedJson } from '../../../farm-protocol/src/json.ts'
 import { readKobraClientCertMaterial } from '../config/kobra-x-cert.ts'
@@ -218,10 +220,7 @@ export function listAnycubicFiles(input: FileRequest) {
     const { records } = z
       .object({ records: z.array(z.unknown()) })
       .parse(await request('file', 'listLocal', { path: '/' }))
-    const files = new Map<
-      string,
-      { name: string; size: number; modified: number }
-    >()
+    const files = new Map<string, PrinterFile>()
     for (const value of records) {
       const record = FileRecord.safeParse(value)
       if (!record.success) continue
@@ -232,7 +231,12 @@ export function listAnycubicFiles(input: FileRequest) {
         !/\.gcode(?:\.3mf)?$/i.test(filename)
       )
         continue
-      files.set(filename, { name: filename, size, modified: timestamp })
+      files.set(filename, {
+        name: filename,
+        size,
+        modified: timestamp,
+        ...(!isAnycubicStartFile(filename) ? { printUnsupported: true } : {}),
+      })
     }
     return [...files.values()]
       .sort((a, b) => b.modified - a.modified)
@@ -252,7 +256,7 @@ export async function uploadAnycubicFile(
   if (!content.size || content.size > MAX_FILE_SIZE) throw Error('unsupported')
 
   const url = await withFileSession(input, async (info, _request, local) => {
-    if (info.state !== 'free' || info.project) throw Error('offline')
+    if (info.state !== 'free' || info.project) throw Error('busy')
     const host = local.host.includes(':') ? `[${local.host}]` : local.host
     const bound = new URL(
       `http://${host}:${local.uploadPort ?? 18910}/gcode_upload`,
@@ -326,6 +330,14 @@ export interface AnycubicFileTransport {
   publish(topic: string, payload: string, signal: AbortSignal): Promise<void>
 }
 
+export class AnycubicStartRefused extends Error {
+  readonly refusal: 'unsupported-action' | 'invalid-command'
+  constructor(refusal: AnycubicStartRefused['refusal'], message: string) {
+    super(message)
+    this.refusal = refusal
+  }
+}
+
 export async function startAnycubicPrint(input: {
   transport: AnycubicFileTransport
   model: string
@@ -334,18 +346,21 @@ export async function startAnycubicPrint(input: {
   signal: AbortSignal
 }): Promise<void> {
   input.signal.throwIfAborted()
-  if (input.model !== '20024') throw new Error('Unsupported Anycubic model')
+  if (input.model !== ANYCUBIC_FILE_MODEL)
+    throw new AnycubicStartRefused(
+      'unsupported-action',
+      'Unsupported Anycubic model',
+    )
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(input.deviceId))
-    throw new Error('Invalid Anycubic device ID')
-  if (
-    input.filename.length > 255 ||
-    !input.filename.endsWith('.gcode') ||
-    /[\\\x00-\x1f\x7f%]/.test(input.filename) ||
-    input.filename
-      .split('/')
-      .some((part) => !part || part === '.' || part === '..')
-  )
-    throw new Error('Invalid Anycubic filename')
+    throw new AnycubicStartRefused(
+      'invalid-command',
+      'Invalid Anycubic device ID',
+    )
+  if (!isAnycubicStartFile(input.filename))
+    throw new AnycubicStartRefused(
+      'invalid-command',
+      'Invalid Anycubic filename',
+    )
   await input.transport.publish(
     `anycubic/anycubicCloud/v1/slicer/printer/${input.model}/${input.deviceId}/print`,
     JSON.stringify({

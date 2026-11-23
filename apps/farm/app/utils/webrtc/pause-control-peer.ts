@@ -19,6 +19,7 @@ const uploadReply = z.union([
     transfer_id: z.string(),
     ok: z.literal(true),
     library: z.literal(true).optional(),
+    printUnsupported: z.literal(true).optional(),
   }),
   z.strictObject({
     type: z.literal('result'),
@@ -31,6 +32,7 @@ const uploadReply = z.union([
       'timeout',
       'aborted',
       'offline',
+      'busy',
       'invalid-transfer',
     ]),
   }),

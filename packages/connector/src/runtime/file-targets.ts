@@ -13,6 +13,7 @@ import {
   readPrinterBinding,
   readBambuPrinterBinding,
   readAnycubicPrinterBinding,
+  readCrealityPrinterBinding,
 } from '../control/printer-binding.ts'
 import { createKobraLinkFilesTarget } from '../kobralink/runtime.ts'
 import type { KobraLinkFetch } from '../kobralink/client.ts'
@@ -116,6 +117,8 @@ export function createFileTargets(input: {
         (printer) => printer.printerKey === controlledKey,
       )
       if (!creality) return undefined
+      const binding = input.config.bindingFor(input.assignmentId)
+      const local = binding && readCrealityPrinterBinding(binding)
       const host = creality.host.includes(':')
         ? `[${creality.host}]`
         : creality.host
@@ -124,7 +127,12 @@ export function createFileTargets(input: {
           backend: 'creality',
           origin: `http://${host}:${creality.httpPort ?? 80}`,
         },
-        list: { backend: 'creality' },
+        list: {
+          backend: 'creality',
+          ...(binding && local?.printerKey === controlledKey
+            ? { binding }
+            : {}),
+        },
       }
     }
     if (collection.version === 5) {

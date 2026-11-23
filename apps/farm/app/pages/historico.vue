@@ -19,6 +19,7 @@ import {
 } from '../utils/job-history-view.ts'
 
 const route = useRoute()
+const router = useRouter()
 type Farm = { farmId: string }
 const farms = ref<Farm[]>([])
 const farmId = ref('')
@@ -30,7 +31,9 @@ const pending = ref(true)
 const error = ref('')
 const errorSummary = ref<HTMLElement | null>(null)
 let generation = 0
+let readGeneration = 0
 let controller: AbortController | undefined
+let replayController: AbortController | undefined
 
 // Outcome tone reuses the printer-state colours; the label always carries it.
 const outcomeTone = {
@@ -41,7 +44,7 @@ const outcomeTone = {
 const rows = computed(() =>
   jobs.value
     .filter((job) => outcome.value === 'all' || job.outcome === outcome.value)
-    .map((job) => ({ ...jobHistoryRow(job), job })),
+    .map((job) => ({ ...jobHistoryRow(job), job, farm: farmId.value })),
 )
 // Replay: printers and the live signed session are read when a row is opened.
 const live = useReplayLive(farmId)
@@ -51,31 +54,47 @@ const replayPrinters = computed(() =>
   libraryReplayPrinters(assignments.value, profiles.value, live.liveFor),
 )
 const replayRequest = { retry: 0, timeout: 15_000 }
-async function loadReplaySource(sha256: string) {
-  const selected = farmId.value
+async function loadReplaySource(sha256: string, selected: string) {
+  if (selected !== farmId.value) throw Error('Replay source changed')
+  const current = generation
+  replayController?.abort()
+  const signal = (replayController = new AbortController()).signal
   const base = `/api/farms/${selected}`
   const [found, printers, printerProfiles] = await Promise.all([
     $fetch<{ version: LibraryVersion }>(`${base}/library/replay-source`, {
       ...replayRequest,
+      signal,
       query: { sha256 },
     }),
     $fetch<{ printers: LibraryReplayAssignment[] }>(`${base}/printers`, {
       ...replayRequest,
+      signal,
       query: { limit: 50 },
     }),
     // Profiles only refine the compatibility check: replay works without them.
     $fetch<{ profiles: PrinterProfile[] }>(`${base}/printer-profiles`, {
       ...replayRequest,
+      signal,
       query: { limit: 50 },
     }).catch(() => ({ profiles: [] as PrinterProfile[] })),
   ])
-  if (selected !== farmId.value || found.version.sha256 !== sha256)
+  if (
+    signal.aborted ||
+    current !== generation ||
+    selected !== farmId.value ||
+    found.version.sha256 !== sha256
+  )
     throw Error('Replay source changed')
   assignments.value = printers.printers
   profiles.value = printerProfiles.profiles
   return libraryReplaySource(found.version)
 }
-function changeFarm() {
+function changeFarm(id: string) {
+  if (id === farmId.value) return
+  cancel()
+  farmId.value = id
+  jobs.value = []
+  nextBefore.value = null
   assignments.value = []
   profiles.value = []
   void loadJobs()
@@ -89,6 +108,12 @@ const status = computed(() =>
 )
 function cancel() {
   generation++
+  cancelRead()
+  replayController?.abort()
+  replayController = undefined
+}
+function cancelRead() {
+  readGeneration++
   controller?.abort()
   controller = undefined
 }
@@ -102,25 +127,25 @@ function failure(cause: unknown) {
     : 'Não foi possível consultar o histórico. Tente novamente.'
 }
 async function run<T>(request: (signal: AbortSignal) => Promise<T>) {
-  cancel()
-  const current = generation
+  cancelRead()
+  const current = readGeneration
   controller = new AbortController()
   pending.value = true
   error.value = ''
   try {
     const result = await request(controller.signal)
-    return current === generation ? result : undefined
+    return current === readGeneration ? result : undefined
   } catch (cause) {
-    if (current !== generation) return undefined
+    if (current !== readGeneration) return undefined
     // Never retain a stale authorized view after a failed request.
     jobs.value = []
     nextBefore.value = null
     error.value = failure(cause)
     await nextTick()
-    errorSummary.value?.focus()
+    if (current === readGeneration) errorSummary.value?.focus()
     return undefined
   } finally {
-    if (current === generation) pending.value = false
+    if (current === readGeneration) pending.value = false
   }
 }
 async function loadFarms() {
@@ -134,16 +159,26 @@ async function loadFarms() {
   )
   farms.value = page?.farms ?? []
   const requested = route.query.farm
-  farmId.value =
+  const selected =
     farms.value.find((farm) => farm.farmId === requested)?.farmId ??
     (farms.value.length === 1 ? (farms.value[0]?.farmId ?? '') : '')
-  if (farmId.value) await loadJobs()
+  if (selected === farmId.value && selected) await loadJobs()
+  else if (selected) changeFarm(selected)
+  if (selected && requested !== selected)
+    void router.replace({ query: { ...route.query, farm: selected } })
+}
+function selectFarm(event: Event) {
+  const id = (event.target as HTMLSelectElement).value
+  void router.replace({ query: { ...route.query, farm: id || undefined } })
 }
 async function loadJobs(before: string | null = null) {
   const selected = farmId.value
+  const scope = generation
   if (!selected) {
     jobs.value = []
     nextBefore.value = null
+    pending.value = false
+    error.value = ''
     return
   }
   const page = await run((signal) =>
@@ -164,10 +199,20 @@ async function loadJobs(before: string | null = null) {
       },
     ),
   )
-  if (!page || selected !== farmId.value) return
+  if (!page || scope !== generation || selected !== farmId.value) return
   jobs.value = before ? [...jobs.value, ...page.jobs] : page.jobs
   nextBefore.value = page.nextBefore
 }
+watch(
+  () => route.query.farm,
+  (id) => {
+    changeFarm(
+      typeof id === 'string' && farms.value.some((farm) => farm.farmId === id)
+        ? id
+        : '',
+    )
+  },
+)
 onMounted(() => void loadFarms())
 onBeforeUnmount(cancel)
 </script>
@@ -209,9 +254,9 @@ onBeforeUnmount(cancel)
           <label for="farm">Farm</label>
           <select
             id="farm"
-            v-model="farmId"
+            :value="farmId"
             :disabled="pending || !farms.length"
-            @change="changeFarm"
+            @change="selectFarm"
           >
             <option value="">Selecione</option>
             <option
@@ -358,7 +403,7 @@ onBeforeUnmount(cancel)
                     :key="`${farmId}:${row.id}`"
                     :job="row.job"
                     :load-source="
-                      () => loadReplaySource(row.job.librarySha256!)
+                      () => loadReplaySource(row.job.librarySha256!, row.farm)
                     "
                     :printers="replayPrinters"
                     :send="live.send"

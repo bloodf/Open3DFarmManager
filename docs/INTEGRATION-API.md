@@ -40,12 +40,9 @@ Owners can grant one or more scopes across a farm or limit them to a printer ass
 | `alerts:write`     | Acknowledge or silence alerts on granted printers.                           |
 | `camera:view`      | Open the camera view for a granted printer.                                  |
 
-Owners can grant the reserved scopes and tokens can carry them, but they
-authorize nothing until an endpoint that requires them ships (`environment:read`
-is already used by `GET /environment/measurements` and `plates:confirm` by
-`POST /jobs/{id}/actions`). Any command an
-endpoint later accepts under these scopes still travels as an issuer-signed
-envelope that the Connector enforces and may refuse with a reason.
+Each scope in the table authorizes the operations listed above. Commands accepted
+by an endpoint travel as issuer-signed envelopes that the Connector enforces
+and may refuse with a reason.
 
 Revocations are audited and take effect on the next API request. Revoking an app
 also makes its webhook subscriptions ineligible for delivery, including events
@@ -53,7 +50,8 @@ already waiting in the outbox.
 
 The OpenAPI document below describes the separate client-facing API. Sandbox apps can be granted sandbox farms only; they cannot be attached to a non-sandbox farm.
 
-Server-side storage of print files is out of scope for the integration API: [E7, #204](https://github.com/bloodf/Open3DFarmManager/issues/204) excludes it. Print library storage, retention and replay are specified in [PRINT-LIBRARY.md](PRINT-LIBRARY.md) (E17.1, [#373](https://github.com/bloodf/Open3DFarmManager/issues/373)) and are not part of this API until that document's implementation lands.
+Library storage, retention and replay are available through the routes described
+below. See [PRINT-LIBRARY.md](PRINT-LIBRARY.md) for their storage model.
 
 ## Authenticate
 
@@ -228,8 +226,8 @@ grades, hardware-report paths, sources and, when the same brand and model are in
 the fleet catalog, its evidence grades. It changes when that evidence changes.
 It does not cover build volume or other machine specs.
 
-`degradedReason` is `offline`, `reconnecting`, `error` or
-`client-certificate-missing`, and null when the latest observation is not
+`degradedReason` is `offline`, `reconnecting`, `error`, `stale`,
+`unknown-state` or `client-certificate-missing`, and null when the latest observation is not
 degraded. A printer outside the grant answers `404 not-found`.
 
 Recorded firmware versions used for `monitoring-only` are the hardware reports
@@ -482,5 +480,5 @@ change behavior within v1 when needed to protect owners or printers.
 
 ## Out of scope
 
-E7 does not provide the print-library storage, retention or replay contract;
-see [PRINT-LIBRARY.md](PRINT-LIBRARY.md).
+The v1 API does not expose arbitrary filesystem access or direct printer commands.
+Library storage and replay use the scoped routes described above.

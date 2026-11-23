@@ -1,4 +1,8 @@
-import { kobraXControlAreas, kobraXDetailSource } from './kobra-x.ts'
+import {
+  kobraXControlAreaEvidence,
+  kobraXControlAreas,
+  kobraXDetailSource,
+} from './kobra-x.ts'
 import { unknownControlAreas } from './control-areas.ts'
 import type {
   ControlAreaCapabilities,
@@ -122,6 +126,7 @@ export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
   {
     id: 'anycubic-kobra-x',
     controlAreas: kobraXControlAreas,
+    controlAreaEvidence: kobraXControlAreaEvidence,
     brand: 'Anycubic',
     model: 'Kobra X',
     releaseStatus: 'Apresentada na Formnext 2025',
@@ -138,10 +143,11 @@ export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
       },
     ],
     connection:
-      'Protocolo LAN nativo documentado; integração direta somente para leitura',
+      'Protocolo LAN nativo com comandos assinados pelo Connector; controles simulados',
     capabilities: {
       ...unknownCapabilities,
       telemetry: 'hardware',
+      materials: 'simulated',
       files: 'simulated',
       pause: 'simulated',
       resume: 'simulated',
@@ -161,9 +167,9 @@ export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
       'https://github.com/bloodf/Open3DFarmManager/blob/main/docs/hardware-reports/2026-11-23-anycubic-kobra-x-native-pinned.json',
     ],
     limitations: [
-      'Telemetria comprovada em hardware somente por leitura, em um Kobra X real (firmware 2.0.2.8) pelo caminho nativo MQTTS: estado, temperaturas do bico e da mesa, ventoinhas e os slots ACE. Pausar, retomar e cancelar continuam apenas simulados e não comprovados em hardware; o agente ainda não encaminha comandos assinados para a atribuição nativa.',
+      'Telemetria comprovada em hardware por leitura, em um Kobra X real (firmware 2.0.2.8) pelo caminho nativo MQTTS: estado, temperaturas do bico e da mesa, ventoinhas e os slots ACE. Os comandos assinados pelo Connector foram testados em simulador e não foram comprovados em hardware. O console G-code bruto não é suportado.',
       'A câmera nativa responde na LAN (URL de vídeo alcançável, registrada no relatório), mas ainda não está ligada à sessão de mídia do OpenFarm, então a câmera permanece Desconhecida como recurso do produto.',
-      'A listagem de arquivos não foi observada pelo caminho nativo somente leitura; arquivos permanecem Simulado, não comprovado em hardware.',
+      'A listagem de arquivos não foi observada no teste de leitura pelo caminho nativo; arquivos permanecem Simulado, não comprovado em hardware.',
     ],
   },
   {

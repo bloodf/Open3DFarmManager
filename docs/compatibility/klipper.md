@@ -19,6 +19,21 @@ Nothing is `documented`. `hardware` means a recorded read-only qualification
 report in [docs/hardware-reports](../hardware-reports/README.md) proves it: so
 far only telemetry on the generic entry, from a Sovol SV06 and a Snapmaker U1.
 
+## Snapmaker U1 active nozzle
+
+Coverage for live active-nozzle temperature is `simulated` and remains
+unqualified on hardware. The read-only U1 hardware report records four tools
+and the active extruder at idle. The Playwright Moonraker journey exercises
+active tool changes with the U1 simulator.
+
+The Connector uses the existing Moonraker object query to read
+`toolhead.extruder` and the discovered nozzle temperatures together.
+Snapmaker's firmware exposes that selector and configures the four heater
+objects `extruder` through `extruder3`.
+[Moonraker object queries](https://moonraker.readthedocs.io/en/latest/external_api/printer/#query-printer-object-status),
+[U1 toolhead status](https://github.com/Snapmaker/u1-klipper/blob/7ac453b50fe6779b2ec0b759038a17da5e6d671d/klippy/toolhead.py),
+[U1 printer configuration](https://github.com/Snapmaker/u1-klipper/blob/7ac453b50fe6779b2ec0b759038a17da5e6d671d/lava/printer.cfg).
+
 ## Sources
 
 - Klipper: https://www.klipper3d.org/

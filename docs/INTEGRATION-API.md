@@ -138,6 +138,55 @@ be a bounded subset of `total`. The Connector's Spoolman setup, active spool
 sources, usage calculation and read-only behaviour are described in
 [SPOOLMAN-INTEGRATION.md](SPOOLMAN-INTEGRATION.md).
 
+### Observed spool page
+
+`GET /inventory/spools` requires a farm-wide `inventory:read` grant. It
+accepts `farmId`, `limit` (1–100), and an opaque `cursor`, returning `data`
+and `nextCursor`. Each item includes the Connector, observation time, stale
+and partial flags, and one spool summary. This pages the latest bounded
+Connector observations; a partial snapshot omits spools, and a changing
+snapshot can change page membership between requests. IDs are scoped to the
+Connector's Spoolman service and may be absent in older observations.
+
+### Spool snapshot identity
+
+New Connector observations include `spoolId` for each spool. The ID belongs
+to that Connector's configured Spoolman service, not to the display name;
+older observations may omit it. The existing snapshot response retains its
+original contract; compare the number of entries with `total` to identify a
+bounded snapshot. The spool page labels each observation with `partial`.
+
+### Spool finder and run usage
+
+`GET /inventory/spools/search` and `GET /inventory/spools/usage` require a
+farm-wide `inventory:read` grant and the spool usage database runtime.
+Both accept `farmId` and `limit` (1–100, default 50).
+
+Search reads the full OpenFarm spool library. Optional filters are `color`
+(six hex digits, with an optional URL-encoded `#`), `material` (case
+insensitive), `availability` (`any`, `stored`, or `loaded`), and
+`minRemainingGrams`. Archived spools are excluded. Matches are ordered
+by Euclidean RGB distance, then farm and spool ID. Colour filtering
+excludes unknown colours and a weight threshold excludes unknown weights.
+A missing location is `null`. The response includes `assessedAt` (Unix
+milliseconds) and each active slot's `assignedAt` timestamp. Loaded
+state reflects the library's assignment ledger at query time. Physical
+find actions, label changes and bin LEDs remain in OpenFarm.
+
+Usage accepts the numeric `id` from the history endpoint `GET /jobs`
+as `jobId`, plus the optional `cursor` returned in `nextCursor`. Each
+record includes the library spool ID, the source, grams and `observedAt`
+(Unix milliseconds, the run end for telemetry and entry time otherwise).
+Corrections retain the original `usageId` and observation time, replace
+the grams and set `corrected`. Re-fetch the run to reconcile corrections
+and upsert by `(farmId, usageId)` to avoid replaying stock movements.
+Unattributed consumption has no spool ledger record.
+
+Join finder results and usage records by `(farmId, spoolId)`. Connector
+observations share that ID space when the Connector reads the farm's
+OpenFarm Spoolman-compatible library. External Spoolman IDs belong to
+their own service and can overlap with library IDs.
+
 A `GET /printers` item may carry a read-only `specs` object with what the
 Connector or printer profile reported: `buildVolumeMm` (`x`, `y`, `z` in mm),
 `nozzles` (`[{ diameterMm }]`, one per tool), `spoolSlots` (integer) and

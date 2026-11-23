@@ -118,6 +118,36 @@ export interface InventoryRow {
   observedAt: number
   snapshot: unknown
 }
+/** A ranked row of the OpenFarm spool library, as the spool finder selects it. */
+export interface SpoolStockRow {
+  farmId: string
+  spoolId: number
+  name: string | null
+  material: string | null
+  colorHex: string | null
+  location: string | null
+  remainingGrams: number | null
+  colorDistance: number | null
+  loaded: boolean
+  loadedAt: {
+    printerId: string
+    slotKind: 'printer' | 'ams' | 'toolhead'
+    slotIndex: number
+    assignedAt: number
+  }[]
+}
+/** Rows of farm.spool_usage_records, as the usage feed selects them. */
+export interface SpoolUsageRow {
+  usageId: string
+  farmId: string
+  jobId: string
+  spoolId: number
+  printerId: string | null
+  grams: number
+  source: 'telemetry' | 'manual' | 'api'
+  observedAt: number
+  corrected: boolean
+}
 export interface ResinLedgerEntryRow {
   id: string
   printerId: string
@@ -443,6 +473,8 @@ export class World {
   history: HistoryRow[] = []
   /** Rows of farm.resin_ledger_entries, as the resin reader selects them. */
   resinLedger: ResinLedgerEntryRow[] = []
+  spoolStock: SpoolStockRow[] = []
+  spoolUsage: SpoolUsageRow[] = []
   inbox: InboxResult = { kind: 'files', data: [], nextOffset: null }
   inboxCalls: { farmId: string; agentId: string; query: unknown }[] = []
   readonly pool: unknown
@@ -551,7 +583,10 @@ export class World {
           observedAt: this.clock,
           stale: false,
           total: 2,
-          spools: [spool, { ...spool, name: null, remainingGrams: -5 }],
+          spools: [
+            { spoolId: 7, ...spool },
+            { ...spool, name: null, remainingGrams: -5 },
+          ],
         },
       },
       {
@@ -559,6 +594,63 @@ export class World {
         connectorId: 'aaaaaaaa-2222-4222-8222-aaaaaaaaaaaa',
         observedAt: this.clock,
         snapshot: { observedAt: this.clock, stale: true, total: 0, spools: [] },
+      },
+    ]
+    this.spoolStock = [
+      {
+        farmId: ids.farmA,
+        spoolId: 7,
+        name: 'PLA Red',
+        material: 'PLA',
+        colorHex: 'ff0000',
+        location: 'Shelf 1',
+        remainingGrams: 640,
+        colorDistance: 0,
+        loaded: true,
+        loadedAt: [
+          {
+            printerId: ids.printerA1,
+            slotKind: 'ams',
+            slotIndex: 0,
+            assignedAt: this.clock - 5_000,
+          },
+        ],
+      },
+      {
+        farmId: ids.farmA,
+        spoolId: 8,
+        name: 'PLA Red',
+        material: 'PLA',
+        colorHex: 'ee1100',
+        location: null,
+        remainingGrams: null,
+        colorDistance: 24.5,
+        loaded: false,
+        loadedAt: [],
+      },
+    ]
+    this.spoolUsage = [
+      {
+        usageId: '00000000-0000-4000-8000-0000000000a1',
+        farmId: ids.farmA,
+        jobId: '101',
+        spoolId: 7,
+        printerId: ids.printerA1,
+        grams: 12.5,
+        source: 'telemetry',
+        observedAt: this.clock - 1_000,
+        corrected: true,
+      },
+      {
+        usageId: '00000000-0000-4000-8000-0000000000a2',
+        farmId: ids.farmA,
+        jobId: '101',
+        spoolId: 8,
+        printerId: null,
+        grams: 3,
+        source: 'manual',
+        observedAt: this.clock - 500,
+        corrected: false,
       },
     ]
     this.resinLedger = [
@@ -716,6 +808,60 @@ export class World {
               row.observedAt < Number(until),
           )
           .map((row) => ({ payload: { state: row.state } }))
+      }
+      if (text.includes('jsonb_array_elements(s.snapshot')) {
+        const [farmIds, posFarm, , posConnector, posIndex, limit] = v as [
+          string[],
+          string | null,
+          string | null,
+          string | null,
+          number | null,
+          number,
+        ]
+        const key = (farm: string, connector: string, index: number) =>
+          `${farm}|${connector}|${String(index).padStart(4, '0')}`
+        return this.inventory
+          .filter((row) => farmIds.includes(row.farmId))
+          .flatMap((row) =>
+            (row.snapshot as { spools: unknown[] }).spools.map((_, index) => ({
+              ...row,
+              index,
+            })),
+          )
+          .sort((a, b) =>
+            key(a.farmId, a.connectorId, a.index).localeCompare(
+              key(b.farmId, b.connectorId, b.index),
+            ),
+          )
+          .filter(
+            (row) =>
+              posFarm === null ||
+              key(row.farmId, row.connectorId, row.index) >
+                key(posFarm, posConnector ?? '', posIndex ?? 0),
+          )
+          .slice(0, limit)
+      }
+      if (text.includes('farm.spool_usage_records')) {
+        const [farmIds, jobId, cursor, , limit] = v as [
+          string[],
+          string,
+          string | null,
+          unknown,
+          number,
+        ]
+        return this.spoolUsage
+          .filter((row) => farmIds.includes(row.farmId))
+          .filter((row) => row.jobId === jobId)
+          .filter((row) => cursor === null || row.usageId > cursor)
+          .sort((a, b) => a.usageId.localeCompare(b.usageId))
+          .slice(0, limit)
+      }
+      if (text.includes('farm.spool_slot_assignments')) {
+        const farmIds = v.find(Array.isArray) as string[]
+        const limit = v.at(-1) as number
+        return this.spoolStock
+          .filter((row) => farmIds.includes(row.farmId))
+          .slice(0, limit)
       }
       if (text.includes('farm.connector_inventory_snapshots')) {
         const [farmIds, posFarm, , posConnector, limit] = v as [

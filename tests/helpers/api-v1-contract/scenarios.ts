@@ -818,6 +818,90 @@ export const fixtures: Record<string, Fixture> = {
     }),
     fault: 'pool',
   },
+  'GET /inventory/spools': {
+    scopes: ['inventory:read'],
+    success: '200',
+    valid: () => ({ method: 'GET', path: '/inventory/spools?limit=1' }),
+    more: [
+      {
+        name: 'second page through nextCursor',
+        run: async (world) => {
+          const app = world.addApp(farm(['inventory:read']))
+          const token = await tokenFor(world, app)
+          const first = await send({
+            method: 'GET',
+            path: '/inventory/spools?limit=1',
+            token,
+          })
+          const cursor = (first.result.json as { nextCursor: string })
+            .nextCursor
+          return send({
+            method: 'GET',
+            path: `/inventory/spools?limit=1&cursor=${cursor}`,
+            token,
+          })
+        },
+      },
+    ],
+    bad: () => ({ method: 'GET', path: '/inventory/spools?cursor=nope' }),
+    missing: () => ({
+      method: 'GET',
+      path: `/inventory/spools?farmId=${ids.unknown}`,
+    }),
+    fault: 'pool',
+  },
+  'GET /inventory/spools/search': {
+    scopes: ['inventory:read'],
+    success: '200',
+    valid: () => ({
+      method: 'GET',
+      path: '/inventory/spools/search?color=%23ff0000&material=PLA&availability=any&minRemainingGrams=0',
+    }),
+    bad: () => ({
+      method: 'GET',
+      path: '/inventory/spools/search?color=red',
+    }),
+    missing: () => ({
+      method: 'GET',
+      path: `/inventory/spools/search?farmId=${ids.unknown}`,
+    }),
+    fault: 'pool',
+  },
+  'GET /inventory/spools/usage': {
+    scopes: ['inventory:read'],
+    success: '200',
+    valid: () => ({
+      method: 'GET',
+      path: '/inventory/spools/usage?jobId=101&limit=1',
+    }),
+    more: [
+      {
+        name: 'second page through nextCursor',
+        run: async (world) => {
+          const app = world.addApp(farm(['inventory:read']))
+          const token = await tokenFor(world, app)
+          const first = await send({
+            method: 'GET',
+            path: '/inventory/spools/usage?jobId=101&limit=1',
+            token,
+          })
+          const cursor = (first.result.json as { nextCursor: string })
+            .nextCursor
+          return send({
+            method: 'GET',
+            path: `/inventory/spools/usage?jobId=101&limit=1&cursor=${cursor}`,
+            token,
+          })
+        },
+      },
+    ],
+    bad: () => ({ method: 'GET', path: '/inventory/spools/usage' }),
+    missing: () => ({
+      method: 'GET',
+      path: `/inventory/spools/usage?jobId=101&farmId=${ids.unknown}`,
+    }),
+    fault: 'pool',
+  },
   'GET /environment/measurements': {
     scopes: ['environment:read'],
     success: '200',

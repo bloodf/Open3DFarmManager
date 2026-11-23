@@ -212,7 +212,10 @@ export async function testPrintingPausePage(input: {
         return {
           klipper: await state(),
           journal: journal(),
-          ui: await page.getByRole('dialog').getByRole('status').innerText(),
+          ui: await page
+            .getByRole('dialog', { name: /^Pausar impressão de/ })
+            .getByRole('status')
+            .innerText(),
         }
       },
       async resume() {

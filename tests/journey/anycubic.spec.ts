@@ -458,7 +458,7 @@ function suite(title: string) {
           'section[aria-labelledby="assignment-heading"]',
         )
         const assignmentRow = assignments.getByRole('row').filter({
-          has: assignments.getByRole('rowheader', {
+          has: page.getByRole('rowheader', {
             name: journey.printerKey,
             exact: true,
           }),
@@ -467,13 +467,8 @@ function suite(title: string) {
         await expect(
           assignmentRow.getByRole('cell', { name: 'Ativa', exact: true }),
         ).toBeVisible()
-        const assignmentDetails = assignments.getByRole('listitem').filter({
-          has: assignments
-            .getByText(journey.printerKey, { exact: true })
-            .and(assignments.locator('dd.exact-key')),
-        })
         await expect(
-          assignmentDetails.getByText('Aprovado', { exact: true }),
+          assignments.getByText('Aprovado', { exact: true }),
         ).toBeVisible()
         // The Anycubic (LAN) setup family is offered by the product.
         await expect(

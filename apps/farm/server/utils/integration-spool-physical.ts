@@ -77,6 +77,7 @@ async function authorized<T>(
         AND f.id = ${access.farmId}::uuid AND (NOT a.sandbox OR f.sandbox)
         AND a.revoked_at IS NULL AND g.disabled_at IS NULL
         AND g.printer_assignment_id IS NULL AND ${access.scope} = ANY(g.scopes)
+        AND (${access.scope} <> 'inventory:write' OR NOT g.requires_approval)
       FOR SHARE OF a, g`
     return grant ? await work(tx) : null
   })

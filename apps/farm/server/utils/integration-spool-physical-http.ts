@@ -20,17 +20,20 @@ export function physicalSpoolAccess(
     return integrationProblem('invalid-request', event.res.headers)
   if (!grantedFarms.includes(farmId))
     return integrationProblem('not-found', event.res.headers)
-  const grantIds = principal.grants
+  const grants = principal.grants
     .filter(
       (grant) =>
         grant.farmId === farmId &&
         grant.printerAssignmentId === null &&
         grant.scopes.includes(scope),
     )
+  if (!grants.length) return integrationProblem('not-found', event.res.headers)
+  const grantIds = grants
+    .filter((grant) => scope !== 'inventory:write' || !grant.requiresApproval)
     .map((grant) => grant.id)
   return grantIds.length
     ? { appId: principal.appId, farmId, scope, grantIds }
-    : integrationProblem('not-found', event.res.headers)
+    : integrationProblem('insufficient-scope', event.res.headers)
 }
 
 export async function physicalSpoolBody<T>(

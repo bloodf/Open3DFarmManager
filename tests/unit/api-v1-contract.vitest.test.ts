@@ -392,6 +392,7 @@ function physicalSpoolScenarios(): Scenario[] {
         printerOnly?: boolean
         failPool?: boolean
         rateLimited?: boolean
+        requiresApproval?: boolean
       } = {},
     ): Scenario => ({
       op: `${method} ${path}`,
@@ -402,6 +403,7 @@ function physicalSpoolScenarios(): Scenario[] {
           [
             {
               scopes: [options.wrongScope ? 'jobs:read' : scope],
+              ...(options.requiresApproval ? { requiresApproval: true } : {}),
               ...(options.printerOnly ? { printerId: ids.printerA1 } : {}),
             },
           ],
@@ -488,6 +490,9 @@ function physicalSpoolScenarios(): Scenario[] {
     ]
     if (method === 'POST') {
       cases.push(
+        scenario('403', 'approval-required grant cannot write', {
+          requiresApproval: true,
+        }),
         scenario('413', 'JSON body exceeds 8 KiB', {
           input: {
             body: ' '.repeat(8193),

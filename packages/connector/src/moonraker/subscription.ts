@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util'
 import { z } from 'zod'
 import type { PrinterState } from '@open3dfarmmanager/farm-protocol'
 import {
@@ -471,8 +472,7 @@ export function createMoonrakerSubscription(input: {
                     baseline &&
                     (value.eventtime < baseline.eventtime ||
                       (value.eventtime === baseline.eventtime &&
-                        JSON.stringify(value.status) !==
-                          JSON.stringify(baseline.status)))
+                        !isDeepStrictEqual(value.status, baseline.status)))
                   )
                     throw Error('Ambiguous complete response ordering')
                   fieldTimes = {

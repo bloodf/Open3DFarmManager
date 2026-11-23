@@ -14,6 +14,7 @@ import {
   readRevocationCredentialRecords,
 } from '../../apps/farm/server/storage/postgres-connector-credential-record.ts'
 import { validatePauseAuthorityRole } from '../../apps/farm/server/utils/pause-authority/role-policy.ts'
+import { pauseAuthorityAdvertisedControlsMigrations } from './postgres-pause-authority-catalog.ts'
 
 /** Only the runner's fresh, dedicated container may supply this database. */
 export async function testPostgresCredentialSuccessors(
@@ -385,15 +386,27 @@ export async function testPostgresCredentialSuccessors(
       transaction_timeout: 10000,
     },
   })
+  const controlsMigrations = await pauseAuthorityAdvertisedControlsMigrations()
   try {
-    await validatePauseAuthorityRole(pauseSql)
-    await admin`GRANT SELECT ON farm.connector_credential_successors TO farm_pause_authority`
+    await admin.begin(async (tx) => {
+      for (const migration of controlsMigrations)
+        await tx.unsafe(migration.up).simple()
+    })
     try {
-      await assert.rejects(validatePauseAuthorityRole(pauseSql))
+      await validatePauseAuthorityRole(pauseSql)
+      await admin`GRANT SELECT ON farm.connector_credential_successors TO farm_pause_authority`
+      try {
+        await assert.rejects(validatePauseAuthorityRole(pauseSql))
+      } finally {
+        await admin`REVOKE SELECT ON farm.connector_credential_successors FROM farm_pause_authority`
+      }
+      await validatePauseAuthorityRole(pauseSql)
     } finally {
-      await admin`REVOKE SELECT ON farm.connector_credential_successors FROM farm_pause_authority`
+      await admin.begin(async (tx) => {
+        for (const migration of controlsMigrations.toReversed())
+          await tx.unsafe(migration.down).simple()
+      })
     }
-    await validatePauseAuthorityRole(pauseSql)
   } finally {
     await pauseSql.end({ timeout: 3 })
     await admin`DROP ROLE ${admin(login)}`

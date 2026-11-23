@@ -21,6 +21,11 @@ import {
 import type { MacroParamMap } from '../moonraker/control-macros.ts'
 import { consoleSupported } from '../moonraker/control-console.ts'
 import { openFixedMoonrakerPause } from '../moonraker/pause-driver.ts'
+import { isDeclaredSnapmakerU1 } from '../moonraker/u1-tools.ts'
+import {
+  SNAPMAKER_U1_MARKER,
+  snapmakerU1Controls,
+} from '../moonraker/u1-marker.ts'
 import {
   readPrinterBinding,
   readBambuPrinterBinding,
@@ -95,7 +100,8 @@ export function createPauseDriverRouter(config: {
   // KobraLink bindings are read-only handles with no command mapping, so they
   // resolve to no binding here and advertise nothing.
   function controls(binding: PrinterBinding): readonly ExtendedControlAction[] {
-    if (!readPrinterBinding(binding)) return []
+    const mapping = readPrinterBinding(binding)
+    if (!mapping) return []
     if (readKobraLinkPrinterBinding(binding)) return KOBRALINK_CONTROLS
     if (readCrealityPrinterBinding(binding)) return CREALITY_ACTIONS
     const anycubic = readAnycubicPrinterBinding(binding)
@@ -109,6 +115,12 @@ export function createPauseDriverRouter(config: {
           )
         : []
     const objects = moonrakerObjects.get(binding)
+    if (isDeclaredSnapmakerU1(mapping.printer_key))
+      return Object.freeze(
+        snapmakerU1Controls(objects).filter(
+          (action) => action !== 'gcode' || config.gcodeConsole?.(binding),
+        ),
+      )
     const found = moonrakerControls(objects)
     return config.gcodeConsole?.(binding) && consoleSupported(objects)
       ? Object.freeze([...found, 'gcode' as const])
@@ -116,6 +128,14 @@ export function createPauseDriverRouter(config: {
   }
   return Object.freeze({
     controls,
+    allowsExtendedResult(binding: PrinterBinding) {
+      const mapping = readPrinterBinding(binding)
+      return (
+        !!mapping?.moonraker_origin &&
+        isDeclaredSnapmakerU1(mapping.printer_key) &&
+        moonrakerObjects.get(binding)?.includes(SNAPMAKER_U1_MARKER) === true
+      )
+    },
     macros: (binding: PrinterBinding) =>
       advertisedMoonrakerMacros(moonrakerObjects.get(binding)),
     macroParams: (binding: PrinterBinding) => moonrakerMacroParams.get(binding),

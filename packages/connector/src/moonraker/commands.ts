@@ -28,7 +28,14 @@ import {
   pinScript,
 } from './control-outputs.ts'
 import { parseQueueOp, queueSupported } from './control-job-queue.ts'
-import { SNAPMAKER_U1_MARKER, SnapmakerU1CommandRefused } from './u1-marker.ts'
+import {
+  SNAPMAKER_U1_MARKER,
+  SnapmakerU1CommandRefused,
+  snapmakerU1Controls,
+  U1_MAX_BED_C,
+  U1_MAX_TOOL_C,
+  U1_TOOL_OBJECTS,
+} from './u1-marker.ts'
 /**
  * Moonraker extended command builder and capability inspection.
  * Translates extended printer actions into Moonraker JSON-RPC calls.
@@ -151,8 +158,24 @@ export function buildMoonrakerCommand(
   args: Record<string, unknown> = {},
   objects: readonly string[] = [],
 ): MoonrakerRpcCall {
-  if (objects.includes(SNAPMAKER_U1_MARKER))
+  const u1 = objects.includes(SNAPMAKER_U1_MARKER)
+  if (u1 && !snapmakerU1Controls(objects).some((control) => control === action))
     throw new SnapmakerU1CommandRefused(action)
+
+  if (u1 && action === 'set_tool_temperature') {
+    const parsed = ControlArguments.parse({ action, args })
+    if (parsed.action !== action) throw new Error('Invalid tool temperature')
+    const { tool, target_c } = parsed.args
+    const heater = U1_TOOL_OBJECTS[tool]
+    if (!objects.includes(heater) || target_c > U1_MAX_TOOL_C)
+      throw new Error('U1 tool temperature unavailable')
+    return {
+      method: 'printer.gcode.script',
+      params: {
+        script: `SET_HEATER_TEMPERATURE HEATER=${heater} TARGET=${target_c}`,
+      },
+    }
+  }
   const keys = (allowed: string[]) => {
     for (const key of Object.keys(args)) {
       if (!allowed.includes(key)) {
@@ -345,6 +368,8 @@ export function buildMoonrakerCommand(
       if (targetC > 300) {
         throw new Error('Extruder temperature exceeds maximum limit')
       }
+      if (u1 && !objects.includes('extruder'))
+        throw new Error("Heater 'extruder' not found in printer objects")
       if (
         objects.length > 0 &&
         !objects.some((obj) => obj === 'extruder' || obj.startsWith('extruder'))
@@ -360,7 +385,7 @@ export function buildMoonrakerCommand(
     }
 
     if (heater === 'bed') {
-      if (targetC > 120) {
+      if (targetC > (u1 ? U1_MAX_BED_C : 120)) {
         throw new Error('Bed temperature exceeds maximum limit')
       }
       if (objects.length > 0 && !objects.includes('heater_bed')) {
@@ -375,6 +400,7 @@ export function buildMoonrakerCommand(
     }
 
     if (heater === 'chamber') {
+      if (u1) throw new SnapmakerU1CommandRefused(action)
       if (targetC > 65) {
         throw new Error('Chamber temperature exceeds maximum limit')
       }

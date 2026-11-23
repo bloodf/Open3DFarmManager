@@ -17,6 +17,7 @@ import {
   isSnapmakerU1StatusObject,
   mapSnapmakerU1Tools,
 } from './u1-tools.ts'
+import { snapmakerU1ToolHeaters } from './u1-marker.ts'
 import {
   MoonrakerClientError,
   openMoonrakerClient,
@@ -327,6 +328,9 @@ export function createMoonrakerSubscription(input: {
           },
         )
         const materials = u1Materials()
+        const toolHeaters = snapmakerU1
+          ? snapmakerU1ToolHeaters(Object.keys(toolStatus))
+          : []
         // The raw chamber reading is live evidence: it is always published,
         // whatever the durable record rate allows.
         const chamberReading = chamberTemperatureReading(value.status)
@@ -340,6 +344,7 @@ export function createMoonrakerSubscription(input: {
                 printer: Object.freeze({
                   ...parsed.printer,
                   ...(materials ? { materials } : {}),
+                  ...(toolHeaters.length ? { toolHeaters } : {}),
                   ...(chamberReading === undefined
                     ? {}
                     : { chamberTemperatureCelsius: chamberReading }),

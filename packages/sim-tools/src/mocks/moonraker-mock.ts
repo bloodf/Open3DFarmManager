@@ -1274,7 +1274,9 @@ export async function startMoonrakerMock(
       if (!line) continue
       const upper = line.toUpperCase()
 
-      const toolMatch = /^T([0-9]+)$/.exec(upper)
+      const toolMatch = (
+        profile === 'u1' ? /^T([0-9]+)(?: A0)?$/ : /^T([0-9]+)$/
+      ).exec(upper)
       if (toolMatch) {
         const tool = Number(toolMatch[1])
         const extName = tool === 0 ? 'extruder' : `extruder${tool}`

@@ -139,6 +139,22 @@ export const LibraryPrintArgs = z.strictObject({
 export type LibraryPrintArgs = z.infer<typeof LibraryPrintArgs>
 /** Console line: one line of printable ASCII, at most 256 bytes. */
 export const GCODE_LINE_MAX_BYTES = 256
+
+/** Physical U1 operations can finish after their signed write authority expires. */
+export const U1_CONTROL_RESULT_TIMEOUT_MS = 24_000
+
+export function isU1PhysicalControl(
+  action: string,
+  args: Record<string, unknown>,
+): boolean {
+  return (
+    action === 'home' ||
+    (action === 'gcode' &&
+      typeof args.line === 'string' &&
+      /^T[0-3]$/i.test(args.line.trim()))
+  )
+}
+
 export const GcodeLine = z
   .string()
   .min(1)

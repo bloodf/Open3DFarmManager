@@ -4,12 +4,15 @@ import {
   buildMoonrakerCommand,
   supportedMoonrakerActions,
 } from '../../packages/connector/src/moonraker/commands.ts'
+import {
+  snapmakerU1ToolHeaters,
+  SNAPMAKER_U1_MARKER,
+} from '../../packages/connector/src/moonraker/u1-marker.ts'
 import { parseMoonrakerSnapshot } from '../../packages/connector/src/moonraker/parse.ts'
 import {
   SNAPMAKER_U1_TOOL_COUNT,
   isSnapmakerU1Model,
   mapSnapmakerU1Tools,
-  snapmakerU1CommandSupport,
 } from '../../packages/connector/src/moonraker/u1-tools.ts'
 
 /** Fixtures are JSONC: a leading `//` comment names the source, then plain JSON. */
@@ -134,33 +137,38 @@ describe('Snapmaker U1 missing fields stay unknown', () => {
   })
 })
 
-describe('Snapmaker U1 unsupported commands', () => {
+describe('Snapmaker U1 signed tool heater mapping', () => {
   const { objects } = fixture('four-tools.jsonc')
-  const support = snapmakerU1CommandSupport(objects)
-
-  test('supports no command and says why for each', () => {
-    expect(support.supported).toEqual([])
-    const byCommand = new Map(
-      support.unsupported.map((u) => [u.command, u.reason]),
-    )
-    expect(byCommand.get('select_tool')).toBe('tool-command-not-implemented')
-    expect(byCommand.get('set_tool_temperature')).toBe(
-      'tool-command-not-implemented',
-    )
-    for (const action of supportedMoonrakerActions(objects))
-      expect(byCommand.get(action)).toBe('not-hardware-qualified')
+  test('advertises only tools with a detected heater', () => {
+    expect(snapmakerU1ToolHeaters(objects)).toEqual([
+      { tool: 0, maxC: 300 },
+      { tool: 1, maxC: 300 },
+      { tool: 2, maxC: 300 },
+      { tool: 3, maxC: 300 },
+    ])
+    expect(snapmakerU1ToolHeaters(['extruder2', 'extruder4'])).toEqual([
+      { tool: 2, maxC: 300 },
+    ])
   })
 
-  test('the adapter has no tool-selection builder', () => {
-    expect(() =>
-      buildMoonrakerCommand('select_tool', { tool: 1 }, objects),
-    ).toThrow()
+  test('the builder only targets a detected U1 extruder and keeps generic behavior', () => {
+    const args = { tool: 1, target_c: 200 }
+    const detected = [...objects, 'print_stats', SNAPMAKER_U1_MARKER]
+    expect(
+      buildMoonrakerCommand('set_tool_temperature', args, detected),
+    ).toEqual({
+      method: 'printer.gcode.script',
+      params: { script: 'SET_HEATER_TEMPERATURE HEATER=extruder1 TARGET=200' },
+    })
     expect(() =>
       buildMoonrakerCommand(
         'set_tool_temperature',
-        { tool: 1, target_c: 200 },
-        objects,
+        args,
+        detected.filter((name) => name !== 'extruder1'),
       ),
+    ).toThrow()
+    expect(() =>
+      buildMoonrakerCommand('set_tool_temperature', args, objects),
     ).toThrow()
   })
 })

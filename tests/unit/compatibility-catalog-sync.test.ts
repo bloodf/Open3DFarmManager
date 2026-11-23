@@ -112,9 +112,9 @@ describe('sincronização do catálogo de compatibilidade', () => {
     expect(anycubicCatalog.length).toBe(5)
     expect(bambuCatalog.length).toBe(5)
     expect(crealityCatalog.length).toBe(5)
-    expect(klipperCatalog.length).toBe(5)
+    expect(klipperCatalog.length).toBe(6)
     expect(lanCatalog.length).toBe(2)
-    expect(catalogById.size).toBe(22)
+    expect(catalogById.size).toBe(23)
   })
 
   it('mantém todo status simulado acompanhado de limitação em pt-BR', () => {

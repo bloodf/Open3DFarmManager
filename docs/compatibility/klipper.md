@@ -6,18 +6,42 @@ Labels never grant authority; they do not enable commands.
 
 | Entry                                 | Telemetry | Files   | Camera    | Materials | Pause/Resume/Cancel |
 | ------------------------------------- | --------- | ------- | --------- | --------- | ------------------- |
-| Generic Klipper + Moonraker           | hardware  | unknown | simulated | unknown   | simulated           |
+| Generic Klipper + Moonraker           | hardware  | unknown | hardware  | unknown   | simulated           |
+| Snapmaker U1 (paxx12 profile)         | simulated | unknown | simulated | simulated | simulated           |
 | Creality K1 series (rooted Moonraker) | simulated | unknown | simulated | unknown   | simulated           |
 | Voron 2.4 (self-built kit)            | simulated | unknown | simulated | unknown   | simulated           |
 | Sovol SV08                            | simulated | unknown | simulated | unknown   | simulated           |
 
 `simulated` means exercised against the loopback Klipper/Moonraker simulators in
-`infra/sim` and the unit tests, never against physical hardware. Camera follows
-the existing read-only Moonraker webcam listing and the simulated camera
-servers. Files and materials stay `unknown`: main does not prove them.
-Nothing is `documented`. `hardware` means a recorded read-only qualification
-report in [docs/hardware-reports](../hardware-reports/README.md) proves it: so
-far only telemetry on the generic entry, from a Sovol SV06 and a Snapmaker U1.
+`infra/sim` and the unit tests. The generic entry's `hardware` grades come
+from read-only reports documenting telemetry on a Sovol SV06 and a Snapmaker
+U1, plus one JPEG snapshot validated by the Connector on the U1. The snapshot
+uses a separately configured camera source. [Hardware reports](../hardware-reports/README.md).
+
+## Snapmaker U1 signed control
+
+The Connector's local printer configuration declares the U1 model. The
+existing signed Moonraker path supports pause, resume, cancel, home, jog,
+setting each nozzle and bed target (including zero), the owner-authorized
+G-code console, and starting a file already uploaded to the printer.
+
+For positive heater targets, the Connector uses the lower of the live heater
+`max_temp` and the U1 ceiling of 300 °C per nozzle or 100 °C for the bed. A zero
+target turns off a known heater. Jogs require homed axes and stay within the
+live position and velocity limits, including `max_z_velocity` when configured.
+The U1 homes X and Y together. The Connector rejects a request to home X or Y
+alone. A request to home only Z requires X and Y to be homed already.
+
+Tool selection accepts a bare `T0`, `T1`, `T2`, or `T3` through the signed
+console when the printer is idle and all axes are homed. The Connector appends
+the vendor flag `A0` so the number selects the physical tool, then verifies the
+active tool. The console retains its existing command safety policy.
+
+The U1 lifecycle browser journey and Connector fixture tests exercise these
+controls. Their grades remain `simulated` until the individual controls are
+observed on hardware. The read-only U1 telemetry and JPEG snapshot evidence
+belong to the generic Klipper + Moonraker entry. Starting an existing file is
+covered as a print control. U1 file management remains `unknown`.
 
 ## Active nozzle on multi-extruder printers
 

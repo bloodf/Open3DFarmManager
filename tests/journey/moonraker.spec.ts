@@ -167,8 +167,16 @@ const PRINT_CALLS = [
   'printer.gcode.script',
 ] as const
 
-if (journeyEnabled())
-  test.describe('journey: Moonraker lifecycle controls', () => {
+const lifecycleProfiles = [
+  { name: 'journey: Moonraker lifecycle controls' },
+  {
+    name: 'journey: Moonraker lifecycle controls (Snapmaker U1)',
+    moonraker: { mock: { profile: 'u1' }, declaredModel: 'Snapmaker U1' },
+  },
+] as const
+
+for (const profile of journeyEnabled() ? lifecycleProfiles : [])
+  test.describe(profile.name, () => {
     test.describe.configure({ mode: 'serial' })
     let harness: JourneyHarness | undefined
 
@@ -266,6 +274,7 @@ if (journeyEnabled())
         simulator: 'moonraker-fixture',
         openFarmInspector: true,
         signedControl: true,
+        ...('moonraker' in profile ? { moonraker: profile.moonraker } : {}),
       })
     })
 
@@ -360,6 +369,11 @@ if (journeyEnabled())
         'printer.emergency_stop': 0,
         'printer.gcode.script': 0,
       })
+      const calls = journey.printer.calls()
+      for (const method of PRINT_CALLS) {
+        const request = 'HTTP POST /' + method.replaceAll('.', '/')
+        expect(calls[request] ?? 0, request).toBe(0)
+      }
       expect(journey.printer.control.gcodeScripts).toEqual([])
       await expect(row.getByText('Cancelado', { exact: true })).toBeVisible({
         timeout: 60_000,
@@ -374,63 +388,6 @@ if (journeyEnabled())
         )
       expect(journey.simulatorObservation()).toMatchObject({ failure: false })
     })
-  })
-
-// A locally declared Snapmaker U1 advertises no command (every one is
-// unsupported: tool commands have no builder, generic Klipper writes are not
-// qualified on U1 hardware), so the page offers no control and the Connector
-// writes nothing, even though the signed control path is open.
-if (journeyEnabled())
-  test('Snapmaker U1 declarada: nenhum comando é oferecido nem enviado', async ({
-    browser,
-  }) => {
-    test.setTimeout(5 * 60_000)
-    const journey = await startJourneyHarness({
-      browser,
-      simulator: 'moonraker-fixture',
-      openFarmInspector: true,
-      signedControl: true,
-      moonraker: { mock: { profile: 'u1' }, declaredModel: 'Snapmaker U1' },
-    })
-    try {
-      const page = journey.ownerPage
-      await journey.expectLiveTelemetry()
-      const row = journey.farmRow()
-      await expect(row).toContainText('Conexão direta autenticada')
-      await journey.expectProgress(0.25)
-      // The control inbox opens: control is armed, yet no command is offered.
-      await expect
-        .poll(() => journey.simulatorObservation().pauseInboxReady, {
-          timeout: 90_000,
-        })
-        .toBe(true)
-      await expect(
-        row.getByRole('group', {
-          name: 'Controles da impressora ' + journey.printerKey,
-        }),
-      ).toHaveCount(0)
-      for (const label of ['Pausar', 'Retomar', 'Cancelar'])
-        await expect(
-          row.getByRole('button', { name: label, exact: true }),
-        ).toHaveCount(0)
-      await expect(
-        page.getByRole('region', {
-          name: 'Controles adicionais de ' + journey.printerKey,
-        }),
-      ).toHaveCount(0)
-      expect(
-        Object.fromEntries(
-          PRINT_CALLS.map((method) => [
-            method,
-            journey.printer.calls()[method] ?? 0,
-          ]),
-        ),
-      ).toEqual(Object.fromEntries(PRINT_CALLS.map((method) => [method, 0])))
-      expect(journey.printer.control.gcodeScripts).toEqual([])
-      expect(journey.printer.model().state).toBe('printing')
-    } finally {
-      await journey.close()
-    }
   })
 
 // Browser file upload over an authorized direct WebRTC control session against

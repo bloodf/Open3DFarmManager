@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { request } from 'node:http'
 import { setTimeout as delay } from 'node:timers/promises'
+import { isKobraXFlvPath, isKobraXFlvPort } from '../kobra-x/camera.ts'
 import { readCrealityJpegs, selectCrealityCamera } from '../creality/camera.ts'
 
 export type AnycubicCameraSource = Readonly<
@@ -10,6 +11,12 @@ export type AnycubicCameraSource = Readonly<
       port?: number
       /** Optional HTTP Basic credentials from trusted local configuration. */
       auth?: { username: string; password: string }
+    }
+  | {
+      kind: 'kobra-x-flv'
+      host: string
+      port: number
+      path: string
     }
   | {
       kind: 'stock'
@@ -35,6 +42,11 @@ export function selectAnycubicCamera(source: AnycubicCameraSource) {
       )
         throw Error()
       return { kind: 'mjpeg' as const, host: source.host, port }
+    }
+    if (source.kind === 'kobra-x-flv') {
+      if (!isKobraXFlvPath(source.path) || !isKobraXFlvPort(source.host, port))
+        throw Error()
+      return { kind: 'flv' as const, host: source.host, port }
     }
     if (
       source.kind !== 'stock' ||

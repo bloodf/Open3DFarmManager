@@ -607,6 +607,160 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /alerts/{printerId}:
+    get:
+      operationId: listPrinterAlerts
+      summary: Read alert lifecycle for a granted printer
+      security:
+        - clientCredentials: ['printers:read']
+      parameters:
+        - in: path
+          name: printerId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Up to 500 alert occurrences, open alerts first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [printerId, alerts, truncated]
+                properties:
+                  printerId: { type: string, format: uuid }
+                  truncated: { type: boolean }
+                  alerts:
+                    type: array
+                    maxItems: 500
+                    items:
+                      type: object
+                      required:
+                        [
+                          id,
+                          kind,
+                          label,
+                          message,
+                          openedAt,
+                          resolvedAt,
+                          acknowledgedAt,
+                          silencedUntil,
+                          needsAttention,
+                        ]
+                      properties:
+                        id: { type: string, format: uuid }
+                        kind: { type: string }
+                        label: { type: string }
+                        message: { type: string }
+                        openedAt:
+                          { type: integer, description: Unix milliseconds }
+                        resolvedAt:
+                          {
+                            type: [integer, 'null'],
+                            description: Unix milliseconds,
+                          }
+                        acknowledgedAt:
+                          {
+                            type: [integer, 'null'],
+                            description: Unix milliseconds,
+                          }
+                        silencedUntil:
+                          {
+                            type: [integer, 'null'],
+                            description: Unix milliseconds,
+                          }
+                        needsAttention: { type: boolean }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /alerts/{printerId}/{alertId}:
+    post:
+      operationId: updatePrinterAlert
+      summary: Acknowledge or silence an open alert occurrence
+      security:
+        - clientCredentials: ['alerts:write']
+      parameters:
+        - in: path
+          name: printerId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: alertId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: false
+                  required: [action]
+                  properties:
+                    action: { const: acknowledge }
+                - type: object
+                  additionalProperties: false
+                  required: [action, until]
+                  properties:
+                    action: { const: silence }
+                    until:
+                      type: integer
+                      description: Unix milliseconds, up to seven days from the request
+      responses:
+        '200':
+          description: Recorded acknowledgement and silence timestamps
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, acknowledgedAt, silencedUntil]
+                properties:
+                  id: { type: string, format: uuid }
+                  acknowledgedAt:
+                    { type: [integer, 'null'], description: Unix milliseconds }
+                  silencedUntil:
+                    { type: [integer, 'null'], description: Unix milliseconds }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /camera/{printerId}:
+    get:
+      operationId: getPrinterCameraLink
+      summary: Create a short-lived OpenFarm camera-view link
+      description: The link requires an authorized OpenFarm browser session and the Connector's direct WebRTC camera path.
+      security:
+        - clientCredentials: ['camera:view']
+      parameters:
+        - in: path
+          name: printerId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Same-origin OpenFarm URL and its expiry
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url, expiresAt]
+                properties:
+                  url: { type: string, format: uri-reference }
+                  expiresAt: { type: integer, description: Unix milliseconds }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /environment/measurements:
     get:
       operationId: listEnvironmentMeasurements
@@ -685,7 +839,16 @@ paths:
                     }
                   degraded: { type: boolean }
                   reasons: { type: array, items: { type: string } }
-                  observedAt: { type: integer, description: Unix milliseconds }
+                  observedAt:
+                    {
+                      type: integer,
+                      description: Heartbeat time in Unix milliseconds,
+                    }
+                  assignmentObservedAt:
+                    {
+                      type: integer,
+                      description: Last successful printer observation in Unix milliseconds,
+                    }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -1534,6 +1697,34 @@ paths:
                           properties:
                             value: { type: number }
                             unit: { const: '°C' }
+                        toolTargets:
+                          type: array
+                          maxItems: 32
+                          items:
+                            type: object
+                            required: [tool, value, unit]
+                            properties:
+                              tool: { type: integer, minimum: 0, maximum: 999 }
+                              value: { type: number }
+                              unit: { const: '°C' }
+                        chamberTemperature:
+                          type: object
+                          required: [value, unit]
+                          properties:
+                            value: { type: number }
+                            unit: { const: '°C' }
+                        chamberTarget:
+                          type: object
+                          required: [value, unit]
+                          properties:
+                            value: { type: number }
+                            unit: { const: '°C' }
+                        runEnergy:
+                          type: object
+                          required: [value, unit]
+                          properties:
+                            value: { type: number, minimum: 0 }
+                            unit: { const: Wh }
                         chamberFan:
                           type: object
                           required: [value, unit]
@@ -1554,6 +1745,8 @@ paths:
                       type: object
                       required: [observedAt, from, to]
                       properties:
+                        reason:
+                          { type: string, enum: [client-certificate-missing] }
                         observedAt:
                           { type: integer, description: Unix milliseconds }
                         from:
@@ -1929,8 +2122,8 @@ components:
             library:write: Upload library files and set the storage mode.
             environment:read: Read enclosure and room environment and power measurements.
             plates:confirm: Confirm that a printer's build plate is clear.
-            alerts:write: Raise integration alerts for a farm. Reserved; no endpoint uses it yet.
-            camera:view: View printer camera snapshots. Reserved; no endpoint uses it yet.
+            alerts:write: Acknowledge or silence alerts on granted printers.
+            camera:view: Open the camera view for a granted printer.
   parameters:
     PrinterId:
       name: printerId

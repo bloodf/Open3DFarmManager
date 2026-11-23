@@ -37,8 +37,8 @@ Owners can grant one or more scopes across a farm or limit them to a printer ass
 | `library:write`    | Upload library files and set the storage mode.                               |
 | `environment:read` | Read enclosure and room environment and power measurements.                  |
 | `plates:confirm`   | Confirm that a printer's build plate is clear.                               |
-| `alerts:write`     | Raise integration alerts for a farm. Reserved: no endpoint uses it yet.      |
-| `camera:view`      | View printer camera snapshots. Reserved: no endpoint uses it yet.            |
+| `alerts:write`     | Acknowledge or silence alerts on granted printers.                           |
+| `camera:view`      | Open the camera view for a granted printer.                                  |
 
 Owners can grant the reserved scopes and tokens can carry them, but they
 authorize nothing until an endpoint that requires them ships (`environment:read`
@@ -83,14 +83,48 @@ one day and default limit is 100. `truncated` signals that more observations
 exist; `until` is the end of the returned window. When timestamps tie at
 the limit, reduce the window and do not treat truncation as a complete export. State intervals use `gap` for
 offline or observations older than two minutes. Metrics include explicit units;
-missing values, including run energy, remain unknown. Raw payloads and local
+missing values remain unknown. Moonraker can report layers, elapsed time,
+tool targets and chamber readings when the configured objects provide them.
+A Connector-reported run energy reading is expressed in Wh, including a
+reported zero. No current Moonraker collector reports run energy. Raw payloads and local
 camera URLs are never returned. The `events` array contains up to 500 observed
 state transitions with timestamps and states; `eventsTruncated` signals that
 additional transitions were omitted.
 
 `GET /health/{printerId}` requires the same grant and reports heartbeat freshness,
-assignment connection state and degraded reasons. A stale or absent heartbeat is
-unknown, not evidence that a printer is idle. Both endpoints are read-only.
+assignment connection state and degraded reasons. `assignmentObservedAt` is
+the last successful printer observation. After two minutes, an expired
+heartbeat or a connected assignment without a successful observation is
+reported as unknown.
+Both endpoints are read-only.
+
+### Camera view
+
+`GET /camera/{printerId}` requires `camera:view` on the assignment and a
+fresh Connector heartbeat advertising its camera. The result's relative
+`url` opens on the OpenFarm origin and expires after two minutes. The
+viewer needs an authenticated OpenFarm account in that farm and a browser
+approved for direct WebRTC. Revoking the grant prevents link redemption.
+The Connector offers one camera per WebRTC session, so it advertises its
+first configured camera for this link. The stream and its credentials
+stay on the existing Connector camera path.
+
+### Alert lifecycle
+
+`GET /alerts/{printerId}` requires `printers:read`. It lists up to 500
+occurrences for the assignment, with open alerts first. Each occurrence has
+its own ID and an observed `openedAt`. An observed recovery sets
+`resolvedAt`. The latest 500 resolved occurrences per assignment are
+retained. Tracking begins with observations accepted after this update.
+Use `needsAttention` to filter the inbox. Resolution, acknowledgement or
+an active silence removes the occurrence from that inbox.
+
+`POST /alerts/{printerId}/{alertId}` requires `alerts:write` on the
+assignment. Send `{"action":"acknowledge"}` or
+`{"action":"silence","until":<Unix milliseconds>}`. Acknowledgement keeps
+the first acknowledgement timestamp. A silence can last up to seven days
+and can be extended. These actions affect the inbox and issue no printer
+commands. An occurrence that has resolved returns `404` on update.
 
 ## Read printers, state and inventory
 

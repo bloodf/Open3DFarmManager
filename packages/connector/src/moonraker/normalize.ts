@@ -2,6 +2,7 @@ import {
   boundPrinterString,
   PrinterState,
 } from '@open3dfarmmanager/farm-protocol'
+import { observedTemperatureDetails } from './temperature-observation.ts'
 import type { ObservationContext, ValidatedMoonrakerSnapshot } from './parse.ts'
 
 function parseFanSpeedPercent(raw: unknown): number | undefined {
@@ -168,6 +169,7 @@ export function normalizeMoonrakerSnapshot(
       ...context,
       state,
       progress: virtual_sdcard.progress,
+      ...observedTemperatureDetails(rawStatus),
       ...(filename ? { filename } : {}),
       ...(validNumber(duration) ? { printDuration: duration } : {}),
       ...(validNumber(print_stats.total_duration)

@@ -189,6 +189,18 @@ function checkRoute(file: string, text: string): string | undefined {
     /\.issueLegacyCredential\s*\(/.test(text)
   )
     return
+  if (
+    file === `${server}/api/camera-view.post.ts` &&
+    called(
+      parsed,
+      'services/authenticated-session.ts',
+      'authenticatedSession',
+    ) &&
+    called(parsed, 'utils/auth/runtime.ts', 'authRuntime') &&
+    /\.redeemCameraTicket\(/.test(text) &&
+    /FROM farm\.memberships/.test(text)
+  )
+    return
   // The integration middleware authenticates the bearer and places its principal
   // in the request context; these handlers must additionally narrow farm grants.
   if (
@@ -255,10 +267,14 @@ function functionBody(module: string, name: string): string {
   return declaration.body.getText(tree)
 }
 
-test('telemetry and health guard checks the printer grant', () => {
+test('telemetry, health and alert guard checks the requested printer grant', () => {
+  assert.match(
+    source(`${server}/utils/integration-telemetry.ts`),
+    /scope: IntegrationScope = 'printers:read'/,
+  )
   assert.match(
     functionBody('utils/integration-telemetry.ts', 'authorizedPrinter'),
-    /integrationGrantFor\(principal, 'printers:read', row\.farmId, row\.id\)/,
+    /integrationGrantFor\(principal, scope, row\.farmId, row\.id\)/,
   )
 })
 

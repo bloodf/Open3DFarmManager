@@ -143,6 +143,71 @@ function dispatchFixture(view: 'eligibility' | 'plate'): Fixture {
 }
 
 export const fixtures: Record<string, Fixture> = {
+  'GET /alerts/{printerId}': {
+    scopes: ['printers:read'],
+    success: '200',
+    valid: () => ({ method: 'GET', path: `/alerts/${P}` }),
+    bad: () => ({ method: 'GET', path: `/alerts/${P}?unexpected=1` }),
+    missing: () => ({ method: 'GET', path: `/alerts/${ids.unknown}` }),
+    printerPath: true,
+    fault: 'pool',
+  },
+  'POST /alerts/{printerId}/{alertId}': {
+    scopes: ['alerts:write'],
+    success: '200',
+    valid: () => ({
+      method: 'POST',
+      path: `/alerts/${P}/${ids.alertA}`,
+      body: { action: 'acknowledge' },
+    }),
+    bad: () => ({
+      method: 'POST',
+      path: `/alerts/${P}/${ids.alertA}`,
+      body: { action: 'silence', until: 0 },
+    }),
+    missing: () => ({
+      method: 'POST',
+      path: `/alerts/${P}/${ids.unknown}`,
+      body: { action: 'acknowledge' },
+    }),
+    printerPath: true,
+    fault: 'pool',
+    more: [
+      {
+        name: 'silence until a future timestamp',
+        run: (world) =>
+          asApp(world, farm(['alerts:write']), () => ({
+            method: 'POST',
+            path: `/alerts/${P}/${ids.alertA}`,
+            body: { action: 'silence', until: Date.now() + 60_000 },
+          })),
+      },
+    ],
+  },
+  'GET /camera/{printerId}': {
+    scopes: ['camera:view'],
+    success: '200',
+    valid: (world) => {
+      world.cameraEnabled = true
+      return { method: 'GET', path: `/camera/${P}` }
+    },
+    bad: () => ({ method: 'GET', path: `/camera/${P}?unexpected=1` }),
+    missing: () => ({ method: 'GET', path: `/camera/${ids.unknown}` }),
+    printerPath: true,
+    fault: 'pool',
+    extra: {
+      '404': [
+        {
+          name: 'camera is absent from the heartbeat',
+          run: (world) =>
+            asApp(world, farm(['camera:view']), () => ({
+              method: 'GET',
+              path: `/camera/${P}`,
+            })),
+        },
+      ],
+    },
+  },
   'GET /health/{printerId}': {
     scopes: ['printers:read'],
     success: '200',

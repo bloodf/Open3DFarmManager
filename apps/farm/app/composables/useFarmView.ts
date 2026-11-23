@@ -13,6 +13,7 @@ import { createFarmStatusKeyResolver } from '../utils/webrtc/farm-status-key-res
 
 export function useFarmView(
   webcamDetail?: WebcamDetailOptions & { onClose: () => void },
+  cameraTarget?: () => string | null,
 ) {
   // Per component instance, client-only. Never serialize private scope into a Nuxt payload.
   const state = shallowRef<FarmViewState>({ kind: 'loading' })
@@ -58,6 +59,7 @@ export function useFarmView(
   onMounted(() => {
     feed = createAuthenticatedFarmStatusFeed({
       ...(webcamDetail ? { webcamDetail } : {}),
+      ...(cameraTarget ? { cameraTarget } : {}),
       onCamera({ assignmentId, stream, cameraId }) {
         const next = new Map(cameras.value)
         if (stream)

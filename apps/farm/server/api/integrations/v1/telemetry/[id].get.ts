@@ -29,6 +29,7 @@ export default defineEventHandler(async (event) => {
       id,
     )
     if (!row || !row.agentId) return integrationProblem('not-found', headers)
+    const observationStart = Math.max(row.assignedAt ?? 0, range.since)
     const sql = integrationAuthPool()
     const preceding = await sql<
       { payload: unknown }[]
@@ -37,7 +38,7 @@ export default defineEventHandler(async (event) => {
         AND payload->>'kind' = 'printer-state' AND payload->'state'->>'printerKey' = ${row.printerKey}
         AND payload->'state'->>'observedAt' ~ '^[0-9]{1,16}$'
         AND (payload->'state'->>'observedAt')::bigint < ${range.since}
-        AND (payload->'state'->>'observedAt')::bigint >= ${Math.max(0, range.since - OBSERVATION_FRESH_MS)}
+        AND (payload->'state'->>'observedAt')::bigint >= ${Math.max(0, range.since - OBSERVATION_FRESH_MS, row.assignedAt ?? 0)}
       ORDER BY (payload->'state'->>'observedAt')::bigint DESC, event_id DESC LIMIT 1`
     const records = await sql<
       { payload: unknown }[]
@@ -45,7 +46,7 @@ export default defineEventHandler(async (event) => {
       WHERE farm_id = ${row.farmId}::uuid AND agent_id = ${row.agentId}::uuid
         AND payload->>'kind' = 'printer-state' AND payload->'state'->>'printerKey' = ${row.printerKey}
         AND payload->'state'->>'observedAt' ~ '^[0-9]{1,16}$'
-        AND (payload->'state'->>'observedAt')::bigint >= ${range.since}
+        AND (payload->'state'->>'observedAt')::bigint >= ${observationStart}
         AND (payload->'state'->>'observedAt')::bigint < ${range.until}
       ORDER BY (payload->'state'->>'observedAt')::bigint, event_id LIMIT ${range.limit + 1}`
     const truncated = records.length > range.limit
@@ -62,7 +63,7 @@ export default defineEventHandler(async (event) => {
       WHERE farm_id = ${row.farmId}::uuid AND agent_id = ${row.agentId}::uuid
         AND payload->>'kind' = 'printer-transition' AND payload->'transition'->>'printerKey' = ${row.printerKey}
         AND payload->'transition'->>'observedAt' ~ '^[0-9]{1,16}$'
-        AND (payload->'transition'->>'observedAt')::bigint >= ${range.since}
+        AND (payload->'transition'->>'observedAt')::bigint >= ${observationStart}
         AND (payload->'transition'->>'observedAt')::bigint < ${effectiveUntil}
       ORDER BY (payload->'transition'->>'observedAt')::bigint, event_id LIMIT 501`
     return {

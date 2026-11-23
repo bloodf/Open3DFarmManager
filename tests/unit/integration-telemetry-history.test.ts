@@ -20,9 +20,26 @@ describe('integration telemetry projections', () => {
           },
           secret: 'hidden',
         },
+        {
+          transition: {
+            printerKey: 'sim',
+            from: 'error',
+            to: 'offline',
+            observedAt: 2000,
+            reason: 'client-certificate-missing',
+          },
+        },
       ]),
     ).toEqual({
-      events: [{ from: 'printing', to: 'error', observedAt: 1000 }],
+      events: [
+        { from: 'printing', to: 'error', observedAt: 1000 },
+        {
+          from: 'error',
+          to: 'offline',
+          observedAt: 2000,
+          reason: 'client-certificate-missing',
+        },
+      ],
       eventsTruncated: false,
     })
   })
@@ -124,6 +141,15 @@ describe('integration telemetry projections', () => {
       connector: 'connected',
       assignment: 'connected',
       degraded: false,
+    })
+    expect(
+      projectHealth({ ...heartbeat, lastSeenAt: 200000 }, 'sim', 200001),
+    ).toMatchObject({
+      connector: 'connected',
+      assignment: 'unknown',
+      degraded: true,
+      reasons: ['assignment-stale'],
+      assignmentObservedAt: 1000,
     })
     expect(projectHealth(heartbeat, 'sim', 200000)).toMatchObject({
       connector: 'unknown',

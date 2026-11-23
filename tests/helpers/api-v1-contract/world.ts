@@ -58,6 +58,7 @@ export const ids = {
   printerB1: 'bbbbbbbb-0000-4000-8000-000000000001',
   agentA: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
   agentB: 'bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb',
+  alertA: 'aaaaaaaa-4444-4444-8444-aaaaaaaaaaaa',
   unknown: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
   itemA: 'aaaaaaaa-2222-4222-8222-aaaaaaaaaaa1',
   itemB: 'aaaaaaaa-2222-4222-8222-aaaaaaaaaaa2',
@@ -419,6 +420,7 @@ export class MemoryWebhooks {
 
 export class World {
   clock = 1_700_000_000_000
+  cameraEnabled = false
   readonly faults = new Set<Fault>()
   readonly config: {
     integrationAuth: { readLimit: number; writeLimit: number }
@@ -659,7 +661,46 @@ export class World {
     const fn = async (strings: TemplateStringsArray, ...v: unknown[]) => {
       if (this.faults.has('pool')) throw new Error('pool down')
       const text = strings.join('?')
-      if (text.includes('farm.connector_heartbeats')) return []
+      if (text.includes('farm.integration_alert_lifecycle')) {
+        if (text.includes('UPDATE')) {
+          const [acknowledgedAt, silencedUntil, printerId, alertId] = v
+          if (printerId !== ids.printerA1 || alertId !== ids.alertA) return []
+          return [{ id: alertId, acknowledgedAt, silencedUntil }]
+        }
+        return v[1] === ids.printerA1
+          ? [
+              {
+                id: ids.alertA,
+                kind: 'error',
+                label: 'Erro',
+                message: 'Impressora em estado de erro.',
+                openedAt: this.clock,
+                resolvedAt: null,
+                acknowledgedAt: null,
+                silencedUntil: null,
+                needsAttention: true,
+              },
+            ]
+          : []
+      }
+      if (text.includes('farm.connector_heartbeats')) {
+        if (!this.cameraEnabled) return []
+        return [
+          {
+            health: {
+              connector: {
+                version: 'fixture',
+                uptimeMs: 1,
+                queueBacklog: 0,
+                storage: 'healthy',
+                rtcScope: 'lan',
+              },
+              printers: [],
+              cameraAssignments: [ids.printerA1],
+            },
+          },
+        ]
+      }
       if (text.includes('farm.telemetry_events')) {
         if (!text.includes("'printer-state'") || !text.includes('LIMIT ?'))
           return []

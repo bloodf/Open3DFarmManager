@@ -3,6 +3,7 @@ import {
   PrinterState,
   PrinterTransition,
 } from '@open3dfarmmanager/farm-protocol'
+import type { IntegrationScope } from '../services/integration-apps.ts'
 import { integrationGrantFor } from './integration-auth-http.ts'
 import {
   uuidPattern,
@@ -24,6 +25,7 @@ export function projectTransitions(payloads: unknown[]) {
             observedAt: parsed.data.observedAt,
             from: parsed.data.from,
             to: parsed.data.to,
+            ...(parsed.data.reason ? { reason: parsed.data.reason } : {}),
           },
         ]
       : []
@@ -61,10 +63,12 @@ export function authorizedPrinter(
   principal: IntegrationPrincipal,
   row: IntegrationPrinterRow | null,
   id: string,
+  scope: IntegrationScope = 'printers:read',
 ) {
   return uuidPattern.test(id) &&
     row &&
-    integrationGrantFor(principal, 'printers:read', row.farmId, row.id)
+    row.id === id &&
+    integrationGrantFor(principal, scope, row.farmId, row.id)
     ? row
     : null
 }
@@ -102,6 +106,33 @@ export function projectHistory(
       ...(s.fans?.chamber !== undefined
         ? { chamberFan: { value: s.fans.chamber, unit: '%' } }
         : {}),
+      ...(s.toolTargetsCelsius === undefined
+        ? {}
+        : {
+            toolTargets: s.toolTargetsCelsius.map(({ tool, target }) => ({
+              tool,
+              value: target,
+              unit: '°C',
+            })),
+          }),
+      ...(s.chamberTemperatureCelsius === undefined
+        ? {}
+        : {
+            chamberTemperature: {
+              value: s.chamberTemperatureCelsius,
+              unit: '°C',
+            },
+          }),
+      ...(s.chamberTargetCelsius === undefined
+        ? {}
+        : {
+            chamberTarget: { value: s.chamberTargetCelsius, unit: '°C' },
+          }),
+      ...(s.runEnergyWh === undefined
+        ? {}
+        : {
+            runEnergy: { value: s.runEnergyWh, unit: 'Wh' },
+          }),
       ...(s.currentLayer !== undefined ? { currentLayer: s.currentLayer } : {}),
       ...(s.totalLayer !== undefined ? { totalLayer: s.totalLayer } : {}),
       ...(s.printDuration !== undefined
@@ -148,16 +179,31 @@ export function projectHealth(
   const reasons: string[] = []
   if (!fresh) reasons.push('connector-stale')
   if (!parsed.success) reasons.push('health-unavailable')
+  if (fresh && parsed.success && parsed.data.connector.rtcScope === 'disabled')
+    reasons.push('rtc-disabled')
   if (parsed.success && parsed.data.connector.storage === 'degraded')
     reasons.push('storage-degraded')
   if (fresh && !printer) reasons.push('assignment-unreported')
+  const assignmentObservedAt = printer?.lastSuccessAt
+  const assignmentFresh =
+    typeof assignmentObservedAt === 'number' &&
+    assignmentObservedAt <= now &&
+    now - assignmentObservedAt <= OBSERVATION_FRESH_MS
   if (fresh && printer && printer.state !== 'connected')
     reasons.push(`printer-${printer.state}`)
+  if (fresh && printer?.state === 'connected' && !assignmentFresh)
+    reasons.push('assignment-stale')
   return {
     connector: fresh ? 'connected' : 'unknown',
-    assignment: fresh ? (printer?.state ?? 'unknown') : 'unknown',
+    assignment:
+      fresh && printer && (printer.state !== 'connected' || assignmentFresh)
+        ? printer.state
+        : 'unknown',
     degraded: reasons.length > 0,
     reasons,
     ...(heartbeat ? { observedAt: heartbeat.lastSeenAt } : {}),
+    ...(typeof assignmentObservedAt === 'number' && assignmentObservedAt <= now
+      ? { assignmentObservedAt }
+      : {}),
   }
 }

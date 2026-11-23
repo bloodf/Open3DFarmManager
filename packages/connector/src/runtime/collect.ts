@@ -223,6 +223,9 @@ export async function collectIntoQueue(input: {
               from: previous,
               to: event.printer.state,
               observedAt: event.printer.observedAt,
+              ...(event.printer.statusReason
+                ? { reason: event.printer.statusReason }
+                : {}),
             },
             now,
           )

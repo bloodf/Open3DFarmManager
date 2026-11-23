@@ -7,9 +7,8 @@ const FILE = 'collection.gcode'
 
 test.use({ actionTimeout: 30_000, navigationTimeout: 30_000 })
 
-// The dispatcher downgrades a successful local confirmation to outcome-unknown.
 if (journeyEnabled())
-  test.fixme('jornada FullFarmManager: retém a próxima impressão até a retirada', async ({
+  test('jornada FullFarmManager: retém a próxima impressão até a retirada', async ({
     browser,
   }) => {
     test.setTimeout(10 * 60_000)

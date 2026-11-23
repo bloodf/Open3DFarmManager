@@ -851,12 +851,26 @@ export function createPauseDispatcher(config: {
             interrupted('deadline')
             return
           }
-          // A collection confirmation is a local journal write: no printer effect to observe.
+          // Local writes have no printer effect to observe.
           if (
             command.action === 'config_write' ||
             command.action === 'confirm_collection'
           ) {
-            finalize('applied', 'applied', 'applied', now.wall)
+            if (command.action === 'config_write') {
+              finalize('applied', 'applied', 'applied', now.wall)
+              return
+            }
+            cleanup()
+            const completedAt = sample()
+            if (!completedAt || completedAt.mono >= resultDeadline) {
+              finalize(
+                'outcome-unknown',
+                'state-unconfirmed',
+                'state-unconfirmed',
+              )
+              return
+            }
+            finalize('applied', 'applied', 'applied', completedAt.wall)
             return
           }
           const paused = await driver.waitForPaused({

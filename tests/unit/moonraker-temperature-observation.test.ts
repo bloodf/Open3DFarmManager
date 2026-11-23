@@ -41,6 +41,38 @@ describe('parseTemperatureFields', () => {
     expect(parseTemperatureFields(input)).toEqual(expected)
   })
 
+  it.each([
+    [
+      { toolhead: { extruder: 'extruder2' }, extruder2: { temperature: 230 } },
+      { kind: 'reading', celsius: 230 },
+    ],
+    [{ toolhead: { extruder: 'extruder' } }, { kind: 'reading', celsius: 210 }],
+    [{ toolhead: { extruder: 'extruder3' } }, { kind: 'absent' }],
+    [
+      { toolhead: { extruder: 'extruder1' }, extruder1: { temperature: null } },
+      { kind: 'invalid' },
+    ],
+    [
+      { toolhead: { extruder: 'fan' }, fan: { temperature: 80 } },
+      { kind: 'invalid' },
+    ],
+    [{}, { kind: 'invalid' }],
+  ])(
+    'reads only the selected extruder in a multi-tool query',
+    (objects, tool) => {
+      expect(
+        parseTemperatureFields(
+          {
+            extruder: { temperature: 210 },
+            heater_bed: { temperature: 60 },
+            ...objects,
+          },
+          true,
+        ),
+      ).toEqual({ tool, bed: { kind: 'reading', celsius: 60 } })
+    },
+  )
+
   it('does not mutate the source', () => {
     const input = {
       extruder: { temperature: 0, extra: 'kept' },

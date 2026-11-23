@@ -425,6 +425,10 @@ export function createMoonrakerSubscription(input: {
                   observeTools(complete.status)
                   const value = Snapshot.parse(complete)
                   const stamp = observation.requestStartedAtMonoMs
+                  const fields = parseTemperatureFields(
+                    complete.status,
+                    observation.activeToolQuery,
+                  )
                   // A delta received during this query has a newer local field
                   // observation. Discard this overlapping response rather than
                   // regress evidence or advance its conservative request anchor.
@@ -461,8 +465,8 @@ export function createMoonrakerSubscription(input: {
                       // Temperature is independent display evidence from this
                       // complete query. Keep the newer delta's state/progress
                       // while publishing those conservatively timed readings.
-                      const fields = parseTemperatureFields(complete.status)
                       if (
+                        observation.activeToolQuery ||
                         fields.tool.kind === 'reading' ||
                         fields.bed.kind === 'reading'
                       )
@@ -484,10 +488,7 @@ export function createMoonrakerSubscription(input: {
                   }
                   publish(
                     value,
-                    {
-                      fields: parseTemperatureFields(complete.status),
-                      observedAtMonoMs: stamp,
-                    },
+                    { fields, observedAtMonoMs: stamp },
                     value.eventtime,
                   )
                 },

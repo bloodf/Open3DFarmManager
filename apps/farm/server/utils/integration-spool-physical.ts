@@ -114,19 +114,40 @@ export function registerPhysicalSpool(
       .digest('hex')
     await tx`SELECT pg_advisory_xact_lock(hashtextextended(${access.appId + ':' + key}, 0))`
     const [existing] = await tx<
-      { request_hash: string; response: ReturnType<typeof physicalSpool> }[]
+      {
+        request_hash: string
+        response: ReturnType<typeof physicalSpool> & {
+          spoolman?: typeof input.spoolman
+        }
+      }[]
     >`
       SELECT request_hash, response FROM farm.integration_physical_spool_registrations
       WHERE app_id = ${access.appId}::uuid AND idempotency_key = ${key}`
-    if (existing)
-      return existing.request_hash === hash
-        ? { outcome: 'registered' as const, spool: existing.response }
-        : { outcome: 'key-reused' as const }
+    if (existing) {
+      if (existing.request_hash !== hash)
+        return { outcome: 'key-reused' as const }
+      const { spoolman: _binding, ...spool } = existing.response
+      return { outcome: 'registered' as const, spool }
+    }
     const [filament] = await tx`
       SELECT id FROM farm.spool_filaments
       WHERE farm_id = ${access.farmId}::uuid AND id = ${input.filamentId}
       FOR KEY SHARE`
     if (!filament) return null
+    if (input.spoolman) {
+      const binding = { farmId: access.farmId, spoolman: input.spoolman }
+      const lock = JSON.stringify([
+        binding.farmId,
+        binding.spoolman.serviceId,
+        binding.spoolman.spoolId,
+      ])
+      await tx`SELECT pg_advisory_xact_lock(hashtextextended(${'physical-spool-binding:' + lock}, 0))`
+      const [duplicate] = await tx`
+        SELECT 1 FROM farm.integration_physical_spool_registrations
+        WHERE response @> ${tx.json(binding)}::jsonb
+        LIMIT 1`
+      if (duplicate) return { outcome: 'already-bound' as const }
+    }
     // Use the Spoolman-compatible library allocator, including its per-farm lock.
     const [row] = await tx<SpoolRow[]>`
       WITH allocated AS (
@@ -136,18 +157,20 @@ export function registerPhysicalSpool(
         DO UPDATE SET last_id = farm.spool_library_counters.last_id + 1
         RETURNING last_id
       )
-      INSERT INTO farm.spools (farm_id, id, filament_id, location, initial_weight, registered_at, spoolman_service_id, spoolman_spool_id)
+      INSERT INTO farm.spools (farm_id, id, filament_id, location, initial_weight, registered_at)
       SELECT ${access.farmId}::uuid, last_id, ${input.filamentId}::bigint,
-        ${input.location}, ${input.initialWeightGrams ?? null}::float8, ${Date.now()}::bigint,
-        ${input.spoolman?.serviceId ?? null}::uuid, ${input.spoolman?.spoolId ?? null}::bigint
+        ${input.location}, ${input.initialWeightGrams ?? null}::float8, ${Date.now()}::bigint
       FROM allocated
-      ON CONFLICT ON CONSTRAINT spools_spoolman_identity DO NOTHING
       RETURNING id::float8 AS id, location, xmin::text || ':' || ctid::text AS revision`
-    if (!row) return { outcome: 'already-bound' as const }
+    if (!row) throw new Error('Spool allocation returned no row')
     const spool = physicalSpool(access.farmId, row)
+    // The insert-only registration record preserves the binding after app revocation.
+    const receipt = input.spoolman
+      ? { ...spool, spoolman: input.spoolman }
+      : spool
     await tx`INSERT INTO farm.integration_physical_spool_registrations
       (app_id, idempotency_key, request_hash, response)
-      VALUES (${access.appId}::uuid, ${key}, ${hash}, ${tx.json(spool)})`
+      VALUES (${access.appId}::uuid, ${key}, ${hash}, ${tx.json(receipt)})`
     return { outcome: 'registered' as const, spool }
   })
 }

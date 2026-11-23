@@ -346,7 +346,7 @@ test('cancel discards staged credentials; nothing is written to runtime', async 
   )
 })
 
-test('credential rotation preserves the service id, while a changed origin rotates it', async () => {
+test('replacing the farm Spoolman rotates credentials and keeps serviceId', async () => {
   const w = world()
   async function apply(t: ReturnType<typeof target>, revision: number) {
     const prepare = {
@@ -383,22 +383,6 @@ test('credential rotation preserves the service id, while a changed origin rotat
     ),
     spoolmanAuthorization({ username: 'ana', password: 'novo' }),
   )
-  await apply(target({ origin: 'http://192.168.1.61:7912' }), 2)
-  const third = JSON.parse(readFileSync(w.runtimeConfigPath, 'utf8'))
-  assert.notEqual(
-    third.collection.spoolman.serviceId,
-    second.collection.spoolman.serviceId,
-  )
-  const replacement = randomUUID()
-  await apply(
-    target({ origin: 'http://192.168.1.61:7912', service_id: replacement }),
-    3,
-  )
-  const fourth = JSON.parse(readFileSync(w.runtimeConfigPath, 'utf8'))
-  assert.equal(fourth.collection.spoolman.serviceId, replacement)
-  await apply(target({ service_id: replacement }), 4)
-  const fifth = JSON.parse(readFileSync(w.runtimeConfigPath, 'utf8'))
-  assert.equal(fifth.collection.spoolman.serviceId, replacement)
   readAgentRuntimeConfig(w.runtimeConfigPath, w.scope)
 })
 

@@ -382,7 +382,8 @@ const scenarios = [
   ...alertSettingsScenarios(),
   ...environmentControlScenarios(),
 ]
-scenarios.push(...physicalSpoolScenarios(), ...spoolIdentityScenarios())
+scenarios.push(...physicalSpoolScenarios())
+scenarios.push(...spoolIdentityScenarios())
 const pairs = ops.flatMap((op) =>
   op.responses.map((response) => ({
     op,
@@ -524,20 +525,18 @@ function physicalSpoolScenarios(): Scenario[] {
               }
               if (text.includes('FROM farm.spool_filaments'))
                 return values[1] === 1 ? [{ id: 1 }] : []
-              if (text.includes('INSERT INTO farm.spools')) {
-                if (
-                  options.input?.body &&
-                  typeof options.input.body === 'object' &&
-                  'spoolman' in options.input.body
-                )
-                  expect(values.slice(-2)).toEqual([
-                    '12345678-1234-4234-8234-123456789abc',
-                    1,
-                  ])
-                return options.bindingConflict
-                  ? []
-                  : [{ ...spool, id: 8, location: values[3] }]
+              if (text.includes('WHERE response @>')) {
+                expect(values[0]).toEqual({
+                  farmId: ids.farmA,
+                  spoolman: {
+                    serviceId: '12345678-1234-4234-8234-123456789abc',
+                    spoolId: 1,
+                  },
+                })
+                return options.bindingConflict ? [{ exists: true }] : []
               }
+              if (text.includes('INSERT INTO farm.spools'))
+                return [{ ...spool, id: 8, location: values[3] }]
               if (text.includes('UPDATE farm.spools'))
                 return [{ ...spool, location: null, revision: '72:(0,2)' }]
               if (text.includes('FROM farm.spools'))

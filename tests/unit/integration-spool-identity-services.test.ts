@@ -107,7 +107,9 @@ test('search and usage expose only explicitly bound provenance even when spool I
   expect(search.data).toEqual(expected)
   expect(usage.data).toEqual(expected)
   for (const [statement] of sql.mock.calls) {
-    expect(statement.join('')).toContain('spoolman_service_id')
+    expect(statement.join('')).toContain(
+      'integration_physical_spool_registrations',
+    )
     expect(statement.join('')).not.toContain('connector_inventory_snapshots')
   }
 })
@@ -169,12 +171,20 @@ test.runIf(process.env.OPENFARM_TEST_SPOOL_IDENTITY_PG === '1')(
         boundAInput,
         'service-a',
       )
-      const boundB = await registerPhysicalSpool(
-        writer,
-        access,
-        { ...input, spoolman: { serviceId: serviceB, spoolId: 1 } },
-        'service-b',
+      const boundBInput = {
+        ...input,
+        spoolman: { serviceId: serviceB, spoolId: 1 },
+      }
+      const concurrent = await Promise.all([
+        registerPhysicalSpool(writer, access, boundBInput, 'service-b'),
+        registerPhysicalSpool(writer, access, boundBInput, 'service-b-race'),
+      ])
+      const boundB = concurrent.find(
+        (result) => result?.outcome === 'registered',
       )
+      expect(
+        concurrent.filter((result) => result?.outcome === 'already-bound'),
+      ).toHaveLength(1)
       if (
         legacy?.outcome !== 'registered' ||
         boundA?.outcome !== 'registered' ||
@@ -196,7 +206,7 @@ test.runIf(process.env.OPENFARM_TEST_SPOOL_IDENTITY_PG === '1')(
         ),
       ).toEqual({ outcome: 'key-reused' })
       await expect(
-        writer`UPDATE farm.spools SET spoolman_service_id = ${serviceB} WHERE id = ${boundA.spool.spoolId}`,
+        writer`UPDATE farm.integration_physical_spool_registrations SET response = response WHERE app_id = ${appId}`,
       ).rejects.toMatchObject({ code: '42501' })
 
       const [job] = await root<{ id: string }[]>`INSERT INTO farm.job_history
@@ -236,6 +246,7 @@ test.runIf(process.env.OPENFARM_TEST_SPOOL_IDENTITY_PG === '1')(
       await publish(serviceB)
       const replacement = await listObservedSpools(readDb, observed)
       expect(replacement.data[0]?.spoolKey).toBe(serviceB + ':1')
+      await root`UPDATE farm.integration_apps SET revoked_at = 1001 WHERE id = ${appId}`
       const after = await readUsage()
       expect(after).toEqual(before)
       expect(

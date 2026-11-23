@@ -1,3 +1,4 @@
+import { readFarmMemberships, resolveFarmScope } from './farm-scope.ts'
 import { z } from 'zod'
 import {
   BrowserDeviceHttpAccountResponse,
@@ -210,6 +211,7 @@ type Read = (
 ) => Promise<unknown>
 type Dependencies = {
   read: Read
+  requestedFarm?: () => unknown
   listKeys: (scope: {
     accountId: string
     farmId: string
@@ -494,12 +496,17 @@ export function createFarmView(deps: Dependencies) {
     try {
       const accountId = await me(run.signal)
       if (!run.current()) return
-      const page = FarmDiscoveryPage.parse(
-        await deps.read('/api/farms', run.signal, {
-          limit: 20,
-          ...(after ? { after: BrowserDeviceUuid.parse(after) } : {}),
-        }),
-      )
+      const readPage = async (cursor?: string) =>
+        FarmDiscoveryPage.parse(
+          await deps.read('/api/farms', run.signal, {
+            limit: 20,
+            ...(cursor ? { after: BrowserDeviceUuid.parse(cursor) } : {}),
+          }),
+        )
+      const page =
+        deps.requestedFarm && after === null
+          ? { farms: await readFarmMemberships(readPage), nextAfter: null }
+          : await readPage(after ?? undefined)
       if (!run.current()) return
       await me(run.signal, accountId)
       if (!run.current()) return
@@ -519,14 +526,10 @@ export function createFarmView(deps: Dependencies) {
         canManage: false,
         keys: { kind: 'loading' },
       })
-      if (
-        run.current() &&
-        after === null &&
-        page.farms.length === 1 &&
-        page.nextAfter === null &&
-        page.farms[0]
-      )
-        await selectFarm(page.farms[0].farmId)
+      if (run.current() && after === null && page.nextAfter === null) {
+        const selected = resolveFarmScope(page.farms, deps.requestedFarm?.())
+        if (selected) await selectFarm(selected.farmId)
+      }
     } catch (error) {
       if (run.current()) failed(error)
     }

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { selectedFarm } from '../utils/farm-request-guard.ts'
+import { resolveFarmScope } from '../utils/farm-scope.ts'
+import { fetchFarmMemberships } from '../composables/useFarmMemberships.ts'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import Button from '../components/ui/Button.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -21,10 +22,12 @@ import {
   type SpoolmanKeyState,
 } from '../utils/spoolman-setup-context.ts'
 
-type Farm = { farmId: string }
+definePageMeta({
+  key: (route) => JSON.stringify([route.path, { farm: route.query.farm }]),
+})
+
 type Connector = { agentId: string; status: 'pending' | 'approved' | 'revoked' }
 
-const farms = ref<Farm[]>([])
 const route = useRoute()
 const farmId = ref('')
 const connectors = ref<Connector[]>([])
@@ -42,6 +45,7 @@ const error = ref('')
 const loadError = ref('')
 const signInRequired = ref(false)
 const noFarm = ref(false)
+const hasMemberships = ref(false)
 const status = ref('')
 const errorSummary = ref<HTMLElement | null>(null)
 const origin = ref('')
@@ -93,13 +97,9 @@ async function load() {
   error.value = ''
   noFarm.value = false
   try {
-    const page = await $fetch<{ farms: Farm[] }>('/api/farms', {
-      query: { limit: 50 },
-      retry: 0,
-      timeout: 15_000,
-    })
-    farms.value = page.farms
-    farmId.value = selectedFarm(page.farms, route.query.farm)?.farmId ?? ''
+    const memberships = await fetchFarmMemberships({ timeout: 15_000 })
+    hasMemberships.value = memberships.length > 0
+    farmId.value = resolveFarmScope(memberships, route.query.farm)?.farmId ?? ''
     if (!farmId.value) noFarm.value = true
     else await refresh()
   } catch (cause) {
@@ -210,8 +210,12 @@ async function submit() {
     </div>
     <EmptyState
       v-if="noFarm"
-      title="Nenhuma farm disponível"
-      description="Esta conta ainda não tem uma farm para configurar o Spoolman. Crie uma farm ou peça acesso."
+      :title="hasMemberships ? 'Selecione uma farm' : 'Nenhuma farm disponível'"
+      :description="
+        hasMemberships
+          ? 'Escolha uma farm para continuar.'
+          : 'Crie uma farm ou solicite acesso à pessoa responsável.'
+      "
     >
       <NuxtLink to="/farm" class="cta">Ir para farms</NuxtLink>
     </EmptyState>

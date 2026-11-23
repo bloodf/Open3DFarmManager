@@ -2,6 +2,8 @@ import { expect, test } from '@playwright/test'
 import { journeyEnabled, startJourneyHarness } from './harness.ts'
 import { startSpoolmanMock } from './helpers/spoolman-mock.ts'
 
+test.use({ actionTimeout: 30_000, navigationTimeout: 30_000 })
+
 if (journeyEnabled())
   test('jornada FullFarmManager: localizar e mover bobina por etiqueta', async ({
     browser,
@@ -10,8 +12,9 @@ if (journeyEnabled())
     const spoolman = await startSpoolmanMock()
     const prior = process.env.NUXT_SPOOL_LIBRARY_IMPORT_ALLOWED_ORIGINS
     process.env.NUXT_SPOOL_LIBRARY_IMPORT_ALLOWED_ORIGINS = spoolman.origin
-    const journey = await startJourneyHarness({ browser })
+    let journey: Awaited<ReturnType<typeof startJourneyHarness>> | undefined
     try {
+      journey = await startJourneyHarness({ browser })
       const page = journey.ownerPage
       await page.goto(
         `${journey.origin}/bobinas/importar?farm=${journey.farmId}`,
@@ -29,21 +32,37 @@ if (journeyEnabled())
       await expect(
         page.getByRole('heading', { name: 'Localizar bobinas' }),
       ).toBeVisible()
-      await expect(page.getByRole('main')).toContainText('Bobinas encontradas')
+      const spool = page
+        .getByRole('table', { name: 'Bobinas encontradas' })
+        .getByRole('row')
+        .filter({ hasText: 'PLA Azul Jornada' })
+      await expect(
+        spool.getByRole('cell', { name: 'Estante da jornada', exact: true }),
+      ).toBeVisible()
       const form = page.getByRole('form', {
         name: 'Registrar local por etiqueta',
       })
       await form.getByLabel('Local').fill('Estante A')
       await form.getByLabel('Etiqueta da bobina').fill('#1')
-      await form.getByRole('button', { name: /escanear|registrar/i }).click()
+      await form
+        .getByRole('button', { name: 'Registrar local', exact: true })
+        .click()
       await expect(
-        page.getByRole('status').filter({ hasText: /local|bobina/i }),
+        page
+          .getByRole('status')
+          .filter({ hasText: 'Bobina #1 movida para “Estante A”.' }),
+      ).toBeVisible()
+      await page.reload()
+      await expect(
+        spool.getByRole('cell', { name: 'Estante A', exact: true }),
       ).toBeVisible()
     } finally {
-      await journey.close()
-      await spoolman.close()
-      if (prior === undefined)
-        delete process.env.NUXT_SPOOL_LIBRARY_IMPORT_ALLOWED_ORIGINS
-      else process.env.NUXT_SPOOL_LIBRARY_IMPORT_ALLOWED_ORIGINS = prior
+      try {
+        await Promise.all([journey?.close(), spoolman.close()])
+      } finally {
+        if (prior === undefined)
+          delete process.env.NUXT_SPOOL_LIBRARY_IMPORT_ALLOWED_ORIGINS
+        else process.env.NUXT_SPOOL_LIBRARY_IMPORT_ALLOWED_ORIGINS = prior
+      }
     }
   })

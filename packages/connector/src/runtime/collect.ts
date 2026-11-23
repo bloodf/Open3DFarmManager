@@ -335,6 +335,15 @@ export async function collectIntoQueue(input: {
       let nextMachineRead = -Infinity
       let machinePending = false
       let latest: RawPrinterObservation | undefined
+      function freshMaterials() {
+        if (
+          cachedInventory === inventory &&
+          inventory?.kind === 'observed' &&
+          cached &&
+          cached.observedAtMonoMs + 5000 > performance.now()
+        )
+          return cached
+      }
       const history = input.importMoonrakerHistory
         ? createMoonrakerHistoryImport({
             printerKey: assignment.printerKey,
@@ -460,22 +469,17 @@ export async function collectIntoQueue(input: {
               })
             materialReads.add(machineRead)
           }
-          if (
-            cachedInventory !== inventory ||
-            inventory?.kind !== 'observed' ||
-            (cached && cached.observedAtMonoMs + 5000 <= performance.now())
-          )
-            cached = undefined
+          const material = freshMaterials()
           input.onRawObservation?.({
             ...value,
             ...(firmwareObservation ? { firmwareObservation } : {}),
-            ...(cached ? { materialsObservation: cached } : {}),
+            ...(material ? { materialsObservation: material } : {}),
           })
-          if (!selected || !inventory || pending || !input.onRawObservation)
-            return
+          if (inventory?.kind !== 'observed' || pending) return
           pending = true
           const snapshot = inventory
           const started = performance.now()
+          let noActiveSpool = false
           const read = getSpoolmanMaterials(async () => {
             const session = moonrakerSession(selected.origin, selected.limits)
             const headers = session
@@ -495,7 +499,10 @@ export async function collectIntoQueue(input: {
                 ]),
               },
             )
-            if (!response.ok || !response.body) return null
+            if (!response.ok || !response.body) {
+              await response.body?.cancel().catch(() => {})
+              throw new Error('Moonraker active spool unavailable')
+            }
             const reader = response.body.getReader()
             const chunks: Uint8Array[] = []
             let size = 0
@@ -504,25 +511,30 @@ export async function collectIntoQueue(input: {
                 const chunk = await reader.read()
                 if (chunk.done) break
                 size += chunk.value.length
-                if (size > 4096) return null
+                if (size > 4096)
+                  throw new Error('Moonraker active spool response bound')
                 chunks.push(chunk.value)
               }
             } finally {
               await reader.cancel()
             }
             const body = JSON.parse(Buffer.concat(chunks).toString())
+            noActiveSpool = body?.result?.spool_id === null
             return parseMoonrakerActiveSpoolId(body)
           }, snapshot)
             .then((materials) => {
               if (
-                !materials ||
+                (!materials && !noActiveSpool) ||
                 signal.aborted ||
                 latest?.epoch !== value.epoch ||
                 inventory !== snapshot ||
                 performance.now() - started >= 5000
               )
                 return
-              cached = { materials, observedAtMonoMs: started }
+              cached = {
+                materials: materials ?? latest.printer.materials ?? [],
+                observedAtMonoMs: started,
+              }
               cachedInventory = snapshot
               const current = latest
               input.onRawObservation?.({
@@ -531,6 +543,24 @@ export async function collectIntoQueue(input: {
                 receivedAtMonoMs: performance.now(),
                 materialsObservation: cached,
               })
+              // The durable Moonraker fingerprint can stay unchanged while
+              // an idle printer's active spool changes.
+              const queued = latestStates.get(current.printerKey)
+              if (
+                queued &&
+                queued.state !== 'offline' &&
+                JSON.stringify(queued.materials ?? []) !==
+                  JSON.stringify(cached.materials)
+              ) {
+                onEvent({
+                  kind: 'snapshot',
+                  printer: {
+                    ...queued,
+                    materials: cached.materials,
+                    observedAt: Math.max(Date.now(), queued.observedAt + 1),
+                  },
+                })
+              }
             })
             .catch(() => {})
             .finally(() => {
@@ -539,22 +569,33 @@ export async function collectIntoQueue(input: {
             })
           materialReads.add(read)
         },
-        ...(input.onRawUnavailable
-          ? {
-              onRawUnavailable(event) {
-                firmwareObservation = undefined
-                latest = undefined
-                cached = undefined
-                input.onRawUnavailable?.(event)
-              },
-            }
-          : {}),
+        onRawUnavailable(event) {
+          firmwareObservation = undefined
+          latest = undefined
+          cached = undefined
+          input.onRawUnavailable?.(event)
+        },
         onEvent: (event) => {
-          onEvent(
-            event.kind === 'snapshot' && machine
-              ? { ...event, printer: { ...event.printer, machine } }
-              : event,
-          )
+          if (event.kind === 'snapshot') {
+            const previous = latestStates.get(event.printer.printerKey)
+            const material = freshMaterials()
+            onEvent({
+              ...event,
+              printer: {
+                ...event.printer,
+                ...(machine ? { machine } : {}),
+                ...(material ? { materials: material.materials } : {}),
+                ...(config.spoolman && previous
+                  ? {
+                      observedAt: Math.max(
+                        event.printer.observedAt,
+                        previous.observedAt + 1,
+                      ),
+                    }
+                  : {}),
+              },
+            })
+          } else onEvent(event)
           if (event.kind === 'unavailable')
             input.apiJobs?.unavailable(assignment.printerKey)
           else if (!signal.aborted) input.apiJobs?.record(event.printer)

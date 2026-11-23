@@ -67,7 +67,7 @@ tags:
   - name: Inventory
     description: Read-only filament inventory mirrored from Spoolman.
   - name: Environment
-    description: Read-only farm-authorised environment and power measurements.
+    description: Farm-authorised environment and power measurements, and environment controls whose safety interlocks the Connector enforces.
   - name: Resin
     description: Read-only resin lots, vats and run references from the resin ledger.
   - name: Jobs
@@ -956,6 +956,172 @@ paths:
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /environment/controls:
+    get:
+      operationId: listEnvironmentControls
+      tags: [Environment]
+      summary: Environment controls of granted printers
+      description: |
+        Drying program, smart plug and extraction controls per printer, each
+        with its readiness from the Connector's last observation, the actions
+        this app may request and the OpenFarm management link. Safety
+        interlocks, plug setup and credential enrollment stay in OpenFarm.
+        Extraction (the chamber fan) is the only qualified control today;
+        smart plugs and drying programs report `unsupported` with
+        `no-qualified-capability`. A reading older than 60 seconds is `stale`;
+        an offline or never-observed printer is `not-ready`. Requires
+        `environment:read` or `environment:control`; `actions` stays empty
+        without `environment:control` on the printer. Pagination is by
+        printer.
+      security:
+        - clientCredentials: ['environment:read']
+        - clientCredentials: ['environment:control']
+      parameters:
+        - $ref: '#/components/parameters/FarmIdFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page of printers with their environment controls.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvironmentControlsPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /environment/controls/{printerId}/actions:
+    post:
+      operationId: submitEnvironmentControlAction
+      tags: [Environment]
+      summary: Request an environment control action
+      description: |
+        Requires `environment:control` on the printer; a printer outside the
+        grants answers 404. A control without a qualified Connector capability,
+        or a grant that requires owner approval, answers 422 `unsupported` with
+        the OpenFarm `managementUrl` and sends nothing. A stale observation
+        answers 409 `device-stale` and an offline, never-observed or failed
+        printer 409 `device-not-ready`, also with `managementUrl` and without a
+        command. Otherwise exactly one issuer-signed `environment:control`
+        envelope is delivered once; the Connector enforces its interlocks (it
+        never turns extraction off during a print) and refuses with a reason.
+        A retry with the same `Idempotency-Key` and body returns the same
+        action.
+      security:
+        - clientCredentials: ['environment:control']
+      parameters:
+        - $ref: '#/components/parameters/PrinterId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnvironmentControlRequest'
+      responses:
+        '202':
+          description: Action accepted (new or replayed).
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvironmentControlAction'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /environment/controls/{printerId}/actions/{actionId}:
+    get:
+      operationId: getEnvironmentControlAction
+      tags: [Environment]
+      summary: Outcome of an environment control action
+      description: |
+        The status comes from Connector results only, never assumed, and moves
+        forward only. `outcome` summarizes it: `accepted` when the Connector
+        applied the command, `refused` or `unsupported` with the Connector's
+        reason, `not-delivered` when it expired or lost its authority before
+        delivery and `unknown` when the result could not be confirmed. Nothing
+        is retried. An action of another printer or outside the grants answers
+        404.
+      security:
+        - clientCredentials: ['environment:control']
+      parameters:
+        - $ref: '#/components/parameters/PrinterId'
+        - name: actionId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '200':
+          description: The environment control action.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvironmentControlAction'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /environment/measurements:
     get:
       operationId: listEnvironmentMeasurements
@@ -2824,8 +2990,8 @@ components:
             $ref: '#/components/schemas/Problem'
     Conflict:
       description: |
-        `idempotency-key-reused`, `intent-conflict`, `request-conflict` or
-        `webhook-limit-reached`.
+        `idempotency-key-reused`, `intent-conflict`, `request-conflict`,
+        `webhook-limit-reached`, `device-stale` or `device-not-ready`.
       headers:
         RateLimit-Limit:
           $ref: '#/components/headers/RateLimit-Limit'
@@ -2958,6 +3124,8 @@ components:
         - service-unavailable
         - connector-unavailable
         - connector-timeout
+        - device-stale
+        - device-not-ready
     Problem:
       type: object
       description: RFC 9457 problem details.
@@ -2982,6 +3150,14 @@ components:
           format: uri-reference
         code:
           $ref: '#/components/schemas/ProblemCode'
+        managementUrl:
+          type: string
+          format: uri-reference
+          maxLength: 512
+          description: |
+            OpenFarm page that manages the device, its setup and its safety
+            rules. Present on environment-control `unsupported`,
+            `device-stale` and `device-not-ready` problems.
         errors:
           type: array
           maxItems: 50
@@ -3779,6 +3955,198 @@ components:
               maxItems: 100
               items:
                 $ref: '#/components/schemas/EnvironmentPrinter'
+    EnvironmentControl:
+      type: object
+      required: [kind, readiness, actions, managementUrl]
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          enum: [drying, plug, extraction]
+        readiness:
+          type: string
+          enum: [ready, not-ready, stale, unsupported]
+        reason:
+          type: string
+          enum:
+            [
+              never-observed,
+              offline,
+              stale,
+              printer-error,
+              no-qualified-capability,
+            ]
+          description: Present unless `readiness` is `ready`.
+        observed:
+          $ref: '#/components/schemas/EnvironmentMeasurement'
+        actions:
+          type: array
+          description: Actions this app may request now.
+          items:
+            type: string
+            enum: [set, 'on', 'off', start, stop]
+        managementUrl:
+          type: string
+          format: uri-reference
+          maxLength: 512
+          description: OpenFarm page that manages the device, its setup and its safety rules.
+    EnvironmentControlPrinter:
+      type: object
+      required: [printerId, farmId, printerKey, controls]
+      additionalProperties: false
+      properties:
+        printerId:
+          $ref: '#/components/schemas/Uuid'
+        farmId:
+          $ref: '#/components/schemas/Uuid'
+        printerKey:
+          type: string
+        displayName:
+          type: string
+        location:
+          type: string
+        controls:
+          type: array
+          maxItems: 3
+          items:
+            $ref: '#/components/schemas/EnvironmentControl'
+    EnvironmentControlsPage:
+      allOf:
+        - $ref: '#/components/schemas/PageInfo'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              maxItems: 100
+              items:
+                $ref: '#/components/schemas/EnvironmentControlPrinter'
+    EnvironmentControlRequest:
+      description: |
+        `extraction`/`set` sets the chamber fan percent; `plug`/`on`|`off`
+        switches a named smart plug; `drying`/`start`|`stop` runs a drying
+        program.
+      oneOf:
+        - type: object
+          required: [control, action, args]
+          additionalProperties: false
+          properties:
+            control: { type: string, enum: [extraction] }
+            action: { type: string, enum: [set] }
+            args:
+              type: object
+              required: [percent]
+              additionalProperties: false
+              properties:
+                percent: { type: integer, minimum: 0, maximum: 100 }
+        - type: object
+          required: [control, action, args]
+          additionalProperties: false
+          properties:
+            control: { type: string, enum: [plug] }
+            action: { type: string, enum: ['on', 'off'] }
+            args:
+              type: object
+              required: [device]
+              additionalProperties: false
+              properties:
+                device:
+                  type: string
+                  pattern: '^[A-Za-z0-9][A-Za-z0-9 _.-]{0,63}$'
+        - type: object
+          required: [control, action, args]
+          additionalProperties: false
+          properties:
+            control: { type: string, enum: [drying] }
+            action: { type: string, enum: [start] }
+            args:
+              type: object
+              required: [targetCelsius, durationMinutes]
+              additionalProperties: false
+              properties:
+                targetCelsius: { type: integer, minimum: 35, maximum: 90 }
+                durationMinutes: { type: integer, minimum: 1, maximum: 1440 }
+        - type: object
+          required: [control, action, args]
+          additionalProperties: false
+          properties:
+            control: { type: string, enum: [drying] }
+            action: { type: string, enum: [stop] }
+            args:
+              type: object
+              additionalProperties: false
+    EnvironmentControlAction:
+      type: object
+      required:
+        [
+          id,
+          farmId,
+          printerId,
+          control,
+          action,
+          args,
+          status,
+          outcome,
+          managementUrl,
+          createdAt,
+          updatedAt,
+        ]
+      additionalProperties: false
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        farmId:
+          $ref: '#/components/schemas/Uuid'
+        printerId:
+          $ref: '#/components/schemas/Uuid'
+        control:
+          type: string
+          enum: [drying, plug, extraction]
+        action:
+          type: string
+          enum: [set, 'on', 'off', start, stop]
+        args:
+          type: object
+          description: The arguments as submitted.
+        status:
+          type: string
+          description: |
+            `queued` until handed to the Connector, `delivered` once it
+            received the command, then `completed`, `refused` or `failed` as
+            the Connector reported; `expired` and `rejected` were never
+            delivered; `outcome-unknown` could not be confirmed and nothing
+            was retried. Final states never change.
+          enum:
+            - queued
+            - delivered
+            - completed
+            - refused
+            - failed
+            - expired
+            - rejected
+            - outcome-unknown
+        outcome:
+          type: string
+          enum:
+            [
+              pending,
+              accepted,
+              refused,
+              unsupported,
+              failed,
+              not-delivered,
+              unknown,
+            ]
+        refusal:
+          $ref: '#/components/schemas/CommandRefusal'
+        managementUrl:
+          type: string
+          format: uri-reference
+          maxLength: 512
+        createdAt:
+          $ref: '#/components/schemas/TimestampMs'
+        updatedAt:
+          $ref: '#/components/schemas/TimestampMs'
     FilamentUsage:
       type: object
       additionalProperties: false

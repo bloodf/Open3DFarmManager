@@ -22,11 +22,13 @@ import type {
   PrinterBinding,
 } from '../kobralink/client.ts'
 import { listBambuFiles, type BambuListOptions } from '../bambu/files.ts'
+import { listAnycubicFiles } from '../anycubic/files.ts'
+import type { PrinterBinding as LocalPrinterBinding } from '../control/printer-binding.ts'
 import { createBambuSdCard } from '../bambu/printer-detail.ts'
 
 export type FileListTarget =
   | { backend: 'creality' }
-  | { backend: 'anycubic' }
+  | { backend: 'anycubic'; binding?: LocalPrinterBinding }
   | {
       backend: 'kobralink'
       client(
@@ -408,8 +410,10 @@ export async function readPrinterFiles(
     throw Error('unsupported')
   switch (target.backend) {
     case 'creality':
-    case 'anycubic':
       throw Error('unsupported')
+    case 'anycubic':
+      if (!target.binding) throw Error('unsupported')
+      return listAnycubicFiles({ binding: target.binding, ...input })
     case 'kobralink': {
       const client = await target.client(input.signal)
       try {

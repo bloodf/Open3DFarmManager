@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: MIT
+import { randomUUID } from 'node:crypto'
+import { createServer } from 'node:http'
 import {
   encodePacket,
   startMqttBroker,
@@ -19,6 +21,7 @@ export interface AnycubicSimulatorState {
 export interface AnycubicSimulatorOptions {
   serial?: string | undefined
   port?: number | undefined
+  lanFiles?: { firmware: string } | undefined
   initialState?: 'RUNNING' | 'PAUSE' | 'IDLE' | undefined
   credentials?: { username: string; password: string } | undefined
   confirmCommands?: boolean | undefined
@@ -40,6 +43,7 @@ export interface AnycubicSimulatorOptions {
 export async function startAnycubicSimulator({
   serial = 'SYNTHETIC',
   port = 0,
+  lanFiles,
   initialState,
   confirmCommands = true,
   credentials,
@@ -81,6 +85,11 @@ export async function startAnycubicSimulator({
   let gcodeState: string | undefined = initialState
   const extended: Record<string, unknown> = {}
   const requests: { command: string; sequence_id: string }[] = []
+
+  let uploadPort: number | undefined
+  const uploadToken = randomUUID()
+  let uploads = 0
+  const slicerTopic = `anycubic/anycubicCloud/v1/slicer/printer/${serial}`
 
   let brokerRef: MqttMockInstance | undefined
   let closed = false
@@ -214,6 +223,58 @@ export async function startAnycubicSimulator({
     onPublish: async (msg) => {
       const topicName = msg.topic
       const raw = JSON.parse(msg.payload.toString('utf8'))
+      if (lanFiles && typeof raw?.msgid === 'string') {
+        if (
+          topicName === slicerTopic + '/info' &&
+          raw.type === 'info' &&
+          raw.action === 'query' &&
+          raw.data === null
+        ) {
+          broker.control.publish(reportTopic, {
+            type: 'info',
+            action: 'report',
+            msgid: raw.msgid,
+            code: 200,
+            state: 'done',
+            data: {
+              version: lanFiles.firmware,
+              state:
+                lifecycle === 'idle' || lifecycle === 'finished'
+                  ? 'free'
+                  : 'busy',
+              project: null,
+              urls: {
+                fileUploadurl: `http://127.0.0.1:${uploadPort}/gcode_upload?s=${uploadToken}`,
+              },
+            },
+          })
+          return
+        }
+        if (
+          topicName === slicerTopic + '/file' &&
+          raw.type === 'file' &&
+          raw.action === 'listLocal' &&
+          raw.data?.path === '/'
+        ) {
+          broker.control.publish(reportTopic.replace('/info/', '/file/'), {
+            type: 'file',
+            action: 'listLocal',
+            msgid: raw.msgid,
+            state: 'done',
+            code: 200,
+            data: {
+              list_mode: 0,
+              records: [...files].map(([filename, bytes]) => ({
+                filename,
+                size: bytes.length,
+                timestamp: Date.now(),
+                is_dir: false,
+              })),
+            },
+          })
+          return
+        }
+      }
       const isStart =
         [
           `anycubic/anycubicCloud/v1/slicer/printer/20024/${serial}/print`,
@@ -396,6 +457,64 @@ export async function startAnycubicSimulator({
     }),
   })
 
+  const http = lanFiles
+    ? createServer((request, response) => {
+        if (
+          request.method !== 'POST' ||
+          request.url !== `/gcode_upload?s=${uploadToken}` ||
+          (lifecycle !== 'idle' && lifecycle !== 'finished')
+        ) {
+          response.writeHead(403).end()
+          return
+        }
+        void (async () => {
+          const chunks: Buffer[] = []
+          let total = 0
+          for await (const value of request) {
+            const chunk = Buffer.from(value)
+            total += chunk.length
+            if (total > 1024 * 1024) throw Error('Oversized synthetic upload')
+            chunks.push(chunk)
+          }
+          const form = await new Response(Buffer.concat(chunks), {
+            headers: { 'Content-Type': request.headers['content-type'] ?? '' },
+          }).formData()
+          const name = form.get('filename')
+          const gcode = form.get('gcode')
+          if (
+            [...form.keys()].length !== 2 ||
+            typeof name !== 'string' ||
+            !/^[a-zA-Z0-9 _.-]+\.gcode\.3mf$/i.test(name) ||
+            !(gcode instanceof File) ||
+            gcode.name !== name ||
+            gcode.type !== 'application/octet-stream' ||
+            !gcode.size ||
+            request.headers['x-file-length'] !== String(gcode.size)
+          )
+            throw Error('Invalid synthetic multipart upload')
+          uploads++
+          files.set(name, Buffer.from(await gcode.arrayBuffer()))
+          response.writeHead(200, { 'Content-Type': 'application/json' })
+          response.end(JSON.stringify({ code: 200, data: { gcode: name } }))
+        })().catch(() => response.writeHead(400).end())
+      })
+    : undefined
+  if (http) {
+    try {
+      uploadPort = await new Promise<number>((resolve, reject) => {
+        http.once('error', reject)
+        http.listen(0, '127.0.0.1', () => {
+          const address = http.address()
+          if (address && typeof address !== 'string') resolve(address.port)
+          else reject(Error('Synthetic upload listener unavailable'))
+        })
+      })
+    } catch (error) {
+      await broker.close()
+      throw error
+    }
+  }
+
   const periodicReports = setInterval(() => {
     if (gcodeState && hasSubscribers()) broadcast()
   }, reportIntervalMs)
@@ -425,6 +544,10 @@ export async function startAnycubicSimulator({
     syntheticTrust,
     reportTopic,
     requests,
+    uploadPort,
+    get uploadCount() {
+      return uploads
+    },
     calls: broker.calls,
     control: {
       faults: broker.control.faults,
@@ -510,7 +633,14 @@ export async function startAnycubicSimulator({
       stopTimer()
       clearInterval(periodicReports)
       scenario.stop()
-      closing ??= broker.close()
+      closing ??= Promise.all([
+        broker.close(),
+        http &&
+          new Promise<void>((resolve) => {
+            http.close(() => resolve())
+            http.closeAllConnections()
+          }),
+      ]).then(() => {})
       return closing
     },
   }

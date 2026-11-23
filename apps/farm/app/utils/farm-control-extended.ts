@@ -137,7 +137,7 @@ export function toolHeaterOptions(
   return (heaters ?? []).map(({ tool, maxC }) => ({
     tool,
     maxC,
-    label: `Ferramenta T${tool}`,
+    label: `Ferramenta ${tool + 1}`,
   }))
 }
 

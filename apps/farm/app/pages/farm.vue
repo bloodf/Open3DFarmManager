@@ -28,6 +28,8 @@ import {
 } from '../composables/useStatusSummary.ts'
 import { wallCardProps } from '../utils/farm-wall-card.ts'
 import FarmCardControls from '../components/farm/FarmCardControls.vue'
+import ExtendedControlStatus from '../components/farm/ExtendedControlStatus.vue'
+import ToolTemperatureConfirmation from '../components/farm/ToolTemperatureConfirmation.vue'
 import CollectionHold from '../components/farm/CollectionHold.vue'
 import PrinterAlerts from '../components/farm/PrinterAlerts.vue'
 import { useFarmControls } from '../components/farm/useFarmControls.ts'
@@ -279,6 +281,7 @@ const {
   availability,
   pauseTarget,
   pauseState,
+  pauseLost,
   lastControlResults,
   pauseRemaining,
   pauseStatus,
@@ -640,7 +643,12 @@ function cancelPause(event: Event) {
               : `${extendedLabel(pauseTarget.action)}${pauseTarget.action === 'run_macro' ? ` ${pauseTarget.args.name}` : ''} — ${pauseTarget.printerKey}`
           }}
         </h2>
-        <p id="pause-dialog-description">
+        <ToolTemperatureConfirmation
+          v-if="pauseTarget.action === 'set_tool_temperature'"
+          :tool="Number(pauseTarget.args.tool)"
+          :target-c="Number(pauseTarget.args.target_c)"
+        />
+        <p v-else id="pause-dialog-description">
           {{
             ['pause', 'resume', 'cancel'].includes(pauseTarget.action)
               ? actionDialogDescription(
@@ -652,7 +660,19 @@ function cancelPause(event: Event) {
                 : 'Confirme o comando para esta impressora. Ele será enviado diretamente ao Connector e não será repetido automaticamente.'
           }}
         </p>
-        <p role="status" aria-live="polite">{{ pauseStatus }}</p>
+        <p
+          v-if="['pause', 'resume', 'cancel'].includes(pauseTarget.action)"
+          role="status"
+          aria-live="polite"
+        >
+          {{ pauseStatus }}
+        </p>
+        <ExtendedControlStatus
+          v-else
+          :state="pauseState"
+          :remaining="pauseRemaining"
+          :lost="pauseLost"
+        />
         <div class="actions">
           <button
             type="button"

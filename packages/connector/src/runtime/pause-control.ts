@@ -379,14 +379,29 @@ async function runAssignmentControl(
       binding === printerBinding
         ? readPrinterBinding(binding)?.printer_key
         : undefined
-    const hold = <D extends typeof router>(driver: D): D =>
+    const hold = <D extends typeof router>(driver: D, api = false): D =>
       input.collection
         ? withCollectionHold(driver, {
             journal: input.collection,
             printerKey: collectionKey,
+            requireInitialClearance(binding) {
+              const mapping = readPrinterBinding(binding)
+              const collection = config.collection
+              return (
+                api &&
+                binding === printerBinding &&
+                !!mapping &&
+                'printers' in collection &&
+                collection.printers.some(
+                  (printer) =>
+                    printer.printerKey === mapping.printer_key &&
+                    printer.origin === mapping.moonraker_origin,
+                )
+              )
+            },
           })
         : driver
-    const apiDriver = hold(router)
+    const apiDriver = hold(router, true)
     const libraryDriver = withLibraryPrint(router, {
       starter: libraryPrint,
       targetFor(binding) {

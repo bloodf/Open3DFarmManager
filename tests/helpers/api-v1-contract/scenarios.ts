@@ -97,6 +97,51 @@ async function asApp(
   return send({ ...input(app), token })
 }
 
+function dispatchFixture(view: 'eligibility' | 'plate'): Fixture {
+  const request = (id: string, printerId: string = P): CallInput => ({
+    method: 'GET',
+    path: `/jobs/${id}/${view}?printerId=${printerId}`,
+  })
+  const failure = (
+    error: 'unsupported' | 'connector-unavailable' | 'connector-timeout',
+  ) => ({
+    name: error,
+    run: (world: World) => {
+      world.inbox = { kind: 'error', error }
+      return asApp(world, farm(['jobs:read']), (app) =>
+        request(world.seedJob(app).id),
+      )
+    },
+  })
+  return {
+    scopes: ['jobs:read'],
+    success: '200',
+    valid: (world, app) => {
+      world.inbox = {
+        kind: 'dispatch',
+        data: [
+          {
+            printerState: 'idle',
+            plateState: 'operator-confirmed',
+            attemptId: '100',
+            observedAt: 200,
+          },
+        ],
+        nextOffset: null,
+      }
+      return request(world.seedJob(app).id)
+    },
+    bad: (world, app) => request(world.seedJob(app).id, 'invalid'),
+    missing: () => request(ids.unknown),
+    fault: 'jobs-runtime',
+    extra: {
+      '422': [failure('unsupported')],
+      '503': [failure('connector-unavailable')],
+      '504': [failure('connector-timeout')],
+    },
+  }
+}
+
 export const fixtures: Record<string, Fixture> = {
   'GET /openapi.json': {
     scopes: [],
@@ -852,6 +897,119 @@ export const fixtures: Record<string, Fixture> = {
     missing: () => ({ method: 'GET', path: `/jobs?farmId=${ids.unknown}` }),
     fault: 'pool',
   },
+  'POST /jobs/{jobId}/actions': {
+    scopes: ['control:basic', 'plates:confirm'],
+    success: '202',
+    valid: (world, app) => {
+      const job = world.seedJob(app, {}, { status: 'started' })
+      return {
+        method: 'POST',
+        path: `/jobs/${job.id}/actions`,
+        ...json({ action: 'cancel', args: {} }),
+      }
+    },
+    more: [
+      {
+        name: 'repeat a plate acknowledgement with the same key',
+        run: async (world) => {
+          const app = world.addApp(farm(['plates:confirm']))
+          const token = await tokenFor(world, app)
+          const job = world.seedJob(app)
+          const input = {
+            method: 'POST',
+            path: `/jobs/${job.id}/actions`,
+            ...json({ action: 'confirm_collection', args: { attempt: '123' } }),
+            token,
+          }
+          const first = await send(input)
+          const second = await send(input)
+          if (
+            first.result.headers.get('location') !==
+            second.result.headers.get('location')
+          )
+            throw new Error('Action replay changed the resource')
+          return second
+        },
+      },
+    ],
+    bad: (world, app) => ({
+      method: 'POST',
+      path: `/jobs/${world.seedJob(app).id}/actions`,
+      body: { action: 'pause', args: {} },
+    }),
+    missing: () => ({
+      method: 'POST',
+      path: `/jobs/${ids.unknown}/actions`,
+      ...json({ action: 'pause', args: {} }),
+    }),
+    fault: 'jobs-runtime',
+    extra: {
+      '409': [
+        {
+          name: 'a key is scoped to its original job',
+          run: async (world) => {
+            const app = world.addApp(farm(['plates:confirm']))
+            const token = await tokenFor(world, app)
+            const input = {
+              method: 'POST',
+              ...json({
+                action: 'confirm_collection',
+                args: { attempt: '123' },
+              }),
+              token,
+            }
+            await send({
+              ...input,
+              path: `/jobs/${world.seedJob(app).id}/actions`,
+            })
+            return send({
+              ...input,
+              path: `/jobs/${world.seedJob(app).id}/actions`,
+            })
+          },
+        },
+      ],
+      '413': [
+        {
+          name: 'bounded JSON request',
+          run: (world) =>
+            asApp(world, farm(['plates:confirm']), (app) => ({
+              method: 'POST',
+              path: `/jobs/${world.seedJob(app).id}/actions`,
+              ...json({ data: 'a'.repeat(17 * 1024) }),
+            })),
+        },
+      ],
+      '415': [
+        {
+          name: 'unsupported media type',
+          run: (world) =>
+            asApp(world, farm(['plates:confirm']), (app) => ({
+              method: 'POST',
+              path: `/jobs/${world.seedJob(app).id}/actions`,
+              headers: { 'content-type': 'text/plain' },
+              body: '{}',
+            })),
+        },
+      ],
+      '422': [
+        {
+          name: 'expected run cannot be supplied by the caller',
+          run: (world) =>
+            asApp(world, farm(['control:basic']), (app) => ({
+              method: 'POST',
+              path: `/jobs/${world.seedJob(app, {}, { status: 'started' }).id}/actions`,
+              ...json({
+                action: 'cancel',
+                args: { expectedRunId: ids.unknown },
+              }),
+            })),
+        },
+      ],
+    },
+  },
+  'GET /jobs/{jobId}/eligibility': dispatchFixture('eligibility'),
+  'GET /jobs/{jobId}/plate': dispatchFixture('plate'),
   'GET /jobs/{jobId}': {
     scopes: ['jobs:read'],
     success: '200',

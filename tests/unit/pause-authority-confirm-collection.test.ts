@@ -58,16 +58,8 @@ describe('migration 0093 pause authority confirm_collection', () => {
     )
   })
 
-  test('the allow-list and the action bound match the signed control protocol', async () => {
-    const up = await read(UP)
-    const actions = allowList(up)
-    expect([...actions].sort()).toEqual(
-      [...ExtendedControlAction.options].sort(),
-    )
-    expect(up).toContain(
-      `BETWEEN 1 AND ${ExtendedControlAction.options.length}`,
-    )
-    expect(ExtendedControlAction.options).toContain('confirm_collection')
+  test('the action bound is 32', async () => {
+    expect(constraintLine(await read(UP))).toContain('BETWEEN 1 AND 32')
   })
 
   test('the role rules match the role policy for every control action', async () => {
@@ -125,4 +117,19 @@ describe('migration 0093 pause authority confirm_collection', () => {
       down.indexOf('ADD CONSTRAINT control_capability_actions'),
     )
   })
+})
+
+test('the latest capability allow-list and action bound match the signed control protocol', async () => {
+  const catalog = await loadMigrationCatalog()
+  const latest = catalog.findLast(({ up }) => constraintLine(up))
+  expect(latest).toBeDefined()
+  const constraint = constraintLine(latest!.up)
+  expect(allowList(constraint).sort()).toEqual(
+    [...ExtendedControlAction.options].sort(),
+  )
+  expect(constraint).toContain(
+    `BETWEEN 1 AND ${ExtendedControlAction.options.length}`,
+  )
+  expect(ExtendedControlAction.options).toContain('confirm_collection')
+  expect(ExtendedControlAction.options).toContain('set_tool_temperature')
 })

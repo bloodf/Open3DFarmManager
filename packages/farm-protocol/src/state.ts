@@ -143,7 +143,9 @@ function printerStateSchema(legacy: boolean) {
         'unknown',
       ]),
       preformStatus: text(256, 1).optional(),
-      statusReason: z.enum(['client-certificate-missing']).optional(),
+      statusReason: z
+        .enum(['client-certificate-missing', 'prusa-link-unqualified'])
+        .optional(),
       progress: z.number().min(0).max(1).optional(),
       materials: z
         .array(
@@ -209,6 +211,9 @@ function printerStateSchema(legacy: boolean) {
       (value) =>
         value.state === 'offline' ||
         (value.state === 'unknown' && value.preformStatus !== undefined) ||
+        (value.statusReason === 'prusa-link-unqualified' &&
+          value.identity?.vendor === 'Prusa' &&
+          !value.controls?.length) ||
         value.progress !== undefined,
       {
         path: ['progress'],

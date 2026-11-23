@@ -116,6 +116,14 @@ if (journeyEnabled())
       })
 
       await journey.expectLiveTelemetry()
+      expect(journey.printer.subscriptionObjects()).toContainEqual(
+        expect.objectContaining({
+          extruder1: ['temperature', 'target'],
+          extruder2: ['temperature', 'target'],
+          extruder3: ['temperature', 'target'],
+          toolhead: ['extruder'],
+        }),
+      )
       const row = journey.farmRow()
       const temperatures = row.getByLabel('Temperaturas observadas')
       await expect(temperatures).toContainText('230 °C')

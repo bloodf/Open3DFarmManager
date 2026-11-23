@@ -9,10 +9,11 @@ defineOptions({ name: 'UiCard' })
 
 <style scoped>
 .ui-card {
-  background: var(--surface-raised);
-  border-radius: var(--radius-sm);
-  padding: var(--space-4);
-  box-shadow: var(--elevation-raised);
+  background: var(--ops-panel);
+  border-radius: var(--ops-radius-md);
+  padding: var(--ops-space-4);
+  border: 1px solid var(--ops-border);
+  color: var(--ops-text);
   min-width: 0;
 }
 </style>

@@ -189,6 +189,29 @@ function checkRoute(file: string, text: string): string | undefined {
     /\.issueLegacyCredential\s*\(/.test(text)
   )
     return
+  if (
+    file === `${server}/api/camera-view.post.ts` &&
+    called(
+      parsed,
+      'services/authenticated-session.ts',
+      'authenticatedSession',
+    ) &&
+    called(parsed, 'utils/auth/runtime.ts', 'authRuntime') &&
+    /\.redeemCameraTicket\(/.test(text) &&
+    /FROM farm\.memberships/.test(text)
+  )
+    return
+  if (
+    file.startsWith(`${server}/api/integrations/v1/`) &&
+    /event\.context\.integrationAuth/.test(text) &&
+    (called(parsed, 'utils/integration-telemetry.ts', 'authorizedPrinter') ||
+      called(
+        parsed,
+        'utils/integration-telemetry.ts',
+        'authorizedPrinterForScope',
+      ))
+  )
+    return
   // The integration middleware authenticates the bearer and places its principal
   // in the request context; these handlers must additionally narrow farm grants.
   if (
@@ -253,6 +276,20 @@ function functionBody(module: string, name: string): string {
   )
   return declaration.body.getText(tree)
 }
+
+test('telemetry and health guard checks the printer grant', () => {
+  assert.match(
+    functionBody('utils/integration-telemetry.ts', 'authorizedPrinter'),
+    /integrationGrantFor\(principal, 'printers:read', row\.farmId, row\.id\)/,
+  )
+})
+
+test('camera and alert write guard checks the requested scope', () => {
+  assert.match(
+    functionBody('utils/integration-telemetry.ts', 'authorizedPrinterForScope'),
+    /integrationGrantFor\(principal, scope, row\.farmId, row\.id\)/,
+  )
+})
 
 test('recognised guards retain their session and scope checks', () => {
   const direct = Object.entries(GUARDS).flatMap(([module, names]) =>

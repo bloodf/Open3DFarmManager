@@ -8,6 +8,7 @@ import { isKobraXAssignment } from '../../utils/kobralink-onboarding.ts'
 import { type ExtendedControlAction } from '../../../../../packages/farm-protocol/src/control-actions.ts'
 defineProps<{
   row: FarmRow
+  showCollection?: boolean
   keys: FarmKeyState
   controlEnabled: boolean
   commandInFlight: boolean
@@ -25,7 +26,7 @@ defineProps<{
 
 <template>
   <CollectionHold
-    v-if="!isKobraXAssignment(row.assignment)"
+    v-if="showCollection !== false && !isKobraXAssignment(row.assignment)"
     :row="row"
     :keys="keys"
     :control-enabled="controlEnabled"

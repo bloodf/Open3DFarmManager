@@ -127,6 +127,8 @@ export async function createRuntimeMoonrakerFixture() {
         agentId: string
         printerKey: string
       }[]
+      /** Locally declared Moonraker model for the journey printer. */
+      model?: string
       /**
        * Journey harness only: another vendor's collection and assignment
        * replace the Moonraker ones (the packaged Connector is unchanged).
@@ -216,7 +218,13 @@ export async function createRuntimeMoonrakerFixture() {
           collection: input.runtime?.collection ?? {
             version: 1,
             allowedOrigins: [moon],
-            printers: [{ printerKey: ref.printerKey, origin: moon }],
+            printers: [
+              {
+                printerKey: ref.printerKey,
+                origin: moon,
+                ...(input.model ? { model: input.model } : {}),
+              },
+            ],
             limits: { staleAfterMs: 5000 },
             ...(sim && {
               spoolman: {

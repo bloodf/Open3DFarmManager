@@ -1,6 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto'
 import {
   API_ENVELOPE_ACTIONS,
+  ApiPlateAction,
+  ApiRunAction,
+  API_RUN_CONTROLS,
+  scopeForApiAction,
   type ApiEnvelopeAction,
 } from '../../../../packages/farm-protocol/src/api-envelope.ts'
 import { ControlArguments } from '../../../../packages/farm-protocol/src/control-actions.ts'
@@ -33,7 +37,10 @@ export interface NewAction {
   idempotencyKey: string
   requestHash: string
   action: ApiEnvelopeAction
-  requiredScope: Extract<IntegrationScope, 'control:basic' | 'control:extended'>
+  requiredScope: Extract<
+    IntegrationScope,
+    'control:basic' | 'control:extended' | 'plates:confirm'
+  >
   status: 'held' | 'submitted'
 }
 export interface ActionRecord extends Omit<NewAction, 'status'> {
@@ -95,7 +102,6 @@ export type SubmitActionResult =
   | { ok: true; created: boolean; action: ActionView }
   | { ok: false; problem: ActionProblem }
 
-const CONTROL_BASIC = new Set(['pause', 'resume', 'cancel'])
 const DEFAULT_ACTION_TTL_MS = 300_000
 const PENDING: readonly string[] = ['pending', 'sending', 'sent']
 
@@ -123,12 +129,28 @@ export function parseActionRequest(body: unknown): ApiEnvelopeAction | null {
   return parsed.data as ApiEnvelopeAction
 }
 
+function parseJobAction(body: unknown, runId: string | undefined) {
+  const plate = ApiPlateAction.safeParse(body)
+  if (plate.success) return plate.data
+  const control = parseActionRequest(body)
+  if (!control || !['cancel', 'pause', 'resume'].includes(control.action))
+    return null
+  const scoped = ApiRunAction.safeParse({
+    action: `job_${control.action}`,
+    args: { expectedRunId: runId },
+  })
+  return scoped.success ? scoped.data : null
+}
+
 export function actionRequestHash(
   printerId: string,
   action: ApiEnvelopeAction,
+  jobId?: string,
 ) {
   return createHash('sha256')
-    .update(JSON.stringify([printerId, action]))
+    .update(
+      JSON.stringify(jobId ? [printerId, action, jobId] : [printerId, action]),
+    )
     .digest('hex')
 }
 
@@ -148,8 +170,10 @@ export function actionView(
   envelope: EnvelopeRecord | null,
   now?: number,
 ): ActionView {
-  const args =
-    record.action.action === 'set_temperature'
+  const run = ApiRunAction.safeParse(record.action)
+  const args = run.success
+    ? {}
+    : record.action.action === 'set_temperature'
       ? {
           heater: record.action.args.heater,
           targetCelsius: record.action.args.target_c,
@@ -159,7 +183,9 @@ export function actionView(
     id: record.id,
     farmId: record.farmId,
     printerId: record.printerAssignmentId,
-    action: record.action.action,
+    action: run.success
+      ? API_RUN_CONTROLS[run.data.action]
+      : record.action.action,
     args: args as Record<string, unknown>,
     status: statusOf(
       record.status,
@@ -202,21 +228,22 @@ export class IntegrationActionsService {
     printerId: string,
     key: string,
     body: unknown,
+    job?: { id: string; farmId: string; runId: string | undefined },
   ): Promise<SubmitActionResult> {
     const printer = printerId.toLowerCase()
     if (!uuidPattern.test(printer)) return { ok: false, problem: 'not-found' }
     if (!IDEMPOTENCY_KEY_PATTERN.test(key))
       return { ok: false, problem: 'validation-failed' }
-    const action = parseActionRequest(body)
+    const action = job
+      ? parseJobAction(body, job.runId)
+      : parseActionRequest(body)
     if (!action) return { ok: false, problem: 'validation-failed' }
-    if (action.action === 'start_library_print')
+    const requiredScope = scopeForApiAction(action.action)
+    if (requiredScope === 'jobs:write')
       return { ok: false, problem: 'unsupported' }
-    const requiredScope = (
-      CONTROL_BASIC.has(action.action) ? 'control:basic' : 'control:extended'
-    ) as NewAction['requiredScope']
     if (!principal.scopes.includes(requiredScope))
       return { ok: false, problem: 'insufficient-scope' }
-    const requestHash = actionRequestHash(printer, action)
+    const requestHash = actionRequestHash(printer, action, job?.id)
     const prior = await this.options.store.existing(principal.appId, key)
     if (prior) {
       if (prior.record.requestHash !== requestHash)
@@ -238,7 +265,8 @@ export class IntegrationActionsService {
         }
     }
     const target = await this.options.store.target(printer)
-    if (!target) return { ok: false, problem: 'not-found' }
+    if (!target || (job && target.farmId !== job.farmId))
+      return { ok: false, problem: 'not-found' }
     const grant = integrationGrantFor(
       principal,
       requiredScope,
@@ -249,9 +277,10 @@ export class IntegrationActionsService {
     // Telemetry may not contain the live capability list. Basic lifecycle
     // commands still require the Connector's own capability and state checks.
     if (
-      target.controls
+      !job &&
+      (target.controls
         ? !target.controls.includes(action.action)
-        : !CONTROL_BASIC.has(action.action)
+        : requiredScope !== 'control:basic')
     )
       return { ok: false, problem: 'unsupported' }
     if (!grant.requiresApproval && !this.options.envelopes)

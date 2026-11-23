@@ -40,7 +40,7 @@ Scope: the 26 `kind: resin` entries in the snapshot’s `fleet/fleet.yaml`, chec
 
 ## Driver coverage
 
-FullFarmManager's snapshot simulates resin readings. OpenFarm has since added the experimental adapters described below. No physical printer was contacted for this reconciliation. All hardware qualification issues remain open.
+FullFarmManager lists these models and simulates resin readings. Its snapshot has no real resin driver. OpenFarm’s FDM adapters do not qualify any resin model. The [driver matrix](REVIEW.md#driver-matrix) records current status and evidence gaps. No physical printer was contacted during reconciliation. All hardware qualification issues remain open.
 
 ## Merged adapter and journey evidence
 

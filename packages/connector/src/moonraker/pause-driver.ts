@@ -128,6 +128,8 @@ const Snapshot = z.strictObject({
     }),
     print_stats: z.strictObject({
       filename: z.string().optional(),
+      total_duration: z.number().finite().nonnegative().optional(),
+      info: z.unknown().optional(),
       state: z.enum([
         'standby',
         'printing',
@@ -173,6 +175,11 @@ export function openFixedMoonrakerPause(input: {
   connectionGeneration: number
   clock: { monotonicNow(): number }
   publish(observation: ControlObservation | null): void
+  observeRun?:
+    | ((
+        evidence: import('../runtime/api-job-lifecycle.ts').ApiRunEvidence,
+      ) => void)
+    | undefined
   /** Permanent owner/context cancellation, including readonly result auditing. */
   signal: AbortSignal
   /**
@@ -421,10 +428,11 @@ export function openFixedMoonrakerPause(input: {
     try {
       const started = now()
       const id = index === 0 ? 1 : index + 2
+      const readRun = index === 0 && input.observeRun !== undefined
       const wire =
         excludedName !== undefined
           ? excludeObjectProbe(id)
-          : withFilename
+          : withFilename || readRun
             ? JSON.stringify({
                 jsonrpc: '2.0',
                 id,
@@ -432,7 +440,9 @@ export function openFixedMoonrakerPause(input: {
                 params: {
                   objects: {
                     webhooks: ['state'],
-                    print_stats: ['state', 'filename'],
+                    print_stats: readRun
+                      ? ['state', 'filename', 'total_duration', 'info']
+                      : ['state', 'filename'],
                   },
                 },
               })
@@ -481,6 +491,13 @@ export function openFixedMoonrakerPause(input: {
             }
           : {}),
       })
+      if (readRun)
+        input.observeRun?.({
+          filename: snapshot.status.print_stats.filename,
+          duration: snapshot.status.print_stats.total_duration,
+          info: snapshot.status.print_stats.info,
+          sourceTime: snapshot.eventtime,
+        })
       publish(observation)
       current()
       return observation

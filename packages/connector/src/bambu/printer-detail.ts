@@ -92,35 +92,11 @@ function mergeAms(previous: unknown, next: unknown): Raw {
   return merged
 }
 
-function alarmWord(value: unknown): string | undefined {
-  return typeof value === 'number' &&
-    Number.isInteger(value) &&
-    value >= 0 &&
-    value <= 0xffffffff
-    ? value.toString(16).toUpperCase().padStart(8, '0')
-    : undefined
-}
-
-function hmsCodes(value: unknown): string[] | undefined {
-  // Keep the whole list within the detail stream's message limit.
-  if (!Array.isArray(value) || value.length > 64) return undefined
-  const codes = new Set<string>()
-  for (const entry of value) {
-    const { attr, code } = object(entry)
-    const prefix = alarmWord(attr)
-    const suffix = alarmWord(code)
-    if (prefix === undefined || suffix === undefined) return undefined
-    const fullCode = prefix + suffix
-    codes.add(fullCode.replace(/(.{4})(?=.)/g, '$1-'))
-  }
-  return [...codes]
-}
-
 /** Pure accumulator: raw MQTT reports in, validated `detail.update` frames out. */
 export function createBambuDetailState(printerKey: string) {
   let print: Raw = {}
-  let printError = ''
-  let hms: string[] = []
+  let printError: string | undefined
+  let hms: string[] | undefined
   let seq = 0
   return {
     /** Undefined for reports that carry no print telemetry (version, upgrade). */
@@ -129,20 +105,10 @@ export function createBambuDetailState(printerKey: string) {
       const decoded = decodeBambuReport(text)
       if (decoded.kind !== 'observation') return undefined
       const delta = object(object(JSON.parse(text)).print)
-      const command =
-        typeof delta.command === 'string'
-          ? delta.command.toLowerCase()
-          : undefined
-      if (
-        command === undefined ||
-        command === 'push_status' ||
-        command === 'pushall'
-      ) {
-        const error = alarmWord(delta.print_error)
-        if (error !== undefined)
-          printError =
-            error === '00000000' ? '' : `${error.slice(0, 4)}-${error.slice(4)}`
-        hms = hmsCodes(delta.hms) ?? hms
+      if (decoded.alarmDelta) {
+        if (decoded.alarmDelta.printError !== undefined)
+          printError = decoded.alarmDelta.printError
+        if ('hms' in decoded.alarmDelta) hms = decoded.alarmDelta.hms
       }
       print = {
         ...print,
@@ -155,8 +121,8 @@ export function createBambuDetailState(printerKey: string) {
     },
     reset() {
       print = {}
-      printError = ''
-      hms = []
+      printError = undefined
+      hms = undefined
     },
     /** Latest raw `print` object, for Connector-side refusals. */
     get print(): Readonly<Raw> {
@@ -218,7 +184,9 @@ export function createBambuDetailState(printerKey: string) {
             state: observed.state ?? 'unknown',
             message: [
               printError && `Erro de impressão: ${printError}.`,
-              hms.length && `Códigos HMS informados: ${hms.join(', ')}.`,
+              hms?.length && `Códigos HMS informados: ${hms.join(', ')}.`,
+              (printError === undefined || hms === undefined) &&
+                'Alertas ainda não informados pela impressora.',
             ]
               .filter(Boolean)
               .join(' '),
@@ -410,7 +378,7 @@ export type BambuDetailListener = (frame: unknown) => void
 
 /**
  * One lazy, reference-counted MQTT report connection per printer. It exists
- * only while a browser session watches. It is read-only: nothing is published.
+ * only while a browser session watches. It publishes read-only status requests.
  */
 export function createBambuDetailStream(input: {
   binding: BambuBinding
@@ -427,6 +395,8 @@ export function createBambuDetailStream(input: {
   let latest: unknown
   let timer: ReturnType<typeof setTimeout> | undefined
   let lastUpdate = -Infinity
+  let restartTimer: ReturnType<typeof setTimeout> | undefined
+  let restartDelay = 1000
 
   const emit = (frame: unknown) => {
     for (const listener of [...listeners]) listener(frame)
@@ -446,6 +416,10 @@ export function createBambuDetailStream(input: {
       trust,
       port: binding.ftpsPort,
     })
+  }
+  function begin() {
+    lifetime = new AbortController()
+    start(lifetime.signal)
   }
   function start(signal: AbortSignal) {
     const publishLatest = () => {
@@ -474,9 +448,28 @@ export function createBambuDetailStream(input: {
         maxReconnects: 5,
       },
       onConnection(connection: 'connected' | 'disconnected' | 'closed') {
-        if (connection === 'connected') return
+        if (signal.aborted) return
+        if (connection === 'connected') {
+          restartDelay = 1000
+          return
+        }
+        clearTimeout(timer)
+        timer = undefined
         state.reset()
-        latest = undefined
+        latest = state.frame()
+        if (connection === 'closed' && lifetime?.signal === signal) {
+          const previous = lifetime
+          lifetime = undefined
+          previous.abort()
+          if (listeners.size && !restartTimer) {
+            restartTimer = setTimeout(() => {
+              restartTimer = undefined
+              if (listeners.size && !lifetime) begin()
+            }, restartDelay)
+            restartDelay = Math.min(restartDelay * 2, 30000)
+          }
+        }
+        if (latest) emit(latest)
       },
       onReport(payload: Buffer) {
         if (signal.aborted || !state.ingest(payload) || timer) return
@@ -489,10 +482,7 @@ export function createBambuDetailStream(input: {
   return {
     subscribe(listener: BambuDetailListener) {
       listeners.add(listener)
-      if (!lifetime) {
-        lifetime = new AbortController()
-        start(lifetime.signal)
-      }
+      if (!lifetime && !restartTimer) begin()
       if (latest) listener(latest)
       let stopped = false
       return () => {
@@ -502,6 +492,9 @@ export function createBambuDetailStream(input: {
         if (listeners.size) return
         clearTimeout(timer)
         timer = undefined
+        clearTimeout(restartTimer)
+        restartTimer = undefined
+        restartDelay = 1000
         lifetime?.abort()
         lifetime = undefined
         latest = undefined

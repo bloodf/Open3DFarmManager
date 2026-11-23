@@ -58,12 +58,14 @@ caption {
 }
 :deep(td),
 th {
-  padding: var(--space-2) var(--space-3);
+  padding: var(--ops-space-1) var(--ops-space-3);
   text-align: start;
   border-top: 1px solid var(--color-border);
   vertical-align: middle;
 }
 th {
   white-space: nowrap;
+  background: var(--ops-raised);
+  color: var(--ops-text);
 }
 </style>

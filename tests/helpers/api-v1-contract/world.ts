@@ -2,6 +2,8 @@
 // jobs and actions services and the real handlers run on top of these fakes.
 // Nothing here opens a socket or a database; the fakes implement the same
 // store seams the PostgreSQL adapters implement.
+import type { FarmAlertKind } from '../../../apps/farm/app/utils/farm-alerts.ts'
+import type { FleetModeRecord } from '../../../apps/farm/server/utils/integration-fleet-mode.ts'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import {
   hashClientSecret,
@@ -456,6 +458,7 @@ export class World {
     actedAt: number
     silencedUntil: number | null
   }[] = []
+  disabledAlertRules: { farmId: string; kind: FarmAlertKind }[] = []
   get alertActionCount() {
     return this.alertActions.length
   }
@@ -760,9 +763,53 @@ export class World {
   }
 
   private makeSql() {
+    const fleetModes = new Map<string, FleetModeRecord>()
     const fn = async (strings: TemplateStringsArray, ...v: unknown[]) => {
       if (this.faults.has('pool')) throw new Error('pool down')
       const text = strings.join('?')
+      if (
+        text.startsWith('\n      SELECT p.id FROM farm.printer_assignments p')
+      )
+        return v[0]
+      if (text.includes('farm.integration_fleet_mode')) {
+        if (text.includes('INSERT INTO')) {
+          const [mode, version, previousMode, appId, target] = v
+          const printerId = (await target) as string
+          if (fleetModes.has(printerId)) return { count: 0 }
+          fleetModes.set(printerId, {
+            mode,
+            version,
+            previousMode,
+            appId,
+          } as FleetModeRecord)
+          return { count: 1 }
+        }
+        if (text.includes('UPDATE')) {
+          const [mode, version, previousMode, appId, target, expectedVersion] =
+            v
+          const printerId = (await target) as string
+          if (fleetModes.get(printerId)?.version !== expectedVersion)
+            return { count: 0 }
+          fleetModes.set(printerId, {
+            mode,
+            version,
+            previousMode,
+            appId,
+          } as FleetModeRecord)
+          return { count: 1 }
+        }
+        const current = fleetModes.get(v[0] as string)
+        return current ? [current] : []
+      }
+      if (
+        text.includes('FROM farm.integration_alert_rules') &&
+        text.includes('AND NOT enabled')
+      ) {
+        const [farmIds] = v as [string[]]
+        return this.disabledAlertRules.filter(({ farmId }) =>
+          farmIds.includes(farmId),
+        )
+      }
       if (text.includes('farm.integration_alert_lifecycle')) {
         if (text.includes('INSERT INTO farm.integration_alert_actions')) {
           const [appId, action, actedAt, silencedUntil, printerId, alertId] =
@@ -1051,7 +1098,13 @@ export class World {
         'Unexpected SQL in the contract world: ' + text.slice(0, 80),
       )
     }
-    return Object.assign(fn, { array: (value: unknown[]) => value })
+    return Object.assign(fn, {
+      array: (value: unknown[]) => value,
+      begin: async <T>(run: (tx: typeof fn) => Promise<T>) => {
+        if (this.faults.has('pool')) throw new Error('pool down')
+        return run(fn)
+      },
+    })
   }
 
   async queryAgentInbox(

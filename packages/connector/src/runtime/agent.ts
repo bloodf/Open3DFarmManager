@@ -13,7 +13,11 @@ import {
   pause,
   runBackgroundDiscovery,
 } from './background-discovery.ts'
-import { decodeApiEnvelopeFrame } from '../../../farm-protocol/src/api-envelope.ts'
+import {
+  ApiResinReplay,
+  decodeApiEnvelopeFrame,
+  encodeApiEnvelopeResultFrame,
+} from '../../../farm-protocol/src/api-envelope.ts'
 import { encodeSignallingClientFrame } from '../../../farm-protocol/src/signalling-socket.ts'
 import {
   CLIENT_WRITE_LIMIT,
@@ -152,6 +156,9 @@ const systemClock: AgentClock = { now: () => Date.now() }
 
 type AgentInput = {
   trustedKeys?: TrustedKeyAuthority
+  resinCapabilities?: Parameters<
+    typeof import('./pause-control.ts').runPauseControl
+  >[0]['resinCapabilities']
   clock?: AgentClock
   statusPort?: number
   configPath: string
@@ -789,11 +796,40 @@ async function runConnectorAgentOnce(
                     })
                 },
                 onApiCommand(frame, report) {
-                  if (!offline || inbox.signal.aborted) return
+                  if (inbox.signal.aborted) return
                   const { envelope } = decodeApiEnvelopeFrame(frame.wire)
+                  const assignedHandler = apiHandlers.get(
+                    envelope.assignment_id,
+                  )
+                  if (
+                    !assignedHandler &&
+                    ApiResinReplay.safeParse(envelope.action).success
+                  ) {
+                    // This inbox is credential-authenticated. An assignment
+                    // without a control handler can only report a refusal.
+                    if (
+                      envelope.farm_id === credential.farm_id &&
+                      envelope.agent_id === credential.agent_id &&
+                      refs.some(
+                        (ref) => ref.assignmentId === envelope.assignment_id,
+                      )
+                    )
+                      report(
+                        encodeApiEnvelopeResultFrame({
+                          v: 1,
+                          t: 'api-envelope.result',
+                          cmd_id: envelope.cmd_id,
+                          outcome: 'refused',
+                          refusal_code: 'unsupported',
+                          detail: 'resin-artifact-dispatch-unavailable',
+                          at: clock.now(),
+                        }),
+                      )
+                    return
+                  }
+                  if (!offline) return
                   const handler =
-                    apiHandlers.get(envelope.assignment_id) ??
-                    apiHandlers.values().next().value
+                    assignedHandler ?? apiHandlers.values().next().value
                   handler?.(frame, {
                     report,
                     apiJobs,
@@ -908,6 +944,9 @@ async function runConnectorAgentOnce(
             )
           },
           ...(input.trustedKeys ? { trustedKeys: input.trustedKeys } : {}),
+          ...(input.resinCapabilities
+            ? { resinCapabilities: input.resinCapabilities }
+            : {}),
           storageDegraded: () => queue.storageDegraded,
           onDiagnostic: pauseDiagnostic,
           onMacroParams(read) {

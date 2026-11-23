@@ -54,13 +54,14 @@ export function validJobCursor(cursor: string | null) {
 export function inventoryGrantFarms(
   principal: IntegrationPrincipal,
   farmId?: string,
+  scope: 'inventory:read' | 'inventory:write' = 'inventory:read',
 ) {
   return [
     ...new Set(
       principal.grants
         .filter(
           (grant) =>
-            grant.scopes.includes('inventory:read') &&
+            grant.scopes.includes(scope) &&
             grant.printerAssignmentId === null &&
             (farmId === undefined || grant.farmId === farmId),
         )

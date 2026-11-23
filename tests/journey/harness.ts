@@ -40,6 +40,7 @@ import { AUDIENCE, startFarmApp, type FarmApp } from './farm-app.ts'
 import {
   VENDOR_DESCRIPTIONS,
   startVendorSimulator,
+  type BambuCameraScenario,
   type VendorControls,
   type VendorDiscovery,
   type VendorName,
@@ -74,6 +75,7 @@ export type JourneyOptions = Readonly<{
   printerKey?: string
   /** Bambu only: opt the printer binding in to control commands. */
   control?: boolean
+  bambuCamera?: BambuCameraScenario
   /**
    * Enables the signed control path for the assigned printer: the Connector
    * trusts the app's pause issuer and opens its control inbox, so the page
@@ -206,7 +208,7 @@ export type JourneyHarness = Readonly<{
   configurator:
     | Pick<Configurator, 'agentId' | 'fingerprint' | 'assignments' | 'log'>
     | undefined
-  /** Loopback MJPEG camera (Creality and Anycubic only). */
+  /** Loopback simulated camera. */
   camera: VendorSimulator['camera']
   /** The Kobra X mock behind the native setup (`kobraX: true`). */
   kobraX: Readonly<{ mock: KobraXMockInstance; lanAddress: string }> | undefined
@@ -433,6 +435,7 @@ export async function startJourneyHarness(
     } else {
       vendor = await startVendorSimulator(simulator as VendorName, {
         printerKey,
+        ...(options.bambuCamera ? { bambuCamera: options.bambuCamera } : {}),
         ...(options.control === undefined ? {} : { control: options.control }),
       })
       const started = vendor

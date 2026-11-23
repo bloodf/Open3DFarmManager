@@ -6,6 +6,7 @@ import {
 } from '../control/printer-binding.ts'
 import { receiveApiCommand } from './api-command.ts'
 import {
+  ApiResinReplay,
   decodeApiEnvelopeFrame,
   encodeApiEnvelopeResultFrame,
 } from '../../../farm-protocol/src/api-envelope.ts'
@@ -118,6 +119,10 @@ export function refuseApiCommand(
         cmd_id: envelope.cmd_id,
         outcome: 'refused',
         refusal_code: code,
+        ...(code === 'unsupported' &&
+        ApiResinReplay.safeParse(envelope.action).success
+          ? { detail: 'resin-artifact-dispatch-unavailable' }
+          : {}),
         at: Date.now(),
       }),
     )
@@ -173,6 +178,9 @@ type PauseControlInput = {
   ) => Parameters<typeof receiveApiCommand>[0]['libraryPrint']
   /** Remembers what a library start printed so the finished job links to it (#385). */
   libraryLinks?: Parameters<typeof receiveApiCommand>[0]['libraryLinks']
+  resinCapabilities?: Parameters<
+    typeof receiveApiCommand
+  >[0]['resinCapabilities']
   /** True while local storage is degraded: commands are refused with `storage`. */
   storageDegraded?: () => boolean
   /** Durable bed-collection hold: OpenFarm starts wait for `confirm_collection`. */
@@ -478,6 +486,9 @@ async function runAssignmentControl(
           journal,
           clock,
           driver: apiDriver,
+          ...(input.resinCapabilities
+            ? { resinCapabilities: input.resinCapabilities }
+            : {}),
           ...(libraryPrint ? { libraryPrint } : {}),
           ...(input.libraryLinks ? { libraryLinks: input.libraryLinks } : {}),
           jobFiles: {

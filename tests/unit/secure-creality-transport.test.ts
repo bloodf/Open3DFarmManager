@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { provisionCrealityPrinter } from '../../packages/connector/src/control/printer-binding.ts'
 import { openFixedCrealityControl } from '../../packages/connector/src/creality/control-driver.ts'
+import { listCrealityFiles } from '../../packages/connector/src/creality/files.ts'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createCrealitySimulator } from '../../packages/sim-tools/src/creality-simulator.ts'
@@ -129,6 +130,17 @@ describe('Creality advertised secure endpoint', () => {
       await control.prepare()
       expect(sim.secureConnections).toBe(1)
       expect(sim.requests).toEqual([])
+      await expect(
+        listCrealityFiles({
+          binding,
+          signal: new AbortController().signal,
+          authorized: () => true,
+        }),
+      ).resolves.toEqual([])
+      expect(sim.secureConnections).toBe(2)
+      expect(sim.requests).toEqual([
+        { method: 'get', params: { reqGcodeFile: 1 } },
+      ])
     } finally {
       await control.close()
       await sim.close()

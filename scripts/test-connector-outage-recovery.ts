@@ -225,6 +225,7 @@ try {
   assert.equal(validateMigrationHistory(catalog, [...journal]), catalog.length)
   report = await runConnectorOutageScenarios({
     admin: sql,
+    fixturePassword: dbPassword,
     ports,
     workDir,
     dbStall: dbStall!,

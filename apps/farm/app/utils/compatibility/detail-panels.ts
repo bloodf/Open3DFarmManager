@@ -38,7 +38,7 @@ export const vendorDetailCatalog: Readonly<
   },
   'kobra-x': {
     reason:
-      'A atribuição nativa do Kobra X só oferece leitura. O Connector ainda não encaminha comandos assinados.',
+      'Os controles disponíveis dependem do estado e das permissões da impressora.',
     hardwareNote:
       'O adaptador nativo tem testes simulados; não comprovado em hardware. O agente ainda não encaminha comandos assinados para a atribuição nativa.',
   },

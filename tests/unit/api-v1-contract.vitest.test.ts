@@ -1883,3 +1883,99 @@ function environmentControlScenarios(): Scenario[] {
   })
   return out
 }
+
+describe('collection hold on the printer action route', () => {
+  it('shows the plate, accepts confirm_collection, and refuses the wrong scope', async () => {
+    const world = freshWorld()
+    const printer = world.authStore.printers.find(
+      (row) => row.id === ids.printerA1,
+    )!
+    printer.state = {
+      printerKey: printer.printerKey,
+      state: 'idle',
+      progress: 0,
+      observedAt: 1_700_000_000_000,
+      controls: ['pause', 'resume', 'cancel', 'confirm_collection'],
+      lastJob: { outcome: 'completed', endedAt: 5000 },
+    }
+    const target = world.actionsStore.targets.get(ids.printerA1)!
+    target.controls = ['pause', 'resume', 'cancel', 'confirm_collection']
+    const token = await tokenFor(
+      world,
+      world.addApp([{ scopes: ['printers:read', 'plates:confirm'] }]),
+    )
+    const basic = await tokenFor(
+      world,
+      world.addApp([{ scopes: ['control:basic'] }]),
+    )
+    const status = await call({
+      method: 'GET',
+      path: `/printers/${ids.printerA1}/status`,
+      token,
+    })
+    expect(status.status).toBe(200)
+    expect(status.json).toMatchObject({
+      state: 'idle',
+      plate: { state: 'awaiting-collection', attemptId: '5000' },
+    })
+    expect(
+      validateValue(
+        resolveRef('#/components/schemas/PrinterStatus'),
+        status.json,
+      ),
+    ).toEqual([])
+    const clear = await call({
+      method: 'GET',
+      path: `/printers/${ids.printerA2}/status`,
+      token,
+    })
+    expect(clear.status).toBe(200)
+    expect(clear.json).not.toHaveProperty('plate')
+
+    const confirm = {
+      method: 'POST',
+      path: `/printers/${ids.printerA1}/actions`,
+      headers: { 'idempotency-key': 'collect-bed' },
+      body: { action: 'confirm_collection', args: { attempt: '5000' } },
+    }
+    const refused = await call({ ...confirm, token: basic })
+    expect(refused.status).toBe(403)
+    expect(refused.json).toMatchObject({ code: 'insufficient-scope' })
+    const pause = await call({
+      method: 'POST',
+      path: `/printers/${ids.printerA1}/actions`,
+      token,
+      headers: { 'idempotency-key': 'not-basic' },
+      body: { action: 'pause', args: {} },
+    })
+    expect(pause.status).toBe(403)
+    expect(pause.json).toMatchObject({ code: 'insufficient-scope' })
+
+    const accepted = await call({ ...confirm, token })
+    expect(accepted.status).toBe(202)
+    expect(accepted.json).toMatchObject({
+      action: 'confirm_collection',
+      args: { attempt: '5000' },
+      status: 'queued',
+    })
+    expect(
+      validateValue(resolveRef('#/components/schemas/Action'), accepted.json),
+    ).toEqual([])
+    const actionId = (accepted.json as { id: string }).id
+    const envelope = world.envelopes.byResource(actionId)!
+    expect(envelope.requiredScope).toBe('plates:confirm')
+    expect(world.envelopes.commands.get(envelope.cmdId)).toMatchObject({
+      kind: 'action',
+      action: {
+        action: 'confirm_collection',
+        args: { attempt: '5000' },
+      },
+    })
+    const replay = await call({ ...confirm, token })
+    expect(replay.status).toBe(202)
+    expect(replay.json).toMatchObject({ id: actionId, status: 'queued' })
+    expect(replay.headers.get('location')).toBe(
+      accepted.headers.get('location'),
+    )
+  })
+})

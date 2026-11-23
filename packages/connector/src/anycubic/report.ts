@@ -1,3 +1,5 @@
+import { boundPrinterString } from '@open3dfarmmanager/farm-protocol'
+
 function estimateSeconds(minutes: unknown) {
   return typeof minutes === 'number' &&
     Number.isSafeInteger(minutes) &&
@@ -124,7 +126,7 @@ export function decodeAnycubicReport(payload: Buffer) {
             slot.type.length > 0 &&
             slot.type.length <= 64
           )
-            material.materialType = slot.type
+            material.materialType = boundPrinterString(slot.type)
           if (
             Array.isArray(slot.color) &&
             slot.color.length >= 3 &&
@@ -165,7 +167,7 @@ export function decodeAnycubicReport(payload: Buffer) {
     }
     const filename = row.filename ?? project?.filename
     if (typeof filename === 'string' && filename.length <= 1024)
-      observation.filename = filename
+      observation.filename = boundPrinterString(filename)
     if (estimateBlocked)
       return { kind: 'observation' as const, ...observation, estimateBlocked }
     return Object.keys(observation).length

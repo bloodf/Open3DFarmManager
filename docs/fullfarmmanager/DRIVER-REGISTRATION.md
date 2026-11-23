@@ -1,6 +1,6 @@
 # Driver registration contract (candidate)
 
-Status: proposal, 2026-11-22. No code implements it yet. It covers Prusa (PrusaLink and Connect Local), Qidi, Flashforge, Phrozen and Anycubic Photon resin. It reuses the registered SDCP and Formlabs read-only collection as the pattern. Every capability stays simulator-graded until owner hardware qualifies it.
+Status: proposal, 2026-11-22. No code implements it yet. It covers Prusa (PrusaLink and Connect Local), Qidi, Flashforge, Phrozen and Anycubic Photon resin. It reuses the registered SDCP and Formlabs read-only collection as the pattern. Stage 1 acceptance uses simulator evidence. Hardware qualification is required for the hardware grade and for stage 2 commands.
 
 ## What the code does today
 
@@ -255,7 +255,7 @@ A mixed journey uses one v8 file with SDCP, Formlabs, Qidi and Phrozen to prove 
 2. `Sonic Mighty Revo 14K` has `protocol: 'Wire protocol/ports unverified'` and `protocolGrade: 'unverified'`, although an SDCP V3.0.0 adapter exists with a V153 synthetic fixture and firmware allowlist. It should be `spec-derived` for status only, with a note that V138 has no positive fixture.
 3. `Photon P1 Max` says "wire protocol/ports unverified", but the adapter documents 18910 HTTP and 8883 MQTT from a public capture. It should be `spec-derived` for the handshake only, with status `unsupported`.
 4. `Form 4` and `Form 4L` have `capabilities: []`. They need a status row graded `unknown` with the reason "sem horário de observação da impressora".
-5. Every row in scope has `capabilities: []`. Nothing yet carries the per-capability `ControlAreaEvidence` that §6 requires. Only `klipper.ts` uses `simulated`.
+5. The existing catalog rows for Sonic Mighty Revo 14K, Photon P1 Max, Form 4 and Form 4L have no per-capability entries or evidence for the read-only behavior described in §6.
 6. `DiscoveryPrinter.vendor` lacks every new family, so background discovery cannot surface them.
 
 ### Resin ledger (`apps/farm/server/utils/resin-ledger/`)

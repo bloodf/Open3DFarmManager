@@ -276,7 +276,9 @@ if (journeyEnabled())
       const job = row.getByLabel('Trabalho atual')
       await expect(job).toContainText('journey.gcode')
       await expect(job).toContainText('25/100')
-      // A scripted progress step from the simulator reaches the page.
+      // The simulator drops peers that fail the stock WebSocket keepalive.
+      expect(await simulator().challengeHeartbeat()).toBeGreaterThan(0)
+      // Live progress keeps reaching the page after the keepalive.
       journey.controls.setProgress(40)
       await journey.expectProgress(0.4)
     })
@@ -303,7 +305,7 @@ if (journeyEnabled())
       await reportedState(row, 'Imprimindo')
     })
 
-    test('temperature, fan, light and homing commands reach the printer', async () => {
+    test('temperature, fan and light reach the printer while homing is blocked', async () => {
       test.setTimeout(8 * 60_000)
       const page = started().ownerPage
       const row = printerRow(page)
@@ -335,8 +337,11 @@ if (journeyEnabled())
       await expect(environment).toContainText('Luz da câmara')
       await expect(environment).toContainText('Ligada')
 
-      await extended(page, 'Referenciar eixos')
-      expect(sets()).toContainEqual({ autohome: 'X Y Z' })
+      await expect(
+        extendedControls(page).getByRole('button', {
+          name: 'Referenciar eixos',
+        }),
+      ).toBeDisabled()
     })
 
     test('commands without a documented stock protocol are shown as não suportado', async () => {
@@ -383,6 +388,8 @@ if (journeyEnabled())
       await expect(row.getByLabel('Último trabalho')).toContainText(
         'journey.gcode',
       )
+      await extended(page, 'Referenciar eixos')
+      expect(sets()).toContainEqual({ autohome: 'X Y Z' })
       await expectHistory(page, 'Cancelado', 'journey.gcode')
     })
 

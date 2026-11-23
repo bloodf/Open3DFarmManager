@@ -46,6 +46,8 @@ export async function testPostgresCredentialRenewal(
 ): Promise<string[]> {
   const role = 'renewal_fixture_' + randomUUID().replaceAll('-', '')
   await admin`CREATE ROLE ${admin(role)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS IN ROLE farm_connector_credential_renewer`
+  const rolePassword = randomUUID().replaceAll('-', '')
+  await admin.unsafe(`ALTER ROLE "${role}" PASSWORD '${rolePassword}'`)
   const pools: Sql[] = []
   const connect = () => {
     const s = postgres({
@@ -53,7 +55,7 @@ export async function testPostgresCredentialRenewal(
       port,
       database: 'fixture',
       username: role,
-      password: '',
+      password: rolePassword,
       ssl: false,
       max: 5,
       connect_timeout: 3,
@@ -777,7 +779,7 @@ export async function testPostgresCredentialRenewal(
       port,
       database: 'fixture',
       username: role,
-      password: '',
+      password: rolePassword,
       ssl: false,
       max: 1,
       connect_timeout: 3,

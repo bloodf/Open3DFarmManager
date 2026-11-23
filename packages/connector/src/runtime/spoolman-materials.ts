@@ -1,3 +1,4 @@
+import { boundPrinterString } from '@open3dfarmmanager/farm-protocol'
 import type { SpoolmanSnapshot } from './spoolman-provider.ts'
 import type { ActiveSpoolAssignment } from '../spoolman/active-assignments.ts'
 
@@ -5,7 +6,9 @@ type Spool = NonNullable<SpoolmanSnapshot['inventory']>['items'][number]
 
 // Spoolman spool fields: https://github.com/Donkie/Spoolman/blob/master/docs/api.md
 export function mapSpoolmanMaterial(spool: Spool, slot = 'external') {
-  const material = spool.filament.material?.slice(0, 64)
+  const material = spool.filament.material
+    ? boundPrinterString(spool.filament.material, 64)
+    : undefined
   const color = spool.filament.color_hex?.toUpperCase()
   const remaining = spool.remaining_weight
   const initial = spool.initial_weight

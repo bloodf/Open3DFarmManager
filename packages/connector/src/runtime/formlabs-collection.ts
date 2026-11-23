@@ -1,3 +1,4 @@
+import { boundPrinterString } from '@open3dfarmmanager/farm-protocol'
 import type { z } from 'zod'
 import { connectFormlabs, isSupportedFormlabsModel } from '../formlabs/index.ts'
 import type { FormlabsBinding } from '../formlabs/config.ts'
@@ -32,7 +33,7 @@ export function createFormlabsCollection(input: {
           printer: {
             printerKey: input.binding.printerKey,
             state: 'unknown',
-            preformStatus: device.status,
+            preformStatus: boundPrinterString(device.status),
             identity: { vendor: 'Formlabs', model: device.product_name },
             observedAt: result.retrievedAt,
           },

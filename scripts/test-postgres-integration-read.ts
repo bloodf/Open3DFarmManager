@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { promisify } from 'node:util'
 import postgres from 'postgres'
+import { recordJobs } from '../apps/farm/server/storage/job-history-store.ts'
 import {
   POSTGRES_IMAGE_PATTERN,
   disposablePostgres,
@@ -116,6 +117,26 @@ try {
         connect_timeout: 3,
       })
   const checks = await testPostgresIntegrationRead(sql)
+  const farmId = randomUUID()
+  const agentId = randomUUID()
+  const usage = [{ tool: 'extruder', grams: 12.5 }]
+  await sql`INSERT INTO farm.farms (id, sandbox) VALUES (${farmId}::uuid, true)`
+  await sql.begin(async (tx) => {
+    await recordJobs(tx, { farmId, agentId }, [
+      {
+        printerKey: 'synthetic',
+        outcome: 'completed',
+        endedAt: 123,
+        filamentUsage: usage,
+      },
+    ])
+  })
+  const rows =
+    await sql`SELECT filament_usage, jsonb_typeof(filament_usage) AS kind FROM farm.job_history WHERE farm_id=${farmId}::uuid`
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0]?.kind, 'array')
+  assert.deepEqual(rows[0]?.filament_usage, usage)
+  checks.push('job history stores filament usage as a JSON array')
   console.log(JSON.stringify({ result: 'passed', checks }))
 } finally {
   if (owned) await owned.stop()

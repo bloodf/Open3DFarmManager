@@ -287,3 +287,5 @@ Tested integrated commit `f708f89a851999d4ce8363e2a52d81b80d07dfba` with Postgre
 On 2026-11-23, a test-only recovery check at base `878e75a9` ran the Qidi, Flashforge and Phrozen journeys in an internal Docker network with PostgreSQL 17.12 and bundled Chromium 1254. All three failed: after navigating from stale detail back to the farm, the row reported no received state instead of the prior stale observation. A separate Flashforge retry using browser history failed at the same assertion. Recovery on that existing page remains unproven. No hardware was used.
 
 The status journey keeps the farm page loaded through its stale and recovery assertions. It then opens the detail page while connected and runs a separate disconnect and recovery cycle there, checking the last-known notice and the absence of print controls.
+
+On 2026-11-23, the Qidi, Flashforge and Phrozen Playwright journeys passed on candidate `0df27df0e3c95ca918884b5af73919d6ec0ba58c`: 3 passed, 0 skipped. The run used bundled Chromium and PostgreSQL 17 on an internal Docker bridge. No physical printers were used.

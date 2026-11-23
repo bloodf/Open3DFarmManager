@@ -554,7 +554,7 @@ The adapter must not depend on these until a capture exists. Each is also marked
 This document also draws on S7 and S8 for camera behavior.
 
 - S7: [stribor/anycubic_kobrax at 34955343](https://github.com/stribor/anycubic_kobrax/tree/34955343)
-(MIT). Web camera commands and tokenized FLV URLs.
+  (MIT). Web camera commands and tokenized FLV URLs.
 
 - S8: [Grunna/ha-anycubic-kobra-x-lan at db9b2a8e](https://github.com/Grunna/ha-anycubic-kobra-x-lan/tree/db9b2a8e)
   (MIT). Web topic and capture sequencing.

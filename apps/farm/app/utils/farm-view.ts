@@ -315,11 +315,13 @@ export const printerStateLabel: Record<
   unknown: 'Estado da impressora desconhecido',
 }
 
-export function formatPrinterStateLabel(
-  printer: Pick<
-    z.infer<typeof PrinterState>,
-    'state' | 'statusReason' | 'preformStatus'
-  >,
+type PrinterOperationalState = Pick<
+  PrinterState,
+  'state' | 'statusReason' | 'preformStatus'
+>
+
+export function formatPrinterOperationalStateLabel(
+  printer: PrinterOperationalState,
 ): string {
   if (printer.preformStatus) return `PreForm informou: ${printer.preformStatus}`
   if (
@@ -329,6 +331,24 @@ export function formatPrinterStateLabel(
     return 'Certificado do cliente ausente (client certificate missing)'
   }
   return printerStateLabel[printer.state]
+}
+
+export function formatPrinterAlarmLabel(
+  alarms: PrinterState['alarms'],
+): string {
+  const labels: string[] = []
+  if (alarms?.printError) labels.push(`Erro de impressão: ${alarms.printError}`)
+  if (alarms?.hmsCount && alarms.hmsCode)
+    labels.push(`Alertas HMS: ${alarms.hmsCount} (${alarms.hmsCode})`)
+  return labels.join(' — ')
+}
+
+export function formatPrinterStateLabel(
+  printer: PrinterOperationalState & Pick<PrinterState, 'alarms'>,
+): string {
+  const state = formatPrinterOperationalStateLabel(printer)
+  const alarms = formatPrinterAlarmLabel(printer.alarms)
+  return alarms ? `${state} — ${alarms}` : state
 }
 
 /** Live-region copy: only stable live/unavailable changes, never transient steps. */

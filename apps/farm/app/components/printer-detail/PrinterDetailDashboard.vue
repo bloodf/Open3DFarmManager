@@ -231,6 +231,7 @@ const heaterReason = computed(
         }}
       </p>
     </header>
+    <slot name="status" />
     <Tabs
       v-model="selected"
       label="Seções da impressora"

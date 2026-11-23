@@ -2,7 +2,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createHash, X509Certificate } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   answerBambuDetailQuery,
   BAMBU_DETAIL_CAPABILITIES,
@@ -125,7 +125,7 @@ describe('Bambu detail stream frames', () => {
     const frame = state.ingest(report({ layer_num: 13 })) as Frame
     expect(frame.detail.print).toEqual({
       state: 'printing',
-      message: '',
+      message: 'Alertas ainda não informados pela impressora.',
       elapsedSeconds: 0,
       file: 'benchy',
       currentLayer: 13,
@@ -172,10 +172,14 @@ describe('Bambu detail stream frames', () => {
       }).detail.print,
     ).toMatchObject({ state: 'paused', message: both })
     expect(update({ layer_num: 14 }).detail.print.message).toBe(both)
-    expect(
-      update({ print_error: -1, hms: [{ attr: 0, code: '0' }] }).detail.print
-        .message,
-    ).toBe(both)
+    expect(update({ print_error: -1 }).detail.print.message).toBe(both)
+    const invalid = update({ print_error: -1, hms: [{ attr: 0, code: '0' }] })
+      .detail.print.message
+    expect(invalid).toBe(
+      'Erro de impressão: 0300-8005. Alertas ainda não informados pela impressora.',
+    )
+    expect(invalid).not.toContain('0700-2100-0002-0004')
+    expect(update({ hms: [hms, hms] }).detail.print.message).toBe(both)
     expect(
       update({
         command: 'gcode_line',
@@ -195,7 +199,98 @@ describe('Bambu detail stream frames', () => {
       'Erro de impressão: 0500-C011.',
     )
     state.reset()
-    expect(update({ gcode_state: 'RUNNING' }).detail.print.message).toBe('')
+    expect(update({ gcode_state: 'RUNNING' }).detail.print.message).toBe(
+      'Alertas ainda não informados pela impressora.',
+    )
+  })
+})
+
+describe('alarm availability regressions', () => {
+  it('keeps each alarm unknown until its first report', () => {
+    const state = createBambuDetailState('printer-1')
+    const update = (value: object) =>
+      (state.ingest(report(value)) as Frame).detail.print.message
+    expect(update({ gcode_state: 'PAUSE' })).toBe(
+      'Alertas ainda não informados pela impressora.',
+    )
+    expect(update({ print_error: 0 })).toBe(
+      'Alertas ainda não informados pela impressora.',
+    )
+    expect(update({ hms: [] })).toBe('')
+  })
+
+  it('discards stale HMS codes for invalid and oversized lists', () => {
+    const state = createBambuDetailState('printer-1')
+    const update = (value: object) =>
+      (state.ingest(report(value)) as Frame).detail.print.message
+    const code = { attr: 0x07002100, code: 0x00020004 }
+    expect(update({ print_error: 0, hms: [code] })).toContain(
+      '0700-2100-0002-0004',
+    )
+    expect(update({ hms: [code, { attr: 1 }] })).toBe(
+      'Alertas ainda não informados pela impressora.',
+    )
+    expect(update({ hms: [code] })).toContain('0700-2100-0002-0004')
+    expect(update({ hms: Array(65).fill(code) })).toBe(
+      'Alertas ainda não informados pela impressora.',
+    )
+  })
+
+  it('notifies on disconnect and starts again after closure while subscribed', () => {
+    vi.useFakeTimers()
+    const directory = mkdtempSync(join(tmpdir(), 'bambu-detail-'))
+    directories.add(directory)
+    const credentialFile = join(directory, 'credential.json')
+    writeFileSync(credentialFile, JSON.stringify({ accessCode: 'secret' }), {
+      mode: 0o600,
+    })
+    const connections: any[] = []
+    const transport = ((options: any) => {
+      connections.push(options)
+      return { done: new Promise(() => {}) }
+    }) as any
+    const stream = createBambuDetailStream({
+      binding: {
+        printerKey: 'printer-1',
+        serial: 'SYNTHETIC',
+        host: '127.0.0.1',
+        port: 8883,
+        control: false,
+        credentialFile,
+        pinSha256: 'a'.repeat(64),
+        allowedEndpoints: [{ host: '127.0.0.1', port: 8883 }],
+      } as never,
+      transport,
+    })
+    const frames: Frame[] = []
+    try {
+      const stop = stream.subscribe((frame) => frames.push(frame as Frame))
+      connections[0].onReport(
+        Buffer.from(
+          report({ gcode_state: 'PAUSE', print_error: 0x03008005, hms: [] }),
+        ),
+      )
+      vi.runAllTimers()
+      expect(frames.at(-1)?.detail.print.message).toContain('0300-8005')
+      connections[0].onConnection('disconnected')
+      expect(frames.at(-1)?.detail.print.message).toBe(
+        'Alertas ainda não informados pela impressora.',
+      )
+      connections[0].onConnection('closed')
+      expect(stream.active).toBe(false)
+      expect(connections).toHaveLength(1)
+      vi.advanceTimersByTime(1000)
+      expect(connections).toHaveLength(2)
+      connections[1].onReport(Buffer.from(report({ print_error: 0, hms: [] })))
+      vi.advanceTimersByTime(1000)
+      expect(frames.at(-1)?.detail.print.message).toBe('')
+      connections[1].onConnection('closed')
+      stop()
+      vi.advanceTimersByTime(30000)
+      expect(connections).toHaveLength(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 
@@ -336,15 +431,18 @@ describe('Bambu detail stream over the simulator', () => {
       temperature: 210,
       target: 220,
     })
-    // Nothing but the version request was published: the stream is read-only.
+    // Version and full-status requests are read-only.
     expect(
       sim.requests.every((request) => request.command === 'get_version'),
     ).toBe(true)
     // Read-only queries are logged apart; no printer command was sent at all.
     expect(sim.requests).toEqual([])
-    expect(sim.queries.every((query) => query.command === 'get_version')).toBe(
-      true,
-    )
+    expect(sim.queries.map((query) => query.command)).toContain('pushall')
+    expect(
+      sim.queries.every((query) =>
+        ['get_version', 'pushall'].includes(query.command),
+      ),
+    ).toBe(true)
     stop()
     stop()
     expect(stream.active).toBe(false)

@@ -19,20 +19,22 @@ Nothing is `documented`. `hardware` means a recorded read-only qualification
 report in [docs/hardware-reports](../hardware-reports/README.md) proves it: so
 far only telemetry on the generic entry, from a Sovol SV06 and a Snapmaker U1.
 
-## Snapmaker U1 active nozzle
+## Active nozzle on multi-extruder printers
 
-Coverage for live active-nozzle temperature is `simulated` and remains
-unqualified on hardware. The read-only U1 hardware report records four tools
-and the active extruder at idle. The Playwright Moonraker journey exercises
-active tool changes with the U1 simulator.
+Active-nozzle temperature coverage is `simulated` and remains unqualified on
+hardware. When Moonraker discovery lists both `toolhead` and an
+`extruderN` object other than `extruder`, the Connector queries the
+discovered nozzle temperatures with `toolhead.extruder` and the farm shows
+the active extruder's temperature as the nozzle value. This applies to any
+Klipper printer meeting those discovery conditions; it is not limited to a
+printer model.
 
-The Connector uses the existing Moonraker object query to read
-`toolhead.extruder` and the discovered nozzle temperatures together.
-Snapmaker's firmware exposes that selector and configures the four heater
-objects `extruder` through `extruder3`.
-[Moonraker object queries](https://moonraker.readthedocs.io/en/latest/external_api/printer/#query-printer-object-status),
-[U1 toolhead status](https://github.com/Snapmaker/u1-klipper/blob/7ac453b50fe6779b2ec0b759038a17da5e6d671d/klippy/toolhead.py),
-[U1 printer configuration](https://github.com/Snapmaker/u1-klipper/blob/7ac453b50fe6779b2ec0b759038a17da5e6d671d/lava/printer.cfg).
+If `toolhead.extruder` does not name a discovered Klipper `extruderN`
+object, the active nozzle value is unavailable (`Indisponivel`); the
+Connector does not substitute the default `extruder` reading. The simulator
+journey exercises tool changes with the Snapmaker U1 setup, but hardware
+qualification is not a gate for this generic behavior.
+[Moonraker object queries](https://moonraker.readthedocs.io/en/latest/external_api/printer/#query-printer-object-status).
 
 ## Sources
 

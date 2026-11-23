@@ -221,9 +221,10 @@ const policies: RoutePolicy[] = [
   },
   {
     method: 'GET',
-    path: /^\/printers(?:\/status|\/readiness|\/[^/]+\/(?:status|capabilities))?$/,
+    path: /^\/printers(?:\/status|\/readiness|\/[^/]+\/(?:status|capabilities|mode))?$/,
     scopes: ['printers:read'],
   },
+  { method: 'POST', path: /^\/printers\/mode$/, scopes: ['control:extended'] },
   { method: 'GET', path: /^\/printers\/[^/]+\/files$/, scopes: ['files:read'] },
   {
     method: 'GET',

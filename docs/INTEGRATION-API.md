@@ -242,6 +242,33 @@ Other read operations include printer files (`files:read`), macros
 status. File and macro listing are answered live by the Connector and may be
 unavailable even when the printer list and status projection are readable.
 
+## Printer operational availability
+
+`GET /printers/{printerId}/mode` requires `printers:read` and returns
+`mode`, its pt-BR `label`, and the current `version`. A new assignment starts
+in `in-service` with a null version. Availability is an OpenFarm setting for
+fleet planning. It preserves observed print state, including unknown state.
+Job dispatch and printer controls keep their existing safety checks.
+
+`POST /printers/mode` requires a covering `control:extended` grant for each
+target. Submit 1–50 distinct printer IDs in `targets` with an
+`expectedVersion` for each printer. Use `action: "set"` and
+`mode: "maintenance"` or `mode: "in-service"`. Use `expectedVersion: null`
+only before the first change. Use `action: "restore"` with the version returned
+by a successful set by the same app. The restore applies only while that version
+is current and produces a new version.
+
+The batch returns `applied`, `denied` or `unsupported` per target in request
+order. Missing and out-of-grant targets both return `denied` with `not-found`
+in a mixed batch. A batch with no covered targets returns HTTP 404. Approvals
+are not available for this operation. An unavailable observation is denied.
+The driver must advertise print-start capability in a fresh, hardware-qualified
+observation. A missing capability or unqualified firmware yields
+`unsupported`. The capability is used only to qualify the availability setting.
+There are no printer commands or automatic retries. After an uncertain HTTP
+response, read the current version before deciding whether another change is
+needed.
+
 ## Resin and environment reads
 
 Both are read-only. Switching, pairing and safety controls stay in OpenFarm and

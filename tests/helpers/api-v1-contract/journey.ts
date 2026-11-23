@@ -196,7 +196,9 @@ export async function openJourney(
             headers: Object.fromEntries(
               new Headers(
                 req.rawHeaders.flatMap((name, index, entries) =>
-                  index % 2 === 0 ? [[name, entries[index + 1] ?? '']] : [],
+                  index % 2 === 0
+                    ? [[name, entries[index + 1] ?? ''] as [string, string]]
+                    : [],
                 ),
               ),
             ),

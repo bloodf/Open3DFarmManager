@@ -262,10 +262,10 @@ test(
                 ],
               }
               assertReads = () => {
-                assert.deepEqual(
-                  remote.queries.map((request) => request.command),
-                  ['get_version'],
-                )
+                assert.deepEqual(remote.queries, [
+                  { command: 'pushall', sequence_id: '0' },
+                  { command: 'get_version', sequence_id: '0' },
+                ])
                 // Reading the firmware never sends a printer command.
                 assert.deepEqual(remote.requests, [])
               }

@@ -8,6 +8,7 @@ export async function setPolishTheme(page: Page, theme: 'light' | 'dark') {
   // The real shell uses the saved preference. Read the emulated scheme on
   // every navigation so screenshot loops can switch themes on the same page.
   await page.addInitScript(() => {
+    if (location.origin === 'null') return
     const theme = matchMedia('(prefers-color-scheme: dark)').matches
       ? 'dark'
       : 'light'

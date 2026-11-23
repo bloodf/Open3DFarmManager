@@ -269,6 +269,14 @@ function printerStateSchema(legacy: boolean) {
     })
     .refine(
       (value) =>
+        value.statusReason !== 'firmware-shutdown' || value.state === 'error',
+      {
+        path: ['statusReason'],
+        message: 'Firmware shutdown requires error state',
+      },
+    )
+    .refine(
+      (value) =>
         value.state === 'offline' ||
         (value.state === 'error' &&
           value.statusReason === 'firmware-shutdown') ||

@@ -250,3 +250,55 @@ test('recognized state without progress waits without retiring epochs', async ()
     rmSync(directory, { recursive: true, force: true })
   }
 })
+
+test('first filename preserves a fresh estimate; a different known filename clears it', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'anycubic-filename-'))
+  const passwordFile = join(directory, 'password.json')
+  writeFileSync(passwordFile, JSON.stringify('synthetic'), { mode: 0o600 })
+  const controller = new AbortController()
+  let report: (payload: unknown) => void = () => {}
+  const observations: Parameters<
+    Parameters<typeof createAnycubicCollection>[0]['onObservation']
+  >[0][] = []
+  const collection = createAnycubicCollection({
+    binding: {
+      printerKey: 'a',
+      host: '127.0.0.1',
+      port: 9883,
+      modelId: '20024',
+      deviceId: 'SYNTHETIC',
+      username: 'test',
+      passwordFile,
+    },
+    signal: controller.signal,
+    onObservation: (value) => observations.push(value),
+    onUnavailable: () => {},
+    transport(options) {
+      report = (payload) =>
+        options.onReport(Buffer.from(JSON.stringify(payload)))
+      return { done: Promise.resolve(), close: async () => {} }
+    },
+  })
+  try {
+    report({
+      data: { state: 'printing', progress: 10, project: { remain_time: 18 } },
+    })
+    assert.equal(observations.at(-1)?.printer.estimatedRemainingSeconds, 1080)
+    report({ data: { filename: 'first.gcode' } })
+    assert.equal(observations.at(-1)?.printer.filename, 'first.gcode')
+    assert.equal(observations.at(-1)?.printer.estimatedRemainingSeconds, 1080)
+    report({ data: { filename: 'first.gcode' } })
+    assert.equal(observations.at(-1)?.printer.filename, 'first.gcode')
+    assert.equal(observations.at(-1)?.printer.estimatedRemainingSeconds, 1080)
+    report({ data: { filename: 'second.gcode' } })
+    assert.equal(observations.at(-1)?.printer.filename, 'second.gcode')
+    assert.equal(
+      observations.at(-1)?.printer.estimatedRemainingSeconds,
+      undefined,
+    )
+  } finally {
+    controller.abort()
+    await collection.done
+    rmSync(directory, { recursive: true, force: true })
+  }
+})

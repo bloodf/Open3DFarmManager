@@ -4,18 +4,7 @@ A prova original deste pacote privado MIT comprova um RTCDataChannel real e crip
 
 ## Interoperabilidade real com o Connector
 
-A prova histórica em `interop.test.ts` conectou o Chromium ao adaptador isolado em `packages/connector/src/webrtc`, executado em processos Node e Bun reais com `node-datachannel` 0.33.5. Ela exige entrega sintética nos dois sentidos, comparação dos certificados efetivos com SDP e rejeição de identidade, transcrição, replay e fingerprints SDP adulterados. O código não inicia o CLI ou um serviço de produção.
-
-O harness atual usa somente Node 24.22.3, conforme o runtime do workspace. Os manifests agora fixam `node-datachannel` 0.33.6; a atualização gerada do lock npm, a execução nativa e a aceitação por plataforma dessa versão permanecem pendentes. A evidência acima refere-se à versão 0.33.5. Consulte a [proveniência atual](../../THIRD_PARTY.md#experimental-connector-webrtc-dependency).
-
-```sh
-npm run test:session -w @open3dfarmmanager/webrtc-experiment
-node --test packages/webrtc-experiment/interop.test.ts
-```
-
-O receptor limita o payload bruto da aplicação a 32 KiB e oito frames pendentes, incluindo o ativo, com 2048 bytes UTF-8 por frame e 1024 frames admitidos por sessão. Diagnósticos têm tamanho fixo; sobrecarga e prazo encerram o peer inteiro. O prazo de oito segundos começa na construção, incluindo ofertas abandonadas, e a fixture tem vida total máxima de 30 segundos, sem conceder autorização de produção. Os testes cobrem filas antes do certificado, flood autenticado, expiração e zero provas nos dois sentidos quando o fingerprint SDP é adulterado. Os limites não abrangem alocações anteriores ao callback em SCTP, N-API ou no navegador.
-
-O [checkpoint de interoperabilidade](../../docs/WEBRTC-CONNECTOR-INTEROP-CHECKPOINT.md) descreve o backend nativo, a revisão de DTLS, o candidato descartado, limites da evidência e o contrato de integração pendente. Consulte também os avisos de dependências. O restante desta página descreve a prova original entre dois peers do Chromium, preservada como comparação.
+O harness sintético histórico foi removido. Os testes em `real-identity/` exercitam os peers mantidos do Connector. A sessão sintética portátil continua coberta por `session.test.ts`.
 
 ## Executar a prova original
 

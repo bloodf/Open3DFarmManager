@@ -58,6 +58,7 @@ async function fixture(withCamera = true) {
     now = Date.now()
   const binding = RtcSessionBinding.parse({
     v: 2,
+    camera_printer_id: assignmentId,
     assignment_count: set.count,
     assignment_digest: set.digest,
     purpose: 'read-only-rtc',
@@ -85,6 +86,8 @@ async function fixture(withCamera = true) {
   })
   const events: { assignmentId: string; stream: unknown }[] = []
   let client: ClientInput | undefined
+  let cameraHooks:
+    ReturnType<NonNullable<ClientInput['cameraMedia']>> | undefined
   const feed = createAuthenticatedFarmStatusFeed({
     resolveKey: async (request) => ({
       scope: { ...request.scope },
@@ -99,7 +102,12 @@ async function fixture(withCamera = true) {
     }),
     createClient(input) {
       client = input
-      return { start: async () => {}, close() {} }
+      return {
+        start: async () => {},
+        close() {
+          cameraHooks?.stop()
+        },
+      }
     },
     ...(withCamera ? { onCamera: (event) => events.push(event) } : {}),
   })
@@ -130,14 +138,18 @@ async function fixture(withCamera = true) {
     close() {},
   }
   const hooks = client!.cameraMedia?.((reason) => violations.push(reason))
+  cameraHooks = hooks
   const offer = (printerId: string) =>
     connector.signCameraPurposeProof({
-      statement: cameraStatementFromBinding(binding, {
-        camera_id: 'cam-1',
-        printer_id: printerId,
-        video_mid: 'camera',
-        lease_ref: nonce(),
-      }),
+      statement: cameraStatementFromBinding(
+        { ...binding, camera_printer_id: printerId },
+        {
+          camera_id: 'cam-1',
+          printer_id: printerId,
+          video_mid: 'camera',
+          lease_ref: nonce(),
+        },
+      ),
       expectedAgentId: agentId,
     })
   return {
@@ -181,8 +193,6 @@ test('an assigned camera offer is countersigned, published and revoked with the 
     }),
   )
   f.handle.close()
-  // Closing the feed closes the client; the peer's close stops camera media.
-  f.hooks!.stop()
   assert.deepEqual(f.events.at(-1), {
     assignmentId: f.assignmentId,
     stream: null,

@@ -22,7 +22,7 @@ const QUERIES: readonly (readonly [Capability, DetailQueryKind])[] = [
 ]
 /** Milliseconds before a kind is asked again; `Infinity` asks once. */
 const REFRESH_MS: Record<DetailQueryKind, number> = {
-  'temperature-store': Infinity,
+  'temperature-store': 60_000,
   'job-queue': 5000,
   timelapse: 5000,
   history: 30_000,
@@ -90,10 +90,12 @@ export function createDetailQueries(input: {
       for (const [kind, request] of pending) {
         if (request.id !== frame.requestId || kind !== frame.kind) continue
         pending.delete(kind)
-        // An unsupported kind is not asked again; any other failure is retried later.
+        // Successful backfills and unsupported kinds are final; other failures
+        // are retried after the kind's finite refresh interval.
         done.set(
           kind,
-          'error' in frame && frame.error === 'unsupported'
+          ('error' in frame && frame.error === 'unsupported') ||
+            (kind === 'temperature-store' && !('error' in frame))
             ? Infinity
             : clock(),
         )

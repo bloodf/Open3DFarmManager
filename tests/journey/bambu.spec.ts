@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { assertCameraDetached } from '../helpers/signalling-farm-camera.ts'
 import type { startBambuSimulator } from '../../packages/sim-tools/src/bambu-simulator.ts'
 import {
   BAMBU_LAN_ADDRESS,
@@ -7,6 +8,7 @@ import {
   type JourneyHarness,
 } from './harness.ts'
 import { BAMBU_ACCESS_CODE } from './harness-vendors.ts'
+import { expectCameraFrames } from './discovery-page.ts'
 
 type BambuSim = Awaited<ReturnType<typeof startBambuSimulator>>
 const FILE = 'jornada-bambu.gcode'
@@ -14,11 +16,13 @@ const GCODE = Buffer.from('; jornada Bambu\nG28\nG1 X10 Y10 F3000\n')
 const UNKNOWN =
   'Resultado desconhecido. Verifique a impressora antes de tentar novamente.'
 const NOT_SENT = /Nenhum comando foi enviado\./
+const BROWSER_CANCELLED =
+  'Operação cancelada neste navegador. Confira o estado da impressora e seus arquivos antes de tentar novamente.'
 // The page reports a file operation it could not finish (failed session, or
 // cancelled because the live view blinked) with one of these.
 const FILES_UNDONE = [
   'Não foi possível concluir pela conexão direta. Verifique a impressora antes de tentar novamente.',
-  'Operação cancelada neste navegador. Confira o estado da impressora e seus arquivos antes de tentar novamente.',
+  BROWSER_CANCELLED,
 ]
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
@@ -292,6 +296,47 @@ if (journeyEnabled())
       harness = undefined
     })
 
+    test('exibe e limpa alertas Bambu LAN simulados no navegador', async () => {
+      const journey = started()
+      const page = journey.ownerPage
+      journey.setTelemetryUpload(false)
+      await page.goto(
+        journey.origin +
+          '/impressoras/' +
+          encodeURIComponent(journey.printerKey),
+        { waitUntil: 'domcontentloaded' },
+      )
+      const alerts = page.getByRole('status', { name: 'Alertas Bambu Lab' })
+      await expect(alerts).toBeAttached({ timeout: 60_000 })
+      await expect(
+        page.getByRole('heading', { name: 'Alertas da impressora' }),
+      ).toBeVisible()
+      await expect(alerts).toHaveText('Nenhum alerta informado.')
+      await page.getByRole('tab', { name: 'Arquivos' }).click()
+      await expect(alerts).toBeVisible()
+      const commandCount = simulator().requests.length
+      const running = page.getByText('Imprimindo', { exact: true }).first()
+      await expect(running).toBeVisible()
+
+      simulator().control.setAlarmReport({
+        print_error: 0x03008005,
+        hms: [{ attr: 0x07002100, code: 0x00020004 }],
+      })
+      await expect(alerts).toHaveText(
+        'Erro de impressão: 0300-8005. Códigos HMS informados: 0700-2100-0002-0004.',
+      )
+      await expect(running).toBeVisible()
+
+      simulator().control.setAlarmReport({ print_error: 0 })
+      await expect(alerts).toHaveText(
+        'Códigos HMS informados: 0700-2100-0002-0004.',
+      )
+      simulator().control.setAlarmReport({ hms: [] })
+      await expect(alerts).toHaveText('Nenhum alerta informado.')
+      await expect(running).toBeVisible()
+      expect(simulator().requests).toHaveLength(commandCount)
+    })
+
     test('completa a jornada Bambu no navegador com resultados confirmados ou desconhecidos', async () => {
       // Thirteen Connector sessions, each opened only after the previous one
       // closed (about 30 s apart), plus a timed print and its history entry.
@@ -340,13 +385,20 @@ if (journeyEnabled())
         await block.getByLabel('Ventilador').selectOption('part')
         await block.getByLabel('Velocidade em %').fill('50')
       })
-      await extendedCommand(page, 'Referenciar eixos')
       await extendedCommand(page, 'Definir luz', async (block) => {
         await block.getByLabel('Luz').selectOption('on')
       })
       await extendedCommand(page, 'Definir velocidade', async (block) => {
         await block.getByLabel('Velocidade').selectOption('sport')
       })
+      await lifecycle(
+        page,
+        'Cancelar',
+        'Confirmar cancelamento',
+        'Impressão cancelada. O Connector confirmou o cancelamento.',
+      )
+      expect(simulator().gcodeState).toBe('IDLE')
+      await extendedCommand(page, 'Referenciar eixos')
       // Bambu loads into a named AMS tray (AMS 1, tray 1 is tray 0).
       await filamentCommand(page, 'Carregar filamento', async (section) => {
         await section.getByLabel('Bandeja AMS').selectOption('0')
@@ -364,14 +416,7 @@ if (journeyEnabled())
         expect(
           simulator().requests.map((request) => request.command),
         ).toContain(name)
-      await lifecycle(
-        page,
-        'Cancelar',
-        'Confirmar cancelamento',
-        'Impressão cancelada. O Connector confirmou o cancelamento.',
-      )
-      expect(simulator().gcodeState).toBe('IDLE')
-
+      simulator().control.setFtpsMlsdRejection(502)
       await page.goto(journey.origin + '/arquivos', {
         waitUntil: 'domcontentloaded',
       })
@@ -427,16 +472,25 @@ if (journeyEnabled())
         () => true,
       )
       await expect(fileOption).toHaveCount(1, { timeout: 45_000 })
+      expect(simulator().ftpsListingRequests.slice(-2)).toEqual([
+        'MLSD',
+        'LIST',
+      ])
       // The listing session has ended; start in the next one. The page clears
       // its confirmation whenever the live view blips, so confirm last.
       await controlInbox()
       await page.locator('#files-existing').selectOption(FILE)
       await page.getByRole('checkbox').check()
       await page.getByRole('button', { name: 'Iniciar impressão' }).click()
-      await expect(status).toHaveText(UNKNOWN, { timeout: 60_000 })
-      expect(simulator().requests.map((request) => request.command)).toContain(
-        'project_file',
+      // The live view can close while the browser is waiting for the result.
+      // The simulator must still receive exactly one start request.
+      await expect(status).toHaveText(
+        new RegExp(`^(${[UNKNOWN, BROWSER_CANCELLED].map(escape).join('|')})$`),
+        { timeout: 60_000 },
       )
+      const printRequests = () =>
+        simulator().requests.filter(({ command }) => command === 'project_file')
+      await expect.poll(() => printRequests().length).toBe(1)
 
       const farmRow = await journey.openFarm()
       await expect(farmRow.getByText('Concluído', { exact: true })).toBeVisible(
@@ -447,6 +501,82 @@ if (journeyEnabled())
       await expect(farmRow.getByLabel('Último trabalho')).toContainText(FILE)
       expect(simulator().gcodeState).toBe('FINISH')
       await historyEntry(page, 'Concluído')
+      expect(printRequests()).toHaveLength(1)
       expect(journey.simulatorObservation()).toMatchObject({ failure: false })
     })
   })
+
+if (journeyEnabled()) {
+  test.describe('journey: Bambu Lab camera', () => {
+    for (const camera of ['jpeg', 'rtsps', 'unmapped'] as const) {
+      test(`câmera Bambu Lab simulada: ${camera}`, async ({ browser }) => {
+        const journey = await startJourneyHarness({
+          browser,
+          simulator: 'bambu',
+          bambuCamera: camera,
+        })
+        try {
+          const row = await journey.openFarm()
+          await journey.ownerPage
+            .getByRole('button', {
+              name: new RegExp(`^Inspecionar ${escape(journey.printerKey)}\\b`),
+            })
+            .click()
+          await expect(
+            row.getByText('Conexão direta autenticada', { exact: true }),
+          ).toBeVisible({ timeout: 60_000 })
+          const region = row.getByRole('region', {
+            name: `Câmera da impressora ${journey.printerKey}`,
+          })
+          const fixture = journey.camera
+          if (!fixture?.activeConnections)
+            throw new Error('Bambu camera fixture missing')
+          if (camera === 'jpeg') {
+            await expectCameraFrames(journey)
+            expect(fixture.activeConnections()).toBeGreaterThan(0)
+          } else {
+            await expect(region.getByText('Câmera indisponível.')).toBeVisible()
+            await expect(
+              region.getByRole('button', { name: /imagem ao vivo/ }),
+            ).toHaveCount(0)
+            expect(fixture.requests()).toBe(0)
+          }
+          const recoveryPage = await journey.newOwnerPage()
+          try {
+            await recoveryPage.goto(new URL('/connectors', journey.origin).href)
+            await recoveryPage
+              .getByLabel('Selecione uma farm')
+              .selectOption(journey.farmId)
+            await recoveryPage
+              .getByRole('button', {
+                name: 'Revogar este Connector',
+                exact: true,
+              })
+              .click()
+            await recoveryPage
+              .getByRole('checkbox', { name: /revogar seu registro/ })
+              .check()
+            await recoveryPage
+              .getByRole('button', { name: 'Confirmar revogação' })
+              .click()
+            await expect(
+              recoveryPage.getByText(/Registro revogado/),
+            ).toBeVisible()
+            if (camera === 'jpeg')
+              await assertCameraDetached({
+                page: journey.ownerPage,
+                region,
+                helperPath: fixture.helper,
+                note: async () => {},
+              })
+            await expect.poll(fixture.activeConnections).toBe(0)
+          } finally {
+            await recoveryPage.close()
+          }
+        } finally {
+          await journey.close()
+        }
+      })
+    }
+  })
+}

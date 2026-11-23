@@ -100,23 +100,40 @@ describe('farm page', () => {
     const opened = await harness.open('farm', routes())
     try {
       const { page } = opened
-      const card = page
-        .getByRole('article')
-        .filter({ has: page.getByRole('heading', { name: 'voron 24' }) })
-      const link = card.getByRole('link', { name: 'Bancada Alfa' })
-      await link.waitFor({ state: 'visible', timeout: WAIT })
-      await pw(link).toHaveAttribute('href', '/impressoras/voron%2024')
-      await pw(card).toContainText('Produção · Sala 1')
-      await pw(card).toContainText('Sem dados')
-      // The detailed card and the controls stay below the wall card.
-      await pw(card.getByText('Conexão direta')).not.toHaveCount(0)
-      // One wall card per printer: no second summary for the same printer.
-      expect(
-        await page.getByRole('link', { name: 'Bancada Alfa' }).count(),
-      ).toBe(1)
+      const tile = page.getByRole('button', {
+        name: /Inspecionar Bancada Alfa/,
+      })
+      await tile.waitFor({ state: 'visible', timeout: WAIT })
+      await pw(tile).toContainText('Sem conexão direta')
+      await pw(page.getByRole('heading', { name: 'Sala 1' })).toBeVisible()
+      expect(await tile.count()).toBe(1)
+      await tile.click()
+      const inspector = page.getByRole('dialog', {
+        name: 'Inspeção da impressora',
+      })
+      const link = inspector.getByRole('link', {
+        name: 'Bancada Alfa',
+        exact: true,
+      })
+      await pw(link).toHaveAttribute(
+        'href',
+        `/impressoras/voron%2024?farm=${FARM}`,
+      )
+      await pw(inspector).toContainText('Produção · Sala 1')
+      await pw(inspector).toContainText('Sem dados')
       await pw(
-        page.getByRole('link', { name: 'Bancada Beta' }),
-      ).toHaveAttribute('href', '/impressoras/ender-3')
+        inspector.getByText('Conexão direta', { exact: true }),
+      ).not.toHaveCount(0)
+      await page.keyboard.press('Escape')
+      await pw(inspector).not.toBeVisible()
+      await pw(tile).toBeFocused()
+      const beta = page.getByRole('button', {
+        name: /Inspecionar Bancada Beta/,
+      })
+      await beta.click()
+      await pw(
+        inspector.getByRole('link', { name: 'Bancada Beta', exact: true }),
+      ).toHaveAttribute('href', `/impressoras/ender-3?farm=${FARM}`)
     } finally {
       await opened.close()
     }
@@ -129,10 +146,12 @@ describe('farm page', () => {
     try {
       const { page } = opened
       await page
-        .getByRole('link', { name: 'Bancada Alfa' })
+        .getByRole('button', { name: /Inspecionar Bancada Alfa/ })
         .waitFor({ state: 'visible', timeout: WAIT })
       expect(
-        await page.getByRole('link', { name: 'Bancada Beta' }).count(),
+        await page
+          .getByRole('button', { name: /Inspecionar Bancada Beta/ })
+          .count(),
       ).toBe(0)
     } finally {
       await opened.close()
@@ -146,9 +165,14 @@ describe('farm page', () => {
         .getByRole('heading', { name: 'Protótipos' })
         .waitFor({ state: 'visible', timeout: WAIT })
       await pw(page.getByRole('heading', { name: 'Produção' })).toBeVisible()
-      // The card heading sits under the group heading.
+      // The machine stays available in its group and opens its detailed heading.
+      await page
+        .getByRole('button', { name: /Inspecionar Bancada Alfa/ })
+        .click()
       await pw(
-        page.getByRole('heading', { name: 'Bancada Alfa', level: 4 }),
+        page
+          .getByRole('dialog', { name: 'Inspeção da impressora' })
+          .getByRole('heading', { name: 'Bancada Alfa', level: 4 }),
       ).toBeVisible()
     } finally {
       await grouped.close()
@@ -164,10 +188,15 @@ describe('farm page', () => {
         .click({ timeout: WAIT })
       const table = page.getByRole('table', { name: 'Impressoras atribuídas' })
       await table.waitFor({ state: 'visible', timeout: WAIT })
-      const hrefs = await table
+      const scopedHrefs = await table
         .locator('tbody th a')
         .evaluateAll((anchors) => anchors.map((a) => a.getAttribute('href')))
+      const hrefs = scopedHrefs.map((href) => href?.split('?')[0])
       expect(hrefs).toEqual(['/impressoras/voron%2024', '/impressoras/ender-3'])
+      expect(scopedHrefs).toEqual([
+        `/impressoras/voron%2024?farm=${FARM}`,
+        `/impressoras/ender-3?farm=${FARM}`,
+      ])
       expect(await table.locator('a[href^="#"]').count()).toBe(0)
     } finally {
       await opened.close()
@@ -209,7 +238,9 @@ describe('farm page', () => {
       await pw(region).toContainText('Resumo indisponível')
       await pw(region).not.toContainText(/TypeError|500/)
       // The wall itself still lists the printers.
-      await pw(page.getByRole('link', { name: 'Bancada Alfa' })).toBeVisible()
+      await pw(
+        page.getByRole('button', { name: /Inspecionar Bancada Alfa/ }),
+      ).toBeVisible()
     } finally {
       await opened.close()
     }

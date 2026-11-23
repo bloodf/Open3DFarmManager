@@ -454,7 +454,7 @@ function keysMatch(cert: ParsedX509, key: ParsedPrivateKey): boolean {
   if (cert.ecPoint && key.ecPoint) {
     return bytesEqual(cert.ecPoint, key.ecPoint)
   }
-  return true
+  return false
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
@@ -841,6 +841,8 @@ async function decryptPkcs12Algorithm(
     const pbeParams = readDerChildren(bytes, algChildren[1]!)
     const salt = bytes.subarray(pbeParams[0]!.valueStart, pbeParams[0]!.end)
     const iterations = decodeSmallInt(bytes, pbeParams[1]!)
+    if (iterations < 1 || iterations > 5_000_000)
+      throw new Error('Invalid PKCS#12 iteration count')
     const key = await pkcs12Kdf('SHA-1', 1, passphrase, salt, iterations, 24)
     const iv = await pkcs12Kdf('SHA-1', 2, passphrase, salt, iterations, 8)
     return decrypt3DesCbc(ciphertext, key, iv)
@@ -891,6 +893,8 @@ async function verifyPkcs12Mac(
   )
   const macSalt = bytes.subarray(macParts[1]!.valueStart, macParts[1]!.end)
   const iterations = macParts[2] ? decodeSmallInt(bytes, macParts[2]) : 1
+  if (iterations < 1 || iterations > 5_000_000)
+    throw new Error('Invalid PKCS#12 iteration count')
   const keyLen = hashName === 'SHA-1' ? 20 : hashName === 'SHA-256' ? 32 : 64
   const macKey = await pkcs12Kdf(
     hashName,

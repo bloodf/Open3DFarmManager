@@ -1,13 +1,13 @@
 import { computed, watch, type Ref } from 'vue'
 import { useFarmControls } from '../components/farm/useFarmControls.ts'
 import { useFarmView } from './useFarmView.ts'
-import type { LibraryPrintArgs } from '../../../../packages/farm-protocol/src/control-actions.ts'
 import {
   liveReplayIndex,
   sendLibraryReplay,
   type LiveReplayInfo,
+  type ReplaySend,
 } from '../utils/replay-live.ts'
-import type { ReplayResult } from '../utils/replay-view.ts'
+import type { LibraryVersion } from '../utils/library-view.ts'
 
 /**
  * The live, signed session replay needs: which printers can be picked right
@@ -37,19 +37,67 @@ export function useReplayLive(farmId: Ref<string>) {
       : new Map()
   })
   const liveFor = (printerKey: string) => index.value.get(printerKey)
-  async function send(
-    printerKey: string,
-    args: LibraryPrintArgs,
-  ): Promise<ReplayResult> {
+  const send: ReplaySend = async (
+    printerKey,
+    args,
+    selectionCurrent = () => true,
+    versionId,
+  ) => {
+    const scope = view.ready.value?.scope
     const row = view.ready.value?.rows.find(
       (item) => item.assignment.printerKey === printerKey,
     )
-    if (!row || !liveFor(printerKey)?.live) return { outcome: 'not-sent' }
+    if (!row || scope?.farmId !== farmId.value)
+      return versionId
+        ? { outcome: 'not-sent', code: 'stale-selection' }
+        : { outcome: 'not-sent' }
+    if (!liveFor(printerKey)?.live)
+      return { outcome: 'not-sent', code: 'webrtc-unavailable' }
+    if (versionId) {
+      try {
+        const { version } = await $fetch<{ version: LibraryVersion }>(
+          `/api/farms/${scope.farmId}/library/versions/${versionId}`,
+          { retry: 0, timeout: 5_000, cache: 'no-store' },
+        )
+        if (
+          version.id !== versionId ||
+          version.sha256 !== args.sha256 ||
+          version.deletedAt !== null ||
+          version.purgedAt !== null
+        )
+          return { outcome: 'not-sent', code: 'stale-selection' }
+      } catch (error) {
+        return {
+          outcome: 'not-sent',
+          code:
+            (error as { statusCode?: number })?.statusCode === 404
+              ? 'stale-selection'
+              : 'library-unavailable',
+        }
+      }
+    }
+    const { assignment } = row
     const abort = new AbortController()
-    return sendLibraryReplay(
+    const result = await sendLibraryReplay(
       (onState) => controls.connectFiles(row, abort.signal, onState),
       args,
+      () =>
+        selectionCurrent() &&
+        farmId.value === scope.farmId &&
+        view.ready.value?.scope?.farmId === scope.farmId &&
+        view.ready.value.scope.viewEpoch === scope.viewEpoch &&
+        view.ready.value.rows.some(
+          ({ assignment: current }) =>
+            current.assignmentId === assignment.assignmentId &&
+            current.agentId === assignment.agentId &&
+            current.printerKey === assignment.printerKey &&
+            current.status === 'active' &&
+            current.connectorStatus === 'approved',
+        ),
     )
+    return result.outcome === 'not-sent' && !result.code
+      ? { ...result, code: 'webrtc-unavailable' }
+      : result
   }
   return { liveFor, send }
 }

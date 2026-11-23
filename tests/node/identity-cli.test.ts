@@ -105,7 +105,10 @@ test('help and version do not require an identity', () => {
   assert.ok(help.stdout.includes('não cria uma identidade'))
   const version = run('--version')
   assert.equal(version.status, 0)
-  assert.equal(version.stdout.trim(), '0.0.1')
+  const releaseVersion = JSON.parse(
+    readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
+  ).version
+  assert.equal(version.stdout.trim(), releaseVersion)
 })
 
 test('explicit identity initialization survives CLI restart and proves possession using its public output', () => {

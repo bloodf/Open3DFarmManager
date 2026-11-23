@@ -1,0 +1,311 @@
+/* Diagrama: grade de HTML e CSS, sem imagem, que reflui até 360 px. */
+.how__figure {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.how__diagram {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: var(--hairline) solid var(--rule-strong);
+  background: var(--paper-raised);
+}
+
+.how__caption {
+  max-width: var(--measure);
+  font-size: var(--step--1);
+  line-height: 1.5;
+  color: var(--ink-muted);
+}
+
+.how__node {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1.5px solid var(--ink);
+  border-radius: var(--radius);
+  background: var(--paper);
+}
+
+.how__node p {
+  max-width: none;
+}
+
+.how__node-name {
+  font-family: var(--font-display);
+  font-size: var(--step-1);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.how__node-note {
+  font-size: var(--step--1);
+  color: var(--ink-muted);
+}
+
+.how__node-sub {
+  justify-self: start;
+  margin-top: var(--space-1);
+  padding: 0.05rem 0.5rem;
+  border: var(--hairline) solid currentcolor;
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  font-weight: 600;
+  color: var(--copper);
+}
+
+.how__node--connector {
+  border-color: var(--copper);
+  border-width: 2.5px;
+}
+
+.how__edge {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  line-height: 1.35;
+  color: var(--ink-muted);
+}
+
+.how__edge-num {
+  display: inline-grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--paper);
+  font-weight: 700;
+}
+
+.how__edge-line {
+  font-size: var(--step-1);
+  line-height: 1;
+  color: var(--ink);
+}
+
+.how__edge--rtc .how__edge-num {
+  background: var(--copper);
+  color: var(--on-copper);
+}
+
+.how__edge--rtc .how__edge-line,
+.how__edge--rtc .how__edge-text {
+  color: var(--copper);
+  font-weight: 600;
+}
+
+.how__zone {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: var(--hairline) dashed var(--rule-strong);
+  background: var(--paper-sunk);
+}
+
+.how__zone-label {
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+/* Lista de passos e etapas de validação. */
+.how__steps,
+.how__validation {
+  display: grid;
+  gap: 0;
+  margin-top: var(--space-6);
+  padding: 0;
+  list-style: none;
+  counter-reset: how;
+}
+
+.how__steps > li,
+.how__validation > li {
+  display: grid;
+  gap: var(--space-2);
+  padding-block: var(--space-4);
+  border-bottom: var(--hairline) solid var(--rule);
+  counter-increment: how;
+}
+
+.how__steps > li:first-child,
+.how__validation > li:first-child {
+  border-top: var(--hairline) solid var(--rule-strong);
+}
+
+.how__steps > li::before,
+.how__validation > li::before {
+  content: counter(how, decimal-leading-zero);
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  color: var(--copper);
+}
+
+.how__subtitle {
+  margin-top: var(--space-7);
+  font-size: var(--step-2);
+}
+
+.how__validation-intro {
+  margin-top: var(--space-3);
+  color: var(--ink-muted);
+}
+
+.how__validation {
+  margin-top: var(--space-4);
+}
+
+.how__validation > li span {
+  color: var(--ink-muted);
+}
+
+@media (min-width: 48rem) {
+  .how__zone {
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: center;
+  }
+
+  .how__zone-label {
+    grid-column: 1 / -1;
+  }
+
+  .how__node--connector {
+    grid-column: 1;
+    grid-row: 2 / 4;
+  }
+
+  .how__edge--printer {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .how__node--printer {
+    grid-column: 3;
+    grid-row: 2;
+  }
+
+  .how__edge--spool {
+    grid-column: 2;
+    grid-row: 3;
+  }
+
+  .how__node--spool {
+    grid-column: 3;
+    grid-row: 3;
+  }
+}
+
+@media (min-width: 62rem) {
+  .how__diagram {
+    grid-template-columns:
+      minmax(0, 1fr) minmax(0, 1.1fr)
+      minmax(0, 1fr);
+    grid-template-areas:
+      'browser web app'
+      'rtc . pair'
+      'zone zone zone';
+    column-gap: var(--space-4);
+    row-gap: var(--space-4);
+    padding: var(--space-5);
+  }
+
+  .how__node--browser {
+    grid-area: browser;
+  }
+
+  .how__edge--web {
+    grid-area: web;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
+
+  .how__edge--web .how__edge-text {
+    flex: 1 0 100%;
+  }
+
+  .how__node--app {
+    grid-area: app;
+  }
+
+  .how__edge--rtc {
+    grid-area: rtc;
+  }
+
+  .how__edge--pair {
+    grid-area: pair;
+  }
+
+  .how__zone {
+    grid-area: zone;
+  }
+
+  .how__steps {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-5);
+  }
+
+  .how__steps > li,
+  .how__validation > li {
+    align-content: start;
+  }
+
+  .how__validation {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-5);
+  }
+}
+
+/* Abaixo de 62 rem a conexão WebRTC vem logo depois da aplicação. */
+@media (max-width: 61.99rem) {
+  .how__diagram {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .how__edge--web {
+    order: 1;
+  }
+
+  .how__node--app {
+    order: 2;
+  }
+
+  .how__edge--pair {
+    order: 3;
+  }
+
+  .how__zone {
+    order: 4;
+  }
+
+  .how__edge--rtc {
+    order: 5;
+  }
+}
+
+@media (forced-colors: active) {
+  .how__node,
+  .how__zone,
+  .how__diagram {
+    border-color: CanvasText;
+  }
+
+  .how__edge-num {
+    border: 1px solid CanvasText;
+    background: Canvas;
+    color: CanvasText;
+  }
+}

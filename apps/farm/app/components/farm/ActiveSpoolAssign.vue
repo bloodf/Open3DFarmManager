@@ -1,5 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import {
+  safeReadStored,
+  safeWriteStored,
+  sameSlots,
+} from '../../utils/spool-form-state.ts'
 
 const props = defineProps<{
   farmId: string
@@ -22,7 +27,10 @@ function storageKey() {
 
 function readStored(): Record<string, number> {
   try {
-    const raw = localStorage.getItem(storageKey())
+    const raw = safeReadStored(
+      typeof localStorage === 'undefined' ? null : localStorage,
+      storageKey(),
+    )
     if (!raw) return {}
     const parsed = JSON.parse(raw) as unknown
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed))
@@ -46,7 +54,15 @@ function readStored(): Record<string, number> {
 }
 
 function writeStored(value: Record<string, number>) {
-  localStorage.setItem(storageKey(), JSON.stringify(value))
+  try {
+    safeWriteStored(
+      typeof localStorage === 'undefined' ? null : localStorage,
+      storageKey(),
+      JSON.stringify(value),
+    )
+  } catch {
+    // Storage may be unavailable in this browser context.
+  }
 }
 
 function syncDraft() {
@@ -66,7 +82,18 @@ onMounted(() => {
 
 watch(
   () => props.slots,
-  () => syncDraft(),
+  (slots, previous) => {
+    if (!previous || !sameSlots(slots, previous)) syncDraft()
+  },
+)
+
+watch(
+  () => [props.farmId, props.printerKey] as const,
+  () => {
+    assignments.value = readStored()
+    syncDraft()
+    emit('change', { ...assignments.value })
+  },
 )
 
 const disabled = computed(

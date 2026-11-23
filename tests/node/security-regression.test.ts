@@ -1,11 +1,18 @@
 import {
-  createBrowserKey,
-  signCommand,
-  encodeCommand,
-  canonicalize,
-  base64url,
-} from '@open3dfarmmanager/farm-protocol'
-import { authorizeCommand } from '../../packages/connector/src/auth/verify.ts'
+  decodeCommandV2,
+  encodeCommandV2,
+} from '../../packages/farm-protocol/src/command-v2.ts'
+import {
+  closeCommandJournal,
+  openCommandJournal,
+} from '../../packages/connector/src/control/command-journal.ts'
+import {
+  createV2Authority,
+  nodeSigner,
+  openV2Dispatch,
+  rejected,
+  type V2Dispatch,
+} from '../helpers/command-v2-dispatch.ts'
 import { spawn, execFileSync } from 'node:child_process'
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -18,12 +25,12 @@ import {
   linkSync,
   symlinkSync,
   lstatSync,
+  chmodSync,
 } from 'node:fs'
 import { join } from 'node:path'
 import { availableParallelism, loadavg, tmpdir } from 'node:os'
 import { loadExistingIdentity } from '../../packages/connector/src/identity/store.ts'
 import { TelemetryQueue } from '../../packages/connector/src/cloud/queue.ts'
-import { PersistentReplayStore } from '../../packages/connector/src/auth/replay.ts'
 const scratch = () => mkdtempSync(join(tmpdir(), 'open3d-security-regression-'))
 const state = {
   printerKey: 'synthetic',
@@ -79,103 +86,75 @@ test('queue append rejects a substituted hard link without modifying the target'
     rmSync(dir, { recursive: true, force: true })
   }
 })
-test('dangling SQLite sidecar symlinks are rejected before SQLite opens them', () => {
+test('unsafe journal paths and dangling SQLite sidecars are rejected before SQLite opens them', () => {
+  for (const suffix of ['', '-wal', '-shm']) {
+    const dir = scratch()
+    try {
+      const target = join(dir, 'outside')
+      if (!suffix) writeFileSync(target, 'UNCHANGED')
+      symlinkSync(target, join(dir, `pause-commands.sqlite${suffix}`))
+      assert.throws(
+        () => openCommandJournal({ directory: dir, clock: () => 1000 }),
+        /private regular storage/,
+      )
+      if (suffix) assert.equal(existsSync(target), false)
+      else assert.equal(readFileSync(target, 'utf8'), 'UNCHANGED')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
+})
+
+test('journal rejects a non-private storage directory', () => {
+  if (process.platform === 'win32') return
   const dir = scratch()
-  let store: PersistentReplayStore | undefined
   try {
-    const target = join(dir, 'outside-wal')
-    symlinkSync(target, join(dir, 'replay.sqlite-wal'))
-    assert.throws(() => {
-      store = new PersistentReplayStore(dir)
-    }, /private files/)
-    assert.equal(existsSync(target), false)
+    chmodSync(dir, 0o755)
+    assert.throws(
+      () => openCommandJournal({ directory: dir, clock: () => 1000 }),
+      /private regular storage/,
+    )
   } finally {
-    store?.close()
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
 test('resigning a claimed payload cannot bypass replay after restart; duplicate fields never reach storage', async () => {
   const dir = scratch()
-  let replay: PersistentReplayStore | undefined
+  let harness: V2Dispatch | undefined
   try {
-    const pair = await createBrowserKey()
-    const id = '00000000-0000-4000-8000-000000000001'
-    const command = await signCommand(
-      {
-        farm_id: id,
-        agent_id: id,
-        printer_id: id,
-        user_id: id,
-        key_id: id,
-        session_id: id,
-        action: 'pause',
-      },
-      pair.privateKey,
-      1000,
-    )
-    const context = {
-      farmId: id,
-      agentId: id,
-      userId: id,
-      keyId: id,
-      sessionId: id,
-      printerIds: new Set([id]),
-      now: 1000,
-      authorization: { issuedAt: 1000, expiresAt: 61000 },
-      key: {
-        id,
-        farmId: id,
-        userId: id,
-        role: 'operator' as const,
-        revokedAt: null,
-        publicJwk: await crypto.subtle.exportKey('jwk', pair.publicKey),
-      },
-    }
-    const wire = encodeCommand(command)
-    let claims = 0
+    const signer = await nodeSigner()
+    const authority = await createV2Authority(signer)
+    harness = await openV2Dispatch(authority, { directory: dir })
+    // Issued after both capabilities, so only replay protection can refuse it.
+    const unsigned = authority.command({}, 1050)
+    harness.advance(60)
+    const wire = encodeCommandV2(await signer.signCommand(unsigned))
     assert.deepEqual(
-      authorizeCommand(wire.replace('"v":1', '"v":1,"\\u0076":1'), context, {
-        claim() {
-          claims++
-          return 'accepted'
-        },
-      }),
-      { ok: false, reason: 'invalid-command' },
+      await harness.dispatch(wire.replace('"v":2', '"v":2,"\\u0076":2')),
+      rejected('invalid-command'),
     )
-    assert.equal(claims, 0)
-    replay = new PersistentReplayStore(dir)
-    assert.equal(authorizeCommand(wire, context, replay).ok, true)
-    replay.close()
-    replay = undefined
-    const { sig: originalSignature, ...payload } = command
-    const signedAgain = base64url(
-      new Uint8Array(
-        await crypto.subtle.sign(
-          { name: 'ECDSA', hash: 'SHA-256' },
-          pair.privateKey,
-          new TextEncoder().encode(canonicalize(payload)),
-        ),
-      ),
-    )
-    assert.equal(typeof originalSignature, 'string')
-    replay = new PersistentReplayStore(dir)
-    assert.deepEqual(
-      authorizeCommand(
-        encodeCommand({ ...payload, sig: signedAgain }),
-        context,
-        replay,
-      ),
-      { ok: false, reason: 'replay' },
-    )
+    assert.equal(harness.claims(), 0)
+    assert.equal((await harness.dispatch(wire)).kind, 'applied')
+    harness.close()
+    harness = undefined
+    // ECDSA signatures are randomized: the same payload signed again has a
+    // different signature but the same command ID and nonce.
+    const signedAgain = encodeCommandV2(await signer.signCommand(unsigned))
+    assert.notEqual(signedAgain, wire)
+    harness = await openV2Dispatch(authority, { directory: dir, now: 1050 })
+    harness.advance(100)
+    assert.deepEqual(await harness.dispatch(signedAgain), rejected('replay'))
+    assert.equal(harness.claims(), 1)
+    assert.equal(harness.writes(), 0)
   } finally {
-    replay?.close()
+    harness?.close()
     rmSync(dir, { recursive: true, force: true })
   }
 })
 // Children report through exit; the test timeout is the single hang bound.
 test(
-  'SQLite claims serialize across separate OS processes',
+  'command journal claims serialize across separate OS processes',
   {
     timeout: 30000,
   },
@@ -187,31 +166,19 @@ test(
       for (const child of spawned) if (child.exitCode === null) child.kill()
     })
     try {
-      const initialized = new PersistentReplayStore(dir)
-      initialized.close()
-      const pair = await createBrowserKey()
-      const id = '00000000-0000-4000-8000-000000000001'
-      const command = await signCommand(
-        {
-          farm_id: id,
-          agent_id: id,
-          printer_id: id,
-          user_id: id,
-          key_id: id,
-          session_id: id,
-          action: 'pause',
-        },
-        pair.privateKey,
-        1000,
+      closeCommandJournal(
+        openCommandJournal({ directory: dir, clock: () => 1000 }),
       )
+      const authority = await createV2Authority(await nodeSigner())
+      const command = decodeCommandV2(await authority.sign())
       const module = new URL(
-        '../../packages/connector/src/auth/replay.ts',
+        '../../packages/connector/src/control/command-journal.ts',
         import.meta.url,
       ).href
       // Each worker opens its store (a write of its own), announces 'ready' and
       // claims only after all four are released together, so the race covers
       // the claims rather than four concurrent store initialisations.
-      const source = `import { PersistentReplayStore } from ${JSON.stringify(module)}; const store = new PersistentReplayStore(process.argv[1]); process.stdout.write('ready\\n'); process.stdin.once('data', () => { try { process.stdout.write(store.claim(JSON.parse(process.argv[2]), 1000)) } finally { store.close(); process.stdin.destroy() } })`
+      const source = `import { openCommandJournal, claimCommand, closeCommandJournal } from ${JSON.stringify(module)}; const journal = openCommandJournal({ directory: process.argv[1], clock: () => 1000 }); process.stdout.write('ready\\n'); process.stdin.once('data', () => { try { const result = claimCommand(journal, { command: JSON.parse(process.argv[2]), printerKey: 'printer-1', wireSha256: 'a'.repeat(64) }); process.stdout.write(result.ok ? 'accepted' : result.reason) } finally { closeCommandJournal(journal); process.stdin.destroy() } })`
       let ready = 0
       const results = await Promise.all(
         Array.from(

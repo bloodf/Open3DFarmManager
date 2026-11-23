@@ -142,11 +142,14 @@ function fixture(
       return role ? [{ role, revoked_at: null }] : []
     }
     if (statement.startsWith('SELECT id FROM farm.printer_assignments'))
+      expect(statement).toContain('revoked_at IS NULL')
+    if (statement.startsWith('SELECT id FROM farm.printer_assignments'))
       return args[1] !== undefined && active.includes(String(args[1]))
         ? [{ id: args[1] }]
         : []
     if (statement.includes('FROM farm.printer_assignments a LEFT JOIN')) {
       expect(args[0]).toBe(farmId)
+      expect(statement).toContain('a.revoked_at IS NULL')
       return rows(
         (args[1] as string | null) ?? null,
         (args[3] as string | null) ?? null,
@@ -523,7 +526,7 @@ describe('wiring', () => {
   })
 })
 
-describe('machine profile panel', () => {
+describe('machine profile panel', { timeout: 30_000 }, () => {
   let browser: Browser | undefined
   let context: BrowserContext | undefined
   let server: Awaited<ReturnType<typeof startHttpMock>> | undefined
@@ -660,8 +663,13 @@ describe('machine profile panel', () => {
         }
       },
     })
-    browser = await launchBrowser({ args: ['--disable-background-networking'] })
-  }, 30_000)
+    // Playwright's own launch cap is 30s and matches this hook, so a cold
+    // Chrome on a busy Node 22 runner fails the hook before the panel renders.
+    browser = await launchBrowser({
+      timeout: 90_000,
+      args: ['--disable-background-networking', '--disable-dev-shm-usage'],
+    })
+  }, 120_000)
 
   afterAll(async () => {
     try {
@@ -689,7 +697,7 @@ describe('machine profile panel', () => {
         : request.abort(),
     )
     page = await context.newPage()
-  }, 15_000)
+  }, 30_000)
 
   afterEach(async () => {
     await context?.close()
@@ -803,7 +811,7 @@ describe('machine profile panel', () => {
     await page.getByRole('button', { name: 'Salvar perfil da máquina' }).click()
     await page.getByRole('alert').waitFor()
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([])
-  }, 20_000)
+  }, 60_000)
 
   test('can be driven by keyboard alone', async () => {
     await open('owner')

@@ -185,7 +185,8 @@ const postgresReady = (() => {
   try {
     findPostgresBin()
     return true
-  } catch {
+  } catch (error) {
+    if (process.env.CI) throw error
     return false
   }
 })()

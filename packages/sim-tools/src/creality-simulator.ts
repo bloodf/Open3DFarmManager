@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { createRequire } from 'node:module'
+import https from 'node:https'
+import type { RawData, WebSocket } from 'ws'
 import { FaultController } from './mocks/faults.ts'
 import { startHttpMock } from './mocks/http-mock.ts'
 import { ScenarioController, type ScenarioStep } from './mocks/scenario.ts'
@@ -7,13 +9,17 @@ import { ScenarioController, type ScenarioStep } from './mocks/scenario.ts'
 const require = createRequire(
   new URL('../../connector/package.json', import.meta.url),
 )
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const { WebSocketServer } = require('ws') as any
+const { WebSocketServer }: typeof import('ws') = require('ws')
 
 export interface CrealitySimulatorOptions {
+  /** Spec-derived, not captured: https://github.com/CrealityOfficial/CrealityPrint/blob/6262848e302b8c0d593f2b341cd01310aa2f58a1/src/slic3r/GUI/print_manage/AppUtils.cpp#L349-L352 */
+  secure?:
+    { key: string; cert: string; info?: Record<string, unknown> } | undefined
   durationMs?: number | undefined
   totalLayers?: number | undefined
   fail?: boolean | undefined
+  gcodeDirectory?:
+    '/usr/data/printer_data/gcodes' | '/mnt/UDISK/printer_data/gcodes'
   /**
    * Re-sends the current status at this interval, as stock firmware keeps
    * pushing status while connected. Absent: frames only on change.
@@ -35,6 +41,8 @@ export async function createCrealitySimulator(
   let uploaded: string | undefined
   /** Files stored over the stock HTTP upload (POST /upload/<name>). */
   const stored = new Map<string, number>()
+  const gcodeDirectory =
+    options.gcodeDirectory ?? '/usr/data/printer_data/gcodes'
   let timer: ReturnType<typeof setInterval> | undefined
   let elapsed = 0
   let lastTick = 0
@@ -51,17 +59,44 @@ export async function createCrealitySimulator(
   }
 
   function disconnect() {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    for (const socket of wss.clients as Set<any>) socket.terminate()
+    for (const socket of wss.clients) socket.terminate()
   }
 
-  function sendRaw(data: string, targets?: Iterable<any>) {
-    const sockets = targets ?? (wss.clients as Set<any>)
+  function sendRaw(data: string, targets?: Iterable<WebSocket>) {
+    const sockets = targets ?? wss.clients
     for (const client of sockets) {
       if (client.readyState === 1 /* OPEN */) {
         client.send(data)
       }
     }
+  }
+
+  async function challengeHeartbeat(timeoutMs = 1500) {
+    const replies = await Promise.all(
+      Array.from(wss.clients, (socket) => {
+        if (socket.readyState !== socket.OPEN) return false
+        return new Promise<boolean>((resolve) => {
+          const finish = (acknowledged: boolean) => {
+            clearTimeout(deadline)
+            socket.off('message', onMessage)
+            socket.off('close', onClose)
+            resolve(acknowledged)
+          }
+          const onMessage = (data: RawData, binary: boolean) => {
+            if (!binary && data.toString() === 'ok') finish(true)
+          }
+          const onClose = () => finish(false)
+          const deadline = setTimeout(() => {
+            socket.terminate()
+            finish(false)
+          }, timeoutMs)
+          socket.on('message', onMessage)
+          socket.once('close', onClose)
+          socket.send(JSON.stringify({ ModeCode: 'heart_beat' }))
+        })
+      }),
+    )
+    return replies.filter(Boolean).length
   }
 
   function formatMalformed(payload?: Buffer | string): string {
@@ -70,7 +105,7 @@ export async function createCrealitySimulator(
     return '{malformed'
   }
 
-  function broadcast(payload: object, targets?: Iterable<any>) {
+  function broadcast(payload: object, targets?: Iterable<WebSocket>) {
     const fault = faults.matchFault({ path: '/', method: 'REPORT' })
     if (fault) {
       if (fault.type === 'drop') {
@@ -158,9 +193,27 @@ export async function createCrealitySimulator(
     )
   }
 
-  function applyCommand(method: string, params: Record<string, unknown>) {
+  function applyCommand(
+    socket: WebSocket,
+    method: string,
+    params: Record<string, unknown>,
+  ) {
     requests.push({ method, params })
     if (!params) return
+    if (method === 'get' && params.reqGcodeFile === 1) {
+      // Simulated stock reply. See docs/protocols/creality-commands.md.
+      broadcast(
+        {
+          retGcodeFileInfo2: Array.from(stored, ([name, size]) => ({
+            name,
+            path: `${gcodeDirectory}/${name}`,
+            size,
+          })),
+        },
+        [socket],
+      )
+      return
+    }
     if (
       method === 'upload' &&
       typeof params.filename === 'string' &&
@@ -177,10 +230,10 @@ export async function createCrealitySimulator(
 
     // Stock start request (OrcaSlicer CrealityPrint): print a stored file.
     if (typeof params.opGcodeFile === 'string') {
-      const name = params.opGcodeFile.replace(
-        /^printprt:\/usr\/data\/printer_data\/gcodes\//,
-        '',
-      )
+      const prefix = `printprt:${gcodeDirectory}/`
+      const name = params.opGcodeFile.startsWith(prefix)
+        ? params.opGcodeFile.slice(prefix.length)
+        : ''
       const busy = currentFrame.state === 1 || currentFrame.state === 2
       if (stored.has(name) && !timer && !busy) startPrint(name)
       else emitWithAckFault(currentFrame)
@@ -232,10 +285,8 @@ export async function createCrealitySimulator(
     emitWithAckFault(currentFrame)
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  wss.on('connection', (socket: any) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    socket.on('message', (data: any) => {
+  wss.on('connection', (socket) => {
+    socket.on('message', (data) => {
       const raw = data.toString()
       received.push(raw)
       const msgFault = faults.matchFault({ path: '/', method: 'PUBLISH' })
@@ -254,7 +305,7 @@ export async function createCrealitySimulator(
             try {
               const parsed = JSON.parse(raw)
               if (parsed && typeof parsed === 'object') {
-                applyCommand(parsed.method, parsed.params)
+                applyCommand(socket, parsed.method, parsed.params)
               }
             } catch {
               // ignore malformed message in raw simulator stream
@@ -267,7 +318,7 @@ export async function createCrealitySimulator(
       try {
         const parsed = JSON.parse(raw)
         if (parsed && typeof parsed === 'object') {
-          applyCommand(parsed.method, parsed.params)
+          applyCommand(socket, parsed.method, parsed.params)
         }
       } catch {
         // ignore malformed message in raw simulator stream
@@ -279,11 +330,47 @@ export async function createCrealitySimulator(
   const wsHttp = await startHttpMock({
     faults,
     onUpgrade: (req, socket, head) => {
-      wss.handleUpgrade(req, socket, head, (ws: unknown) => {
+      wss.handleUpgrade(req, socket, head, (ws) => {
         wss.emit('connection', ws, req)
       })
     },
   })
+
+  const secureServer =
+    options.secure &&
+    https.createServer(
+      { key: options.secure.key, cert: options.secure.cert },
+      (req, res) => {
+        if (req.method !== 'GET' || req.url !== '/info') {
+          res.writeHead(404).end()
+          return
+        }
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(
+          JSON.stringify({
+            model: 'Simulator',
+            mac: 'AA:BB:CC:00:00:01',
+            wssPort: securePort,
+            videoPort: 8000,
+            ...options.secure?.info,
+          }),
+        )
+      },
+    )
+  let securePort: number | undefined
+  let secureConnections = 0
+  if (secureServer) {
+    secureServer.on('upgrade', (req, socket, head) => {
+      secureConnections++
+      wss.handleUpgrade(req, socket, head, (ws) =>
+        wss.emit('connection', ws, req),
+      )
+    })
+    await new Promise<void>((resolve) =>
+      secureServer.listen(0, '127.0.0.1', resolve),
+    )
+    securePort = (secureServer.address() as { port: number }).port
+  }
 
   // Stock HTTP upload: POST /upload/<name> with a multipart body. The body is
   // drained and counted, never parsed or kept.
@@ -346,6 +433,10 @@ export async function createCrealitySimulator(
 
   return {
     port: wsHttp.ports.default,
+    securePort,
+    get secureConnections() {
+      return secureConnections
+    },
     /** Loopback port of the stock HTTP upload endpoint. */
     httpPort: uploadHttp.ports.default,
     origin: wsHttp.origin.replace(/^http:/, 'ws:'),
@@ -382,6 +473,8 @@ export async function createCrealitySimulator(
     emitFrame(frame: object) {
       broadcast(frame)
     },
+    /** One stock keepalive challenge per live peer. The reply is a text frame. */
+    challengeHeartbeat,
     disconnect,
     close() {
       closed = true
@@ -395,7 +488,17 @@ export async function createCrealitySimulator(
         await new Promise<void>((resolve, reject) =>
           wss.close((error: unknown) => (error ? reject(error) : resolve())),
         )
-        await Promise.all([wsHttp.close(), uploadHttp.close()])
+        await Promise.all([
+          wsHttp.close(),
+          uploadHttp.close(),
+          ...(secureServer
+            ? [
+                new Promise<void>((resolve) =>
+                  secureServer.close(() => resolve()),
+                ),
+              ]
+            : []),
+        ])
       })()
       return closing
     },

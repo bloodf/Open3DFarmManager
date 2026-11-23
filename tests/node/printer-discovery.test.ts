@@ -83,22 +83,44 @@ test('discovers both protocols over loopback', async () => {
     responder.send(response, peer.port, peer.address),
   )
   const port = address.port
+  const sockets: dgram.Socket[] = []
+  const bambuReady = new Promise<dgram.Socket>((resolve, reject) => {
+    const socket = dgram.createSocket('udp4')
+    sockets.push(socket)
+    socket.once('error', reject)
+    socket.once('listening', () => resolve(socket))
+  })
+  let suppliedBambuSocket = false
   const found = discoverPrinters({
     timeout: 150,
     bindAddress: '127.0.0.1',
-    bambuPorts: [port + 1],
+    bambuPorts: [0],
     mdnsPort: 0,
     queryAddress: '127.0.0.1',
     queryPort: port,
+    createSocket: () => {
+      if (!suppliedBambuSocket) {
+        suppliedBambuSocket = true
+        return sockets[0]!
+      }
+      return dgram.createSocket('udp4')
+    },
   })
-  await new Promise((resolve) => setTimeout(resolve, 30))
-  responder.send(fixture, port + 1, '127.0.0.1')
   try {
+    const bambu = await bambuReady
+    const bambuAddress = bambu.address()
+    assert(bambuAddress && typeof bambuAddress !== 'string')
+    responder.send(fixture, bambuAddress.port, '127.0.0.1')
     assert.deepEqual((await found).map((p) => p.vendor).sort(), [
       'bambu',
       'moonraker',
     ])
   } finally {
+    for (const socket of sockets) {
+      try {
+        socket.close()
+      } catch {}
+    }
     responder.close()
   }
 })

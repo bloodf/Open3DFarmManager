@@ -57,7 +57,9 @@ export async function connectKobraX(options: {
       : {}),
   })
   const path = 'anycubic/anycubicCloud/v1/slicer/printer'
-  const reports = `${path}/public/${modeId}/${deviceId}/`
+  // Reports arrive on `printer/public` with no `slicer/` segment. Queries stay
+  // on `path`.
+  const reports = `anycubic/anycubicCloud/v1/printer/public/${modeId}/${deviceId}/`
   const queries = {
     info: 'query',
     status: 'query',
@@ -245,6 +247,8 @@ export async function connectKobraX(options: {
     snapshot: state.snapshot,
     control,
     facts: facts.get,
+    /** Unscoped telemetry hint. It confers no capture ownership and is never
+     * used by the Connector's passive camera source. */
     cameraUrl: state.cameraUrl,
     fingerprint: () => pin,
     /** Identity the printer proved through recovery; never the credentials. */

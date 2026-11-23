@@ -287,7 +287,7 @@ export async function testPostgresSignallingAuthorization(
     port,
     database: 'fixture',
     username: applicationName,
-    password: '',
+    password: runtime.options.pass,
     max: 1,
     connect_timeout: 3,
   })
@@ -817,7 +817,7 @@ export async function testPostgresSignallingAuthorization(
         port,
         database: 'fixture',
         username: 'fixture',
-        password: '',
+        password: admin.options.pass,
         ssl: false,
         max: 1,
         connect_timeout: 3,

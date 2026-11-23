@@ -1,4 +1,5 @@
 import { currentPauseNegotiationRuntime } from '../utils/pause-authority/runtime.ts'
+import { setIntegrationEnvelopeInbox } from '../utils/integration-jobs-runtime.ts'
 import postgres, { type Sql } from 'postgres'
 import type { SessionConfig } from 'nuxt/server'
 import {
@@ -127,6 +128,7 @@ export function createSignallingRuntimeLifecycle() {
               credentialAudience: config.audience,
             },
           })
+          setIntegrationEnvelopeInbox(runtime)
           active = Object.freeze({ runtime, metadata })
         } catch {
           closed = true
@@ -141,7 +143,10 @@ export function createSignallingRuntimeLifecycle() {
     },
     async close(): Promise<void> {
       closed = true
-      if (active?.runtime === runtime) active = undefined
+      if (active?.runtime === runtime) {
+        active = undefined
+        setIntegrationEnvelopeInbox(null)
+      }
       runtime?.close()
       runtime = undefined
       await pending?.catch(() => {})

@@ -3,15 +3,17 @@ import { BrowserDeviceUuid } from './browser-device-proof.ts'
 import { PrinterFile } from './file-list.ts'
 
 export const API_QUERY_SUPPORT_HEADER = 'open3dfarm-api-query'
+export const API_DISPATCH_QUERY_SUPPORT_HEADER = 'open3dfarm-api-dispatch-query'
 export const MAX_API_QUERY_ITEMS = 200
 export const MAX_API_QUERY_PAGE = 100
 export const MAX_API_QUERY_RESULT_BYTES = 5500
 
-export const ApiQueryKind = z.enum(['files', 'macros'])
+export const ApiQueryKind = z.enum(['files', 'macros', 'dispatch'])
 export type ApiQueryKind = z.infer<typeof ApiQueryKind>
 export const apiQueryScopes = {
   files: 'files:read',
   macros: 'control:extended',
+  dispatch: 'jobs:read',
 } as const
 
 export const ApiQueryRequest = z.strictObject({
@@ -39,6 +41,14 @@ export const ApiQueryMacro = z.strictObject({
   name: z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/),
 })
 
+export const ApiDispatchObservation = z.strictObject({
+  printerState: z.enum(['idle', 'busy', 'not-ready']),
+  plateState: z.enum(['awaiting-collection', 'operator-confirmed', 'unknown']),
+  attemptId: z.string().min(1).max(256).optional(),
+  observedAt: z.number().int().nonnegative(),
+})
+export type ApiDispatchObservation = z.infer<typeof ApiDispatchObservation>
+
 const page = {
   nextOffset: z
     .number()
@@ -58,6 +68,11 @@ export const ApiQueryResult = z.discriminatedUnion('kind', [
     kind: z.literal('macros'),
     ...page,
     data: z.array(ApiQueryMacro).max(MAX_API_QUERY_PAGE),
+  }),
+  z.strictObject({
+    kind: z.literal('dispatch'),
+    nextOffset: z.null(),
+    data: z.tuple([ApiDispatchObservation]),
   }),
   z.strictObject({
     kind: z.literal('error'),

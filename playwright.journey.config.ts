@@ -18,6 +18,6 @@ export default defineConfig({
   outputDir: process.env.OPENFARM_JOURNEY_OUTPUT ?? 'test-results/journey',
   use: {
     ignoreHTTPSErrors: true,
-    ...browserOptions(),
+    launchOptions: browserOptions(),
   },
 })

@@ -8,6 +8,7 @@ import {
   uuidPattern,
 } from '../integration-auth.ts'
 import type { IntegrationPrinterReader } from '../integration-printers.ts'
+import type { FarmAlertKind } from '../../../app/utils/farm-alerts.ts'
 import { alertsForPrinter, type ApiPrinterAlert } from './printer-alerts.ts'
 
 const cursorPattern = /^[A-Za-z0-9_-]{1,512}$/
@@ -85,13 +86,16 @@ function authorizedRows(principal: IntegrationPrincipal, farmId?: string) {
 function toStatus(
   row: IntegrationPrinterRow,
   nowWall: number,
+  disabled: ReadonlySet<FarmAlertKind> | undefined,
 ): BulkPrinterStatus {
   const status: BulkPrinterStatus = {
     printerId: row.id,
     farmId: row.farmId,
     printerKey: row.printerKey,
     state: 'unknown',
-    alerts: alertsForPrinter(row, nowWall),
+    alerts: alertsForPrinter(row, nowWall).filter(
+      (alert) => !disabled?.has(alert.kind),
+    ),
   }
   if (row.displayName !== undefined) status.displayName = row.displayName
   if (row.groupName !== undefined) status.groupName = row.groupName
@@ -126,6 +130,9 @@ export async function listBulkPrinterStatus(
   reader: IntegrationPrinterReader,
   query: URLSearchParams,
   nowWall = Date.now(),
+  readDisabled?: (
+    farmIds: string[],
+  ) => Promise<{ farmId: string; kind: FarmAlertKind }[]>,
 ) {
   const farmIds = query.getAll('farmId')
   const cursors = query.getAll('cursor')
@@ -157,8 +164,19 @@ export async function listBulkPrinterStatus(
   })
   const hasMore = rows.length > limit
   const page = rows.slice(0, limit)
+  const disabled = new Map<string, Set<FarmAlertKind>>()
+  if (readDisabled && page.length) {
+    const overrides = await readDisabled([
+      ...new Set(page.map((row) => row.farmId)),
+    ])
+    for (const { farmId, kind } of overrides) {
+      const kinds = disabled.get(farmId) ?? new Set<FarmAlertKind>()
+      kinds.add(kind)
+      disabled.set(farmId, kinds)
+    }
+  }
   return {
-    data: page.map((row) => toStatus(row, nowWall)),
+    data: page.map((row) => toStatus(row, nowWall, disabled.get(row.farmId))),
     nextCursor: hasMore
       ? encodedCursor(page[page.length - 1]!.id, snapshotAt)
       : null,

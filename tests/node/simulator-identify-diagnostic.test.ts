@@ -2624,6 +2624,48 @@ test('caller cannot replace reviewed source pins', async () => {
   }
 })
 
+test('retains a missing prunable worktree as a ledger exclusion', () => {
+  const dir = mkdtempSync(join(realpathSync(tmpdir()), 'open3dfm-stale-git-'))
+  const actualGit = spawnSync('which', ['git'], {
+    encoding: 'utf8',
+  }).stdout.trim()
+  const stale = join(dir, 'missing-worktree')
+  try {
+    writeFileSync(
+      join(dir, 'git'),
+      `#!/bin/sh
+if [ "$3" = worktree ]; then
+  "$ACTUAL_GIT" "$@"
+  printf 'worktree %s\\0HEAD 0000000000000000000000000000000000000000\\0detached\\0prunable missing\\0\\0' "$STALE_WORKTREE"
+  exit $?
+fi
+exec "$ACTUAL_GIT" "$@"
+`,
+      { mode: 0o700 },
+    )
+    const source = `import assert from 'node:assert/strict';
+      const m = await import(process.argv[1]);
+      assert.ok(m.repositoryExclusionRoots().includes(process.argv[2]));
+      assert.throws(() => m.assertLedgerOutsideRepository(process.argv[2] + '/ledger'), /outside/);`
+    const result = spawnSync(
+      process.execPath,
+      ['--input-type=module', '-e', source, moduleUrl, stale],
+      {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          PATH: `${dir}:${process.env.PATH}`,
+          ACTUAL_GIT: actualGit,
+          STALE_WORKTREE: stale,
+        },
+      },
+    )
+    assert.equal(result.status, 0, result.stderr)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('Git discovery failure refuses ledger preflight before creation', () => {
   const dir = mkdtempSync(join(tmpdir(), 'open3dfm-git-discovery-'))
   const actualGit = spawnSync('which', ['git'], {
@@ -2934,7 +2976,10 @@ test('retains mounted work files after both container removal attempts fail', as
     const retained = JSON.parse(
       readFileSync(join(requiredLedger(options), 'retained-work.json'), 'utf8'),
     )
-    assert.equal(retained.path, join(requiredLedger(options), 'work'))
+    assert.equal(
+      retained.path,
+      join(realpathSync(requiredLedger(options)), 'work'),
+    )
   } finally {
     cleanupLedger(requiredLedger(options))
   }

@@ -1,3 +1,4 @@
+import { credentialKeyring } from '../sealed-credential-key.ts'
 import { createLogger } from '@open3dfarmmanager/shared'
 import { createError, useRuntimeConfig, type RequestEvent } from 'nuxt/server'
 import { isBambuCloudEnabled } from '../../../../../packages/connector/src/bambu/cloud.ts'
@@ -73,7 +74,7 @@ function masterKey(): string {
       status: 503,
       message: 'Conta Bambu Cloud indisponível. Tente novamente.',
     })
-  return auth.sessionSecret
+  return credentialKeyring(auth)
 }
 
 function databaseUrl(): string {

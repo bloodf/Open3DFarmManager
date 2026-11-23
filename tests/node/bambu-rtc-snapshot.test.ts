@@ -273,7 +273,14 @@ test('collector forwards real Bambu runtime provenance to the snapshot provider 
     assert.ok(transport)
     transport.onReport(
       Buffer.from(
-        JSON.stringify({ print: { gcode_state: 'RUNNING', mc_percent: 20 } }),
+        JSON.stringify({
+          print: {
+            gcode_state: 'RUNNING',
+            mc_percent: 20,
+            print_error: 0x03008005,
+            hms: [{ attr: 0x05000200, code: 0x00020001 }],
+          },
+        }),
       ),
     )
     assert.equal(observations.length, 1)
@@ -281,6 +288,12 @@ test('collector forwards real Bambu runtime provenance to the snapshot provider 
     f.open(performance.now() + 10000)
     assert.equal(f.received.length, 1)
     assert.equal(f.received[0]?.printers[0]?.progress, 0.2)
+    assert.equal(f.received[0]?.printers[0]?.state, 'printing')
+    assert.deepEqual(f.received[0]?.printers[0]?.alarms, {
+      printError: '0300-8005',
+      hmsCount: 1,
+      hmsCode: '0500-0200-0002-0001',
+    })
     assert.ok(
       observations[0] && 'bambu' in observations[0].fieldObservedAtMonoMs,
     )
@@ -306,6 +319,35 @@ test('collector forwards real Bambu runtime provenance to the snapshot provider 
     f.source.close()
     queue.close()
     rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('Bambu alarms expire from the farm snapshot independently of printing state', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const f = fixture(['bambu'])
+  const alarms = { printError: '0300-8005' }
+  try {
+    f.source.observe({
+      ...bambu(),
+      printer: { ...bambu().printer, alarms },
+      fieldObservedAtMonoMs: {
+        bambu: { state: 100, progress: 100, alarms: 50 },
+      },
+    })
+    f.open()
+    assert.deepEqual(f.received[0]?.printers[0]?.alarms, alarms)
+    assert.equal(f.received[0]?.validUntilMonoMs, 5100)
+
+    f.setNow(5050)
+    t.mock.timers.tick(4950)
+    assert.equal(f.unavailable(), 0)
+    assert.equal(f.received.length, 2)
+    assert.equal(f.received[1]?.printers[0]?.state, 'printing')
+    assert.equal(f.received[1]?.printers[0]?.alarms, undefined)
+    assert.equal(f.received[1]?.validUntilMonoMs, 5100)
+  } finally {
+    f.source.close()
+    t.mock.timers.reset()
   }
 })
 

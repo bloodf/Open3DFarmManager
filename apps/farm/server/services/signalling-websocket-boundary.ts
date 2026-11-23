@@ -40,6 +40,17 @@ const subprotocols = {
 function object(value: unknown): value is object {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
+
+function isLegacySpoolFeedUpgrade(request: IncomingMessage): boolean {
+  return (
+    request.method === 'GET' &&
+    typeof request.url === 'string' &&
+    request.url.length <= 512 &&
+    /^\/spoolman\/sl1\.[0-9a-f]{32}\.[A-Za-z0-9_-]{43}\/api\/v1(?:\/(?:vendor|filament|spool)(?:\/\d{1,10})?|\/setting(?:\/[^/?]+)?|\/tag\/scan(?:\/[^/?]+)?)?\/?$/.test(
+      request.url,
+    )
+  )
+}
 /** Nitro 2.13.6 initializes plugins before node-server constructs its CrossWS adapter.
  * Force and validate h3's cached options here. If another consumer already cached
  * incompatible options, startup fails instead of applying an ineffective post-parse cap. */
@@ -82,6 +93,7 @@ export function installSignallingWebSocketBounds(app: unknown): void {
             )
           )
             return
+          if (isLegacySpoolFeedUpgrade(request)) return
         } catch {}
         throw new Response(null, { status: 404 })
       },

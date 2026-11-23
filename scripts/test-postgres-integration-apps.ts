@@ -1,13 +1,35 @@
-// Synthetic PostgreSQL only. Caller owns the database, migrations (through 0040) and teardown.
+// Synthetic PostgreSQL only. An explicit fixture is caller-owned; otherwise the runner creates one.
 import { randomUUID } from 'node:crypto'
+import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import postgres from 'postgres'
 import { testPostgresIntegrationApps } from '../tests/helpers/postgres-integration-apps-integration.ts'
 
 const portText = process.env.INTEGRATION_APPS_SYNTHETIC_TEST_PORT
+const admitted = process.env.INTEGRATION_APPS_SYNTHETIC_TEST_DISPOSABLE
+if (
+  process.argv.length === 2 &&
+  portText === undefined &&
+  admitted === undefined
+) {
+  const env: NodeJS.ProcessEnv = { ...process.env, OPENFARM_PG: 'local' }
+  delete env.OPENFARM_TEST_DATABASE_URL
+  const result = spawnSync(
+    process.execPath,
+    [
+      fileURLToPath(new URL('./test-postgres.ts', import.meta.url)),
+      '--only',
+      'test-postgres-integration-apps.ts',
+    ],
+    { env, stdio: 'inherit' },
+  )
+  if (result.error) throw result.error
+  process.exit(result.status ?? 1)
+}
 const port = Number(portText)
 if (
   process.argv.length !== 2 ||
-  process.env.INTEGRATION_APPS_SYNTHETIC_TEST_DISPOSABLE !== 'yes' ||
+  admitted !== 'yes' ||
   typeof portText !== 'string' ||
   !/^[0-9]{4,5}$/.test(portText) ||
   !Number.isInteger(port) ||

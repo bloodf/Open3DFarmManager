@@ -1,0 +1,70 @@
+/*
+ * Design tokens.
+ * Light and dark values live side by side in light-dark(); `color-scheme`
+ * decides which one applies. The theme toggle sets data-theme on <html>.
+ * Without the attribute the visitor's system preference wins.
+ */
+:root {
+  color-scheme: light dark;
+
+  /* Surfaces: warm paper in light, deep workshop dark. */
+  --paper: light-dark(#f4efe6, #13120f);
+  --paper-raised: light-dark(#fbf8f2, #1c1a16);
+  --paper-sunk: light-dark(#ebe4d6, #0e0d0b);
+
+  /* Text. Both ink tones keep at least 4.5:1 on every surface above. */
+  --ink: light-dark(#1d1a16, #ece6d9);
+  --ink-muted: light-dark(#575047, #b6ac9a);
+
+  /* Hairlines are decorative; --rule-strong carries meaning (3:1+). */
+  --rule: light-dark(#cdc2ae, #38342c);
+  --rule-strong: light-dark(#7a6f5d, #8a8070);
+
+  /* Restrained accents: copper for emphasis, green for confirmed state. */
+  --copper: light-dark(#8c4216, #e8a06a);
+  --on-copper: light-dark(#fbf8f2, #13120f);
+  --green: light-dark(#2b5a3a, #8fc79b);
+  --focus: light-dark(#8c4216, #f2b583);
+  --selection: light-dark(#e6c9a8, #5a3a22);
+
+  /* Typography: system stacks only, so the site makes no font requests. */
+  --font-display:
+    'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua',
+    'URW Bookman', Georgia, serif;
+  --font-body:
+    system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    sans-serif;
+  --font-mono:
+    ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono',
+    monospace;
+
+  /* Fluid type scale. */
+  --step--1: clamp(0.8125rem, 0.79rem + 0.1vw, 0.875rem);
+  --step-0: clamp(1rem, 0.96rem + 0.2vw, 1.125rem);
+  --step-1: clamp(1.2rem, 1.1rem + 0.5vw, 1.45rem);
+  --step-2: clamp(1.5rem, 1.25rem + 1.2vw, 2.1rem);
+  --step-3: clamp(1.9rem, 1.4rem + 2.4vw, 3.1rem);
+  --step-4: clamp(2.3rem, 1.5rem + 4vw, 4.75rem);
+
+  /* Spacing and layout. */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2.5rem;
+  --space-7: clamp(3rem, 2rem + 5vw, 6rem);
+  --gutter: clamp(1rem, 0.5rem + 2.5vw, 2rem);
+  --measure: 66ch;
+  --container: 72rem;
+  --hairline: 1px;
+  --radius: 2px;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}

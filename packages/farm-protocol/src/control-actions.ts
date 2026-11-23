@@ -1,5 +1,30 @@
 import { z } from 'zod'
 
+export const ToolIndex = z.literal([0, 1, 2, 3])
+export const ToolTemperatureArgs = z.strictObject({
+  tool: ToolIndex,
+  target_c: z.number().int().nonnegative(),
+})
+
+export const SpeedMode = z.enum(['silent', 'standard', 'sport', 'ludicrous'])
+export type SpeedMode = z.infer<typeof SpeedMode>
+export const SpeedModes = z
+  .array(SpeedMode)
+  .min(1)
+  .max(4)
+  .refine((modes) => new Set(modes).size === modes.length)
+
+/** Missing advertisements preserve support for all speed levels. */
+export function speedModeAllowed(
+  modes: readonly SpeedMode[] | undefined,
+  level: unknown,
+): boolean {
+  return (
+    modes === undefined ||
+    (typeof level === 'string' && modes.some((mode) => mode === level))
+  )
+}
+
 /** Lifecycle actions; the dashboard labels and state machine cover exactly these. */
 export const ControlAction = z.enum(['pause', 'resume', 'cancel'])
 export type ControlAction = z.infer<typeof ControlAction>
@@ -12,6 +37,7 @@ export const ExtendedControlAction = z.enum([
   ...ControlAction.options,
   'emergency_stop',
   'set_temperature',
+  'set_tool_temperature',
   'set_fan',
   'home',
   'set_light',
@@ -38,16 +64,27 @@ export const ExtendedControlAction = z.enum([
   'queue_op',
   'bed_mesh',
   'gcode',
+  'confirm_collection',
 ])
 export type ExtendedControlAction = z.infer<typeof ExtendedControlAction>
 /** Optional, advisory detail of a command result. It never changes the outcome. */
 export const ControlResultCode = z.enum([
+  'signature',
+  'scope',
+  'state',
+  'busy',
+  'guard-denied',
   'bambu-authorization-required',
   'incompatible',
   'download-failed',
   'checksum-mismatch',
   'cache-full',
   'local-file-missing',
+  'awaiting-collection',
+  'tool-state-stale',
+  'tool-printer-not-idle',
+  'tool-heater-not-advertised',
+  'tool-temperature-above-maximum',
 ])
 export type ControlResultCode = z.infer<typeof ControlResultCode>
 export const MOONRAKER_CONTROLS: readonly ControlAction[] = Object.freeze([
@@ -84,6 +121,15 @@ const PrintFileName = z
   .min(1)
   .max(255)
   .refine((v) => !/[\\/\x00-\x1f\x7f]/.test(v) && !v.includes('..'))
+/** The Anycubic LAN start envelope accepts stored raw G-code paths. */
+export function isAnycubicStartFile(name: string): boolean {
+  return (
+    name.length <= 255 &&
+    name.endsWith('.gcode') &&
+    !/[\\\x00-\x1f\x7f%]/.test(name) &&
+    !name.split('/').some((part) => !part || part === '.' || part === '..')
+  )
+}
 const PlateNumber = z.number().int().min(1).max(1000)
 export const LibraryPrintArgs = z.strictObject({
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
@@ -189,13 +235,38 @@ export function controlRoleAllowed(
     return role === 'owner' || role === 'admin'
   return ['owner', 'admin', 'operator'].includes(role)
 }
+/** Motion, filament, macros and job starts never run while a print owns the printer. */
+export const IDLE_ONLY_CONTROL_ACTIONS: ReadonlySet<string> = new Set([
+  'home',
+  'set_tool_temperature',
+  'load_filament',
+  'unload_filament',
+  'run_macro',
+  'start_print',
+  'start_library_print',
+])
+/**
+ * The one idle-only rule shared by every Connector entry point: true when
+ * `action` must be refused as printer-busy because a print is running or paused.
+ */
+export function controlPrinterBusy(action: string, state: string): boolean {
+  return (
+    IDLE_ONLY_CONTROL_ACTIONS.has(action) &&
+    (state === 'printing' || state === 'paused')
+  )
+}
 export function controlSourceState(
   action: ExtendedControlAction,
   state: string,
 ): boolean {
+  if (controlPrinterBusy(action, state)) return false
+  if (action === 'set_tool_temperature') return state === 'idle'
   if (action === 'exclude_object')
     return state === 'printing' || state === 'paused'
   if (action === 'emergency_stop') return true
+  // The operator says the bed is clear: only while no job owns the printer.
+  if (action === 'confirm_collection')
+    return state === 'idle' || state === 'cancelled' || state === 'error'
   // A library start uploads a file first: never onto a printer that is busy.
   if (action === 'start_library_print')
     return !['printing', 'paused', 'unknown', 'error'].includes(state)
@@ -339,6 +410,10 @@ export const ConfigWriteArguments = z.union([
         /^\d{13}\.bak$/.test(backup.slice(path.length + '.openfarm-'.length)),
     ),
 ])
+/** The finished attempt (its end time in ms) whose bed the operator cleared. */
+export const CollectionArguments = z.strictObject({
+  attempt: z.string().regex(/^(?:0|[1-9][0-9]{0,15})$/),
+})
 export const ControlArguments = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('file_op'), args: FileOperation }),
   z.strictObject({
@@ -354,6 +429,10 @@ export const ControlArguments = z.discriminatedUnion('action', [
     args: ExcludeObjectArguments,
   }),
   z.strictObject({ action: z.literal('bed_mesh'), args: BedMeshArguments }),
+  z.strictObject({
+    action: z.literal('confirm_collection'),
+    args: CollectionArguments,
+  }),
   z.strictObject({ action: z.literal('extrude'), args: ExtrudeArguments }),
   z.strictObject({
     action: z.literal('run_macro'),
@@ -400,6 +479,10 @@ export const ControlArguments = z.discriminatedUnion('action', [
     }),
   }),
   z.strictObject({
+    action: z.literal('set_tool_temperature'),
+    args: ToolTemperatureArgs,
+  }),
+  z.strictObject({
     action: z.literal('set_temperature'),
     args: z.strictObject({
       heater: z.enum(['extruder', 'bed', 'chamber']),
@@ -440,7 +523,7 @@ export const ControlArguments = z.discriminatedUnion('action', [
   z.strictObject({
     action: z.literal('set_speed'),
     args: z.strictObject({
-      level: z.enum(['silent', 'standard', 'sport', 'ludicrous']),
+      level: SpeedMode,
     }),
   }),
   z.strictObject({

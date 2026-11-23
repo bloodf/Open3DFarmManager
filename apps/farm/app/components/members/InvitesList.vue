@@ -1,5 +1,7 @@
 <script setup lang="ts">
+import Button from '../ui/Button.vue'
 import EmptyState from '../ui/EmptyState.vue'
+import MembersSection from './MembersSection.vue'
 import {
   formatInviteExpiry,
   roleLabel,
@@ -14,11 +16,19 @@ defineProps<{
 const emit = defineEmits<{
   revoke: [invite: FarmInvite]
 }>()
+
+function summary(count: number) {
+  return count === 1 ? '1 convite' : `${count} convites`
+}
 </script>
 
 <template>
-  <section aria-labelledby="invites-heading">
-    <h2 id="invites-heading">Convites pendentes</h2>
+  <MembersSection
+    heading-id="invites-heading"
+    title="Convites pendentes"
+    :summary="invites.length ? summary(invites.length) : undefined"
+    :bordered="invites.length > 0"
+  >
     <EmptyState
       :level="3"
       v-if="invites.length === 0"
@@ -35,17 +45,17 @@ const emit = defineEmits<{
             >Expira em {{ formatInviteExpiry(invite.expiresAt) }}</span
           >
         </div>
-        <button
-          type="button"
+        <Button
+          class="danger"
           :disabled="pending"
           :aria-label="`Revogar convite de ${roleLabel[invite.role]}`"
           @click="emit('revoke', invite)"
         >
           Revogar convite
-        </button>
+        </Button>
       </li>
     </ul>
-  </section>
+  </MembersSection>
 </template>
 
 <style scoped>
@@ -54,35 +64,42 @@ const emit = defineEmits<{
   padding: 0;
   margin: 0;
   display: grid;
-  gap: 1rem;
 }
 li {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem 1rem;
+  gap: var(--space-3) var(--space-4);
   align-items: center;
   justify-content: space-between;
-  padding-block: 0.75rem;
-  border-block-end: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  padding-block: var(--space-4);
+  border-block-end: 1px solid var(--color-border);
+}
+li:first-child {
+  padding-block-start: 0;
+}
+li:last-child {
+  padding-block-end: 0;
+  border-block-end: 0;
 }
 .identity {
   display: grid;
-  gap: 0.25rem;
+  gap: var(--space-1);
+  min-width: 0;
 }
 .role {
-  font-weight: 700;
+  font-weight: var(--font-weight-semibold);
 }
-button {
-  font: inherit;
-  min-height: 2.75rem;
-  padding: 0.5rem 0.75rem;
-  cursor: pointer;
+.expiry {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
 }
-button:disabled {
-  cursor: not-allowed;
+li .danger {
+  border-color: var(--printer-error);
+  color: var(--printer-error);
 }
-button:focus-visible {
-  outline: 3px solid currentColor;
-  outline-offset: 3px;
+@media (max-width: 30rem) {
+  li .danger {
+    width: 100%;
+  }
 }
 </style>

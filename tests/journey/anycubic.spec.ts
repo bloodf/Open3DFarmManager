@@ -1,3 +1,5 @@
+import { openFarmInspector } from '../helpers/farm-inspector.ts'
+import { fileURLToPath } from 'node:url'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import type { startAnycubicSimulator } from '../../packages/sim-tools/src/anycubic-simulator.ts'
 import { discoverOnPage, expectCameraFrames } from './discovery-page.ts'
@@ -11,11 +13,14 @@ import {
 
 // Opt-in: OPENFARM_JOURNEY=1. The whole Anycubic (LAN) journey in a real
 // browser against the loopback simulator: find, assignment, live telemetry,
-// every advertised command, the unsupported file steps, starting a stored
-// file, the job end card and the history entries. Never a physical printer.
+// every advertised command, file upload and listing, starting a stored
+// G-code file, the job end card and the history entries. Never a physical printer.
 type Simulator = Awaited<ReturnType<typeof startAnycubicSimulator>>
 
 const STORED_FILE = 'journey.gcode'
+const UPLOAD_FILE = fileURLToPath(
+  new URL('../fixtures/anycubic/journey.gcode.3mf', import.meta.url),
+)
 // Pause, resume and cancel are confirmed by the print state they lead to. Any
 // other command is confirmed only when the printer's next report carries the
 // value that was asked for (target, fan speed, light); each step below also
@@ -105,12 +110,19 @@ function suite(title: string) {
       }
     }
     const printerRow = (page: Page) =>
-      page.getByRole('article').filter({
-        has: page.getByRole('heading', {
-          name: started().printerKey,
-          exact: true,
-        }),
-      })
+      page
+        .getByRole('dialog', { name: 'Inspeção da impressora', exact: true })
+        .getByRole('article')
+        .filter({
+          has: page.getByRole('heading', {
+            name: started().printerKey,
+            exact: true,
+          }),
+        })
+    async function openFarm(page: Page = started().ownerPage) {
+      await started().openFarm(page)
+      return openFarmInspector(page, started().printerKey)
+    }
     /**
      * The direct session lasts 30 s and the page reopens it by itself, but it
      * stops after six failed reopens in a row. When the connection does not
@@ -131,7 +143,7 @@ function suite(title: string) {
             )
         )
           return
-        await started().openFarm(page)
+        await openFarm(page)
       }
       throw new Error('The direct connection never came back')
     }
@@ -178,12 +190,15 @@ function suite(title: string) {
      * "Nenhum comando foi enviado" is closed and asked for again, as a person
      * would; a sent command is never repeated.
      */
+    const commandDialog = (page: Page) =>
+      page.locator('dialog[aria-labelledby="pause-dialog-title"]')
+
     async function command(
       page: Page,
       open: () => Promise<void>,
       confirm: string,
     ) {
-      const dialog = page.getByRole('dialog')
+      const dialog = commandDialog(page)
       const status = dialog.getByRole('status')
       // "Cancelar" until the command settles or fails, "Fechar" after.
       const close = dialog.getByRole('button', { name: /^(Fechar|Cancelar)$/ })
@@ -240,7 +255,7 @@ function suite(title: string) {
               timeout: 10_000,
             })
             await button.click({ timeout: 5000 })
-            await expect(page.getByRole('dialog')).toBeVisible({
+            await expect(commandDialog(page)).toBeVisible({
               timeout: 3000,
             })
           }).toPass({ timeout: 300_000 })
@@ -270,7 +285,7 @@ function suite(title: string) {
             await expect(button).toBeEnabled({ timeout: 5000 })
             await button.click({ timeout: 5000 })
             // The page ignores a click that lands between two live sessions.
-            await expect(page.getByRole('dialog')).toBeVisible({
+            await expect(commandDialog(page)).toBeVisible({
               timeout: 3000,
             })
           }).toPass({ timeout: 300_000 })
@@ -309,17 +324,14 @@ function suite(title: string) {
       throw new Error('The files page never reached a live printer')
     }
     /**
-     * One file operation. Each one opens its own short control session; when
-     * the page reports that the direct connection did not complete it, the
-     * operation is prepared and asked for again, as the message tells a
-     * person to do after checking the printer.
+     * One file operation per control session. Only listing can be repeated
+     * after a dispatch that did not finish.
      */
     async function filesStep(
       page: Page,
       prepare: () => Promise<Locator>,
       expected: string | RegExp,
-      safeToRepeat: () => boolean = () => true,
-      verified: () => boolean = () => true,
+      readOnly = false,
     ) {
       const done = filesStatus(page, expected)
       // Not completed, or dropped by the page when the live session ended.
@@ -333,8 +345,6 @@ function suite(title: string) {
       })
       let preparing = ''
       for (let attempt = 0; attempt < 15; attempt++) {
-        if (!safeToRepeat())
-          throw new Error('The printer changed state; not repeating')
         // Reloading is the last resort: the page recovers its live session by
         // itself, and each reload starts the device and farm checks again.
         if (
@@ -374,7 +384,8 @@ function suite(title: string) {
           'files status: ' +
             (await page.getByRole('status').allInnerTexts()).join(' | '),
         ).toBeVisible({ timeout: 90_000 })
-        if ((await done.isVisible()) && verified()) return
+        if (await done.isVisible()) return
+        if (!readOnly) break
       }
       throw new Error(
         'File operation never completed: ' + expected + ' ' + preparing,
@@ -457,11 +468,15 @@ function suite(title: string) {
         const assignments = page.locator(
           'section[aria-labelledby="assignment-heading"]',
         )
+        const assignmentRow = assignments.getByRole('row').filter({
+          has: page.getByRole('rowheader', {
+            name: journey.printerKey,
+            exact: true,
+          }),
+        })
+        await expect(assignmentRow).toBeVisible({ timeout: 30_000 })
         await expect(
-          assignments.getByText(journey.printerKey, { exact: true }),
-        ).toBeVisible({ timeout: 30_000 })
-        await expect(
-          assignments.getByText('Ativa', { exact: true }),
+          assignmentRow.getByRole('cell', { name: 'Ativa', exact: true }),
         ).toBeVisible()
         await expect(
           assignments.getByText('Aprovado', { exact: true }),
@@ -478,7 +493,7 @@ function suite(title: string) {
       await step(async () => {
         const journey = started()
         const page = journey.ownerPage
-        const row = await journey.openFarm()
+        const row = await openFarm()
         const progress = (fraction: string) =>
           expect(async () => {
             await live(page)
@@ -509,6 +524,37 @@ function suite(title: string) {
           'Definir luz',
         ])
         expect(journey.simulatorObservation()).toMatchObject({ failure: false })
+      })
+    })
+
+    test('shows the remaining print time reported over Anycubic LAN', async () => {
+      test.setTimeout(8 * 60_000)
+      await step(async () => {
+        const journey = started()
+        const sim = simulator()
+        const page = journey.ownerPage
+        journey.setTelemetryUpload(false)
+        const remaining = printerRow(page)
+          .getByLabel('Trabalho atual')
+          .getByText('Tempo restante estimado', { exact: true })
+          .locator('xpath=following-sibling::dd[1]')
+        const expectRemaining = (text: string) =>
+          expect(async () => {
+            await live(page)
+            await expect(remaining).toHaveText(text, { timeout: 10_000 })
+            await expect(remaining).toBeVisible()
+          }).toPass({ timeout: 300_000 })
+
+        try {
+          sim.setRemainingMinutes(92)
+          await openFarm(page)
+          await expectRemaining('1 h 32 min')
+          sim.setRemainingMinutes(0)
+          await expectRemaining('0 h 0 min')
+        } finally {
+          sim.setRemainingMinutes(undefined)
+          journey.setTelemetryUpload(true)
+        }
       })
     })
 
@@ -578,74 +624,59 @@ function suite(title: string) {
       })
     })
 
-    test('upload and listing are não suportado; a stored file starts printing', async () => {
+    test('uploads and lists a package, then starts a stored G-code file', async () => {
       test.setTimeout(15 * 60_000)
       await step(async () => {
         const journey = started()
         const page = journey.ownerPage
         const sim = simulator()
-        // LAN upload has no documented protocol, so the file is placed on the
-        // simulated printer storage directly, as a slicer or USB stick would.
         sim.upload(STORED_FILE, Buffer.from('G28\nG1 X10 Y10\n'))
         await openFiles(page)
 
-        const unlisted =
-          'Listagem não suportada pela biblioteca desta impressora.'
+        const uploadsBefore = sim.uploadCount
         await filesStep(
           page,
           async () => {
-            await page.locator('#files-upload').setInputFiles({
-              name: 'envio.gcode',
-              mimeType: 'text/plain',
-              buffer: Buffer.from('G28\n'),
-            })
+            await page.locator('#files-upload').setInputFiles(UPLOAD_FILE)
             return page.getByRole('button', {
               name: 'Enviar arquivo',
               exact: true,
             })
           },
-          'Envio não suportado pela biblioteca desta impressora.',
+          /Arquivo enviado\./,
         )
+        expect(sim.uploadCount).toBe(uploadsBefore + 1)
+        expect(sim.lifecycle.state).toBe('idle')
+
         const consult = page.getByRole('button', {
           name: 'Consultar arquivos',
           exact: true,
         })
-        await filesStep(page, async () => consult, unlisted)
-        expect(sim.lifecycle.state).toBe('idle')
-
-        // Start: the exact name of the stored file, then an explicit check.
-        const stored = page.getByLabel('Arquivo armazenado na impressora')
+        await filesStep(
+          page,
+          async () => consult,
+          'Arquivos atualizados.',
+          true,
+        )
+        const stored = page.getByLabel('Arquivo para imprimir')
+        await expect(
+          stored.locator('option[value="journey.gcode.3mf"]'),
+        ).toBeAttached()
         const start = page.getByRole('button', {
           name: 'Iniciar impressão',
           exact: true,
         })
-        await expect(stored).toBeVisible()
-        await stored.fill('../' + STORED_FILE)
-        await expect(
-          page.getByText('Nome inválido para o comando de impressão.'),
-        ).toBeVisible()
-        await expect(start).toBeDisabled()
-        await stored.fill(STORED_FILE)
-        await expect(start).toBeDisabled()
         await filesStep(
           page,
           async () => {
-            // A reloaded page asks for the listing again before the name.
-            if (!(await stored.isVisible())) {
-              await expect(consult).toBeEnabled({ timeout: 40_000 })
-              await consult.click()
-              await expect(stored).toBeVisible({ timeout: 90_000 })
-            }
-            await stored.fill(STORED_FILE)
+            await stored.selectOption(STORED_FILE)
+            await expect(start).toBeDisabled()
             await page
               .getByRole('checkbox', { name: /Quero iniciar esta impressão/ })
               .check()
             return start
           },
           /Impressão iniciada\. O Connector confirmou o comando\./,
-          // Never a second start once the simulated printer left idle.
-          () => sim.lifecycle.state === 'idle',
-          () => sim.lifecycle.state !== 'idle',
         )
         expect(['printing', 'finished']).toContain(sim.lifecycle.state)
         expect(journey.simulatorObservation()).toMatchObject({ failure: false })
@@ -662,7 +693,7 @@ function suite(title: string) {
         await expect
           .poll(() => sim.lifecycle.state, { timeout: 60_000 })
           .toBe('finished')
-        const row = await journey.openFarm()
+        const row = await openFarm()
         await expectState(row, 'Ociosa')
         await expect(async () => {
           await live(page)
@@ -719,7 +750,7 @@ function suite(title: string) {
         // A fresh farm page: the camera runs after every control step.
         // The camera track rides the direct connection, so its 15 s budget
         // starts once that connection is up, not while it is being set up.
-        await journey.openFarm()
+        await openFarm()
         await live(journey.ownerPage)
         await expectCameraFrames(journey)
         expect(journey.simulatorObservation()).toMatchObject({ failure: false })

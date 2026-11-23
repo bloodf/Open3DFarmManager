@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import BambuAlarmStatus from '../../components/printer-detail/BambuAlarmStatus.vue'
 import {
   computed,
+  nextTick,
   onBeforeUnmount,
   onMounted,
   ref,
@@ -11,6 +13,7 @@ import { useRoute } from 'vue-router'
 import ConfigEditorPanel from '../../components/printer-detail/ConfigEditorPanel.vue'
 import { vendorDetailCatalog } from '../../utils/compatibility/detail-panels.ts'
 import FileManagerPanel from '../../components/printer-detail/FileManagerPanel.vue'
+import ResinLedgerPanel from '../../components/resin/ResinLedgerPanel.vue'
 import PowerPanel from '../../components/printer-detail/PowerPanel.vue'
 import SystemServicesPanel from '../../components/printer-detail/SystemServicesPanel.vue'
 import WebcamsPanel from '../../components/printer-detail/WebcamsPanel.vue'
@@ -32,6 +35,7 @@ import {
   actionDialogTitle,
   liveControlActionAvailability,
 } from '../../utils/farm-control.ts'
+import { printableFile } from '../../utils/files-view.ts'
 import { extendedLabel } from '../../utils/farm-control-extended.ts'
 import {
   formatPrinterStateLabel,
@@ -71,6 +75,13 @@ const vendorCatalog = computed(() => {
   return vendor ? vendorDetailCatalog[vendor] : undefined
 })
 const printFile = ref('')
+const canStartStoredFile = computed(() =>
+  printableFile(printFile.value, vendorFrame.value?.vendor),
+)
+function startStoredFile(event: Event) {
+  if (canStartStoredFile.value)
+    control('start_print', event, { file: printFile.value })
+}
 const systemFrame = computed(() =>
   detailFrame.value?.capabilities.includes('system')
     ? detailFrame.value
@@ -83,44 +94,48 @@ const consoleResponses = shallowRef<
 >([])
 let consoleSequence = 0
 const view = useFarmView({
-  onGcodeHelp(commands) {
-    consoleCommands.value = commands
-  },
-  onGcodeResponse(frame) {
-    consoleResponses.value = [
-      ...consoleResponses.value.slice(-999),
-      { seq: consoleSequence++, lines: frame.lines },
-    ]
-  },
-  onDetail(frame) {
-    detailFrame.value = frame
-  },
-  onQuery(frame) {
-    detailQueries.value = applyDetailQuery(detailQueries.value, frame)
-    if (frame.kind === 'temperature-store')
-      history.value = backfillHistory(
-        history.value,
-        frame,
-        Date.now(),
-        Date.now(),
-      )
-  },
-  // The queue and timelapse areas are advertised by the printer's controls.
-  advertised: () => capabilities.value ?? [],
-  printerKey: initialPrinterKey,
-  onUpdate(value) {
-    webcams.value = value
-  },
-  onClose() {
-    webcams.value = null
-    detailFrame.value = undefined
-    consoleCommands.value = []
-    detailQueries.value = emptyDetailQueries
+  requestedFarm: () => route.query.farm,
+  webcamDetail: {
+    onGcodeHelp(commands) {
+      consoleCommands.value = commands
+    },
+    onGcodeResponse(frame) {
+      consoleResponses.value = [
+        ...consoleResponses.value.slice(-999),
+        { seq: consoleSequence++, lines: frame.lines },
+      ]
+    },
+    onDetail(frame) {
+      detailFrame.value = frame
+    },
+    onQuery(frame) {
+      detailQueries.value = applyDetailQuery(detailQueries.value, frame)
+      if (frame.kind === 'temperature-store')
+        history.value = backfillHistory(
+          history.value,
+          frame,
+          Date.now(),
+          Date.now(),
+        )
+    },
+    // The queue and timelapse areas are advertised by the printer's controls.
+    advertised: () => capabilities.value ?? [],
+    printerKey: initialPrinterKey,
+    onUpdate(value) {
+      webcams.value = value
+    },
+    onClose() {
+      webcams.value = null
+      detailFrame.value = undefined
+      consoleCommands.value = []
+      detailQueries.value = emptyDetailQueries
+    },
   },
 })
 definePageMeta({ key: (route) => route.path })
 const { state: viewState, ready, now, discover } = view
 const heading = ref<HTMLElement | null>(null)
+const page = ref<HTMLElement | null>(null)
 const pauseDialog = ref<HTMLDialogElement | null>(null)
 const pauseCancel = ref<HTMLButtonElement | null>(null)
 const dialog = {
@@ -748,45 +763,67 @@ function cancelPause(event: Event) {
   event.preventDefault()
   closePause()
 }
+// Focus lands on the heading of the screen that was just shown (the status
+// line, the alert or the printer name), but never steals focus from a control
+// the user is already using.
+function focusHeading() {
+  const active = document.activeElement
+  if (active && active !== document.body) return
+  const target = heading.value ?? page.value?.querySelector<HTMLElement>('h1')
+  target?.focus()
+}
 onMounted(() => heading.value?.focus())
+watch(
+  () => [viewState.value.kind, ready.value?.inventory, !!row.value] as const,
+  async () => {
+    await nextTick()
+    focusHeading()
+  },
+)
 </script>
 
 <template>
-  <main id="conteudo">
-    <nav aria-label="Navegação da impressora" class="actions">
-      <NuxtLink to="/farm">Minha farm</NuxtLink>
-      <NuxtLink to="/impressoras">Impressoras</NuxtLink>
+  <main id="conteudo" ref="page" class="printer-page">
+    <nav aria-label="Navegação da impressora">
+      <ul class="nav-links">
+        <li><NuxtLink to="/farm">Minha farm</NuxtLink></li>
+        <li><NuxtLink to="/impressoras">Impressoras</NuxtLink></li>
+      </ul>
     </nav>
     <div
       v-if="viewState.kind === 'loading' || ready?.inventory === 'loading'"
-      class="loading"
+      class="loading panel"
       aria-busy="true"
     >
+      <h1 class="page-title">Impressora</h1>
       <p ref="heading" role="status" tabindex="-1">Carregando a impressora…</p>
       <Skeleton /><Skeleton /><Skeleton />
     </div>
     <section
       v-else-if="viewState.kind === 'sign-in-required'"
       aria-label="Acesso à farm"
+      class="panel"
     >
       <h1 ref="heading" tabindex="-1">Entre para ver a impressora</h1>
       <p>Entre na sua conta para consultar esta impressora.</p>
-      <NuxtLink to="/entrar">Entrar</NuxtLink>
+      <NuxtLink to="/entrar" class="cta">Entrar</NuxtLink>
     </section>
-    <ErrorState
-      v-else-if="viewState.kind === 'error'"
-      title="Não foi possível carregar a impressora"
-    >
-      <p ref="heading" role="alert" tabindex="-1">
-        {{ farmViewErrorText(viewState.reason) }}
-      </p>
-      <div class="actions">
-        <Button @click="discover()">Tentar novamente</Button>
-        <NuxtLink to="/entrar">Entrar novamente</NuxtLink>
-      </div>
-    </ErrorState>
+    <template v-else-if="viewState.kind === 'error'">
+      <h1 class="page-title">Impressora</h1>
+      <ErrorState title="Não foi possível carregar a impressora">
+        <p ref="heading" role="alert" tabindex="-1">
+          {{ farmViewErrorText(viewState.reason) }}
+        </p>
+        <div class="actions">
+          <Button @click="discover()">Tentar novamente</Button>
+          <NuxtLink to="/entrar">Entrar novamente</NuxtLink>
+        </div>
+      </ErrorState>
+    </template>
     <template v-else-if="!row">
-      <h1 ref="heading" tabindex="-1">Impressora não encontrada</h1>
+      <h1 ref="heading" class="page-title" tabindex="-1">
+        Impressora não encontrada
+      </h1>
       <EmptyState
         title="Nenhuma impressora com este identificador"
         description="Nenhuma impressora com este identificador está atribuída à farm selecionada."
@@ -798,7 +835,9 @@ onMounted(() => heading.value?.focus())
       v-else
       :name="row.assignment.displayName || row.assignment.printerKey"
       :state-label="state ? formatPrinterStateLabel(state) : 'Sem dados'"
-      :state-tone="state?.state ?? 'offline'"
+      :state-tone="
+        state?.state === 'unknown' ? 'stale' : (state?.state ?? 'offline')
+      "
       :connector-label="
         row.connection === 'authenticated'
           ? 'conexão direta ativa'
@@ -872,6 +911,16 @@ onMounted(() => heading.value?.focus())
       @set-pin="setPin"
       @emergency-stop="emergencyStop"
     >
+      <template #status>
+        <BambuAlarmStatus
+          v-if="
+            live &&
+            detailFrame?.vendor === 'bambu' &&
+            detailFrame.printerKey === printerKey
+          "
+          :message="detailFrame.detail.print?.message ?? ''"
+        />
+      </template>
       <template #configuracao>
         <ConfigEditorPanel
           v-if="configAdvertised"
@@ -936,17 +985,18 @@ onMounted(() => heading.value?.focus())
         />
       </template>
     </PrinterDetailDashboard>
-    <button
+    <Button
       v-if="vendorCatalog && state?.controls?.includes('pause')"
-      type="button"
+      class="pause-button"
       :disabled="!availability('pause').available || commandInFlight"
-      @click="(event) => control('pause', event)"
+      @click="(event: Event) => control('pause', event)"
     >
       Pausar impressão
-    </button>
+    </Button>
     <section
       v-if="row && live && vendorFrame"
       aria-label="Detalhes da impressora"
+      class="panel vendor-detail"
     >
       <h2>Impressão</h2>
       <p v-if="vendorFrame.detail.print?.file">
@@ -955,21 +1005,21 @@ onMounted(() => heading.value?.focus())
       <p v-if="vendorFrame.detail.print?.progress !== undefined">
         Progresso: {{ Math.round(vendorFrame.detail.print.progress * 100) }}%
       </p>
-      <button
+      <Button
         v-if="
           vendorFrame.vendor === 'creality' && state?.controls?.includes('home')
         "
-        type="button"
         :disabled="!availability('home').available || commandInFlight"
-        @click="(event) => control('home', event, { axes: ['x', 'y', 'z'] })"
+        @click="
+          (event: Event) => control('home', event, { axes: ['x', 'y', 'z'] })
+        "
       >
         Referenciar todos os eixos
-      </button>
+      </Button>
       <form
         v-if="state?.controls?.includes('start_print')"
-        @submit.prevent="
-          (event) => control('start_print', event, { file: printFile })
-        "
+        class="print-form"
+        @submit.prevent="startStoredFile"
       >
         <label for="detail-print-file">Nome do arquivo na impressora</label>
         <input
@@ -977,13 +1027,28 @@ onMounted(() => heading.value?.focus())
           v-model.trim="printFile"
           required
           maxlength="255"
+          :aria-describedby="
+            vendorFrame.vendor === 'anycubic'
+              ? 'detail-print-file-hint'
+              : undefined
+          "
         />
-        <button
+        <span
+          v-if="vendorFrame.vendor === 'anycubic'"
+          id="detail-print-file-hint"
+        >
+          Informe o nome de um arquivo .gcode já armazenado na impressora.
+        </span>
+        <Button
           type="submit"
-          :disabled="!availability('start_print').available || commandInFlight"
+          :disabled="
+            !availability('start_print').available ||
+            commandInFlight ||
+            !canStartStoredFile
+          "
         >
           Iniciar impressão
-        </button>
+        </Button>
       </form>
       <template v-if="vendorFrame.detail.fans?.length">
         <h2>Ventoinhas</h2>
@@ -997,16 +1062,17 @@ onMounted(() => heading.value?.focus())
                   : 'Câmara'
             }}: {{ Math.round(fan.speed * 100) }}%
           </p>
-          <button
+          <Button
             v-if="state?.controls?.includes('set_fan')"
-            type="button"
             :disabled="!availability('set_fan').available || commandInFlight"
-            @click="(event) => setFan(fan.name, fan.speed > 0 ? 0 : 100, event)"
+            @click="
+              (event: Event) => setFan(fan.name, fan.speed > 0 ? 0 : 100, event)
+            "
           >
             {{
               fan.speed > 0 ? 'Desligar ventoinha' : 'Ligar ventoinha a 100%'
             }}
-          </button>
+          </Button>
         </div>
       </template>
       <template v-if="vendorFrame.detail.lights?.length">
@@ -1014,12 +1080,11 @@ onMounted(() => heading.value?.focus())
         <p>
           {{ vendorFrame.detail.lights[0]?.white ? 'Ligada' : 'Desligada' }}
         </p>
-        <button
+        <Button
           v-if="state?.controls?.includes('set_light')"
-          type="button"
           :disabled="!availability('set_light').available || commandInFlight"
           @click="
-            (event) =>
+            (event: Event) =>
               control('set_light', event, {
                 on: !vendorFrame?.detail.lights?.[0]?.white,
               })
@@ -1028,7 +1093,7 @@ onMounted(() => heading.value?.focus())
           {{
             vendorFrame.detail.lights[0]?.white ? 'Desligar luz' : 'Ligar luz'
           }}
-        </button>
+        </Button>
       </template>
       <template v-if="vendorFrame.detail.materials?.length">
         <h2>Slots ACE</h2>
@@ -1044,9 +1109,17 @@ onMounted(() => heading.value?.focus())
       </template>
     </section>
 
+    <ResinLedgerPanel
+      v-if="row && ready?.scope?.farmId"
+      :key="row.assignment.assignmentId"
+      :farm-id="ready.scope.farmId"
+      :printer-key="row.assignment.printerKey"
+    />
+
     <section
       v-if="row && (playback || transfer.kind !== 'idle')"
       aria-labelledby="timelapse-playback-title"
+      class="panel"
     >
       <h2 id="timelapse-playback-title">Transferência de timelapse</h2>
       <p
@@ -1141,3 +1214,218 @@ onMounted(() => heading.value?.focus())
 </template>
 
 <style scoped src="../../components/farm/farm-view.css"></style>
+<style scoped>
+.printer-page {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+  min-width: 0;
+}
+.printer-page > nav,
+.printer-page > section,
+.printer-page > .loading {
+  margin: 0;
+}
+.nav-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.nav-links a,
+.cta {
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-raised);
+  text-decoration: none;
+  font-weight: var(--font-weight-semibold);
+}
+.nav-links a:hover,
+.cta:hover {
+  border-color: var(--color-accent);
+}
+.cta {
+  justify-self: start;
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+.page-title,
+.panel > h1 {
+  width: fit-content;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.page-title {
+  margin: 0;
+}
+.page-title:focus-visible,
+.panel h1:focus-visible,
+.panel [role='status']:focus-visible,
+.printer-page > .ui-card :deep([role='alert']:focus-visible),
+.printer-page :deep(.printer-detail__header h1:focus-visible) {
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: var(--focus-ring-offset);
+  border-radius: var(--radius-sm);
+}
+.printer-page > .ui-card {
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-raised);
+  box-shadow: none;
+}
+.printer-page > .ui-card :deep(h2) {
+  margin: 0 0 var(--space-3);
+  font-size: var(--font-size-lg);
+  line-height: var(--line-height-tight);
+}
+.printer-page > .ui-card :deep(p) {
+  margin-block: 0 var(--space-3);
+}
+.panel,
+.printer-page :deep(.printer-detail__header),
+.printer-page :deep(.printer-detail > section),
+.printer-page :deep([role='tabpanel'] > section) {
+  margin: 0;
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-raised);
+  min-width: 0;
+}
+.panel > h1,
+.panel > h2,
+.printer-page :deep(.printer-detail > section > h2),
+.printer-page :deep([role='tabpanel'] > section > h2) {
+  margin: 0 0 var(--space-3);
+  font-size: var(--font-size-lg);
+  line-height: var(--line-height-tight);
+}
+.panel > h1 {
+  font-size: clamp(var(--font-size-xl), 4vw, var(--font-size-2xl));
+}
+.panel > p,
+.printer-page :deep(.printer-detail > section > p),
+.printer-page :deep([role='tabpanel'] > section > p) {
+  margin-block: 0 var(--space-3);
+}
+.panel > :last-child,
+.printer-page :deep(.printer-detail > section > :last-child),
+.printer-page :deep([role='tabpanel'] > section > :last-child) {
+  margin-bottom: 0;
+}
+.loading {
+  display: grid;
+  gap: var(--space-3);
+}
+.loading > h1,
+.loading > p {
+  margin: 0;
+}
+.printer-page :deep(.printer-detail) {
+  display: grid;
+  gap: var(--space-4);
+}
+.printer-page :deep(.printer-detail__header) {
+  display: grid;
+  gap: var(--space-3);
+  justify-items: start;
+}
+.printer-page :deep(.printer-detail__header > *) {
+  margin: 0;
+}
+.printer-page :deep(.printer-detail__header h1) {
+  width: fit-content;
+  max-width: 100%;
+}
+.printer-page :deep(.stale strong) {
+  margin-inline-end: var(--space-2);
+}
+/* v-show hides a panel with an inline display: none, which wins over this. */
+.printer-page :deep([role='tabpanel']) {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.printer-page :deep(.tabs) {
+  margin: 0;
+}
+.pause-button {
+  justify-self: start;
+}
+.vendor-detail > h2:not(:first-child) {
+  margin-top: var(--space-4);
+}
+.print-form {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+  margin-block: var(--space-3);
+}
+.print-form label {
+  margin: 0;
+  font-weight: var(--font-weight-semibold);
+}
+.print-form input {
+  width: min(100%, 24rem);
+  color: inherit;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+.panel video {
+  display: block;
+  width: 100%;
+  max-width: 40rem;
+  margin-bottom: var(--space-3);
+}
+dialog {
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--elevation-2);
+}
+dialog h2 {
+  margin-top: 0;
+  font-size: var(--font-size-lg);
+  overflow-wrap: anywhere;
+}
+dialog .actions {
+  margin-top: var(--space-4);
+}
+dialog .actions button {
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-raised);
+  color: var(--color-accent);
+}
+dialog .actions button:first-child:not(:disabled) {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+dialog .actions button:disabled {
+  opacity: 0.6;
+}
+@media (max-width: 400px) {
+  .panel,
+  .printer-page :deep(.printer-detail__header),
+  .printer-page :deep(.printer-detail > section),
+  .printer-page :deep([role='tabpanel'] > section) {
+    padding: var(--space-4);
+  }
+  .nav-links a {
+    padding-inline: var(--space-3);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .nav-links a,
+  .cta {
+    transition: border-color 120ms ease-out;
+  }
+}
+</style>

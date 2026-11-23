@@ -48,6 +48,13 @@ const PAUSE_AUTHORITY_SERVER_LOG =
 
 /** Every discovered suite must have a contract; sort order is the run order. */
 export const PG_SUITE_CONTRACTS: Record<string, PgSuiteContract> = {
+  'test-postgres-alert-rules.ts': {
+    migrations: 'full',
+    fixture: {
+      port: 'ALERT_RULES_SYNTHETIC_TEST_PORT',
+      admitted: 'ALERT_RULES_SYNTHETIC_TEST_DISPOSABLE',
+    },
+  },
   'test-postgres-atomic-telemetry.ts': {
     migrations: 'none',
     fixture: {
@@ -132,6 +139,13 @@ export const PG_SUITE_CONTRACTS: Record<string, PgSuiteContract> = {
       admitted: 'ENROLLMENT_SYNTHETIC_TEST_DISPOSABLE',
     },
   },
+  'test-postgres-fleet-mode.ts': {
+    migrations: 'full',
+    fixture: {
+      port: 'FLEET_MODE_SYNTHETIC_TEST_PORT',
+      admitted: 'FLEET_MODE_SYNTHETIC_TEST_DISPOSABLE',
+    },
+  },
   'test-postgres-integration-apps.ts': {
     migrations: 'full',
     fixture: {
@@ -158,6 +172,13 @@ export const PG_SUITE_CONTRACTS: Record<string, PgSuiteContract> = {
     fixture: {
       port: 'INTEGRATION_JOBS_SYNTHETIC_TEST_PORT',
       admitted: 'INTEGRATION_JOBS_SYNTHETIC_TEST_DISPOSABLE',
+    },
+  },
+  'test-postgres-integration-read.ts': {
+    migrations: 'full',
+    fixture: {
+      port: 'INTEGRATION_READ_SYNTHETIC_TEST_PORT',
+      admitted: 'INTEGRATION_READ_SYNTHETIC_TEST_DISPOSABLE',
     },
   },
   'test-postgres-integration-webhooks.ts': {
@@ -227,6 +248,13 @@ export const PG_SUITE_CONTRACTS: Record<string, PgSuiteContract> = {
       admitted: 'REGISTRATION_SYNTHETIC_TEST_DISPOSABLE',
     },
   },
+  'test-postgres-resin-ledger.ts': {
+    migrations: '0092_resin_ledger',
+    fixture: {
+      port: 'RESIN_LEDGER_SYNTHETIC_TEST_PORT',
+      admitted: 'RESIN_LEDGER_SYNTHETIC_TEST_DISPOSABLE',
+    },
+  },
   'test-postgres-session-clock.ts': {
     migrations: 'full',
     fixture: {
@@ -261,6 +289,13 @@ export const PG_SUITE_CONTRACTS: Record<string, PgSuiteContract> = {
     fixture: {
       port: 'TELEMETRY_PRUNE_SYNTHETIC_TEST_PORT',
       admitted: 'TELEMETRY_PRUNE_SYNTHETIC_TEST_DISPOSABLE',
+    },
+  },
+  'test-postgres-latest-state.ts': {
+    migrations: 'full',
+    fixture: {
+      port: 'LATEST_STATE_SYNTHETIC_TEST_PORT',
+      admitted: 'LATEST_STATE_TEST_DISPOSABLE',
     },
   },
   'test-postgres-startup-gating.ts': {
@@ -586,7 +621,7 @@ async function main(): Promise<number> {
         )
       const ctx: FixtureContext = {
         port,
-        url: `postgres://fixture@127.0.0.1:${port}/fixture`,
+        url: database.connectionString,
         systemId,
         image,
         logPath: database.logPath,
@@ -601,7 +636,7 @@ async function main(): Promise<number> {
       ledger({ event: 'fixture-ready', job: name, port, state })
       const handle: JobHandle = {
         sql,
-        env: { ...env, ...additions },
+        env: { ...env, ...additions, PGPASSWORD: database.password },
         cleanup: () => database.stop(),
       }
       current.cleanup = handle.cleanup

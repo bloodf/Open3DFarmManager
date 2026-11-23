@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { useFarmRoute } from '../composables/useFarmRoute.ts'
+import { computed, inject, nextTick, onMounted, ref, watch } from 'vue'
 import {
   filterFarmRows,
   groupFarmRows,
@@ -20,14 +21,21 @@ import PrinterWallTable from '../components/farm/PrinterWallTable.vue'
 import FarmPrinterCard from '../components/farm/FarmPrinterCard.vue'
 import PrinterWallCard from '../components/farm/PrinterWallCard.vue'
 import PrinterWallSummary from '../components/farm/PrinterWallSummary.vue'
-import { useStatusSummary } from '../composables/useStatusSummary.ts'
+import { farmLocation } from '../utils/farm-scope.ts'
+import {
+  statusSummaryKey,
+  useStatusSummary,
+} from '../composables/useStatusSummary.ts'
 import { wallCardProps } from '../utils/farm-wall-card.ts'
 import FarmCardControls from '../components/farm/FarmCardControls.vue'
+import CollectionHold from '../components/farm/CollectionHold.vue'
 import PrinterAlerts from '../components/farm/PrinterAlerts.vue'
 import { useFarmControls } from '../components/farm/useFarmControls.ts'
 import { deriveAlerts } from '../utils/farm-alerts.ts'
 import {
   farmConnectionNotice,
+  formatPrinterStateLabel,
+  observationAge,
   resolvedLocalInterfaceOrigin,
   type FarmRow,
 } from '../utils/farm-view.ts'
@@ -38,13 +46,15 @@ import {
   actionDialogTitle,
 } from '../utils/farm-control.ts'
 import { extendedLabel } from '../utils/farm-control-extended.ts'
+import { COLLECTION_DIALOG_DESCRIPTION } from '../components/farm/collection-hold-view.ts'
 import { farmViewErrorText } from '../utils/farm-view-error.ts'
 import Button from '../components/ui/Button.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import ErrorState from '../components/ui/ErrorState.vue'
 import Skeleton from '../components/ui/Skeleton.vue'
 import StaleNotice from '../components/ui/StaleNotice.vue'
-const view = useFarmView()
+const { route, setFarmScope } = useFarmRoute()
+const view = useFarmView({ requestedFarm: () => route.query.farm })
 const {
   state,
   ready,
@@ -75,9 +85,11 @@ const offlineVisible = computed(
 )
 // The whole farm in one bounded request: counts and latest states even for
 // printers outside the assignment page the wall lists.
-const statusSummary = useStatusSummary({
-  farmId: () => ready.value?.scope?.farmId,
-})
+const statusSummary =
+  inject(statusSummaryKey, undefined) ??
+  useStatusSummary({
+    farmId: () => ready.value?.scope?.farmId,
+  })
 const heading = ref<HTMLElement | null>(null)
 const errorSummary = ref<HTMLElement | null>(null)
 const drafts = ref<
@@ -102,30 +114,42 @@ onMounted(() => heading.value?.focus())
 const errorText = computed(() =>
   state.value.kind === 'error' ? farmViewErrorText(state.value.reason) : '',
 )
-const route = useRoute()
-watch([() => route.query.farm, () => ready.value?.farms], ([farmId, farms]) => {
-  if (
-    typeof farmId === 'string' &&
-    farms?.some((farm) => farm.farmId === farmId) &&
-    ready.value?.scope?.farmId !== farmId
-  )
-    void selectFarm(farmId)
-})
-
 const router = useRouter()
+const scopedLink = (path: string) =>
+  farmLocation(
+    path,
+    typeof route.query.farm === 'string'
+      ? route.query.farm
+      : ready.value?.scope?.farmId,
+  )
+
 const wallQuery = computed({
-  get: () => readFarmWallQuery(route.query),
+  get: () => ({
+    ...readFarmWallQuery(route.query),
+    groupBy:
+      route.query.groupBy === undefined
+        ? 'location'
+        : readFarmWallQuery(route.query).groupBy,
+  }),
   set: (value) => {
     void router.replace({
       query: {
         ...router.currentRoute.value.query,
         ...writeFarmWallQuery(value),
+        groupBy: value.groupBy || 'none',
       },
       hash: route.hash,
     })
   },
 })
-const rows = computed(() => ready.value?.rows ?? [])
+const rows = computed(() => {
+  const inventory = ready.value?.rows ?? []
+  if (!offlineVisible.value) return inventory
+  const storedIds = new Set(
+    offlineStates.value.map((state) => state.assignmentId),
+  )
+  return inventory.filter((row) => !storedIds.has(row.assignment.assignmentId))
+})
 const facets = computed(() => {
   const fields = [
     { key: 'group', field: 'groupName', label: 'Grupo' },
@@ -188,6 +212,55 @@ function displayLocalOrigin(row: FarmRow) {
     row.observation?.state.localWebUiOrigin,
   )
 }
+const inspector = ref<HTMLDialogElement | null>(null)
+const inspectedId = ref<string | null>(null)
+const inspectedMode = ref<'in-service' | 'maintenance' | null>(null)
+watch(inspectedId, async (id, _old, onCleanup) => {
+  inspectedMode.value = null
+  if (!id || !ready.value?.scope) return
+  let active = true
+  onCleanup(() => {
+    active = false
+  })
+  try {
+    const mode = await $fetch<{ mode: 'in-service' | 'maintenance' }>(
+      `/api/farms/${encodeURIComponent(ready.value.scope.farmId)}/printers/${encodeURIComponent(id)}/mode`,
+    )
+    if (active) inspectedMode.value = mode.mode
+  } catch {
+    // Leave availability unknown when the server cannot confirm it.
+  }
+})
+const inspectedRow = computed(
+  () =>
+    (ready.value?.rows ?? [])
+      .map((row) => ({
+        ...row,
+        draft: drafts.value[row.assignment.assignmentId],
+      }))
+      .find((row) => row.assignment.assignmentId === inspectedId.value) ?? null,
+)
+watch(inspectedRow, (row) => {
+  if (!row && inspector.value?.open) inspector.value.close()
+})
+let inspectorTrigger: HTMLElement | null = null
+async function openInspector(
+  row: (typeof renderedRows.value)[number],
+  event: Event,
+) {
+  inspectorTrigger = event.currentTarget as HTMLElement
+  inspectedId.value = row.assignment.assignmentId
+  await nextTick()
+  inspector.value?.showModal()
+}
+function closeInspector() {
+  inspector.value?.close()
+}
+function inspectorClosed() {
+  inspectedId.value = null
+  inspectorTrigger?.focus()
+  inspectorTrigger = null
+}
 const pauseDialog = ref<HTMLDialogElement | null>(null)
 const pauseCancel = ref<HTMLButtonElement | null>(null)
 const dialog = {
@@ -221,31 +294,43 @@ function cancelPause(event: Event) {
 }
 </script>
 <template>
-  <main id="conteudo">
-    <small>Open3DFarmManager</small>
-    <h1 ref="heading" tabindex="-1">Minha farm</h1>
-    <nav aria-label="Navegação da farm" class="actions">
-      <NuxtLink to="/">Início</NuxtLink>
-      <NuxtLink to="/arquivos">Arquivos</NuxtLink>
-      <NuxtLink to="/impressoras">Impressoras</NuxtLink>
-      <NuxtLink to="/parear">Connectors</NuxtLink>
-      <NuxtLink to="/dispositivos">Dispositivos do navegador</NuxtLink>
-      <NuxtLink to="/sair">Sair da conta</NuxtLink>
-    </nav>
-    <p>
-      Os controles desta página são somente leitura, exceto a pausa, que exige
-      confirmação e uma conexão direta segura.
-    </p>
-    <div v-if="state.kind === 'loading'" class="loading" aria-busy="true">
+  <main id="conteudo" class="farm-page">
+    <header class="page-header">
+      <p class="eyebrow">Open3DFarmManager</p>
+      <h1 ref="heading" tabindex="-1">Minha farm</h1>
+      <p class="intro">
+        Os comandos exigem confirmação e conexão direta segura. Sem conexão
+        direta, a operação é somente leitura.
+      </p>
+      <nav aria-label="Navegação da farm">
+        <ul class="nav-links">
+          <li><NuxtLink :to="scopedLink('/')">Início</NuxtLink></li>
+          <li><NuxtLink :to="scopedLink('/arquivos')">Arquivos</NuxtLink></li>
+          <li>
+            <NuxtLink :to="scopedLink('/impressoras')">Impressoras</NuxtLink>
+          </li>
+          <li><NuxtLink :to="scopedLink('/parear')">Connectors</NuxtLink></li>
+          <li>
+            <NuxtLink :to="scopedLink('/dispositivos')"
+              >Dispositivos do navegador</NuxtLink
+            >
+          </li>
+          <li><NuxtLink :to="scopedLink('/sair')">Sair da conta</NuxtLink></li>
+        </ul>
+      </nav>
+    </header>
+    <div v-if="state.kind === 'loading'" class="loading panel" aria-busy="true">
       <p role="status">Carregando suas farms…</p>
       <Skeleton /><Skeleton /><Skeleton />
     </div>
     <section
       v-else-if="state.kind === 'sign-in-required'"
       aria-label="Acesso à farm"
+      class="panel"
     >
+      <h2>Entre para ver a farm</h2>
       <p>Entre na sua conta para consultar suas farms.</p>
-      <NuxtLink to="/entrar">Entrar</NuxtLink>
+      <NuxtLink :to="scopedLink('/entrar')" class="cta">Entrar</NuxtLink>
     </section>
     <ErrorState
       v-else-if="state.kind === 'error'"
@@ -254,23 +339,26 @@ function cancelPause(event: Event) {
       <p ref="errorSummary" role="alert" tabindex="-1">{{ errorText }}</p>
       <div class="actions">
         <Button @click="discover()">Tentar novamente</Button>
-        <NuxtLink to="/entrar">Entrar novamente</NuxtLink>
+        <NuxtLink :to="scopedLink('/entrar')">Entrar novamente</NuxtLink>
       </div>
     </ErrorState>
-    <template v-else-if="ready">
-      <p class="opaque">Conta atual: {{ ready.accountId }}</p>
-      <FarmScopeSelector
-        :ready="ready"
-        @select="selectFarm"
-        @discover="discover"
-      />
-      <template v-if="ready.scope">
-        <ApprovalPanel :farm-id="ready.scope.farmId" />
+    <div v-else-if="ready" class="stack">
+      <p class="opaque account">Conta atual: {{ ready.accountId }}</p>
+      <div class="setup-grid">
+        <FarmScopeSelector
+          :ready="ready"
+          @select="setFarmScope"
+          @discover="discover"
+        />
         <FarmDeviceSelector
+          v-if="ready.scope"
           :keys="ready.keys"
           :connection-notice="connectionNotice"
           @select="selectKey"
         />
+      </div>
+      <template v-if="ready.scope">
+        <ApprovalPanel :farm-id="ready.scope.farmId" />
         <SpoolInventory
           :items="ready.spools"
           :rows="ready.rows"
@@ -287,6 +375,7 @@ function cancelPause(event: Event) {
           :now-wall-ms="liveNow().wall"
         />
         <section
+          class="panel"
           aria-labelledby="printers-heading"
           :aria-busy="ready.inventory === 'loading'"
         >
@@ -304,27 +393,24 @@ function cancelPause(event: Event) {
             <Skeleton /><Skeleton /><Skeleton />
           </div>
           <template v-else>
-            <div class="actions">
-              <button
-                type="button"
+            <div class="actions toolbar">
+              <Button
                 @click="selectFarm(ready.scope.farmId, ready.printerAfter)"
               >
                 Atualizar cadastro
-              </button>
-              <button
+              </Button>
+              <Button
                 v-if="ready.printerAfter"
-                type="button"
                 @click="selectFarm(ready.scope.farmId)"
               >
                 Primeira página de atribuições
-              </button>
-              <button
+              </Button>
+              <Button
                 v-if="ready.nextPrinter"
-                type="button"
                 @click="selectFarm(ready.scope.farmId, ready.nextPrinter)"
               >
                 Próximas atribuições
-              </button>
+              </Button>
             </div>
             <p v-if="ready.printerAfter">
               Exibindo outra página de atribuições.
@@ -338,18 +424,38 @@ function cancelPause(event: Event) {
               "
               description="Atribua uma impressora a um Connector para acompanhar o estado dela aqui."
             >
-              <NuxtLink to="/impressoras">Gerenciar atribuições</NuxtLink>
+              <NuxtLink
+                :to="
+                  farmLocation(
+                    '/impressoras',
+                    typeof route.query.farm === 'string'
+                      ? route.query.farm
+                      : undefined,
+                  )
+                "
+                >Gerenciar atribuições</NuxtLink
+              >
             </EmptyState>
-            <PrinterWallFilters
-              v-model="wallQuery"
-              :facets="facets"
-              :counts="counts"
-              :total="ready.rows.length"
-              :visible="renderedRows.length"
-            />
+            <form
+              v-if="rows.length"
+              role="search"
+              aria-label="Filtrar impressoras"
+              class="filters"
+              @submit.prevent
+            >
+              <PrinterWallFilters
+                v-model="wallQuery"
+                :facets="facets"
+                :counts="counts"
+                :total="rows.length"
+                :visible="renderedRows.length"
+              />
+            </form>
             <PrinterWallTable
+              v-if="rows.length"
               v-slot="{ rows: wallRows }"
               :rows="renderedRows"
+              :farm-id="ready.scope.farmId"
               :live-now="liveNow"
             >
               <template
@@ -365,62 +471,51 @@ function cancelPause(event: Event) {
                   }}
                 </h3>
                 <ul class="printers">
-                  <FarmPrinterCard
+                  <li
                     v-for="row in group.rows"
                     :key="row.assignment.assignmentId"
-                    :row="row"
-                    :farm-id="ready.scope.farmId"
-                    :camera-for="cameraFor"
-                    :live-now="liveNow"
-                    :alerts="
-                      alertsSummary.byAssignment[row.assignment.assignmentId] ??
-                      []
+                    class="floor-tile"
+                    :data-state="
+                      row.connection !== 'authenticated'
+                        ? 'offline'
+                        : (row.observation?.state.state ?? 'offline')
                     "
-                    @setup="setupLink(row.assignment.assignmentId)"
-                    @save="saveLink(row.assignment.assignmentId)"
-                    @cancel="delete drafts[row.assignment.assignmentId]"
                   >
-                    <template #summary>
-                      <PrinterWallCard
-                        v-bind="
-                          wallCardProps(
-                            row,
-                            alertsSummary.byAssignment[
-                              row.assignment.assignmentId
-                            ] ?? [],
-                          )
+                    <button
+                      type="button"
+                      class="floor-tile__open"
+                      @click="openInspector(row, $event)"
+                    >
+                      <span>Inspecionar</span>
+                      <strong>{{
+                        row.assignment.displayName || row.assignment.printerKey
+                      }}</strong>
+                      <span>{{
+                        row.connection !== 'authenticated'
+                          ? 'Sem conexão direta'
+                          : row.observation
+                            ? formatPrinterStateLabel(row.observation.state)
+                            : 'Aguardando estado'
+                      }}</span>
+                      <span
+                        v-if="
+                          row.observation &&
+                          observationAge(row.observation, liveNow()).stale
                         "
-                        :now="liveNow()"
-                        :heading-level="wallQuery.groupBy ? 4 : 3"
-                        embedded
-                      />
-                    </template>
-                    <template #local-link>
-                      <a
-                        :href="displayLocalOrigin(row) ?? undefined"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        referrerpolicy="no-referrer"
-                        :aria-describedby="`local-help-${row.assignment.assignmentId}`"
-                        >Abrir interface local de
-                        <span class="opaque">{{
-                          row.assignment.printerKey
-                        }}</span></a
+                        >Dados desatualizados</span
                       >
-                    </template>
-                    <FarmCardControls
+                      <span v-if="row.observation?.state.filename">{{
+                        row.observation.state.filename
+                      }}</span>
+                    </button>
+                    <CollectionHold
                       :row="row"
                       :keys="ready.keys"
                       :control-enabled="pauseEnabled"
                       :command-in-flight="commandInFlight"
-                      :live-now="liveNow"
-                      :last-result="
-                        lastControlResults[row.assignment.assignmentId]
-                      "
-                      :availability="availability"
                       :open-control="openControl"
                     />
-                  </FarmPrinterCard>
+                  </li>
                 </ul>
               </template>
             </PrinterWallTable>
@@ -428,6 +523,7 @@ function cancelPause(event: Event) {
         </section>
         <section
           v-if="offlineVisible"
+          class="panel"
           aria-labelledby="last-known-heading"
           aria-describedby="last-known-description"
         >
@@ -443,7 +539,90 @@ function cancelPause(event: Event) {
           </ul>
         </section>
       </template>
-    </template>
+    </div>
+    <dialog
+      ref="inspector"
+      v-if="ready?.scope"
+      class="floor-inspector"
+      aria-label="Inspeção da impressora"
+      @close="inspectorClosed"
+    >
+      <button
+        type="button"
+        class="floor-inspector__close"
+        @click="closeInspector"
+      >
+        Fechar inspeção
+      </button>
+      <p v-if="inspectedRow">
+        Disponibilidade:
+        {{
+          inspectedMode === 'maintenance'
+            ? 'Em manutenção'
+            : inspectedMode === 'in-service'
+              ? 'Em serviço'
+              : 'Indisponível'
+        }}
+      </p>
+      <ul class="inspector-list">
+        <FarmPrinterCard
+          v-if="inspectedRow"
+          :key="inspectedRow.assignment.assignmentId"
+          :row="inspectedRow"
+          :farm-id="ready.scope.farmId"
+          :camera-for="cameraFor"
+          :live-now="liveNow"
+          :alerts="
+            alertsSummary.byAssignment[inspectedRow.assignment.assignmentId] ??
+            []
+          "
+          @setup="setupLink(inspectedRow.assignment.assignmentId)"
+          @save="saveLink(inspectedRow.assignment.assignmentId)"
+          @cancel="delete drafts[inspectedRow.assignment.assignmentId]"
+        >
+          <template #summary>
+            <PrinterWallCard
+              v-bind="
+                wallCardProps(
+                  inspectedRow,
+                  alertsSummary.byAssignment[
+                    inspectedRow.assignment.assignmentId
+                  ] ?? [],
+                  ready.scope.farmId,
+                )
+              "
+              :now="liveNow()"
+              :heading-level="wallQuery.groupBy ? 4 : 3"
+              embedded
+            />
+          </template>
+          <template #local-link="{ row }">
+            <a
+              :href="displayLocalOrigin(row) ?? undefined"
+              target="_blank"
+              rel="noopener noreferrer"
+              referrerpolicy="no-referrer"
+              :aria-describedby="`local-help-${row.assignment.assignmentId}`"
+              >Abrir interface local de
+              <span class="opaque">{{ row.assignment.printerKey }}</span></a
+            >
+          </template>
+          <FarmCardControls
+            :row="inspectedRow"
+            :keys="ready.keys"
+            :control-enabled="pauseEnabled"
+            :command-in-flight="commandInFlight"
+            :live-now="liveNow"
+            :last-result="
+              lastControlResults[inspectedRow.assignment.assignmentId]
+            "
+            :availability="availability"
+            :open-control="openControl"
+            :show-collection="false"
+          />
+        </FarmPrinterCard>
+      </ul>
+    </dialog>
     <dialog
       ref="pauseDialog"
       aria-labelledby="pause-dialog-title"
@@ -468,7 +647,9 @@ function cancelPause(event: Event) {
                   pauseTarget.action as ControlAction,
                   pauseTarget.printerKey,
                 )
-              : 'Confirme o comando para esta impressora. Ele será enviado diretamente ao Connector e não será repetido automaticamente.'
+              : pauseTarget.action === 'confirm_collection'
+                ? COLLECTION_DIALOG_DESCRIPTION
+                : 'Confirme o comando para esta impressora. Ele será enviado diretamente ao Connector e não será repetido automaticamente.'
           }}
         </p>
         <p role="status" aria-live="polite">{{ pauseStatus }}</p>
@@ -483,7 +664,9 @@ function cancelPause(event: Event) {
                 ? actionButtonConfirmationLabel(
                     pauseTarget.action as ControlAction,
                   )
-                : 'Confirmar comando'
+                : pauseTarget.action === 'confirm_collection'
+                  ? 'Confirmar placa livre'
+                  : 'Confirmar comando'
             }}
           </button>
           <button
@@ -505,3 +688,295 @@ function cancelPause(event: Event) {
 </template>
 
 <style scoped src="../components/farm/farm-view.css"></style>
+<style scoped>
+.farm-page {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+}
+.page-header {
+  display: grid;
+  gap: var(--space-2);
+}
+.eyebrow {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+.page-header h1 {
+  width: fit-content;
+  max-width: 100%;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.page-header h1:focus-visible,
+.stack [role='alert']:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: var(--focus-ring-offset);
+  border-radius: var(--radius-sm);
+}
+.intro {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+.nav-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.nav-links a,
+.cta {
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-raised);
+  text-decoration: none;
+  font-weight: var(--font-weight-semibold);
+}
+.nav-links a:hover,
+.cta:hover {
+  border-color: var(--color-accent);
+}
+.nav-links a[aria-current='page'],
+.nav-links a.router-link-exact-active {
+  border-color: var(--color-accent);
+}
+.cta {
+  justify-self: start;
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+.stack {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.stack > :deep(section),
+.setup-grid > :deep(section),
+.panel {
+  margin: 0;
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-raised);
+  min-width: 0;
+}
+.panel > h2,
+.stack > :deep(section) > h2,
+.setup-grid > :deep(section) > h2 {
+  margin: 0 0 var(--space-3);
+  font-size: var(--font-size-lg);
+  line-height: var(--line-height-tight);
+}
+.panel > p,
+.stack > :deep(section) > p,
+.setup-grid > :deep(section) > p {
+  margin-block: 0 var(--space-3);
+}
+.account {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+.setup-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+.toolbar {
+  margin-bottom: var(--space-4);
+}
+.filters {
+  margin-block: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  columns: 14rem 3;
+  column-gap: var(--space-5);
+}
+.filters :deep(label) {
+  margin: 0 0 var(--space-1);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  break-after: avoid;
+}
+.filters :deep(select),
+.filters :deep(input[type='search']),
+.filters :deep(button) {
+  width: 100%;
+  margin-bottom: var(--space-3);
+  break-inside: avoid;
+  color: inherit;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+.filters :deep(button) {
+  background: var(--color-surface-raised);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+.filters :deep(ul),
+.filters :deep(p) {
+  column-span: all;
+}
+.filters :deep(ul) {
+  margin: var(--space-2) 0;
+  padding: 0;
+  list-style: none;
+  gap: var(--space-1) var(--space-4);
+  font-size: var(--font-size-sm);
+}
+.filters :deep(p) {
+  margin: 0 0 var(--space-1);
+  font-weight: var(--font-weight-semibold);
+}
+.printers {
+  gap: var(--space-4);
+}
+.printers > :deep(.printer-card) {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  margin: 0;
+}
+.last-known-list {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+}
+dialog {
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--elevation-2);
+}
+dialog h2 {
+  margin-top: 0;
+  font-size: var(--font-size-lg);
+  overflow-wrap: anywhere;
+}
+dialog .actions {
+  margin-top: var(--space-4);
+}
+dialog .actions button {
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-raised);
+  color: var(--color-accent);
+}
+dialog .actions button:first-child:not(:disabled) {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+dialog .actions button:disabled {
+  opacity: 0.6;
+}
+@media (max-width: 400px) {
+  .stack > :deep(section),
+  .setup-grid > :deep(section),
+  .panel {
+    padding: var(--space-4);
+  }
+  .nav-links a {
+    padding-inline: var(--space-3);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .nav-links a,
+  .cta {
+    transition: border-color 120ms ease-out;
+  }
+}
+</style>
+
+<style scoped>
+.floor-tile {
+  min-width: 0;
+  border: 1px solid var(--ops-border);
+  border-radius: var(--ops-radius-lg);
+  background: var(--ops-panel);
+  color: var(--ops-text);
+  overflow-wrap: anywhere;
+}
+.floor-tile[data-state='offline'] {
+  background: var(--ops-offline-hatch);
+}
+.floor-tile__open {
+  display: grid;
+  width: 100%;
+  gap: var(--ops-space-2);
+  padding: var(--ops-space-3);
+  border: 0;
+  border-inline-start: 4px solid var(--ops-idle);
+  background: transparent;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.floor-tile[data-state='printing'] .floor-tile__open {
+  border-inline-start-color: var(--ops-printing);
+}
+.floor-tile[data-state='paused'] .floor-tile__open {
+  border-inline-start-color: var(--ops-attention);
+}
+.floor-tile[data-state='error'] .floor-tile__open {
+  border-inline-start-color: var(--ops-fault);
+}
+.floor-tile__open span {
+  font-size: var(--ops-text-small);
+}
+.floor-tile__open span:nth-child(3) {
+  width: fit-content;
+  padding: var(--ops-space-1);
+  color: var(--ops-idle);
+  background: var(--ops-idle-bg);
+}
+.floor-tile[data-state='printing'] .floor-tile__open span:nth-child(3) {
+  color: var(--ops-printing);
+  background: var(--ops-printing-bg);
+}
+.floor-tile[data-state='paused'] .floor-tile__open span:nth-child(3) {
+  color: var(--ops-attention);
+  background: var(--ops-attention-bg);
+}
+.floor-tile[data-state='error'] .floor-tile__open span:nth-child(3) {
+  color: var(--ops-fault);
+  background: var(--ops-fault-bg);
+}
+.floor-tile[data-state='offline'] .floor-tile__open span:nth-child(3) {
+  color: var(--ops-offline);
+  background: var(--ops-offline-bg);
+}
+.floor-tile :deep(.collection-hold) {
+  margin: var(--ops-space-2);
+}
+.floor-inspector {
+  position: fixed;
+  inset: 0 0 0 auto;
+  margin: 0;
+  width: min(36rem, 100vw);
+  max-width: 100vw;
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: auto;
+  border: 0;
+  border-inline-start: 1px solid var(--ops-border);
+  background: var(--ops-panel);
+  color: var(--ops-text);
+}
+.floor-inspector::backdrop {
+  background: color-mix(in srgb, var(--ops-text) 50%, transparent);
+}
+.inspector-list {
+  list-style: none;
+  padding: 0;
+}
+</style>

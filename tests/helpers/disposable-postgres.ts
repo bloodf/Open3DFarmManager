@@ -11,12 +11,20 @@ import assert from 'node:assert/strict'
 import { execFile, execFileSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { existsSync, readdirSync } from 'node:fs'
-import { appendFile, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
+import {
+  appendFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import postgres, { type Sql } from 'postgres'
+import { fixturePostgresHba } from './fixture-postgres-hba.ts'
 import {
   catalogThrough,
   loadMigrationCatalog,
@@ -40,6 +48,19 @@ export interface PostgresBinaries {
 }
 
 let cachedBinaries: PostgresBinaries | undefined
+
+function assertPgIdent(value: string): string {
+  if (!/^[a-z_][a-z0-9_]{0,62}$/.test(value))
+    throw new Error('Invalid PostgreSQL identifier')
+  return value
+}
+
+function reportCleanupFailure(context: string, error: unknown): void {
+  process.emitWarning(
+    `${context}: ${error instanceof Error ? error.message : String(error)}`,
+    { type: 'CleanupWarning' },
+  )
+}
 
 /**
  * Lowest supported server major. Runtime and suites set transaction_timeout,
@@ -78,7 +99,9 @@ export function findPostgresBin(forceRefresh = false): PostgresBinaries {
         candidates.push(join(linuxBase, v, 'bin'))
       }
     }
-  } catch {}
+  } catch (error) {
+    reportCleanupFailure('Could not inspect PostgreSQL installations', error)
+  }
 
   const tooOld: string[] = []
   for (const dir of candidates) {
@@ -153,10 +176,13 @@ export interface DisposablePostgresInput {
   isolated?: boolean
   docker?: DockerCommand | undefined
   image?: string | undefined
+  additionalScramRoles?: string[]
 }
 
 export interface DisposablePostgresFixture {
   readonly port: number
+  readonly password: string
+  readonly connectionString: string
   readonly container?: string | undefined
   readonly dataDir?: string | undefined
   readonly tempDir?: string | undefined
@@ -184,11 +210,20 @@ export function disposablePostgres(
   let logPath: string | undefined
   let systemId: string | undefined
   let testDbName: string | undefined
+  let ownedRole: string | undefined
   let rootSql: Sql | undefined
+  const password = randomBytes(32).toString('hex')
+  let connectionString = ''
 
   return {
     get port() {
       return port
+    },
+    get password() {
+      return password
+    },
+    get connectionString() {
+      return connectionString
     },
     get container() {
       return container
@@ -239,7 +274,10 @@ export function disposablePostgres(
           ...['--tmpfs', '/tmp:rw,mode=1777'],
           ...['-p', `127.0.0.1:${input.port || ''}:5432`],
           ...['-e', 'POSTGRES_USER=fixture', '-e', 'POSTGRES_DB=fixture'],
-          ...['-e', 'POSTGRES_HOST_AUTH_METHOD=trust'],
+          // Keep Docker TCP password authentication because bridge peers can
+          // reach PostgreSQL directly. Use the native provider for passwordless
+          // test logins.
+          ...['-e', `POSTGRES_PASSWORD=${password}`],
           ...['-e', 'PGDATA=/var/lib/postgresql/data/pgdata'],
           image,
           ...(input.postgresArgs ?? []),
@@ -264,35 +302,58 @@ export function disposablePostgres(
           onnotice: () => {},
           database: 'fixture',
           username: 'fixture',
-          password: '',
+          password,
           ssl: false,
           max: 4,
           connect_timeout: 3,
           connection: { application_name: name, statement_timeout: 10000 },
         })
       } else if (testDatabaseUrl) {
-        // Provider: existing superuser URL (OPENFARM_TEST_DATABASE_URL)
+        // Provider: existing superuser URL (OPENFARM_TEST_DATABASE_URL).
+        // The fixture role is task-owned and removed with its database.
         const parsed = new URL(testDatabaseUrl)
         port = Number(parsed.port || 5432)
+        if (!Number.isInteger(port) || port < 1 || port > 65535)
+          throw new Error('Invalid existing cluster port')
         rootSql = postgres(testDatabaseUrl, { max: 1, onnotice: () => {} })
-        testDbName = `o3dfm_test_${randomBytes(4).toString('hex')}`
-        await rootSql.unsafe(
-          `DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'fixture') THEN CREATE ROLE fixture WITH SUPERUSER LOGIN; END IF; END $$;`,
-        )
-        await rootSql.unsafe(`CREATE DATABASE "${testDbName}" OWNER fixture`)
-        ledger({ resource: 'database', name: testDbName, url: testDatabaseUrl })
-        sql = postgres({
-          host: parsed.hostname,
-          port,
-          onnotice: () => {},
-          database: testDbName,
-          username: 'fixture',
-          password: '',
-          ssl: false,
-          max: 4,
-          connect_timeout: 3,
-          connection: { application_name: name, statement_timeout: 10000 },
-        })
+        const databaseName = `o3dfm_test_${randomBytes(4).toString('hex')}`
+        const roleName = `o3dfm_fixture_${randomBytes(4).toString('hex')}`
+        testDbName = databaseName
+        try {
+          await rootSql.unsafe(
+            `CREATE ROLE "${assertPgIdent(roleName)}" WITH SUPERUSER LOGIN PASSWORD '${password}'`,
+          )
+          ownedRole = roleName
+          await rootSql.unsafe(
+            `CREATE DATABASE "${assertPgIdent(databaseName)}" OWNER "${assertPgIdent(roleName)}"`,
+          )
+          ledger({
+            resource: 'database',
+            name: databaseName,
+            host: parsed.hostname,
+            port,
+          })
+          sql = postgres({
+            host: parsed.hostname,
+            port,
+            onnotice: () => {},
+            database: databaseName,
+            username: roleName,
+            password,
+            ssl: false,
+            max: 4,
+            connect_timeout: 3,
+            connection: { application_name: name, statement_timeout: 10000 },
+          })
+        } catch (error) {
+          await this.stop().catch((cleanupError) => {
+            reportCleanupFailure(
+              'Could not clean up failed existing cluster',
+              cleanupError,
+            )
+          })
+          throw error
+        }
       } else {
         // Default provider: throwaway cluster made with initdb + pg_ctl on loopback
         const bins = findPostgresBin()
@@ -306,22 +367,30 @@ export function disposablePostgres(
         const logDir = join(dataDir, 'log')
         logPath = join(logDir, 'postgresql.log')
         const pgCtlLog = join(tempDir, 'pg_ctl.log')
+        const passwordFile = join(tempDir, 'password')
 
         ledger({ resource: 'cluster', name, tempDir, port })
 
         try {
+          await writeFile(passwordFile, password, { mode: 0o600 })
           await exec(bins.initdb, [
             '-D',
             dataDir,
             '-U',
             'fixture',
-            '--auth-local=trust',
-            '--auth-host=trust',
+            '--auth-local=scram-sha-256',
+            '--auth-host=scram-sha-256',
+            `--pwfile=${passwordFile}`,
             '--no-instructions',
             '--no-locale',
             '-E',
             'UTF-8',
           ])
+
+          await writeFile(
+            join(dataDir, 'pg_hba.conf'),
+            fixturePostgresHba(input.additionalScramRoles),
+          )
 
           // Configure high-performance test settings and logging
           await appendFile(
@@ -389,7 +458,7 @@ log_timezone = 'UTC'
             onnotice: () => {},
             database: 'postgres',
             username: 'fixture',
-            password: '',
+            password,
             ssl: false,
             max: 1,
             connect_timeout: 5,
@@ -403,7 +472,7 @@ log_timezone = 'UTC'
             onnotice: () => {},
             database: 'fixture',
             username: 'fixture',
-            password: '',
+            password,
             ssl: false,
             max: 4,
             connect_timeout: 3,
@@ -420,14 +489,37 @@ log_timezone = 'UTC'
                 'immediate',
                 'stop',
               ])
-            } catch {}
+            } catch (cleanupError) {
+              reportCleanupFailure(
+                'Could not stop failed PostgreSQL startup',
+                cleanupError,
+              )
+            }
           }
           if (tempDir && existsSync(tempDir)) {
-            await rm(tempDir, { recursive: true, force: true }).catch(() => {})
+            await rm(tempDir, { recursive: true, force: true }).catch(
+              (cleanupError) => {
+                reportCleanupFailure(
+                  'Could not remove failed PostgreSQL startup directory',
+                  cleanupError,
+                )
+              },
+            )
           }
           throw startupErr
         }
       }
+
+      const host = testDatabaseUrl
+        ? new URL(testDatabaseUrl).hostname
+        : '127.0.0.1'
+      const url = new URL('postgresql://localhost')
+      url.hostname = host
+      url.port = String(port)
+      url.username = ownedRole ?? 'fixture'
+      url.password = password
+      url.pathname = `/${testDbName ?? 'fixture'}`
+      connectionString = url.toString()
 
       try {
         assert.equal(
@@ -473,7 +565,12 @@ log_timezone = 'UTC'
         )
         return sql
       } catch (err) {
-        await this.stop().catch(() => {})
+        await this.stop().catch((cleanupError) => {
+          reportCleanupFailure(
+            'Could not clean up failed PostgreSQL fixture',
+            cleanupError,
+          )
+        })
         throw err
       }
     },
@@ -488,7 +585,9 @@ log_timezone = 'UTC'
         try {
           const content = await readFile(logPath, 'utf8')
           return content.slice(-10000)
-        } catch {}
+        } catch (error) {
+          reportCleanupFailure('Could not read PostgreSQL logs', error)
+        }
       }
       return ''
     },
@@ -528,10 +627,22 @@ log_timezone = 'UTC'
           }
         } else if (testDatabaseUrl && rootSql) {
           if (testDbName) {
-            await rootSql.unsafe(`DROP DATABASE IF EXISTS "${testDbName}"`)
+            await rootSql.unsafe(
+              `DROP DATABASE IF EXISTS "${assertPgIdent(testDbName)}" WITH (FORCE)`,
+            )
             ledger({ removed: 'database', name: testDbName })
+            testDbName = undefined
           }
-          await rootSql.end()
+          if (ownedRole) {
+            await rootSql.unsafe(
+              `DROP ROLE IF EXISTS "${assertPgIdent(ownedRole)}"`,
+            )
+            ledger({ removed: 'role', name: ownedRole })
+            ownedRole = undefined
+          }
+          const root = rootSql
+          rootSql = undefined
+          await root.end()
         } else {
           // Local cluster: stop pg_ctl and remove temp data directory
           if (dataDir && existsSync(dataDir)) {
@@ -544,10 +655,16 @@ log_timezone = 'UTC'
                 'immediate',
                 'stop',
               ])
-            } catch {}
+            } catch (error) {
+              failure ??= error
+            }
           }
           if (tempDir && existsSync(tempDir)) {
-            await rm(tempDir, { recursive: true, force: true }).catch(() => {})
+            await rm(tempDir, { recursive: true, force: true }).catch(
+              (error) => {
+                failure ??= error
+              },
+            )
             ledger({ removed: 'cluster', tempDir })
           }
         }

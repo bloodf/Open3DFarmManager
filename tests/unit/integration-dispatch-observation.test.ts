@@ -74,6 +74,10 @@ test('dispatch observations preserve the attempt across repeated confirmations a
       attemptId: '200',
     })
     collection = observeDispatch(collection, 300)
+    expect(await query()).toMatchObject({
+      printerState: 'idle',
+      plateState: 'unknown',
+    })
     mock.control.update({ state: 'printing' })
     expect(await query()).toMatchObject({
       printerState: 'busy',

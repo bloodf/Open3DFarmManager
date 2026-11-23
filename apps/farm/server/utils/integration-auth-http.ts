@@ -246,7 +246,7 @@ const policies: RoutePolicy[] = [
   {
     method: 'POST',
     path: /^\/printers\/[^/]+\/actions$/,
-    scopes: ['control:basic', 'control:extended'],
+    scopes: ['control:basic', 'control:extended', 'plates:confirm'],
   },
   {
     method: 'GET',
@@ -421,6 +421,7 @@ async function readActionScope(request: Request) {
       : 'invalid-request'
   }
   if (typeof action !== 'string') return 'invalid-request'
+  if (action === 'confirm_collection') return 'plates:confirm'
   return ['pause', 'resume', 'cancel'].includes(action)
     ? 'control:basic'
     : 'control:extended'

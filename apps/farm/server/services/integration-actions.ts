@@ -121,9 +121,11 @@ export function parseActionRequest(body: unknown): ApiEnvelopeAction | null {
     candidate = { ...input, args: { ...args, target_c: targetCelsius } }
   }
   const parsed = ControlArguments.safeParse(candidate)
+  // Plate confirmation is a printer action, but it is not an idle-gated control.
   if (
     !parsed.success ||
-    !API_ENVELOPE_ACTIONS.includes(parsed.data.action as never)
+    (parsed.data.action !== 'confirm_collection' &&
+      !API_ENVELOPE_ACTIONS.includes(parsed.data.action as never))
   )
     return null
   return parsed.data as ApiEnvelopeAction

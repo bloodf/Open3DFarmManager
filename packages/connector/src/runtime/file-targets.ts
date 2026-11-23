@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { readFileSync } from 'node:fs'
+import { ANYCUBIC_FILE_MODEL } from '../anycubic/files.ts'
 import type { AgentRuntimeConfig } from '../config/runtime.ts'
 import { readBambuCredentials } from '../bambu/credentials.ts'
 import {
@@ -10,6 +11,8 @@ import { moonrakerQueryClient } from './api-query-moonraker.ts'
 import {
   readPrinterBinding,
   readBambuPrinterBinding,
+  readAnycubicPrinterBinding,
+  readCrealityPrinterBinding,
 } from '../control/printer-binding.ts'
 import { createKobraLinkFilesTarget } from '../kobralink/runtime.ts'
 import type { KobraLinkFetch } from '../kobralink/client.ts'
@@ -113,6 +116,8 @@ export function createFileTargets(input: {
         (printer) => printer.printerKey === controlledKey,
       )
       if (!creality) return undefined
+      const binding = input.config.bindingFor(input.assignmentId)
+      const local = binding && readCrealityPrinterBinding(binding)
       const host = creality.host.includes(':')
         ? `[${creality.host}]`
         : creality.host
@@ -121,19 +126,35 @@ export function createFileTargets(input: {
           backend: 'creality',
           origin: `http://${host}:${creality.httpPort ?? 80}`,
         },
-        list: { backend: 'creality' },
+        list: {
+          backend: 'creality',
+          ...(binding && local?.printerKey === controlledKey
+            ? { binding }
+            : {}),
+        },
       }
     }
-    // The Anycubic LAN library documents neither an upload body nor a
-    // listing schema (anycubic/files.ts). The target still exists so the page
-    // is answered "unsupported" instead of being refused as unauthorized.
-    if (
-      collection.version === 5 &&
-      collection.anycubic.printers.some(
-        (printer) => printer.printerKey === controlledKey,
+    if (collection.version === 5) {
+      const handle = input.config.bindingFor(input.assignmentId)
+      const binding = handle && readAnycubicPrinterBinding(handle)
+      if (
+        handle &&
+        binding?.modelId === ANYCUBIC_FILE_MODEL &&
+        binding.printerKey === controlledKey
+      ) {
+        const target = { backend: 'anycubic', binding: handle } as const
+        return { upload: target, list: target }
+      }
+      if (
+        collection.anycubic.printers.some(
+          (printer) => printer.printerKey === controlledKey,
+        )
       )
-    )
-      return { upload: { backend: 'anycubic' }, list: { backend: 'anycubic' } }
+        return {
+          upload: { backend: 'anycubic' },
+          list: { backend: 'anycubic' },
+        }
+    }
     return undefined
   }
   const provisioned = targets()

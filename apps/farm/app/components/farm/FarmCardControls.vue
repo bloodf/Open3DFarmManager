@@ -2,11 +2,13 @@
 import FarmMacrosControls from '../FarmMacrosControls.vue'
 import FarmExtendedControls from '../FarmExtendedControls.vue'
 import PrinterControls from '../PrinterControls.vue'
+import CollectionHold from './CollectionHold.vue'
 import { type FarmRow, type FarmKeyState } from '../../utils/farm-view.ts'
 import { isKobraXAssignment } from '../../utils/kobralink-onboarding.ts'
 import { type ExtendedControlAction } from '../../../../../packages/farm-protocol/src/control-actions.ts'
 defineProps<{
   row: FarmRow
+  showCollection?: boolean
   keys: FarmKeyState
   controlEnabled: boolean
   commandInFlight: boolean
@@ -23,6 +25,14 @@ defineProps<{
 </script>
 
 <template>
+  <CollectionHold
+    v-if="showCollection !== false && !isKobraXAssignment(row.assignment)"
+    :row="row"
+    :keys="keys"
+    :control-enabled="controlEnabled"
+    :command-in-flight="commandInFlight"
+    :open-control="openControl"
+  />
   <FarmMacrosControls
     v-if="!isKobraXAssignment(row.assignment)"
     :row="row"

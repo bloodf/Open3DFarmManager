@@ -1,12 +1,17 @@
+<script setup lang="ts">
+import AccountForm from '../components/onboarding/AccountForm.vue'
+import OnboardingPage from '../components/onboarding/OnboardingPage.vue'
+</script>
+
 <template>
-  <main id="conteudo">
-    <small>Open3DFarmManager</small>
-    <h1>Criar conta</h1>
-    <p>
-      Use o convite enviado por um proprietário da farm. Cada convite funciona
-      uma única vez e expira em até 72 horas.
-    </p>
-    <AccountCreateForm
+  <OnboardingPage title="Criar conta" narrow>
+    <template #intro>
+      <p>
+        Use o convite enviado por um proprietário da farm. Cada convite funciona
+        uma única vez e expira em até 72 horas.
+      </p>
+    </template>
+    <AccountForm
       endpoint="/api/auth/register"
       token-header="x-invite-token"
       token-label="Código do convite"
@@ -14,6 +19,12 @@
       submit-label="Criar conta"
       token-from-fragment
     />
-    <p><NuxtLink to="/entrar">Já tenho conta</NuxtLink></p>
-  </main>
+    <p class="alt"><NuxtLink to="/entrar">Já tenho conta</NuxtLink></p>
+  </OnboardingPage>
 </template>
+
+<style scoped>
+.alt {
+  margin: 0;
+}
+</style>

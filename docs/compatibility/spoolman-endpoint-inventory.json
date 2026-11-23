@@ -1,0 +1,2843 @@
+{
+  "id": "spoolman-endpoint-inventory",
+  "upstream": {
+    "project": "Spoolman",
+    "repository": "https://github.com/Donkie/Spoolman",
+    "license": "MIT",
+    "version_tag": "v0.27.1",
+    "source_revision": "ff8efd517b76a4b2783f29c89e9b9fbcd8cd167b",
+    "image_digest": "sha256:1405c3db0661cabf45209701f95304cf65f7db3b0f262dc824d32a1694fdf5fa",
+    "openapi_sha256": "8a49da4878281579db33d7f85db1bc702a552ddd2f964f7a44b7caaad0a05e1d",
+    "license_sha256": "cf3df3be715594e4aa388b88689cc8663a69d69fdbffa8a716f2187d9852541d"
+  },
+  "cutoff": "2026-11-21",
+  "method": "OpenAPI export from pinned FastAPI app plus static review of websocket decorators and models.py. No Spoolman container executed during inventory generation.",
+  "source_files_sha256": {
+    "spoolman/api/v1/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "spoolman/api/v1/export.py": "f51ddf5e9f5f550443d93b50973590aa5b75f4887f181dc1c368191932c470a6",
+    "spoolman/api/v1/externaldb.py": "691c6a9b3e2f2e9bbce5a9c0c21bdcb1a62036ee38d9cd2a3f377986f7bd5148",
+    "spoolman/api/v1/field.py": "9a592c56e0d04c44b658ff39f7d9b11bed08bce771e7a0f14ba8fb99e20763e3",
+    "spoolman/api/v1/filament.py": "e1b345acbeefa4177b6627e3acb98cd0fc075ae3009c4ebaf0a7d8f3110b6b08",
+    "spoolman/api/v1/models.py": "d1cb2fbe251a52e200ea7de0bf8d2b4de389600cfd49727fc2d7ba3635574752",
+    "spoolman/api/v1/other.py": "7dd3d02db156397a59955b4d2136a92e61e14296918e726bff321b43cb15cf57",
+    "spoolman/api/v1/router.py": "de349980b70139ff1e0cc4b92c1702fbee0e3c7a3272766ed5f88fb4b491965e",
+    "spoolman/api/v1/search.py": "de068fbd86560e60a510a7958f224708681feae20ba8710c5c51d538341e94a7",
+    "spoolman/api/v1/setting.py": "a54a312fede634baebb1360ef881132c8f5956ccf31e72f5bd5b4af9e9cb1410",
+    "spoolman/api/v1/spool.py": "67211ff040f8830ac50f93d369da26cbebad56cdbddf7776f96579c99e7e4314",
+    "spoolman/api/v1/tag.py": "3dad965d48cf9c3121716812e2f871ff6530977dc0bd713aad4aba1f1d3d00e2",
+    "spoolman/api/v1/vendor.py": "b4f1cb9e0d30205a0125cb418b93db465269b3bef204b472288a7b86507eef3d"
+  },
+  "endpoints": [
+    {
+      "id": "WS /api/v1/",
+      "method": "WS",
+      "path": "/api/v1/",
+      "operationId": null,
+      "summary": "WebSocket on /api/v1/ (from router.py)",
+      "tags": ["websocket"],
+      "transport": "websocket",
+      "query_parameters": [],
+      "path_parameters": [],
+      "response_headers": [],
+      "responses": ["101"]
+    },
+    {
+      "id": "GET /api/v1/article-number",
+      "method": "GET",
+      "path": "/api/v1/article-number",
+      "operationId": "Find_article_numbers_article_number_get",
+      "summary": "Find Article Numbers",
+      "tags": ["other"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [],
+      "response_headers": [],
+      "responses": ["200"]
+    },
+    {
+      "id": "POST /api/v1/backup",
+      "method": "POST",
+      "path": "/api/v1/backup",
+      "operationId": "backup_backup_post",
+      "summary": "Backup",
+      "tags": [],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [],
+      "response_headers": [],
+      "responses": ["200", "500"]
+    },
+    {
+      "id": "GET /api/v1/export/filaments",
+      "method": "GET",
+      "path": "/api/v1/export/filaments",
+      "operationId": "Export_filaments_export_filaments_get",
+      "summary": "Export Filaments",
+      "tags": ["export"],
+      "transport": "http",
+      "query_parameters": [
+        {
+          "name": "fmt",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/ExportFormat"
+          }
+        }
+      ],
+      "path_parameters": [],
+      "response_headers": [],
+      "responses": ["200", "422"]
+    },
+    {
+      "id": "GET /api/v1/export/spools",
+      "method": "GET",
+      "path": "/api/v1/export/spools",
+      "operationId": "Export_spools_export_spools_get",
+      "summary": "Export Spools",
+      "tags": ["export"],
+      "transport": "http",
+      "query_parameters": [
+        {
+          "name": "fmt",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/ExportFormat"
+          }
+        },
+        {
+          "name": "allow_archived",
+          "required": false,
+          "schema": {
+            "default": false,
+            "description": "Whether to include archived spools in the export.",
+            "title": "Allow Archived",
+            "type": "boolean"
+          }
+        }
+      ],
+      "path_parameters": [],
+      "response_headers": [],
+      "responses": ["200", "422"]
+    },
+    {
+      "id": "GET /api/v1/export/vendors",
+      "method": "GET",
+      "path": "/api/v1/export/vendors",
+      "operationId": "Export_vendors_export_vendors_get",
+      "summary": "Export Vendors",
+      "tags": ["export"],
+      "transport": "http",
+      "query_parameters": [
+        {
+          "name": "fmt",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/ExportFormat"
+          }
+        }
+      ],
+      "path_parameters": [],
+      "response_headers": [],
+      "responses": ["200", "422"]
+    },
+    {
+      "id": "GET /api/v1/external/filament",
+      "method": "GET",
+      "path": "/api/v1/external/filament",
+      "operationId": "Get_all_external_filaments_external_filament_get",
+      "summary": "Get All External Filaments",
+      "tags": ["external"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [],
+      "response_headers": [],
+      "responses": ["200"]
+    },
+    {
+      "id": "GET /api/v1/external/filament/search",
+      "method": "GET",
+      "path": "/api/v1/external/filament/search",
+      "operationId": "Search_external_filaments_external_filament_search_get",
+      "summary": "Search External Filaments",
+      "tags": ["external"],
+      "transport": "http",
+      "query_parameters": [
+        {
+          "name": "query",
+          "required": true,
+          "schema": {
+            "description": "Search query, matched word-by-word against manufacturer, name and material.",
+            "examples": ["polymaker pla"],
+            "title": "Query",
+            "type": "string"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "default": 20,
+            "description": "Maximum number of results to return.",
+            "maximum": 100,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        {
+          "name": "offset",
+          "required": false,
+          "schema": {
+            "default": 0,
+            "description": "Number of matches to skip, for paging through the results.",
+            "minimum": 0,
+            "title": "Offset",
+            "type": "integer"
+          }
+        }
+      ],
+      "path_parameters": [],
+      "response_headers": [],
+      "responses": ["200", "422"]
+    },
+    {
+      "id": "GET /api/v1/external/material",
+      "method": "GET",
+      "path": "/api/v1/external/material",
+      "operationId": "Get_all_external_materials_external_material_get",
+      "summary": "Get All External Materials",
+      "tags": ["external"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [],
+      "response_headers": [],
+      "responses": ["200"]
+    },
+    {
+      "id": "GET /api/v1/field/{entity_type}",
+      "method": "GET",
+      "path": "/api/v1/field/{entity_type}",
+      "operationId": "Get_extra_fields_field__entity_type__get",
+      "summary": "Get Extra Fields",
+      "tags": ["field"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [
+        {
+          "name": "entity_type",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/EntityType",
+            "description": "Entity type this field is for"
+          }
+        }
+      ],
+      "response_headers": [],
+      "responses": ["200", "422"]
+    },
+    {
+      "id": "DELETE /api/v1/field/{entity_type}/{key}",
+      "method": "DELETE",
+      "path": "/api/v1/field/{entity_type}/{key}",
+      "operationId": "Delete_extra_field_field__entity_type___key__delete",
+      "summary": "Delete Extra Field",
+      "tags": ["field"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [
+        {
+          "name": "entity_type",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/EntityType",
+            "description": "Entity type this field is for"
+          }
+        },
+        {
+          "name": "key",
+          "required": true,
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z0-9_]+$",
+            "title": "Key",
+            "type": "string"
+          }
+        }
+      ],
+      "response_headers": [],
+      "responses": ["200", "404", "422"]
+    },
+    {
+      "id": "POST /api/v1/field/{entity_type}/{key}",
+      "method": "POST",
+      "path": "/api/v1/field/{entity_type}/{key}",
+      "operationId": "Add_or_update_extra_field_field__entity_type___key__post",
+      "summary": "Add Or Update Extra Field",
+      "tags": ["field"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [
+        {
+          "name": "entity_type",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/EntityType",
+            "description": "Entity type this field is for"
+          }
+        },
+        {
+          "name": "key",
+          "required": true,
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z0-9_]+$",
+            "title": "Key",
+            "type": "string"
+          }
+        }
+      ],
+      "response_headers": [],
+      "responses": ["200", "400", "422"],
+      "request_body": {
+        "required": true,
+        "content_types": ["application/json"]
+      }
+    },
+    {
+      "id": "GET /api/v1/field/{entity_type}/{key}/values",
+      "method": "GET",
+      "path": "/api/v1/field/{entity_type}/{key}/values",
+      "operationId": "Get_extra_field_values_field__entity_type___key__values_get",
+      "summary": "Get Extra Field Values",
+      "tags": ["field"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [
+        {
+          "name": "entity_type",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/EntityType",
+            "description": "Entity type this field is for"
+          }
+        },
+        {
+          "name": "key",
+          "required": true,
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z0-9_]+$",
+            "title": "Key",
+            "type": "string"
+          }
+        }
+      ],
+      "response_headers": [],
+      "responses": ["200", "404", "422"]
+    },
+    {
+      "id": "GET /api/v1/filament",
+      "method": "GET",
+      "path": "/api/v1/filament",
+      "operationId": "Find_filaments_filament_get",
+      "summary": "Find Filaments",
+      "tags": ["filament"],
+      "transport": "http",
+      "query_parameters": [
+        {
+          "name": "vendor_name",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "deprecated": true,
+            "description": "See vendor.name.",
+            "title": "Vendor Name"
+          }
+        },
+        {
+          "name": "vendor_id",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "pattern": "^-?\\d+(,-?\\d+)*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "deprecated": true,
+            "description": "See vendor.id.",
+            "title": "Vendor ID"
+          }
+        },
+        {
+          "name": "vendor.name",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Partial case-insensitive search term for the filament vendor name. Separate multiple terms with a comma. Specify an empty string to match filaments with no vendor name. Surround a term with quotes to search for the exact term.",
+            "title": "Vendor Name"
+          }
+        },
+        {
+          "name": "vendor.id",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "pattern": "^-?\\d+(,-?\\d+)*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Match an exact vendor ID. Separate multiple IDs with a comma. Specify -1 to match filaments with no vendor.",
+            "examples": ["1", "1,2"],
+            "title": "Vendor ID"
+          }
+        },
+        {
+          "name": "name",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Partial case-insensitive search term for the filament name. Separate multiple terms with a comma. Specify an empty string to match filaments with no name. Surround a term with quotes to search for the exact term.",
+            "title": "Filament Name"
+          }
+        },
+        {
+          "name": "material",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Partial case-insensitive search term for the filament material. Separate multiple terms with a comma. Specify an empty string to match filaments with no material. Surround a term with quotes to search for the exact term.",
+            "title": "Filament Material"
+          }
+        },
+        {
+          "name": "article_number",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Partial case-insensitive search term for the filament article number. Separate multiple terms with a comma. Specify an empty string to match filaments with no article number. Surround a term with quotes to search for the exact term.",
+            "title": "Filament Article Number"
+          }
+        },
+        {
+          "name": "color_hex",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Match filament by similar color.",
+            "title": "Filament Color"
+          }
+        },
+        {
+          "name": "color_similarity_threshold",
+          "required": false,
+          "schema": {
+            "default": 20,
+            "description": "The similarity threshold for color matching. A value between 0.0-100.0, where 0 means match only exactly the same color.",
+            "examples": [20],
+            "title": "Color Similarity Threshold",
+            "type": "number"
+          }
+        },
+        {
+          "name": "external_id",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Find filaments imported by the given external ID. Separate multiple IDs with a comma. Specify empty string to match filaments with no external ID. Surround a term with quotes to search for the exact term.",
+            "examples": ["polymaker_pla_polysonicblack_1000_175"],
+            "title": "External Id"
+          }
+        },
+        {
+          "name": "tag",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Match the filament that an NFC/RFID tag with this UID is linked to. Exact match on the normalized UID: separators are ignored and case does not matter. Only a tag linked to the filament itself matches, not a tag on one of its spools; look those up on the spool endpoint. Returns either one filament or none. Returns 400 if the UID is not hexadecimal.",
+            "examples": ["04A2B3C4D5E6F7", "04:a2:b3:c4:d5:e6:f7"],
+            "title": "Tag UID"
+          }
+        },
+        {
+          "name": "sort",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Sort the results by the given field. Should be a comma-separate string with \"field:direction\" items.",
+            "examples": ["vendor.name:asc,spool_weight:desc"],
+            "title": "Sort"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Maximum number of items in the response.",
+            "title": "Limit"
+          }
+        },
+        {
+          "name": "offset",
+          "required": false,
+          "schema": {
+            "default": 0,
+            "description": "Offset in the full result set if a limit is set.",
+            "title": "Offset",
+            "type": "integer"
+          }
+        }
+      ],
+      "path_parameters": [],
+      "response_headers": [],
+      "responses": ["200", "299", "422"]
+    },
+    {
+      "id": "POST /api/v1/filament",
+      "method": "POST",
+      "path": "/api/v1/filament",
+      "operationId": "Add_filament_filament_post",
+      "summary": "Add Filament",
+      "tags": ["filament"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [],
+      "response_headers": [],
+      "responses": ["200", "400", "422"],
+      "request_body": {
+        "required": true,
+        "content_types": ["application/json"]
+      }
+    },
+    {
+      "id": "DELETE /api/v1/filament/{filament_id}",
+      "method": "DELETE",
+      "path": "/api/v1/filament/{filament_id}",
+      "operationId": "Delete_filament_filament__filament_id__delete",
+      "summary": "Delete Filament",
+      "tags": ["filament"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [
+        {
+          "name": "filament_id",
+          "required": true,
+          "schema": {
+            "title": "Filament Id",
+            "type": "integer"
+          }
+        }
+      ],
+      "response_headers": [],
+      "responses": ["200", "403", "404", "422"]
+    },
+    {
+      "id": "GET /api/v1/filament/{filament_id}",
+      "method": "GET",
+      "path": "/api/v1/filament/{filament_id}",
+      "operationId": "Get_filament_filament__filament_id__get",
+      "summary": "Get Filament",
+      "tags": ["filament"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [
+        {
+          "name": "filament_id",
+          "required": true,
+          "schema": {
+            "title": "Filament Id",
+            "type": "integer"
+          }
+        }
+      ],
+      "response_headers": [],
+      "responses": ["200", "299", "404", "422"]
+    },
+    {
+      "id": "PATCH /api/v1/filament/{filament_id}",
+      "method": "PATCH",
+      "path": "/api/v1/filament/{filament_id}",
+      "operationId": "Update_filament_filament__filament_id__patch",
+      "summary": "Update Filament",
+      "tags": ["filament"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [
+        {
+          "name": "filament_id",
+          "required": true,
+          "schema": {
+            "title": "Filament Id",
+            "type": "integer"
+          }
+        }
+      ],
+      "response_headers": [],
+      "responses": ["200", "400", "404", "422"],
+      "request_body": {
+        "required": true,
+        "content_types": ["application/json"]
+      }
+    },
+    {
+      "id": "WS /api/v1/filament/{filament_id}",
+      "method": "WS",
+      "path": "/api/v1/filament/{filament_id}",
+      "operationId": null,
+      "summary": "WebSocket on /api/v1/filament/{filament_id} (from filament.py)",
+      "tags": ["websocket"],
+      "transport": "websocket",
+      "query_parameters": [],
+      "path_parameters": [],
+      "response_headers": [],
+      "responses": ["101"]
+    },
+    {
+      "id": "POST /api/v1/filament/{filament_id}/tag",
+      "method": "POST",
+      "path": "/api/v1/filament/{filament_id}/tag",
+      "operationId": "Link_a_tag_to_a_filament_filament__filament_id__tag_post",
+      "summary": "Link A Tag To A Filament",
+      "tags": ["filament"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [
+        {
+          "name": "filament_id",
+          "required": true,
+          "schema": {
+            "title": "Filament Id",
+            "type": "integer"
+          }
+        }
+      ],
+      "response_headers": [],
+      "responses": ["201", "400", "404", "409", "422"],
+      "request_body": {
+        "required": true,
+        "content_types": ["application/json"]
+      }
+    },
+    {
+      "id": "DELETE /api/v1/filament/{filament_id}/tag/{uid}",
+      "method": "DELETE",
+      "path": "/api/v1/filament/{filament_id}/tag/{uid}",
+      "operationId": "Unlink_a_tag_from_a_filament_filament__filament_id__tag__uid__delete",
+      "summary": "Unlink A Tag From A Filament",
+      "tags": ["filament"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [
+        {
+          "name": "filament_id",
+          "required": true,
+          "schema": {
+            "title": "Filament Id",
+            "type": "integer"
+          }
+        },
+        {
+          "name": "uid",
+          "required": true,
+          "schema": {
+            "description": "The tag's UID, in any shape. Normalized before matching.",
+            "examples": ["04A2B3C4D5E6F7"],
+            "title": "Tag UID",
+            "type": "string"
+          }
+        }
+      ],
+      "response_headers": [],
+      "responses": ["204", "400", "404", "422"]
+    },
+    {
+      "id": "GET /api/v1/health",
+      "method": "GET",
+      "path": "/api/v1/health",
+      "operationId": "health_health_get",
+      "summary": "Health",
+      "tags": [],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [],
+      "response_headers": [],
+      "responses": ["200"]
+    },
+    {
+      "id": "GET /api/v1/info",
+      "method": "GET",
+      "path": "/api/v1/info",
+      "operationId": "info_info_get",
+      "summary": "Info",
+      "tags": [],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [],
+      "response_headers": [],
+      "responses": ["200"]
+    },
+    {
+      "id": "GET /api/v1/location",
+      "method": "GET",
+      "path": "/api/v1/location",
+      "operationId": "Find_locations_location_get",
+      "summary": "Find Locations",
+      "tags": ["other"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [],
+      "response_headers": [],
+      "responses": ["200"]
+    },
+    {
+      "id": "PATCH /api/v1/location/{location}",
+      "method": "PATCH",
+      "path": "/api/v1/location/{location}",
+      "operationId": "Rename_location_location__location__patch",
+      "summary": "Rename Location",
+      "tags": ["other"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [
+        {
+          "name": "location",
+          "required": true,
+          "schema": {
+            "title": "Location",
+            "type": "string"
+          }
+        }
+      ],
+      "response_headers": [],
+      "responses": ["200", "422"],
+      "request_body": {
+        "required": true,
+        "content_types": ["application/json"]
+      }
+    },
+    {
+      "id": "GET /api/v1/lot-number",
+      "method": "GET",
+      "path": "/api/v1/lot-number",
+      "operationId": "Find_lot_numbers_lot_number_get",
+      "summary": "Find Lot Numbers",
+      "tags": ["other"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [],
+      "response_headers": [],
+      "responses": ["200"]
+    },
+    {
+      "id": "GET /api/v1/material",
+      "method": "GET",
+      "path": "/api/v1/material",
+      "operationId": "Find_materials_material_get",
+      "summary": "Find Materials",
+      "tags": ["other"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [],
+      "response_headers": [],
+      "responses": ["200"]
+    },
+    {
+      "id": "GET /api/v1/search",
+      "method": "GET",
+      "path": "/api/v1/search",
+      "operationId": "Search_search_get",
+      "summary": "Search",
+      "tags": ["search"],
+      "transport": "http",
+      "query_parameters": [
+        {
+          "name": "q",
+          "required": true,
+          "schema": {
+            "description": "The search query.",
+            "examples": ["red"],
+            "minLength": 1,
+            "title": "Query",
+            "type": "string"
+          }
+        },
+        {
+          "name": "color_similarity_threshold",
+          "required": false,
+          "schema": {
+            "default": 20,
+            "description": "The similarity threshold for color matching, when the query is a color. A value between 0.0-100.0, where 0 means match only exactly the same color.",
+            "examples": [20],
+            "maximum": 100,
+            "minimum": 0,
+            "title": "Color Similarity Threshold",
+            "type": "number"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "default": 20,
+            "description": "Maximum number of results per category (spools, filaments, vendors).",
+            "maximum": 100,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        {
+          "name": "allow_archived",
+          "required": false,
+          "schema": {
+            "default": false,
+            "description": "Whether to include archived spools in the results.",
+            "title": "Allow Archived",
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "spools_per_filament",
+          "required": false,
+          "schema": {
+            "default": 0,
+            "description": "How many of each matching filament's spools to include with it, so a filament hit can be followed straight to one of its spools. 0 (the default) omits them entirely.",
+            "maximum": 10,
+            "minimum": 0,
+            "title": "Spools Per Filament",
+            "type": "integer"
+          }
+        }
+      ],
+      "path_parameters": [],
+      "response_headers": [],
+      "responses": ["200", "422"]
+    },
+    {
+      "id": "GET /api/v1/setting/",
+      "method": "GET",
+      "path": "/api/v1/setting/",
+      "operationId": "Get_all_settings_setting__get",
+      "summary": "Get All Settings",
+      "tags": ["setting"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [],
+      "response_headers": [],
+      "responses": ["200"]
+    },
+    {
+      "id": "GET /api/v1/setting/{key}",
+      "method": "GET",
+      "path": "/api/v1/setting/{key}",
+      "operationId": "Get_setting_setting__key__get",
+      "summary": "Get Setting",
+      "tags": ["setting"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [
+        {
+          "name": "key",
+          "required": true,
+          "schema": {
+            "title": "Key",
+            "type": "string"
+          }
+        }
+      ],
+      "response_headers": [],
+      "responses": ["200", "299", "404", "422"]
+    },
+    {
+      "id": "POST /api/v1/setting/{key}",
+      "method": "POST",
+      "path": "/api/v1/setting/{key}",
+      "operationId": "Set_setting_setting__key__post",
+      "summary": "Set Setting",
+      "tags": ["setting"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [
+        {
+          "name": "key",
+          "required": true,
+          "schema": {
+            "title": "Key",
+            "type": "string"
+          }
+        }
+      ],
+      "response_headers": [],
+      "responses": ["200", "404", "415", "422"],
+      "request_body": {
+        "required": true,
+        "content_types": ["application/json"]
+      }
+    },
+    {
+      "id": "WS /api/v1/setting/{key}",
+      "method": "WS",
+      "path": "/api/v1/setting/{key}",
+      "operationId": null,
+      "summary": "WebSocket on /api/v1/setting/{key} (from setting.py)",
+      "tags": ["websocket"],
+      "transport": "websocket",
+      "query_parameters": [],
+      "path_parameters": [],
+      "response_headers": [],
+      "responses": ["101"]
+    },
+    {
+      "id": "GET /api/v1/spool",
+      "method": "GET",
+      "path": "/api/v1/spool",
+      "operationId": "Find_spool_spool_get",
+      "summary": "Find Spool",
+      "tags": ["spool"],
+      "transport": "http",
+      "query_parameters": [
+        {
+          "name": "filament_name",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "deprecated": true,
+            "description": "See filament.name.",
+            "title": "Filament Name"
+          }
+        },
+        {
+          "name": "filament_id",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "pattern": "^-?\\d+(,-?\\d+)*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "deprecated": true,
+            "description": "See filament.id.",
+            "title": "Filament ID"
+          }
+        },
+        {
+          "name": "filament_material",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "deprecated": true,
+            "description": "See filament.material.",
+            "title": "Filament Material"
+          }
+        },
+        {
+          "name": "vendor_name",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "deprecated": true,
+            "description": "See filament.vendor.name.",
+            "title": "Vendor Name"
+          }
+        },
+        {
+          "name": "vendor_id",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "pattern": "^-?\\d+(,-?\\d+)*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "deprecated": true,
+            "description": "See filament.vendor.id.",
+            "title": "Vendor ID"
+          }
+        },
+        {
+          "name": "filament.name",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Partial case-insensitive search term for the filament name. Separate multiple terms with a comma. Specify an empty string to match spools with no filament name. Surround a term with quotes to search for the exact term.",
+            "title": "Filament Name"
+          }
+        },
+        {
+          "name": "filament.id",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "pattern": "^-?\\d+(,-?\\d+)*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Match an exact filament ID. Separate multiple IDs with a comma.",
+            "examples": ["1", "1,2"],
+            "title": "Filament ID"
+          }
+        },
+        {
+          "name": "filament.material",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Partial case-insensitive search term for the filament material. Separate multiple terms with a comma. Specify an empty string to match spools with no filament material. Surround a term with quotes to search for the exact term.",
+            "title": "Filament Material"
+          }
+        },
+        {
+          "name": "filament.multi_color_direction",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Match spools by their filament's multi-color direction, e.g. coaxial or longitudinal. Separate multiple terms with a comma. Specify an empty string to match single-color filaments. Surround a term with quotes to search for the exact term.",
+            "examples": ["\"coaxial\"", "\"longitudinal\""],
+            "title": "Filament Multi-Color Direction"
+          }
+        },
+        {
+          "name": "filament.vendor.name",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Partial case-insensitive search term for the filament vendor name. Separate multiple terms with a comma. Specify an empty string to match spools with no vendor name. Surround a term with quotes to search for the exact term.",
+            "title": "Vendor Name"
+          }
+        },
+        {
+          "name": "filament.vendor.id",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "pattern": "^-?\\d+(,-?\\d+)*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Match an exact vendor ID. Separate multiple IDs with a comma. Set it to -1 to match spools with filaments with no vendor.",
+            "examples": ["1", "1,2"],
+            "title": "Vendor ID"
+          }
+        },
+        {
+          "name": "location",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Partial case-insensitive search term for the spool location. Separate multiple terms with a comma. Specify an empty string to match spools with no location. Surround a term with quotes to search for the exact term.",
+            "title": "Location"
+          }
+        },
+        {
+          "name": "lot_nr",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Partial case-insensitive search term for the spool lot number. Separate multiple terms with a comma. Specify an empty string to match spools with no lot nr. Surround a term with quotes to search for the exact term.",
+            "title": "Lot/Batch Number"
+          }
+        },
+        {
+          "name": "tag",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Match the spool that an NFC/RFID tag with this UID is linked to. Exact match on the normalized UID: separators are ignored and case does not matter, so 04:a2:b3:c4, 04-A2-B3-C4 and 04a2b3c4 all find the same spool. A tag is linked to at most one spool, so this returns either one spool or none. Returns 400 if the UID is not hexadecimal.",
+            "examples": ["04A2B3C4D5E6F7", "04:a2:b3:c4:d5:e6:f7"],
+            "title": "Tag UID"
+          }
+        },
+        {
+          "name": "allow_archived",
+          "required": false,
+          "schema": {
+            "default": false,
+            "description": "Whether to include archived spools in the search results.",
+            "title": "Allow Archived",
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "first_used",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Filter by the spool's first_used timestamp. Give an inclusive range as `<start>|<end>` (ISO 8601; either end may be omitted to leave it open), a bare timestamp to match it exactly, or an empty string to match spools that have no first_used timestamp at all. Separate multiple of these with a comma to OR them. A timestamp with no UTC offset is interpreted as UTC.",
+            "examples": [
+              "2024-05-01T00:00:00Z|",
+              "|2024-05-01T00:00:00Z",
+              "2024-05-01T00:00:00Z|2024-06-01T00:00:00Z",
+              ""
+            ],
+            "title": "First Used"
+          }
+        },
+        {
+          "name": "last_used",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Filter by the spool's last_used timestamp. Give an inclusive range as `<start>|<end>` (ISO 8601; either end may be omitted to leave it open), a bare timestamp to match it exactly, or an empty string to match spools that have no last_used timestamp at all. Separate multiple of these with a comma to OR them. A timestamp with no UTC offset is interpreted as UTC.",
+            "examples": [
+              "2024-05-01T00:00:00Z|",
+              "|2024-05-01T00:00:00Z",
+              "2024-05-01T00:00:00Z|2024-06-01T00:00:00Z",
+              ""
+            ],
+            "title": "Last Used"
+          }
+        },
+        {
+          "name": "registered",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Filter by the spool's registered timestamp. Give an inclusive range as `<start>|<end>` (ISO 8601; either end may be omitted to leave it open), a bare timestamp to match it exactly, or an empty string to match spools that have no registered timestamp at all. Separate multiple of these with a comma to OR them. A timestamp with no UTC offset is interpreted as UTC.",
+            "examples": [
+              "2024-05-01T00:00:00Z|",
+              "|2024-05-01T00:00:00Z",
+              "2024-05-01T00:00:00Z|2024-06-01T00:00:00Z",
+              ""
+            ],
+            "title": "Registered"
+          }
+        },
+        {
+          "name": "sort",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Sort the results by the given field. Should be a comma-separate string with \"field:direction\" items.",
+            "examples": [
+              "filament.name:asc,filament.vendor.id:asc,location:desc"
+            ],
+            "title": "Sort"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Maximum number of items in the response.",
+            "title": "Limit"
+          }
+        },
+        {
+          "name": "offset",
+          "required": false,
+          "schema": {
+            "default": 0,
+            "description": "Offset in the full result set if a limit is set.",
+            "title": "Offset",
+            "type": "integer"
+          }
+        }
+      ],
+      "path_parameters": [],
+      "response_headers": [],
+      "responses": ["200", "299", "422"]
+    },
+    {
+      "id": "POST /api/v1/spool",
+      "method": "POST",
+      "path": "/api/v1/spool",
+      "operationId": "Add_spool_spool_post",
+      "summary": "Add Spool",
+      "tags": ["spool"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [],
+      "response_headers": [],
+      "responses": ["200", "400", "422"],
+      "request_body": {
+        "required": true,
+        "content_types": ["application/json"]
+      }
+    },
+    {
+      "id": "PATCH /api/v1/spool/field/{field}",
+      "method": "PATCH",
+      "path": "/api/v1/spool/field/{field}",
+      "operationId": "Rename_a_spool_field_value_spool_field__field__patch",
+      "summary": "Rename A Spool Field Value",
+      "tags": ["spool"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [
+        {
+          "name": "field",
+          "required": true,
+          "schema": {
+            "description": "The spool field to rename a value of: location, or extra.<key> for one of the spool's custom text or single-choice fields. Fields belonging to the filament or its vendor (material, vendor) cannot be renamed here.",
+            "examples": ["location", "extra.shelf"],
+            "title": "Field",
+            "type": "string"
+          }
+        }
+      ],
+      "response_headers": [],
+      "responses": ["200", "400", "422"],
+      "request_body": {
+        "required": true,
+        "content_types": ["application/json"]
+      }
+    },
+    {
+      "id": "GET /api/v1/spool/group",
+      "method": "GET",
+      "path": "/api/v1/spool/group",
+      "operationId": "Find_spool_groups_spool_group_get",
+      "summary": "Find Spool Groups",
+      "tags": ["spool"],
+      "transport": "http",
+      "query_parameters": [
+        {
+          "name": "group_by",
+          "required": true,
+          "schema": {
+            "description": "The field to group spools by: filament, vendor, material, location, or extra.<key> for one of the spool's custom fields (text and single-choice fields only).",
+            "examples": ["location", "extra.shelf"],
+            "title": "Group By",
+            "type": "string"
+          }
+        },
+        {
+          "name": "filament.name",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Partial case-insensitive search term for the filament name. See the spool search endpoint.",
+            "title": "Filament Name"
+          }
+        },
+        {
+          "name": "filament.id",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "pattern": "^-?\\d+(,-?\\d+)*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Match an exact filament ID. Separate multiple IDs with a comma.",
+            "title": "Filament ID"
+          }
+        },
+        {
+          "name": "filament.material",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Partial case-insensitive search term for the filament material.",
+            "title": "Filament Material"
+          }
+        },
+        {
+          "name": "filament.multi_color_direction",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Match by the filament's multi-color direction, e.g. coaxial or longitudinal. Specify an empty string to match single-color filaments.",
+            "examples": ["\"coaxial\"", "\"longitudinal\""],
+            "title": "Filament Multi-Color Direction"
+          }
+        },
+        {
+          "name": "filament.vendor.name",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Partial case-insensitive search term for the filament vendor name.",
+            "title": "Vendor Name"
+          }
+        },
+        {
+          "name": "filament.vendor.id",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "pattern": "^-?\\d+(,-?\\d+)*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Match an exact vendor ID. Separate multiple IDs with a comma. Set it to -1 to match spools with filaments with no vendor.",
+            "title": "Vendor ID"
+          }
+        },
+        {
+          "name": "location",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Partial case-insensitive search term for the spool location.",
+            "title": "Location"
+          }
+        },
+        {
+          "name": "lot_nr",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Partial case-insensitive search term for the spool lot number.",
+            "title": "Lot/Batch Number"
+          }
+        },
+        {
+          "name": "allow_archived",
+          "required": false,
+          "schema": {
+            "default": false,
+            "description": "Whether to include archived spools in the aggregates.",
+            "title": "Allow Archived",
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "include_empty",
+          "required": false,
+          "schema": {
+            "default": false,
+            "description": "Also return matching filaments (group_by=filament) or manufacturers (group_by=vendor) that hold no matching spools, as groups of zero, instead of omitting them. In vendor mode the group of filaments with no manufacturer is not listed, since this mode lists manufacturers. Every other axis is keyed by a value read off the spools themselves and so has no empty groups to list. Filters on the spools themselves (location, lot_nr, the date filters, spool extra fields) are rejected in combination with it, since a filament with no spools has no value for them.",
+            "title": "Include Empty",
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "preview",
+          "required": false,
+          "schema": {
+            "default": false,
+            "description": "Attach a few members to each group: up to 5 spools (id, remaining_weight, initial_weight) for group_by=filament, up to 4 filaments (id and colors) for group_by=vendor. Ignored for other axes.",
+            "title": "Preview",
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "first_used",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Filter by the spool's first_used timestamp. Give an inclusive range as `<start>|<end>` (ISO 8601; either end may be omitted to leave it open), a bare timestamp to match it exactly, or an empty string to match spools that have no first_used timestamp at all. Separate multiple of these with a comma to OR them. A timestamp with no UTC offset is interpreted as UTC.",
+            "examples": [
+              "2024-05-01T00:00:00Z|",
+              "|2024-05-01T00:00:00Z",
+              "2024-05-01T00:00:00Z|2024-06-01T00:00:00Z",
+              ""
+            ],
+            "title": "First Used"
+          }
+        },
+        {
+          "name": "last_used",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Filter by the spool's last_used timestamp. Give an inclusive range as `<start>|<end>` (ISO 8601; either end may be omitted to leave it open), a bare timestamp to match it exactly, or an empty string to match spools that have no last_used timestamp at all. Separate multiple of these with a comma to OR them. A timestamp with no UTC offset is interpreted as UTC.",
+            "examples": [
+              "2024-05-01T00:00:00Z|",
+              "|2024-05-01T00:00:00Z",
+              "2024-05-01T00:00:00Z|2024-06-01T00:00:00Z",
+              ""
+            ],
+            "title": "Last Used"
+          }
+        },
+        {
+          "name": "registered",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Filter by the spool's registered timestamp. Give an inclusive range as `<start>|<end>` (ISO 8601; either end may be omitted to leave it open), a bare timestamp to match it exactly, or an empty string to match spools that have no registered timestamp at all. Separate multiple of these with a comma to OR them. A timestamp with no UTC offset is interpreted as UTC.",
+            "examples": [
+              "2024-05-01T00:00:00Z|",
+              "|2024-05-01T00:00:00Z",
+              "2024-05-01T00:00:00Z|2024-06-01T00:00:00Z",
+              ""
+            ],
+            "title": "Registered"
+          }
+        },
+        {
+          "name": "sort",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Sort the groups by the given field. Comma-separated \"field:direction\" items. Available fields: group.title, group.vendor_name (manufacturer name, groups with no manufacturer last), group.total_remaining, group.last_used, group.spool_count, group.in_use_count, group.filament_count, any filament column as filament.<column> (e.g. filament.material) or manufacturer column as filament.vendor.<column> (e.g. filament.vendor.name), and extra fields as filament.extra.<key> or filament.vendor.extra.<key>. Empty values sort last; unknown fields are ignored.",
+            "examples": ["group.last_used:desc"],
+            "title": "Sort"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Maximum number of groups in the response.",
+            "title": "Limit"
+          }
+        },
+        {
+          "name": "offset",
+          "required": false,
+          "schema": {
+            "default": 0,
+            "description": "Offset in the full group result set if a limit is set.",
+            "title": "Offset",
+            "type": "integer"
+          }
+        }
+      ],
+      "path_parameters": [],
+      "response_headers": [],
+      "responses": ["200", "400", "422"]
+    },
+    {
+      "id": "DELETE /api/v1/spool/{spool_id}",
+      "method": "DELETE",
+      "path": "/api/v1/spool/{spool_id}",
+      "operationId": "Delete_spool_spool__spool_id__delete",
+      "summary": "Delete Spool",
+      "tags": ["spool"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [
+        {
+          "name": "spool_id",
+          "required": true,
+          "schema": {
+            "title": "Spool Id",
+            "type": "integer"
+          }
+        }
+      ],
+      "response_headers": [],
+      "responses": ["200", "404", "422"]
+    },
+    {
+      "id": "GET /api/v1/spool/{spool_id}",
+      "method": "GET",
+      "path": "/api/v1/spool/{spool_id}",
+      "operationId": "Get_spool_spool__spool_id__get",
+      "summary": "Get Spool",
+      "tags": ["spool"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [
+        {
+          "name": "spool_id",
+          "required": true,
+          "schema": {
+            "title": "Spool Id",
+            "type": "integer"
+          }
+        }
+      ],
+      "response_headers": [],
+      "responses": ["200", "299", "404", "422"]
+    },
+    {
+      "id": "PATCH /api/v1/spool/{spool_id}",
+      "method": "PATCH",
+      "path": "/api/v1/spool/{spool_id}",
+      "operationId": "Update_spool_spool__spool_id__patch",
+      "summary": "Update Spool",
+      "tags": ["spool"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [
+        {
+          "name": "spool_id",
+          "required": true,
+          "schema": {
+            "title": "Spool Id",
+            "type": "integer"
+          }
+        }
+      ],
+      "response_headers": [],
+      "responses": ["200", "400", "404", "422"],
+      "request_body": {
+        "required": true,
+        "content_types": ["application/json"]
+      }
+    },
+    {
+      "id": "WS /api/v1/spool/{spool_id}",
+      "method": "WS",
+      "path": "/api/v1/spool/{spool_id}",
+      "operationId": null,
+      "summary": "WebSocket on /api/v1/spool/{spool_id} (from spool.py)",
+      "tags": ["websocket"],
+      "transport": "websocket",
+      "query_parameters": [],
+      "path_parameters": [],
+      "response_headers": [],
+      "responses": ["101"]
+    },
+    {
+      "id": "PUT /api/v1/spool/{spool_id}/measure",
+      "method": "PUT",
+      "path": "/api/v1/spool/{spool_id}/measure",
+      "operationId": "Use_spool_filament_based_on_the_current_weight_measurement_spool__spool_id__measure_put",
+      "summary": "Use Spool Filament Based On The Current Weight Measurement",
+      "tags": ["spool"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [
+        {
+          "name": "spool_id",
+          "required": true,
+          "schema": {
+            "title": "Spool Id",
+            "type": "integer"
+          }
+        }
+      ],
+      "response_headers": [],
+      "responses": ["200", "400", "404", "422"],
+      "request_body": {
+        "required": true,
+        "content_types": ["application/json"]
+      }
+    },
+    {
+      "id": "POST /api/v1/spool/{spool_id}/tag",
+      "method": "POST",
+      "path": "/api/v1/spool/{spool_id}/tag",
+      "operationId": "Link_a_tag_to_a_spool_spool__spool_id__tag_post",
+      "summary": "Link A Tag To A Spool",
+      "tags": ["spool"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [
+        {
+          "name": "spool_id",
+          "required": true,
+          "schema": {
+            "title": "Spool Id",
+            "type": "integer"
+          }
+        }
+      ],
+      "response_headers": [],
+      "responses": ["201", "400", "404", "409", "422"],
+      "request_body": {
+        "required": true,
+        "content_types": ["application/json"]
+      }
+    },
+    {
+      "id": "DELETE /api/v1/spool/{spool_id}/tag/{uid}",
+      "method": "DELETE",
+      "path": "/api/v1/spool/{spool_id}/tag/{uid}",
+      "operationId": "Unlink_a_tag_from_a_spool_spool__spool_id__tag__uid__delete",
+      "summary": "Unlink A Tag From A Spool",
+      "tags": ["spool"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [
+        {
+          "name": "spool_id",
+          "required": true,
+          "schema": {
+            "title": "Spool Id",
+            "type": "integer"
+          }
+        },
+        {
+          "name": "uid",
+          "required": true,
+          "schema": {
+            "description": "The tag's UID, in any shape. Normalized before matching.",
+            "examples": ["04A2B3C4D5E6F7"],
+            "title": "Tag UID",
+            "type": "string"
+          }
+        }
+      ],
+      "response_headers": [],
+      "responses": ["204", "400", "404", "422"]
+    },
+    {
+      "id": "PUT /api/v1/spool/{spool_id}/use",
+      "method": "PUT",
+      "path": "/api/v1/spool/{spool_id}/use",
+      "operationId": "Use_spool_filament_spool__spool_id__use_put",
+      "summary": "Use Spool Filament",
+      "tags": ["spool"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [
+        {
+          "name": "spool_id",
+          "required": true,
+          "schema": {
+            "title": "Spool Id",
+            "type": "integer"
+          }
+        }
+      ],
+      "response_headers": [],
+      "responses": ["200", "400", "404", "422"],
+      "request_body": {
+        "required": true,
+        "content_types": ["application/json"]
+      }
+    },
+    {
+      "id": "GET /api/v1/tag/reader",
+      "method": "GET",
+      "path": "/api/v1/tag/reader",
+      "operationId": "List_recently_seen_tag_readers_tag_reader_get",
+      "summary": "List Recently Seen Tag Readers",
+      "tags": ["tag"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [],
+      "response_headers": [],
+      "responses": ["200"]
+    },
+    {
+      "id": "POST /api/v1/tag/scan",
+      "method": "POST",
+      "path": "/api/v1/tag/scan",
+      "operationId": "Report_a_tag_scan_tag_scan_post",
+      "summary": "Report A Tag Scan",
+      "tags": ["tag"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [],
+      "response_headers": [],
+      "responses": ["200", "299", "400", "422"],
+      "request_body": {
+        "required": true,
+        "content_types": ["application/json"]
+      }
+    },
+    {
+      "id": "WS /api/v1/tag/scan",
+      "method": "WS",
+      "path": "/api/v1/tag/scan",
+      "operationId": null,
+      "summary": "WebSocket on /api/v1/tag/scan (from tag.py)",
+      "tags": ["websocket"],
+      "transport": "websocket",
+      "query_parameters": [],
+      "path_parameters": [],
+      "response_headers": [],
+      "responses": ["101"]
+    },
+    {
+      "id": "WS /api/v1/tag/scan/{reader_id}",
+      "method": "WS",
+      "path": "/api/v1/tag/scan/{reader_id}",
+      "operationId": null,
+      "summary": "WebSocket on /api/v1/tag/scan/{reader_id} (from tag.py)",
+      "tags": ["websocket"],
+      "transport": "websocket",
+      "query_parameters": [],
+      "path_parameters": [],
+      "response_headers": [],
+      "responses": ["101"]
+    },
+    {
+      "id": "GET /api/v1/vendor",
+      "method": "GET",
+      "path": "/api/v1/vendor",
+      "operationId": "Find_vendor_vendor_get",
+      "summary": "Find Vendor",
+      "tags": ["vendor"],
+      "transport": "http",
+      "query_parameters": [
+        {
+          "name": "name",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Partial case-insensitive search term for the vendor name. Separate multiple terms with a comma. Surround a term with quotes to search for the exact term.",
+            "title": "Vendor Name"
+          }
+        },
+        {
+          "name": "external_id",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Exact match for the vendor external ID. Separate multiple IDs with a comma. Specify empty string to match filaments with no external ID. Surround a term with quotes to search for the exact term.",
+            "title": "Vendor External ID"
+          }
+        },
+        {
+          "name": "sort",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Sort the results by the given field. Should be a comma-separate string with \"field:direction\" items.",
+            "examples": ["name:asc,id:desc"],
+            "title": "Sort"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Maximum number of items in the response.",
+            "title": "Limit"
+          }
+        },
+        {
+          "name": "offset",
+          "required": false,
+          "schema": {
+            "default": 0,
+            "description": "Offset in the full result set if a limit is set.",
+            "title": "Offset",
+            "type": "integer"
+          }
+        }
+      ],
+      "path_parameters": [],
+      "response_headers": [],
+      "responses": ["200", "299", "422"]
+    },
+    {
+      "id": "POST /api/v1/vendor",
+      "method": "POST",
+      "path": "/api/v1/vendor",
+      "operationId": "Add_vendor_vendor_post",
+      "summary": "Add Vendor",
+      "tags": ["vendor"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [],
+      "response_headers": [],
+      "responses": ["200", "400", "422"],
+      "request_body": {
+        "required": true,
+        "content_types": ["application/json"]
+      }
+    },
+    {
+      "id": "DELETE /api/v1/vendor/{vendor_id}",
+      "method": "DELETE",
+      "path": "/api/v1/vendor/{vendor_id}",
+      "operationId": "Delete_vendor_vendor__vendor_id__delete",
+      "summary": "Delete Vendor",
+      "tags": ["vendor"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [
+        {
+          "name": "vendor_id",
+          "required": true,
+          "schema": {
+            "title": "Vendor Id",
+            "type": "integer"
+          }
+        }
+      ],
+      "response_headers": [],
+      "responses": ["200", "404", "422"]
+    },
+    {
+      "id": "GET /api/v1/vendor/{vendor_id}",
+      "method": "GET",
+      "path": "/api/v1/vendor/{vendor_id}",
+      "operationId": "Get_vendor_vendor__vendor_id__get",
+      "summary": "Get Vendor",
+      "tags": ["vendor"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [
+        {
+          "name": "vendor_id",
+          "required": true,
+          "schema": {
+            "title": "Vendor Id",
+            "type": "integer"
+          }
+        }
+      ],
+      "response_headers": [],
+      "responses": ["200", "299", "404", "422"]
+    },
+    {
+      "id": "PATCH /api/v1/vendor/{vendor_id}",
+      "method": "PATCH",
+      "path": "/api/v1/vendor/{vendor_id}",
+      "operationId": "Update_vendor_vendor__vendor_id__patch",
+      "summary": "Update Vendor",
+      "tags": ["vendor"],
+      "transport": "http",
+      "query_parameters": [],
+      "path_parameters": [
+        {
+          "name": "vendor_id",
+          "required": true,
+          "schema": {
+            "title": "Vendor Id",
+            "type": "integer"
+          }
+        }
+      ],
+      "response_headers": [],
+      "responses": ["200", "400", "404", "422"],
+      "request_body": {
+        "required": true,
+        "content_types": ["application/json"]
+      }
+    },
+    {
+      "id": "WS /api/v1/vendor/{vendor_id}",
+      "method": "WS",
+      "path": "/api/v1/vendor/{vendor_id}",
+      "operationId": null,
+      "summary": "WebSocket on /api/v1/vendor/{vendor_id} (from vendor.py)",
+      "tags": ["websocket"],
+      "transport": "websocket",
+      "query_parameters": [],
+      "path_parameters": [],
+      "response_headers": [],
+      "responses": ["101"]
+    }
+  ],
+  "schemas": {
+    "BackupResponse": {
+      "type": "object",
+      "title": "BackupResponse",
+      "required": ["path"],
+      "properties": ["created", "path"],
+      "enum": null
+    },
+    "EntityType": {
+      "type": "string",
+      "title": "EntityType",
+      "required": [],
+      "properties": [],
+      "enum": ["vendor", "filament", "spool"]
+    },
+    "EventType": {
+      "type": "string",
+      "title": "EventType",
+      "required": [],
+      "properties": [],
+      "enum": ["added", "updated", "deleted", "scanned"]
+    },
+    "ExportFormat": {
+      "type": "string",
+      "title": "ExportFormat",
+      "required": [],
+      "properties": [],
+      "enum": ["csv", "json"]
+    },
+    "ExternalFilament": {
+      "type": "object",
+      "title": "ExternalFilament",
+      "required": [
+        "id",
+        "manufacturer",
+        "name",
+        "material",
+        "density",
+        "weight",
+        "diameter"
+      ],
+      "properties": [
+        "bed_temp",
+        "color_hex",
+        "color_hexes",
+        "density",
+        "diameter",
+        "extruder_temp",
+        "finish",
+        "glow",
+        "id",
+        "manufacturer",
+        "material",
+        "multi_color_direction",
+        "name",
+        "pattern",
+        "spool_type",
+        "spool_weight",
+        "translucent",
+        "weight"
+      ],
+      "enum": null
+    },
+    "ExternalMaterial": {
+      "type": "object",
+      "title": "ExternalMaterial",
+      "required": ["material", "density"],
+      "properties": ["bed_temp", "density", "extruder_temp", "material"],
+      "enum": null
+    },
+    "ExtraField": {
+      "type": "object",
+      "title": "ExtraField",
+      "required": ["name", "field_type", "key", "entity_type"],
+      "properties": [
+        "choices",
+        "default_value",
+        "entity_type",
+        "field_type",
+        "key",
+        "multi_choice",
+        "name",
+        "order",
+        "unit"
+      ],
+      "enum": null
+    },
+    "ExtraFieldParameters": {
+      "type": "object",
+      "title": "ExtraFieldParameters",
+      "required": ["name", "field_type"],
+      "properties": [
+        "choices",
+        "default_value",
+        "field_type",
+        "multi_choice",
+        "name",
+        "order",
+        "unit"
+      ],
+      "enum": null
+    },
+    "ExtraFieldType": {
+      "type": "string",
+      "title": "ExtraFieldType",
+      "required": [],
+      "properties": [],
+      "enum": [
+        "text",
+        "integer",
+        "integer_range",
+        "float",
+        "float_range",
+        "datetime",
+        "boolean",
+        "choice"
+      ]
+    },
+    "Filament": {
+      "type": "object",
+      "title": "Filament",
+      "required": ["id", "registered", "density", "diameter", "extra"],
+      "properties": [
+        "article_number",
+        "color_hex",
+        "comment",
+        "density",
+        "diameter",
+        "external_id",
+        "extra",
+        "id",
+        "material",
+        "multi_color_direction",
+        "multi_color_hexes",
+        "name",
+        "price",
+        "registered",
+        "settings_bed_temp",
+        "settings_extruder_temp",
+        "spool_weight",
+        "tags",
+        "vendor",
+        "weight"
+      ],
+      "enum": null
+    },
+    "FilamentEvent": {
+      "type": "object",
+      "title": "FilamentEvent",
+      "required": ["type", "resource", "date", "payload"],
+      "properties": ["date", "payload", "resource", "type"],
+      "enum": null
+    },
+    "FilamentParameters": {
+      "type": "object",
+      "title": "FilamentParameters",
+      "required": ["density", "diameter"],
+      "properties": [
+        "article_number",
+        "color_hex",
+        "comment",
+        "density",
+        "diameter",
+        "external_id",
+        "extra",
+        "material",
+        "multi_color_direction",
+        "multi_color_hexes",
+        "name",
+        "price",
+        "settings_bed_temp",
+        "settings_extruder_temp",
+        "spool_weight",
+        "vendor_id",
+        "weight"
+      ],
+      "enum": null
+    },
+    "FilamentUpdateParameters": {
+      "type": "object",
+      "title": "FilamentUpdateParameters",
+      "required": [],
+      "properties": [
+        "article_number",
+        "color_hex",
+        "comment",
+        "density",
+        "diameter",
+        "external_id",
+        "extra",
+        "material",
+        "multi_color_direction",
+        "multi_color_hexes",
+        "name",
+        "price",
+        "settings_bed_temp",
+        "settings_extruder_temp",
+        "spool_weight",
+        "vendor_id",
+        "weight"
+      ],
+      "enum": null
+    },
+    "Finish": {
+      "type": "string",
+      "title": "Finish",
+      "required": [],
+      "properties": [],
+      "enum": ["matte", "glossy"]
+    },
+    "HTTPValidationError": {
+      "type": "object",
+      "title": "HTTPValidationError",
+      "required": [],
+      "properties": ["detail"],
+      "enum": null
+    },
+    "HealthCheck": {
+      "type": "object",
+      "title": "HealthCheck",
+      "required": ["status"],
+      "properties": ["status"],
+      "enum": null
+    },
+    "Info": {
+      "type": "object",
+      "title": "Info",
+      "required": [
+        "version",
+        "debug_mode",
+        "automatic_backups",
+        "data_dir",
+        "logs_dir",
+        "backups_dir",
+        "db_type",
+        "external_db_name"
+      ],
+      "properties": [
+        "automatic_backups",
+        "backups_dir",
+        "build_date",
+        "data_dir",
+        "db_type",
+        "debug_mode",
+        "external_db_name",
+        "git_commit",
+        "latest_version",
+        "logs_dir",
+        "update_available",
+        "version"
+      ],
+      "enum": null
+    },
+    "Message": {
+      "type": "object",
+      "title": "Message",
+      "required": ["message"],
+      "properties": ["message"],
+      "enum": null
+    },
+    "MultiColorDirection-Input": {
+      "type": "string",
+      "title": "MultiColorDirection",
+      "required": [],
+      "properties": [],
+      "enum": ["coaxial", "longitudinal"]
+    },
+    "Pattern": {
+      "type": "string",
+      "title": "Pattern",
+      "required": [],
+      "properties": [],
+      "enum": ["marble", "sparkle"]
+    },
+    "RenameFieldValueParameters": {
+      "type": "object",
+      "title": "RenameFieldValueParameters",
+      "required": ["value", "new_value"],
+      "properties": ["new_value", "value"],
+      "enum": null
+    },
+    "RenameFieldValueResult": {
+      "type": "object",
+      "title": "RenameFieldValueResult",
+      "required": ["spools_updated"],
+      "properties": ["spools_updated"],
+      "enum": null
+    },
+    "RenameLocationBody": {
+      "type": "object",
+      "title": "RenameLocationBody",
+      "required": ["name"],
+      "properties": ["name"],
+      "enum": null
+    },
+    "RootModel_str_": {
+      "type": "string",
+      "title": "RootModel[str]",
+      "required": [],
+      "properties": [],
+      "enum": null
+    },
+    "SearchResultFilament": {
+      "type": "object",
+      "title": "SearchResultFilament",
+      "required": ["filament", "match_field"],
+      "properties": ["filament", "match_field", "spool_count", "spools"],
+      "enum": null
+    },
+    "SearchResultFilamentSpool": {
+      "type": "object",
+      "title": "SearchResultFilamentSpool",
+      "required": ["id", "archived"],
+      "properties": ["archived", "id", "location", "remaining_weight"],
+      "enum": null
+    },
+    "SearchResultSpool": {
+      "type": "object",
+      "title": "SearchResultSpool",
+      "required": ["spool", "match_field"],
+      "properties": ["match_field", "spool"],
+      "enum": null
+    },
+    "SearchResultVendor": {
+      "type": "object",
+      "title": "SearchResultVendor",
+      "required": ["vendor", "match_field"],
+      "properties": ["match_field", "vendor"],
+      "enum": null
+    },
+    "SearchResults": {
+      "type": "object",
+      "title": "SearchResults",
+      "required": ["spools", "filaments", "vendors", "is_color_query"],
+      "properties": ["filaments", "is_color_query", "spools", "vendors"],
+      "enum": null
+    },
+    "SettingEvent": {
+      "type": "object",
+      "title": "SettingEvent",
+      "required": ["type", "resource", "date", "payload"],
+      "properties": ["date", "payload", "resource", "type"],
+      "enum": null
+    },
+    "SettingKV": {
+      "type": "object",
+      "title": "SettingKV",
+      "required": ["key", "setting"],
+      "properties": ["key", "setting"],
+      "enum": null
+    },
+    "SettingResponse": {
+      "type": "object",
+      "title": "SettingResponse",
+      "required": ["value", "is_set", "type"],
+      "properties": ["is_set", "type", "value"],
+      "enum": null
+    },
+    "SettingType": {
+      "type": "string",
+      "title": "SettingType",
+      "required": [],
+      "properties": [],
+      "enum": ["boolean", "number", "string", "array", "object"]
+    },
+    "Spool": {
+      "type": "object",
+      "title": "Spool",
+      "required": [
+        "id",
+        "registered",
+        "filament",
+        "used_weight",
+        "used_length",
+        "archived",
+        "extra"
+      ],
+      "properties": [
+        "archived",
+        "comment",
+        "extra",
+        "filament",
+        "first_used",
+        "id",
+        "initial_weight",
+        "last_used",
+        "location",
+        "lot_nr",
+        "price",
+        "registered",
+        "remaining_length",
+        "remaining_weight",
+        "spool_weight",
+        "tags",
+        "used_length",
+        "used_weight"
+      ],
+      "enum": null
+    },
+    "SpoolEvent": {
+      "type": "object",
+      "title": "SpoolEvent",
+      "required": ["type", "resource", "date", "payload"],
+      "properties": ["date", "payload", "resource", "type"],
+      "enum": null
+    },
+    "SpoolGroup": {
+      "type": "object",
+      "title": "SpoolGroup",
+      "required": ["group_by", "spool_count", "in_use_count"],
+      "properties": [
+        "filament",
+        "filament_count",
+        "filaments",
+        "group_by",
+        "in_use_count",
+        "key",
+        "last_used",
+        "spool_count",
+        "spools",
+        "total_remaining_weight",
+        "vendor"
+      ],
+      "enum": null
+    },
+    "SpoolGroupPreviewFilament": {
+      "type": "object",
+      "title": "SpoolGroupPreviewFilament",
+      "required": ["id"],
+      "properties": [
+        "color_hex",
+        "id",
+        "multi_color_direction",
+        "multi_color_hexes"
+      ],
+      "enum": null
+    },
+    "SpoolGroupPreviewSpool": {
+      "type": "object",
+      "title": "SpoolGroupPreviewSpool",
+      "required": ["id"],
+      "properties": ["id", "initial_weight", "remaining_weight"],
+      "enum": null
+    },
+    "SpoolMeasureParameters": {
+      "type": "object",
+      "title": "SpoolMeasureParameters",
+      "required": ["weight"],
+      "properties": ["weight"],
+      "enum": null
+    },
+    "SpoolParameters": {
+      "type": "object",
+      "title": "SpoolParameters",
+      "required": ["filament_id"],
+      "properties": [
+        "archived",
+        "comment",
+        "extra",
+        "filament_id",
+        "first_used",
+        "initial_weight",
+        "last_used",
+        "location",
+        "lot_nr",
+        "price",
+        "remaining_weight",
+        "spool_weight",
+        "used_weight"
+      ],
+      "enum": null
+    },
+    "SpoolType": {
+      "type": "string",
+      "title": "SpoolType",
+      "required": [],
+      "properties": [],
+      "enum": ["plastic", "cardboard", "metal"]
+    },
+    "SpoolUpdateParameters": {
+      "type": "object",
+      "title": "SpoolUpdateParameters",
+      "required": [],
+      "properties": [
+        "archived",
+        "comment",
+        "extra",
+        "filament_id",
+        "first_used",
+        "initial_weight",
+        "last_used",
+        "location",
+        "lot_nr",
+        "price",
+        "remaining_weight",
+        "spool_weight",
+        "used_weight"
+      ],
+      "enum": null
+    },
+    "SpoolUseParameters": {
+      "type": "object",
+      "title": "SpoolUseParameters",
+      "required": [],
+      "properties": ["use_length", "use_weight"],
+      "enum": null
+    },
+    "Tag": {
+      "type": "object",
+      "title": "Tag",
+      "required": ["uid", "added"],
+      "properties": ["added", "format", "uid"],
+      "enum": null
+    },
+    "TagConflictMessage": {
+      "type": "object",
+      "title": "TagConflictMessage",
+      "required": ["message"],
+      "properties": ["filament_id", "message", "spool_id"],
+      "enum": null
+    },
+    "TagDecodedInfo": {
+      "type": "object",
+      "title": "TagDecodedInfo",
+      "required": [],
+      "properties": [
+        "article_number",
+        "bed_temp",
+        "color_hex",
+        "density",
+        "diameter",
+        "extruder_temp",
+        "initial_weight",
+        "instance_uuid",
+        "material",
+        "material_class",
+        "name",
+        "spool_weight",
+        "used_weight",
+        "vendor_name",
+        "weight"
+      ],
+      "enum": null
+    },
+    "TagLinkParameters": {
+      "type": "object",
+      "title": "TagLinkParameters",
+      "required": ["uid"],
+      "properties": ["format", "uid"],
+      "enum": null
+    },
+    "TagReader": {
+      "type": "object",
+      "title": "TagReader",
+      "required": ["reader_id", "last_seen"],
+      "properties": ["last_seen", "last_uid", "name", "reader_id"],
+      "enum": null
+    },
+    "TagScan": {
+      "type": "object",
+      "title": "TagScan",
+      "required": ["uid", "reader_id"],
+      "properties": [
+        "created",
+        "decoded",
+        "filament",
+        "format",
+        "matched_filament_id",
+        "matched_spool_id",
+        "name",
+        "payload_b64",
+        "reader_id",
+        "spool",
+        "uid"
+      ],
+      "enum": null
+    },
+    "TagScanEvent": {
+      "type": "object",
+      "title": "TagScanEvent",
+      "required": ["type", "resource", "date", "payload"],
+      "properties": ["date", "payload", "resource", "type"],
+      "enum": null
+    },
+    "TagScanParameters": {
+      "type": "object",
+      "title": "TagScanParameters",
+      "required": ["uid"],
+      "properties": [
+        "create",
+        "format",
+        "name",
+        "payload_b64",
+        "reader_id",
+        "uid"
+      ],
+      "enum": null
+    },
+    "ValidationError": {
+      "type": "object",
+      "title": "ValidationError",
+      "required": ["loc", "msg", "type"],
+      "properties": ["ctx", "input", "loc", "msg", "type"],
+      "enum": null
+    },
+    "Vendor": {
+      "type": "object",
+      "title": "Vendor",
+      "required": ["id", "registered", "name", "extra"],
+      "properties": [
+        "comment",
+        "empty_spool_weight",
+        "external_id",
+        "extra",
+        "id",
+        "name",
+        "registered"
+      ],
+      "enum": null
+    },
+    "VendorEvent": {
+      "type": "object",
+      "title": "VendorEvent",
+      "required": ["type", "resource", "date", "payload"],
+      "properties": ["date", "payload", "resource", "type"],
+      "enum": null
+    },
+    "VendorParameters": {
+      "type": "object",
+      "title": "VendorParameters",
+      "required": ["name"],
+      "properties": [
+        "comment",
+        "empty_spool_weight",
+        "external_id",
+        "extra",
+        "name"
+      ],
+      "enum": null
+    },
+    "VendorUpdateParameters": {
+      "type": "object",
+      "title": "VendorUpdateParameters",
+      "required": [],
+      "properties": [
+        "comment",
+        "empty_spool_weight",
+        "external_id",
+        "extra",
+        "name"
+      ],
+      "enum": null
+    },
+    "spoolman__api__v1__models__MultiColorDirection": {
+      "type": "string",
+      "title": "MultiColorDirection",
+      "required": [],
+      "properties": [],
+      "enum": ["coaxial", "longitudinal"]
+    },
+    "spoolman__externaldb__MultiColorDirection": {
+      "type": "string",
+      "title": "MultiColorDirection",
+      "required": [],
+      "properties": [],
+      "enum": ["coaxial", "longitudinal"]
+    }
+  },
+  "websocket_events": [
+    {
+      "model": "SpoolEvent",
+      "description": "Documented in models.py; code 299 examples on entity HTTP routes."
+    },
+    {
+      "model": "FilamentEvent",
+      "description": "Documented in models.py; code 299 examples on entity HTTP routes."
+    },
+    {
+      "model": "VendorEvent",
+      "description": "Documented in models.py; code 299 examples on entity HTTP routes."
+    },
+    {
+      "model": "SettingEvent",
+      "description": "Documented in models.py; code 299 examples on entity HTTP routes."
+    },
+    {
+      "model": "TagScanEvent",
+      "description": "Documented in models.py; code 299 examples on entity HTTP routes."
+    }
+  ],
+  "documented_errors_and_guards": [
+    {
+      "kind": "ItemNotFoundError",
+      "http_status": 404,
+      "body": {
+        "message": "string"
+      }
+    },
+    {
+      "kind": "Backup failure",
+      "http_status": 500,
+      "body": {
+        "message": "Backup failed. See server logs for more information."
+      }
+    },
+    {
+      "kind": "Untrusted browser origin (HTTP writes or WS handshake)",
+      "websocket_close_code": 4403
+    },
+    {
+      "kind": "Untrusted Host header (WS handshake)",
+      "websocket_close_code": 4400
+    }
+  ],
+  "notable_headers": [
+    {
+      "endpoint": "GET /api/v1/external/filament/search",
+      "name": "x-total-count",
+      "direction": "response"
+    }
+  ],
+  "openapi_path_count": 36
+}

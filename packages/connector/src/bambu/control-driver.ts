@@ -31,7 +31,16 @@ const lifecycle = (action: ExtendedControlAction | undefined) =>
   action === undefined || ['pause', 'resume', 'cancel'].includes(action)
 const Report = z.object({
   print: z.object({
-    gcode_state: z.enum(['RUNNING', 'PAUSE', 'IDLE', 'FINISH', 'FAILED']),
+    gcode_state: z.enum([
+      'RUNNING',
+      'PREPARE',
+      'SLICING',
+      'INIT',
+      'PAUSE',
+      'IDLE',
+      'FINISH',
+      'FAILED',
+    ]),
   }),
 })
 export class BambuControlTimeout extends Error {
@@ -154,7 +163,7 @@ export function openFixedBambuControl(input: {
             sequence: ++sequence,
             ready: state !== 'FAILED',
             printState:
-              state === 'RUNNING'
+              state === 'RUNNING' || state === 'PREPARE'
                 ? 'printing'
                 : state === 'PAUSE'
                   ? 'paused'

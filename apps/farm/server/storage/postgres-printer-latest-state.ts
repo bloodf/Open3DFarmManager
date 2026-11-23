@@ -3,6 +3,7 @@ import {
   PrinterState,
   type TelemetryEvent,
 } from '@open3dfarmmanager/farm-protocol'
+import { recordObservedAlerts } from '../utils/integration-alerts.ts'
 
 /** Callers on schemas that may predate migration 0033 probe before writing. */
 export async function latestStateTableExists(
@@ -20,17 +21,30 @@ export async function recordLatestStates(
   const states = events
     .filter((event) => event.kind === 'printer-state')
     .map((event) => event.state)
-    .sort((a, b) =>
-      Buffer.compare(Buffer.from(a.printerKey), Buffer.from(b.printerKey)),
+    .sort(
+      (a, b) =>
+        Buffer.compare(Buffer.from(a.printerKey), Buffer.from(b.printerKey)) ||
+        a.observedAt - b.observedAt,
     )
-  for (const state of states)
-    await tx`INSERT INTO farm.printer_latest_state (farm_id, agent_id, printer_key, observed_at, state)
+  let canRecordAlerts: boolean | undefined
+  for (const state of states) {
+    const updated =
+      await tx`INSERT INTO farm.printer_latest_state (farm_id, agent_id, printer_key, observed_at, state)
       VALUES (${scope.farmId}::uuid, ${scope.agentId}::uuid, ${state.printerKey}, ${state.observedAt}, ${tx.json(state)}::jsonb)
       ON CONFLICT (farm_id, agent_id, printer_key) DO UPDATE SET observed_at = EXCLUDED.observed_at, state = CASE
   WHEN EXCLUDED.state ? 'machine' OR NOT (printer_latest_state.state ? 'machine') THEN EXCLUDED.state
   ELSE EXCLUDED.state || jsonb_build_object('machine', printer_latest_state.state->'machine')
 END
-      WHERE farm.printer_latest_state.observed_at < EXCLUDED.observed_at`
+      WHERE farm.printer_latest_state.observed_at < EXCLUDED.observed_at
+      RETURNING printer_key`
+    if (!updated.length) continue
+    if (canRecordAlerts === undefined) {
+      const [access] = await tx<{ allowed: boolean | null }[]>`SELECT
+        has_table_privilege(to_regclass('farm.integration_alert_lifecycle'), 'INSERT') AS allowed`
+      canRecordAlerts = access?.allowed === true
+    }
+    if (canRecordAlerts) await recordObservedAlerts(tx, scope, state)
+  }
 }
 
 /** Internal read: caller is responsible for authorizing access to the farm. */

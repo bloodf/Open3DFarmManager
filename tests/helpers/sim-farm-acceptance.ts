@@ -141,6 +141,7 @@ export function simulatorStack(input: {
 
 export async function runSimFarmAcceptance(input: {
   admin: Sql
+  fixtureDatabaseUrl: string
   ports: SimPorts
   origins?: ReturnType<typeof mockSimulatorStack>['origins']
   workDir: string
@@ -247,12 +248,14 @@ export async function runSimFarmAcceptance(input: {
     { name: prefix + '_pair', group: 'farm_pairing_runtime' },
     { name: prefix + '_owner', group: 'farm_printer_ownership' },
   ]
+  const rolePassword = randomUUID().replaceAll('-', '')
   const created: string[] = []
   const pools: Sql[] = []
   const closers: Array<() => Promise<void>> = []
   try {
     for (const role of roles) {
       await admin`CREATE ROLE ${admin(role.name)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS IN ROLE ${admin(role.group)}`
+      await admin.unsafe(`ALTER ROLE "${role.name}" PASSWORD '${rolePassword}'`)
       created.push(role.name)
       ledger({ resource: 'database-role', name: role.name })
     }
@@ -263,7 +266,7 @@ export async function runSimFarmAcceptance(input: {
         port: ports.db,
         database: 'fixture',
         username,
-        password: '',
+        password: rolePassword,
         ssl: false,
         max: 2,
         connect_timeout: 3,
@@ -352,7 +355,7 @@ export async function runSimFarmAcceptance(input: {
       { mode: 0o600, flag: 'wx' },
     )
     const databaseUrl = (user: string) =>
-      `postgres://${encodeURIComponent(user)}:synthetic@127.0.0.1:${ports.db}/fixture`
+      `postgres://${encodeURIComponent(user)}:${rolePassword}@127.0.0.1:${ports.db}/fixture`
     const app = startFarmApp({
       env: {
         PATH: process.env.PATH ?? '/usr/bin:/bin',
@@ -360,7 +363,7 @@ export async function runSimFarmAcceptance(input: {
         NITRO_HOST: '127.0.0.1',
         NITRO_PORT: String(ports.app),
         NUXT_DATABASE_ENABLED: 'true',
-        NUXT_DATABASE_DATABASE_URL: databaseUrl('fixture'),
+        NUXT_DATABASE_DATABASE_URL: input.fixtureDatabaseUrl,
         NUXT_DATABASE_MIGRATIONS: 'verify',
         NUXT_DATABASE_MIGRATIONS_DIR: repo('infra/db/migrations/'),
         NUXT_CONNECTOR_TELEMETRY_ENABLED: 'true',
@@ -441,7 +444,13 @@ export async function runSimFarmAcceptance(input: {
     await until(
       async () =>
         delivered() >= PRINTERS.length + 1 &&
-        delivered() >= connector.count('queued') &&
+        delivered() >=
+          connector.count('queued') +
+            Number(
+              (
+                await admin`SELECT count(*)::int AS n FROM farm.telemetry_events WHERE agent_id=${enrolled.agentId}::uuid AND farm_id=${enrolled.farmId}::uuid AND payload ? 'inventory'`
+              )[0]!.n,
+            ) &&
         (await stored()) === delivered(),
       30000,
       'telemetry drain settled',

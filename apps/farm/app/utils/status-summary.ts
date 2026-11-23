@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { PrinterState } from '../../../../packages/farm-protocol/src/state.ts'
 import type { LastKnownState } from '../composables/useLastKnownStates-core.ts'
 
 /** Mirrors STATUS_SUMMARY_MAX_PRINTERS of the server route. */
@@ -18,6 +19,7 @@ const SummaryPrinter = z.object({
   groupName: z.string().nullable().optional(),
   location: z.string().nullable().optional(),
   state: z.enum(PRINTER_STATES),
+  alarms: PrinterState.shape.alarms,
   progress: z.number().min(0).max(1).optional(),
   temperatures: z
     .object({
@@ -80,6 +82,7 @@ export function parseStatusSummary(value: unknown): StatusSummaryParse {
       : {}),
     ...(printer.location !== undefined ? { location: printer.location } : {}),
     state: printer.state,
+    ...(printer.alarms !== undefined && { alarms: printer.alarms }),
     progress: printer.progress,
     // A missing reading is not a reading of zero.
     temperatures: {

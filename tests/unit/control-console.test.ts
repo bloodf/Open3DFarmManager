@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 import { randomUUID } from 'node:crypto'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, onTestFinished } from 'vitest'
 import {
   ControlArguments,
   ExtendedControlAction,
@@ -525,6 +525,7 @@ describe('command journal', () => {
     (version) => {
       // Scratch directory under the OS temp area; left in place on purpose.
       const directory = mkdtempSync(join(tmpdir(), 'console-journal-'))
+      onTestFinished(() => rmSync(directory, { recursive: true, force: true }))
       closeCommandJournal(openCommandJournal({ directory, clock: Date.now }))
       const path = join(directory, 'pause-commands.sqlite')
       const db = new DatabaseSync(path)
@@ -545,7 +546,7 @@ describe('command journal', () => {
             ? v14
             : v14.replace(",'gcode'", '').replace(",'file_op'", '')
         db.exec(
-          `DROP TABLE control_command_actions; ${historical}; INSERT INTO control_command_actions VALUES ('retained', 'set_pin'); PRAGMA user_version=${version};`,
+          `DROP INDEX pause_active_assignment; DROP INDEX pause_active_printer; CREATE UNIQUE INDEX pause_active_assignment ON pause_commands(assignment_id) WHERE status IN ('claimed','write-started','outcome-unknown'); CREATE UNIQUE INDEX pause_active_printer ON pause_commands(farm_id,printer_key) WHERE status IN ('claimed','write-started','outcome-unknown'); DROP TABLE control_command_actions; ${historical}; INSERT INTO control_command_actions VALUES ('retained', 'set_pin'); PRAGMA user_version=${version};`,
         )
       } finally {
         db.close()

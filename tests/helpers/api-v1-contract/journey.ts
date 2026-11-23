@@ -196,7 +196,9 @@ export async function openJourney(
             headers: Object.fromEntries(
               new Headers(
                 req.rawHeaders.flatMap((name, index, entries) =>
-                  index % 2 === 0 ? [[name, entries[index + 1] ?? '']] : [],
+                  index % 2 === 0
+                    ? [[name, entries[index + 1] ?? ''] as [string, string]]
+                    : [],
                 ),
               ),
             ),
@@ -239,6 +241,8 @@ export async function openJourney(
         nonce: record.nonce,
         issued_at: record.issuedAt,
         expires_at: record.expiresAt,
+        scope: record.requiredScope,
+        grant_epoch: record.issuedAt,
         ...command,
       },
       keys.privateKey,

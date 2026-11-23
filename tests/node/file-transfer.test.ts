@@ -85,7 +85,20 @@ test('idle timeout removes staging', async (t) => {
 })
 test('backpressure waits before reading and sending chunks', async () => {
   let buffered = 100_000
+  let reads = 0
   const messages: string[] = []
+  const file = new Blob([bytes])
+  const originalSlice = file.slice.bind(file)
+  file.slice = ((...args: Parameters<Blob['slice']>) => {
+    const chunk = originalSlice(...args)
+    const read = chunk.arrayBuffer.bind(chunk)
+    return Object.assign(chunk, {
+      async arrayBuffer() {
+        reads++
+        return read()
+      },
+    })
+  }) as Blob['slice']
   const run = sendFile(
     {
       get bufferedAmount() {
@@ -98,11 +111,17 @@ test('backpressure waits before reading and sending chunks', async () => {
       },
     },
     offer,
-    new Blob([bytes]),
+    file,
   )
   await new Promise((resolve) => setTimeout(resolve, 20))
   assert.deepEqual(messages, ['offer'])
+  assert.equal(
+    reads,
+    0,
+    'chunk bytes must not be read while the channel is full',
+  )
   buffered = 0
   await run
+  assert.equal(reads, 1)
   assert.deepEqual(messages, ['offer', 'chunk', 'complete'])
 })

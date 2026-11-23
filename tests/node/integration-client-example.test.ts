@@ -88,7 +88,7 @@ test('reference client exposes stable API problem codes', async () => {
 
 test('webhook verifier signs timestamp plus exact raw bytes and supports rotation', () => {
   const body = Buffer.from('{"type":"webhook.test"}')
-  const timestamp = '1795000000000'
+  const timestamp = String(Date.now())
   const secret = 'sandbox-signing-secret'
   const signature = createHmac('sha256', secret)
     .update(`${timestamp}.`)

@@ -1,3 +1,4 @@
+import { openFarmInspector } from './farm-inspector.ts'
 import { isDockerSim } from '../../packages/sim-tools/src/mocks/env.ts'
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
@@ -27,6 +28,7 @@ const State = z.object({
 export async function testPrintingPausePage(input: {
   fixture: ProvisionedSignallingFixture
   directory: string
+  ownedMockOrigin?: string
   note(value: string): Promise<void>
 }) {
   const startedAt = performance.now()
@@ -36,59 +38,63 @@ export async function testPrintingPausePage(input: {
     )
   await stage('start')
   assert.equal(process.env.SIGNALLING_HTTPS_SIM_PRINTING_PAUSE, 'sv06')
-  const origin = process.env.SIGNALLING_HTTPS_SIM_MOONRAKER!
+  const origin =
+    input.ownedMockOrigin ?? process.env.SIGNALLING_HTTPS_SIM_MOONRAKER!
   const url = new URL(origin)
   assert.equal(url.hostname, '127.0.0.1')
   assert.equal(url.protocol, 'http:')
-  // Prove the target is the explicitly supplied infra/sim sv06 container,
-  // rather than trusting a loopback origin (which may front real hardware).
-  assert.ok(
-    isDockerSim(),
-    'This container fixture requires OPENFARM_SIM=docker',
-  )
-  const container = process.env.SIGNALLING_HTTPS_SIM_CONTAINER ?? ''
-  assert.match(
-    container,
-    /^[a-f0-9]{64}$/,
-    'Explicit task-owned simulator container ID required',
-  )
-  const inspected = await promisify(execFile)(
-    'docker',
-    ['inspect', container],
-    { timeout: 10000 },
-  )
-  const metadata = z
-    .array(
-      z.object({
-        Config: z.object({ Labels: z.record(z.string(), z.string()) }),
-        NetworkSettings: z.object({
-          Ports: z.record(
-            z.string(),
-            z
-              .array(z.object({ HostIp: z.string(), HostPort: z.string() }))
-              .nullable(),
-          ),
-        }),
-      }),
+  if (!input.ownedMockOrigin) {
+    // Prove the target is the explicitly supplied infra/sim sv06 container,
+    // rather than trusting a loopback origin (which may front real hardware).
+    assert.ok(
+      isDockerSim(),
+      'This container fixture requires OPENFARM_SIM=docker',
     )
-    .parse(JSON.parse(inspected.stdout))[0]!
-  assert.equal(metadata.Config.Labels['com.docker.compose.service'], 'sv06')
-  assert.ok(
-    metadata.Config.Labels['com.docker.compose.project.config_files']
-      ?.split(',')
-      .some((path) => path.endsWith('/infra/sim/docker-compose.yml')),
-  )
-  assert.ok(
-    metadata.NetworkSettings.Ports['7125/tcp']?.some(
-      (binding) =>
-        binding.HostIp === '127.0.0.1' && binding.HostPort === url.port,
-    ),
-    'Origin must be the sv06 published loopback port',
-  )
+    const container = process.env.SIGNALLING_HTTPS_SIM_CONTAINER ?? ''
+    assert.match(
+      container,
+      /^[a-f0-9]{64}$/,
+      'Explicit task-owned simulator container ID required',
+    )
+    const inspected = await promisify(execFile)(
+      'docker',
+      ['inspect', container],
+      { timeout: 10000 },
+    )
+    const metadata = z
+      .array(
+        z.object({
+          Config: z.object({ Labels: z.record(z.string(), z.string()) }),
+          NetworkSettings: z.object({
+            Ports: z.record(
+              z.string(),
+              z
+                .array(z.object({ HostIp: z.string(), HostPort: z.string() }))
+                .nullable(),
+            ),
+          }),
+        }),
+      )
+      .parse(JSON.parse(inspected.stdout))[0]!
+    assert.equal(metadata.Config.Labels['com.docker.compose.service'], 'sv06')
+    assert.ok(
+      metadata.Config.Labels['com.docker.compose.project.config_files']
+        ?.split(',')
+        .some((path) => path.endsWith('/infra/sim/docker-compose.yml')),
+    )
+    assert.ok(
+      metadata.NetworkSettings.Ports['7125/tcp']?.some(
+        (binding) =>
+          binding.HostIp === '127.0.0.1' && binding.HostPort === url.port,
+      ),
+      'Origin must be the sv06 published loopback port',
+    )
+  }
   const request = async (path: string, init?: RequestInit) => {
     const requestedAt = performance.now()
     const response = await fetch(origin + path, {
       ...init,
+      redirect: 'error',
       signal: AbortSignal.timeout(10000),
     })
     assert.ok(response.ok, `${path}: HTTP ${response.status}`)
@@ -169,19 +175,15 @@ export async function testPrintingPausePage(input: {
       },
       async confirm() {
         await stage('page-open')
-        const assignment = input.fixture.assignmentRefs[0]!
-        const row = page.getByRole('article').filter({
-          has: page.getByRole('heading', {
-            name: assignment.printerKey,
-            exact: true,
-          }),
-        })
+        assert.equal(input.fixture.assignmentRefs.length, 1)
+        const assignment = input.fixture.assignmentRefs[0]
+        assert.ok(assignment)
+        const row = await openFarmInspector(page, assignment.printerKey)
         await expect(
           row.getByText('Conexão direta autenticada', { exact: true }),
         ).toBeVisible({ timeout: 15000 })
         const button = row.getByRole('button', {
-          name: 'Pausar',
-          exact: true,
+          name: /^Pausar(?: impressão)?$/,
         })
         await expect(button).toBeEnabled()
         await button.click()
@@ -200,7 +202,9 @@ export async function testPrintingPausePage(input: {
         await expect(dialog.getByRole('status')).toHaveText(PAUSED_UI, {
           timeout: 10000,
         })
-        await expect(row.getByText('Pausada', { exact: true })).toBeVisible()
+        await expect(
+          row.locator('dt:text-is("Último estado informado") + dd'),
+        ).toHaveText('Pausada')
         await expect(button).toBeDisabled()
         await expect.poll(state).toBe('paused')
       },
@@ -208,7 +212,10 @@ export async function testPrintingPausePage(input: {
         return {
           klipper: await state(),
           journal: journal(),
-          ui: await page.getByRole('dialog').getByRole('status').innerText(),
+          ui: await page
+            .getByRole('dialog', { name: /^Pausar impressão de/ })
+            .getByRole('status')
+            .innerText(),
         }
       },
       async resume() {
@@ -222,7 +229,9 @@ export async function testPrintingPausePage(input: {
             exact: true,
           }),
         })
-        await expect(row.getByText('Imprimindo', { exact: true })).toBeVisible()
+        await expect(
+          row.locator('dt:text-is("Último estado informado") + dd'),
+        ).toHaveText('Imprimindo')
         await page.waitForTimeout(2000)
       },
       note: input.note,

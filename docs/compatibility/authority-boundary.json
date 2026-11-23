@@ -20,10 +20,9 @@
     {
       "id": "F2",
       "level": "confirmed-by-source-reading",
-      "claim": "The v1 verifier authorizeCommand and PersistentReplayStore have no callers under packages, apps or scripts (tests only). It is the only place resume, cancel and emergency_stop exist as actions; project documentation describes it as a library prototype without driver or transport.",
+      "claim": "The v1 verifier authorizeCommand and PersistentReplayStore have no callers under packages, apps or scripts (tests only). It is the only place resume, cancel and emergency_stop exist as actions; project documentation describes it as a library prototype without driver or transport. Update (#609): authorizeCommand and verify.ts were removed and their tests moved to the v2 path; The unused v1 replay store was also removed; the command journal protects the current path.",
       "evidence": [
         "packages/connector/src/auth/verify.ts:88",
-        "packages/connector/src/auth/replay.ts:23",
         "packages/farm-protocol/src/command.ts:20",
         "docs/COMMAND-SECURITY.md"
       ],
@@ -273,7 +272,7 @@
     },
     {
       "id": "AC4",
-      "rule": "The v1 verifier is not a production path; do not wire authorizeCommand to a driver without authenticated context, issued capability and journal equivalent to v2."
+      "rule": "The v1 verifier is not a production path (removed in #609); do not reintroduce a verifier like authorizeCommand wired to a driver without authenticated context, issued capability and journal equivalent to v2."
     },
     {
       "id": "AC5",
@@ -384,8 +383,8 @@
     },
     {
       "id": "S7",
-      "reference": "packages/connector/src/auth/verify.ts; packages/connector/src/auth/replay.ts; packages/farm-protocol/src/command.ts",
-      "supports": "v1 verifier and replay store",
+      "reference": "packages/connector/src/auth/verify.ts (removed); packages/farm-protocol/src/command.ts",
+      "supports": "v1 verifier (verify.ts removed in #609) and replay store",
       "published": "2026-11-12 (base commit)",
       "accessed": "2026-11-13",
       "method": "source read and caller search"

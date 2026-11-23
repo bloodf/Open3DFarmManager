@@ -3,7 +3,7 @@ import { canonicalize } from './canonical.ts'
 import { parseBoundedJson } from './json.ts'
 import { base64url, decodeBase64url } from './encoding.ts'
 import { BrowserDeviceUuid } from './browser-device-proof.ts'
-import { ControlArguments } from './control-actions.ts'
+import { CollectionArguments, ControlArguments } from './control-actions.ts'
 
 /**
  * Command envelope for API-submitted jobs and actions: the server-to-Connector
@@ -53,6 +53,7 @@ export const API_ENVELOPE_ACTIONS = [
   'resume',
   'cancel',
   'set_temperature',
+  'set_tool_temperature',
   'set_fan',
   'home',
   'set_light',
@@ -62,10 +63,134 @@ export const API_ENVELOPE_ACTIONS = [
   'unload_filament',
   'start_library_print',
 ] as const
-export const ApiEnvelopeAction = ControlArguments.refine((value) =>
-  (API_ENVELOPE_ACTIONS as readonly string[]).includes(value.action),
-)
-export type ApiEnvelopeAction = z.infer<typeof ControlArguments>
+export const ApiRunAction = z.strictObject({
+  action: z.enum(['job_pause', 'job_resume', 'job_cancel']),
+  args: z.strictObject({ expectedRunId: uuid }),
+})
+export const ApiPlateAction = z.strictObject({
+  action: z.literal('confirm_collection'),
+  args: CollectionArguments,
+})
+export const ApiResinReplay = z.strictObject({
+  action: z.literal('start_library_print'),
+  args: z.strictObject({
+    sha256,
+    versionId: uuid,
+    filename: z
+      .string()
+      .min(1)
+      .max(255)
+      .regex(/^[^\/\\\x00-\x1f\x7f]+$/),
+    profile: z.string().min(1).max(100),
+    plate: z.literal(1),
+  }),
+})
+export const ApiEnvelopeAction = z.union([
+  ApiResinReplay,
+  ApiRunAction,
+  ApiPlateAction,
+  ControlArguments.refine((value) =>
+    (API_ENVELOPE_ACTIONS as readonly string[]).includes(value.action),
+  ),
+])
+export type ApiEnvelopeAction = z.infer<typeof ApiEnvelopeAction>
+
+/**
+ * Environment controls an API app may request under `environment:control`
+ * (#693). They never reuse an ordinary printer action, so the scope a signed
+ * envelope needs is unambiguous. The Connector maps each one to a qualified
+ * driver capability, enforces its own safety interlocks and refuses
+ * `unsupported` where no qualified capability exists. Drying programs have no
+ * qualified Connector capability yet and are always refused as unsupported.
+ */
+export const API_ENVIRONMENT_ACTIONS = [
+  'extraction_set',
+  'plug_switch',
+  'drying_start',
+  'drying_stop',
+] as const
+export const ApiEnvironmentDeviceName = z
+  .string()
+  .regex(/^[A-Za-z0-9][A-Za-z0-9 _.-]{0,63}$/)
+export const ApiEnvironmentAction = z.discriminatedUnion('action', [
+  z.strictObject({
+    action: z.literal('extraction_set'),
+    args: z.strictObject({ percent: z.number().int().min(0).max(100) }),
+  }),
+  z.strictObject({
+    action: z.literal('plug_switch'),
+    args: z.strictObject({ device: ApiEnvironmentDeviceName, on: z.boolean() }),
+  }),
+  z.strictObject({
+    action: z.literal('drying_start'),
+    args: z.strictObject({
+      targetCelsius: z.number().int().min(35).max(90),
+      durationMinutes: z.number().int().min(1).max(1440),
+    }),
+  }),
+  z.strictObject({
+    action: z.literal('drying_stop'),
+    args: z.strictObject({}),
+  }),
+])
+export type ApiEnvironmentAction = z.infer<typeof ApiEnvironmentAction>
+/** Every action a signed envelope may carry. */
+export const ApiEnvelopeCommandAction = z.union([
+  ApiEnvelopeAction,
+  ApiEnvironmentAction,
+])
+export type ApiEnvelopeCommandAction = z.infer<typeof ApiEnvelopeCommandAction>
+
+export function isApiEnvironmentAction(
+  action: { action: string } | undefined,
+): action is ApiEnvironmentAction {
+  return (
+    action !== undefined &&
+    (API_ENVIRONMENT_ACTIONS as readonly string[]).includes(action.action)
+  )
+}
+
+export const API_RUN_CONTROLS = {
+  job_pause: 'pause',
+  job_resume: 'resume',
+  job_cancel: 'cancel',
+} as const
+
+export const ApiEnvelopeScope = z.enum([
+  'jobs:start',
+  'jobs:write',
+  'control:basic',
+  'control:extended',
+  'plates:confirm',
+  'environment:control',
+])
+
+export function scopeForApiAction(action: ApiEnvelopeAction['action']) {
+  switch (action) {
+    case 'confirm_collection':
+      return 'plates:confirm'
+    case 'start_library_print':
+      return 'jobs:write'
+    case 'job_pause':
+    case 'job_resume':
+    case 'job_cancel':
+    case 'pause':
+    case 'resume':
+    case 'cancel':
+      return 'control:basic'
+    default:
+      return 'control:extended'
+  }
+}
+
+/** The scope for any envelope action, environment controls included. */
+export function scopeForApiCommand(
+  action: ApiEnvelopeCommandAction['action'],
+): z.infer<typeof ApiEnvelopeScope> {
+  return (API_ENVIRONMENT_ACTIONS as readonly string[]).includes(action)
+    ? 'environment:control'
+    : scopeForApiAction(action as ApiEnvelopeAction['action'])
+}
 
 export const ApiEnvelopeJob = z.strictObject({
   file_url: httpsUrl,
@@ -96,6 +221,12 @@ const common = {
   nonce,
   issued_at: time,
   expires_at: time,
+  // Roll out Connector support before issuing these fields: older strict V1
+  // parsers reject them. Connectors use the authenticated inbox scope for
+  // legacy envelopes and require both signed claims when either is present.
+  scope: ApiEnvelopeScope.optional(),
+  /** Issuance-time authority epoch, revalidated by the delivery claim. */
+  grant_epoch: time.optional(),
 }
 const expiryBounds = (value: { issued_at: number; expires_at: number }) =>
   value.expires_at - value.issued_at >= MIN_API_ENVELOPE_TTL_MS &&
@@ -104,7 +235,7 @@ const claimsFields = {
   ...common,
   kind: z.enum(['job', 'action']),
   job: ApiEnvelopeJob.optional(),
-  action: ApiEnvelopeAction.optional(),
+  action: ApiEnvelopeCommandAction.optional(),
 }
 /** Exactly one of `job` and `action`, matching `kind`. */
 const kindMatches = (value: {

@@ -8,6 +8,8 @@ import { BrowserDeviceUuid } from '../../../farm-protocol/src/browser-device-pro
 import { canonicalize } from '../../../farm-protocol/src/canonical.ts'
 import {
   API_ENVELOPE_CLOCK_SKEW_MS,
+  API_RUN_CONTROLS,
+  ApiRunAction,
   ApiEnvelopeV1,
 } from '../../../farm-protocol/src/api-envelope.ts'
 
@@ -47,7 +49,8 @@ if (
 const RETENTION_MS = 600_000
 const MAX_CAPACITY = 10_000
 const APPLICATION_ID = 0x4f334450
-const SCHEMA_VERSION = 16
+const SCHEMA_VERSION = 17
+const MAX_CLOCK_STEP_MS = RETENTION_MS + 1_000
 const reasons = [
   'guard-denied',
   'rpc-rejected',
@@ -80,6 +83,7 @@ const holdsPrinterWhenUnconfirmed = new Set([
   'emergency_stop',
   'firmware_restart',
 ])
+const actionlessCommands = new Set(['confirm_collection'])
 const time = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
 const printerKey = z
   .string()
@@ -180,6 +184,8 @@ type State = {
   clock: () => number
   capacity: number
   writerId: string
+  wallBase: number
+  monotonicBase: number
   closed: boolean
 }
 type Receipt = {
@@ -330,11 +336,17 @@ const schema = [
            AND (status<>'applied' OR write_started_at IS NOT NULL)
            AND ((status='outcome-unknown' AND retain_until IS NULL) OR (status IN ('not-sent','applied') AND retain_until=finished_at+600000))))
   ) STRICT`,
-  `CREATE UNIQUE INDEX pause_active_assignment ON pause_commands(assignment_id) WHERE status IN ('claimed','write-started','outcome-unknown')`,
-  `CREATE UNIQUE INDEX pause_active_printer ON pause_commands(farm_id,printer_key) WHERE status IN ('claimed','write-started','outcome-unknown')`,
+  `CREATE INDEX pause_active_assignment ON pause_commands(assignment_id) WHERE status IN ('claimed','write-started','outcome-unknown')`,
+  `CREATE INDEX pause_active_printer ON pause_commands(farm_id,printer_key) WHERE status IN ('claimed','write-started','outcome-unknown')`,
   `CREATE INDEX pause_recent_printer ON pause_commands(farm_id,printer_key,claimed_at)`,
   `CREATE INDEX pause_terminal_retention ON pause_commands(retain_until) WHERE status IN ('not-sent','applied')`,
 ]
+const previousSchema = schema.map((sql) =>
+  sql.replace(
+    'CREATE INDEX pause_active_',
+    'CREATE UNIQUE INDEX pause_active_',
+  ),
+)
 function privateEntry(path: string, directory: boolean) {
   const stat = lstatSync(path)
   if (
@@ -382,7 +394,14 @@ function clockStep(state: State, observedWall = sample(state)): number | null {
     row.high_water < 0
   )
     throw new Error('Invalid command journal metadata')
-  if (now < row.high_water) return null
+  if (
+    now < row.high_water ||
+    now >
+      state.wallBase +
+        (performance.now() - state.monotonicBase) +
+        MAX_CLOCK_STEP_MS
+  )
+    return null
   state.database
     .prepare('UPDATE pause_meta SET high_water=? WHERE id=1')
     .run(now)
@@ -441,6 +460,7 @@ export function openCommandJournal(input: {
     }
   }
   privateStorage({ directory: input.directory, path })
+  const writerId = randomUUID()
   const database = new DatabaseSync(path, {
     timeout: 100,
     allowExtension: false,
@@ -471,6 +491,7 @@ export function openCommandJournal(input: {
         13,
         14,
         15,
+        16,
         SCHEMA_VERSION,
       ].includes(Number(initialVersion)) ||
         initialApplication !== APPLICATION_ID)
@@ -503,6 +524,47 @@ export function openCommandJournal(input: {
         database.exec(
           "INSERT INTO control_command_actions SELECT cmd_id,'pause' FROM pause_commands",
         )
+        database.exec(
+          'DROP INDEX pause_active_assignment; DROP INDEX pause_active_printer',
+        )
+        database.exec(
+          schema.find((sql) =>
+            sql.startsWith('CREATE INDEX pause_active_assignment'),
+          )!,
+        )
+        database.exec(
+          schema.find((sql) =>
+            sql.startsWith('CREATE INDEX pause_active_printer'),
+          )!,
+        )
+        database.exec(`PRAGMA user_version=${SCHEMA_VERSION}`)
+      } else if (version === 16 && app === APPLICATION_ID) {
+        const definitions = database
+          .prepare(
+            "SELECT sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY sql",
+          )
+          .all()
+          .map((row) => row.sql)
+        if (
+          definitions.length !== previousSchema.length ||
+          definitions.some(
+            (sql, index) => sql !== [...previousSchema].sort()[index],
+          )
+        )
+          throw new Error('Invalid command journal schema')
+        database.exec(
+          'DROP INDEX pause_active_assignment; DROP INDEX pause_active_printer',
+        )
+        database.exec(
+          schema.find((sql) =>
+            sql.startsWith('CREATE INDEX pause_active_assignment'),
+          )!,
+        )
+        database.exec(
+          schema.find((sql) =>
+            sql.startsWith('CREATE INDEX pause_active_printer'),
+          )!,
+        )
         database.exec(`PRAGMA user_version=${SCHEMA_VERSION}`)
       } else if (
         Object.hasOwn(previousActionSchemas, Number(version)) &&
@@ -516,7 +578,7 @@ export function openCommandJournal(input: {
           .map((row) => row.sql)
         const matchesLegacy = previousActionSchemas[Number(version)]?.some(
           (previous) => {
-            const expected = schema
+            const expected = previousSchema
               .map((sql) => (sql === actionSchema ? previous : sql))
               .sort()
             return (
@@ -534,6 +596,19 @@ export function openCommandJournal(input: {
           'INSERT INTO control_command_actions SELECT * FROM legacy_control_command_actions',
         )
         database.exec('DROP TABLE legacy_control_command_actions')
+        database.exec(
+          'DROP INDEX pause_active_assignment; DROP INDEX pause_active_printer',
+        )
+        database.exec(
+          schema.find((sql) =>
+            sql.startsWith('CREATE INDEX pause_active_assignment'),
+          )!,
+        )
+        database.exec(
+          schema.find((sql) =>
+            sql.startsWith('CREATE INDEX pause_active_printer'),
+          )!,
+        )
         database.exec(`PRAGMA user_version=${SCHEMA_VERSION}`)
       } else if (version !== SCHEMA_VERSION || app !== APPLICATION_ID)
         throw new Error('Unknown command journal version')
@@ -553,6 +628,12 @@ export function openCommandJournal(input: {
         .get()
       if (meta?.n !== 1 || meta.id !== 1)
         throw new Error('Invalid command journal metadata')
+      // A previous writer's unfinished operation is never resumed or retried.
+      database
+        .prepare(
+          "UPDATE pause_commands SET status='outcome-unknown', reason='outcome-unknown', finished_at=COALESCE(write_started_at, claimed_at), retain_until=NULL WHERE writer_id<>? AND status IN ('claimed','write-started')",
+        )
+        .run(writerId)
       database.exec('COMMIT')
     } catch (error) {
       try {
@@ -573,7 +654,9 @@ export function openCommandJournal(input: {
       path,
       clock: input.clock,
       capacity,
-      writerId: randomUUID(),
+      writerId,
+      wallBase: validateWall(input.clock()),
+      monotonicBase: performance.now(),
       closed: false,
     })
     return handle
@@ -613,6 +696,7 @@ export function claimApiCommand(
   const parsed = ApiClaimInput.safeParse(input)
   if (!parsed.success) return { ok: false, reason: 'storage-unavailable' }
   const envelope = parsed.data.envelope
+  const run = ApiRunAction.safeParse(envelope.action)
   return claimRow(
     handle,
     {
@@ -625,7 +709,12 @@ export function claimApiCommand(
       account_id: envelope.app_id,
       transport_id: 'api-envelope',
       capability_id: envelope.grant_id,
-      action: envelope.kind === 'job' ? 'start_print' : envelope.action!.action,
+      action:
+        envelope.kind === 'job'
+          ? 'start_print'
+          : run.success
+            ? API_RUN_CONTROLS[run.data.action]
+            : envelope.action!.action,
       not_before: Math.max(0, envelope.issued_at - API_ENVELOPE_CLOCK_SKEW_MS),
       expires_at: envelope.expires_at,
     },
@@ -645,7 +734,10 @@ function claimRow(
     const result = transaction(
       state,
       (): { ok: true } | Exclude<CommandClaimResult, { ok: true }> => {
-        const now = clockStep(state)
+        const observed = sample(state)
+        if (observed >= command.expires_at)
+          return { ok: false, reason: 'storage-unavailable' }
+        const now = clockStep(state, observed)
         if (now === null) return { ok: false, reason: 'clock-regressed' }
         if (now < command.not_before || now >= command.expires_at)
           return { ok: false, reason: 'storage-unavailable' }
@@ -663,6 +755,7 @@ function claimRow(
         )
           return { ok: false, reason: 'replay' }
         if (
+          command.action !== 'emergency_stop' &&
           state.database
             .prepare(
               "SELECT 1 FROM pause_commands WHERE status IN ('claimed','write-started','outcome-unknown') AND (assignment_id=? OR (farm_id=? AND printer_key=?)) LIMIT 1",
@@ -678,9 +771,9 @@ function claimRow(
         const recent = state.database
           .prepare(
             `SELECT count(*) AS n FROM pause_commands
-             JOIN control_command_actions USING (cmd_id)
+             LEFT JOIN control_command_actions USING (cmd_id)
              WHERE farm_id=? AND printer_key=?
-               AND (action='exclude_object')=?
+               AND (COALESCE(action,'')='exclude_object')=?
                AND CASE WHEN action='exclude_object' THEN write_started_at ELSE claimed_at END>?`,
           )
           .get(
@@ -690,7 +783,8 @@ function claimRow(
             now - 60000,
           )?.n
         if (typeof recent !== 'number') throw new Error('Invalid rate count')
-        if (recent >= 10) return { ok: false, reason: 'rate-limited' }
+        if (command.action !== 'emergency_stop' && recent >= 10)
+          return { ok: false, reason: 'rate-limited' }
         // Bed mesh is its own class: one accepted dispatch per printer a minute.
         if (command.action === 'bed_mesh') {
           const meshes = state.database
@@ -725,9 +819,13 @@ function claimRow(
             'DELETE FROM control_command_actions WHERE cmd_id NOT IN (SELECT cmd_id FROM pause_commands)',
           )
           .run()
-        state.database
-          .prepare('INSERT INTO control_command_actions VALUES(?,?)')
-          .run(command.cmd_id, command.action)
+        // A plate confirmation is a local collection-journal write with no
+        // printer effect. The v17 action table predates it, so its row keeps
+        // replay protection, exclusion and the rate limit without an action.
+        if (!actionlessCommands.has(command.action))
+          state.database
+            .prepare('INSERT INTO control_command_actions VALUES(?,?)')
+            .run(command.cmd_id, command.action)
         return { ok: true }
       },
     )

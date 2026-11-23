@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.1.0
+
+### Farm app
+
+- Polish farm dashboard, printer detail, spool management, and job history layouts, empty states, and accessibility.
+- Support connecting encrypted Bambu Cloud accounts per farm, importing cloud printers into setup, and viewing AMS state and cloud print history.
+- Add password change and global sign-out flows in browser sessions.
+
+### Integration API
+
+- Report optional printer specs (`buildVolumeMm`, `nozzles`, `spoolSlots`, `multicolor`) on printer reads (OpenAPI 1.1.0).
+- Fix 503 service unavailable errors on inventory and job history caused by `sql.array` removal in `postgres` 4.1.1.
+- Expose library files and job replay through the v1 integration API.
+- Add v1 bulk printer status and alert webhooks.
+
+### Connector
+
+- Add native Anycubic Kobra X telemetry support using the bundled slicer certificate and `printer/public` report subscription.
+- Accept unknown envelope members in Snapmaker U1 pause replies and vendor members in Moonraker responses.
+- Qualify Moonraker printer identity detection and multi-webcam discovery.
+- Support configurable WebRTC ICE bind address (`rtc.bindAddress`).
+
+### Install and upgrade
+
+- Add first-install self-hosting guide and Docker Compose setup walkthrough.
+- Gate release archive builds on upgrade rehearsal verification and verify Connector native binary provenance.
+- Harden database migration sequencing and CLI rollback authorization checks.
+
+### Website
+
+- Launch static documentation website with component architecture diagrams and printer compatibility matrix.
+- Publish step-by-step installation guide and hosting, validation, and license FAQ.
+
 ## 0.0.1
 
 - Initial Open3DFarmManager release with the farm app and Connector.

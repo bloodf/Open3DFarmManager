@@ -1,0 +1,101 @@
+{
+  "vendor": "kobra-x",
+  "host": "<printer-host>",
+  "port": 9883,
+  "timestamp": "2026-11-21T14:47:16.514Z",
+  "identity": {
+    "vendor": "Anycubic",
+    "model": "Kobra X",
+    "firmware": "2.0.2.8",
+    "serial": "<device-id>"
+  },
+  "telemetry": {
+    "observed": true,
+    "fields": [
+      "materials",
+      "toolTemperatureCelsius",
+      "bedTemperatureCelsius",
+      "fans"
+    ],
+    "sample": {
+      "materials": [
+        {
+          "slot": "0:0",
+          "materialType": "PLA+",
+          "colorHex": "FF7F32FF",
+          "remainingPercent": 100,
+          "active": true
+        },
+        {
+          "slot": "0:1",
+          "materialType": "PLA Matte",
+          "colorHex": "000000FF",
+          "remainingPercent": 100,
+          "active": true
+        },
+        {
+          "slot": "0:2",
+          "materialType": "PLA+",
+          "colorHex": "B1B3B3FF",
+          "remainingPercent": 100,
+          "active": true
+        },
+        {
+          "slot": "0:3",
+          "materialType": "PLA Metal",
+          "colorHex": "2F3F44FF",
+          "remainingPercent": 100,
+          "active": true
+        }
+      ],
+      "toolTemperatureCelsius": 33,
+      "bedTemperatureCelsius": 30,
+      "fans": {
+        "part": 0,
+        "aux": 0
+      }
+    }
+  },
+  "camera": {
+    "reachable": true,
+    "kind": "mjpeg",
+    "url": "<camera-url>",
+    "detail": "Camera URL reachable"
+  },
+  "files": {
+    "listable": false,
+    "count": 0,
+    "files": [],
+    "reason": "No file listing reported over the native LAN path"
+  },
+  "catalog": {
+    "matchedCatalogId": "anycubic-kobra-x",
+    "matchedCatalogBrand": "Anycubic",
+    "matchedCatalogModel": "Kobra X",
+    "currentCapabilities": {
+      "telemetry": "simulated",
+      "files": "simulated",
+      "camera": "unknown",
+      "materials": "unknown",
+      "pause": "simulated",
+      "resume": "simulated",
+      "cancel": "simulated"
+    },
+    "provenCapabilities": {
+      "telemetry": true,
+      "camera": true,
+      "files": false
+    },
+    "canPromoteToHardwareProven": true,
+    "promotionNotes": [
+      "Identified catalog entry: anycubic-kobra-x (Anycubic Kobra X)",
+      "Telemetry observed with 4 active field(s) [materials, toolTemperatureCelsius, bedTemperatureCelsius, fans]",
+      "Camera verified reachable via mjpeg",
+      "File listing was not supported or returned no listable files"
+    ]
+  },
+  "qualification": {
+    "status": "qualified",
+    "summary": "Printer successfully qualified with active telemetry (4 fields) and camera verified."
+  }
+}

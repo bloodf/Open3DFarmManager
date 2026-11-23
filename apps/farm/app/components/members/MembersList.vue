@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { reactive, watch } from 'vue'
+import Button from '../ui/Button.vue'
 import EmptyState from '../ui/EmptyState.vue'
+import MembersSection from './MembersSection.vue'
 import {
   assignableRoles,
   memberDisplayName,
@@ -51,11 +53,19 @@ function requestRole(member: FarmMember) {
 function selectId(member: FarmMember) {
   return `member-role-${member.accountId}`
 }
+
+function summary(count: number) {
+  return count === 1 ? '1 membro' : `${count} membros`
+}
 </script>
 
 <template>
-  <section aria-labelledby="members-heading">
-    <h2 id="members-heading">Membros</h2>
+  <MembersSection
+    heading-id="members-heading"
+    title="Membros"
+    :summary="members.length ? summary(members.length) : undefined"
+    :bordered="members.length > 0"
+  >
     <EmptyState
       :level="3"
       v-if="members.length === 0"
@@ -71,48 +81,49 @@ function selectId(member: FarmMember) {
           <span class="role">Papel atual: {{ roleLabel[member.role] }}</span>
         </div>
         <div class="actions">
-          <label :for="selectId(member)">Novo papel</label>
-          <select
-            :id="selectId(member)"
-            :value="draftFor(member)"
-            :disabled="pending"
-            :aria-label="`Novo papel para ${memberDisplayName(member)}`"
-            @change="
-              setDraft(member, ($event.target as HTMLSelectElement).value)
-            "
-          >
-            <option v-if="member.role === 'owner'" value="" disabled>
-              {{ roleLabel.owner }}
-            </option>
-            <option
-              v-for="item in assignableRoles"
-              :key="item.value"
-              :value="item.value"
+          <div class="role-field">
+            <label :for="selectId(member)">Novo papel</label>
+            <select
+              :id="selectId(member)"
+              :value="draftFor(member)"
+              :disabled="pending"
+              :aria-label="`Novo papel para ${memberDisplayName(member)}`"
+              @change="
+                setDraft(member, ($event.target as HTMLSelectElement).value)
+              "
             >
-              {{ item.label }}
-            </option>
-          </select>
-          <button
-            type="button"
+              <option v-if="member.role === 'owner'" value="" disabled>
+                {{ roleLabel.owner }}
+              </option>
+              <option
+                v-for="item in assignableRoles"
+                :key="item.value"
+                :value="item.value"
+              >
+                {{ item.label }}
+              </option>
+            </select>
+          </div>
+          <Button
             :disabled="
               pending || !draftFor(member) || draftFor(member) === member.role
             "
             @click="requestRole(member)"
           >
             Alterar papel
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            class="danger"
             :disabled="pending"
             :aria-label="`Remover ${memberDisplayName(member)}`"
             @click="emit('remove', member)"
           >
             Remover
-          </button>
+          </Button>
         </div>
       </li>
     </ul>
-  </section>
+  </MembersSection>
 </template>
 
 <style scoped>
@@ -121,47 +132,81 @@ function selectId(member: FarmMember) {
   padding: 0;
   margin: 0;
   display: grid;
-  gap: 1.25rem;
 }
 li {
-  display: grid;
-  gap: 0.75rem;
-  padding-block: 0.75rem;
-  border-block-end: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-4);
+  align-items: flex-end;
+  justify-content: space-between;
+  padding-block: var(--space-4);
+  border-block-end: 1px solid var(--color-border);
+}
+li:first-child {
+  padding-block-start: 0;
+}
+li:last-child {
+  padding-block-end: 0;
+  border-block-end: 0;
 }
 .identity {
   display: grid;
-  gap: 0.25rem;
+  gap: var(--space-1);
+  min-width: 0;
+  flex: 1 1 12rem;
 }
 .name {
-  font-weight: 700;
+  font-weight: var(--font-weight-semibold);
+  overflow-wrap: anywhere;
+}
+.role {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
 }
 .actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
-  align-items: center;
+  gap: var(--space-3);
+  align-items: flex-end;
+  min-width: 0;
 }
-label,
-select,
-button {
-  font: inherit;
+.role-field {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
 }
-select,
-button {
+label {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+}
+select {
   min-height: 2.75rem;
-  padding: 0.5rem 0.75rem;
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+  color: inherit;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
 }
-button {
-  cursor: pointer;
-}
-button:disabled,
-select:disabled {
-  cursor: not-allowed;
-}
-button:focus-visible,
 select:focus-visible {
-  outline: 3px solid currentColor;
-  outline-offset: 3px;
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+select:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.actions .danger {
+  border-color: var(--printer-error);
+  color: var(--printer-error);
+}
+@media (max-width: 30rem) {
+  .actions,
+  .role-field {
+    width: 100%;
+  }
+  .actions > :deep(.ui-button) {
+    flex: 1 1 auto;
+  }
 }
 </style>

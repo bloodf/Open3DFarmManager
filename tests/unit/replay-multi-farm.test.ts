@@ -37,6 +37,17 @@ it('selects farm B and sends only to its live printer', async () => {
   await nextTick()
   expect(selectFarm).toHaveBeenLastCalledWith('B')
   ready.value = {
+    scope: { farmId: 'A' },
+    rows: [{ assignment: { printerKey: 'printer-shared' } }],
+    keys: { 'printer-shared': { live: true } },
+  }
+  expect(await live.send('printer-shared', { sha256: 'a'.repeat(64) })).toEqual(
+    {
+      outcome: 'not-sent',
+    },
+  )
+  expect(connectFiles).not.toHaveBeenCalled()
+  ready.value = {
     scope: { farmId: 'B' },
     rows: [{ assignment: { printerKey: 'printer-b' } }],
     keys: {},

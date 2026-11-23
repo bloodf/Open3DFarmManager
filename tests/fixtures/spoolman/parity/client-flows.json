@@ -1,0 +1,302 @@
+[
+  {
+    "client": "setup",
+    "name": "flows-setup-vendor",
+    "method": "POST",
+    "path": "/api/v1/vendor",
+    "body": {
+      "name": "Flow Vendor",
+      "empty_spool_weight": 200
+    }
+  },
+  {
+    "client": "setup",
+    "name": "flows-setup-filament",
+    "method": "POST",
+    "path": "/api/v1/filament",
+    "body": {
+      "name": "Flow PETG",
+      "vendor_id": 1,
+      "material": "PETG",
+      "density": 1.27,
+      "diameter": 1.75,
+      "weight": 1000,
+      "color_hex": "1E90FF"
+    }
+  },
+  {
+    "client": "setup",
+    "name": "flows-setup-spool-a",
+    "method": "POST",
+    "path": "/api/v1/spool",
+    "body": {
+      "filament_id": 2,
+      "remaining_weight": 800,
+      "location": "Printer 1"
+    }
+  },
+  {
+    "client": "setup",
+    "name": "flows-setup-spool-b",
+    "method": "POST",
+    "path": "/api/v1/spool",
+    "body": {
+      "filament_id": 2,
+      "location": "Dry Box"
+    }
+  },
+  {
+    "client": "Klipper macro via Moonraker",
+    "name": "klipper-set-active-spool-exists",
+    "method": "GET",
+    "path": "/api/v1/spool/2"
+  },
+  {
+    "client": "Klipper macro via Moonraker",
+    "name": "klipper-set-active-spool-missing",
+    "method": "GET",
+    "path": "/api/v1/spool/404"
+  },
+  {
+    "client": "Klipper macro via Moonraker",
+    "name": "klipper-report-extrusion-1",
+    "method": "PUT",
+    "path": "/api/v1/spool/2/use",
+    "body": {
+      "use_length": 25.5
+    }
+  },
+  {
+    "client": "Klipper macro via Moonraker",
+    "name": "klipper-report-extrusion-2",
+    "method": "PUT",
+    "path": "/api/v1/spool/2/use",
+    "body": {
+      "use_length": 25.5
+    }
+  },
+  {
+    "client": "Klipper macro via Moonraker",
+    "name": "klipper-report-extrusion-zero",
+    "method": "PUT",
+    "path": "/api/v1/spool/2/use",
+    "body": {
+      "use_length": 0
+    }
+  },
+  {
+    "client": "Klipper macro via Moonraker",
+    "name": "klipper-report-extrusion-negative",
+    "method": "PUT",
+    "path": "/api/v1/spool/2/use",
+    "body": {
+      "use_length": -1
+    }
+  },
+  {
+    "client": "Klipper macro via Moonraker",
+    "name": "klipper-report-extrusion-missing-spool",
+    "method": "PUT",
+    "path": "/api/v1/spool/404/use",
+    "body": {
+      "use_length": 1
+    }
+  },
+  {
+    "client": "Klipper macro via Moonraker",
+    "name": "klipper-report-extrusion-string",
+    "method": "PUT",
+    "path": "/api/v1/spool/2/use",
+    "body": {
+      "use_length": "12.5"
+    }
+  },
+  {
+    "client": "Klipper macro via Moonraker",
+    "name": "klipper-report-both-fields",
+    "method": "PUT",
+    "path": "/api/v1/spool/2/use",
+    "body": {
+      "use_length": 1,
+      "use_weight": 1
+    }
+  },
+  {
+    "client": "Klipper macro via Moonraker",
+    "name": "klipper-report-no-field",
+    "method": "PUT",
+    "path": "/api/v1/spool/2/use",
+    "body": {}
+  },
+  {
+    "client": "Klipper macro via Moonraker",
+    "name": "klipper-report-more-than-remaining",
+    "method": "PUT",
+    "path": "/api/v1/spool/3/use",
+    "body": {
+      "use_length": 100000000
+    }
+  },
+  {
+    "client": "Klipper macro via Moonraker",
+    "name": "klipper-spool-after-report",
+    "method": "GET",
+    "path": "/api/v1/spool/2"
+  },
+  {
+    "client": "Klipper macro via Moonraker",
+    "name": "klipper-spool-after-overuse",
+    "method": "GET",
+    "path": "/api/v1/spool/3"
+  },
+  {
+    "client": "Moonraker",
+    "name": "moonraker-spool-list-for-dashboard",
+    "method": "GET",
+    "path": "/api/v1/spool?allow_archived=false&sort=id:asc"
+  },
+  {
+    "client": "Moonraker",
+    "name": "moonraker-filament-lookup",
+    "method": "GET",
+    "path": "/api/v1/filament/2"
+  },
+  {
+    "client": "Moonraker",
+    "name": "moonraker-vendor-lookup",
+    "method": "GET",
+    "path": "/api/v1/vendor/1"
+  },
+  {
+    "client": "Moonraker",
+    "name": "moonraker-health",
+    "method": "GET",
+    "path": "/api/v1/health"
+  },
+  {
+    "client": "OctoPrint plugin",
+    "name": "octoprint-spools-available",
+    "method": "GET",
+    "path": "/api/v1/spool"
+  },
+  {
+    "client": "OctoPrint plugin",
+    "name": "octoprint-spools-by-material",
+    "method": "GET",
+    "path": "/api/v1/spool?filament.material=petg&sort=id:desc"
+  },
+  {
+    "client": "OctoPrint plugin",
+    "name": "octoprint-commit-usage-weight",
+    "method": "PUT",
+    "path": "/api/v1/spool/3/use",
+    "body": {
+      "use_weight": 12.5
+    }
+  },
+  {
+    "client": "OctoPrint plugin",
+    "name": "octoprint-commit-usage-length",
+    "method": "PUT",
+    "path": "/api/v1/spool/3/use",
+    "body": {
+      "use_length": 1500
+    }
+  },
+  {
+    "client": "OctoPrint plugin",
+    "name": "octoprint-spool-after-usage",
+    "method": "GET",
+    "path": "/api/v1/spool/3"
+  },
+  {
+    "client": "Home Assistant community integration",
+    "name": "home-assistant-spools",
+    "method": "GET",
+    "path": "/api/v1/spool"
+  },
+  {
+    "client": "Home Assistant community integration",
+    "name": "home-assistant-locations",
+    "method": "GET",
+    "path": "/api/v1/location"
+  },
+  {
+    "client": "Home Assistant community integration",
+    "name": "home-assistant-use-weight",
+    "method": "PUT",
+    "path": "/api/v1/spool/2/use",
+    "body": {
+      "use_weight": 3.25
+    }
+  },
+  {
+    "client": "Home Assistant community integration",
+    "name": "home-assistant-spool-by-id",
+    "method": "GET",
+    "path": "/api/v1/spool/2"
+  },
+  {
+    "client": "Home Assistant community integration",
+    "name": "home-assistant-patch-location",
+    "method": "PATCH",
+    "path": "/api/v1/spool/3",
+    "body": {
+      "location": "Printer 2"
+    }
+  },
+  {
+    "client": "Home Assistant community integration",
+    "name": "home-assistant-locations-after",
+    "method": "GET",
+    "path": "/api/v1/location"
+  },
+  {
+    "client": "Home Assistant community integration",
+    "name": "home-assistant-measure",
+    "method": "PUT",
+    "path": "/api/v1/spool/2/measure",
+    "body": {
+      "weight": 700
+    }
+  },
+  {
+    "client": "Home Assistant community integration",
+    "name": "home-assistant-spool-after-measure",
+    "method": "GET",
+    "path": "/api/v1/spool/2"
+  },
+  {
+    "client": "PipSpool OrcaSlicer plugin",
+    "name": "orcaslicer-active-spools",
+    "method": "GET",
+    "path": "/api/v1/spool?allow_archived=false"
+  },
+  {
+    "client": "PipSpool OrcaSlicer plugin",
+    "name": "orcaslicer-filaments",
+    "method": "GET",
+    "path": "/api/v1/filament"
+  },
+  {
+    "client": "PipSpool OrcaSlicer plugin",
+    "name": "orcaslicer-spool-archived-excluded",
+    "method": "PATCH",
+    "path": "/api/v1/spool/1",
+    "body": {
+      "archived": true
+    }
+  },
+  {
+    "client": "PipSpool OrcaSlicer plugin",
+    "name": "orcaslicer-active-spools-after-archive",
+    "method": "GET",
+    "path": "/api/v1/spool?allow_archived=false"
+  },
+  {
+    "client": "PipSpool OrcaSlicer plugin",
+    "name": "orcaslicer-spools-with-archived",
+    "method": "GET",
+    "path": "/api/v1/spool?allow_archived=true"
+  }
+]

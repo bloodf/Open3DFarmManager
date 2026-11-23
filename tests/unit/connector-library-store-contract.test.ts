@@ -2,26 +2,37 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import {
-  ConnectorLibraryStore,
-  LibraryStoreError,
-} from '../../packages/connector/src/library/store.ts'
+import { createLibraryStore } from '../../packages/connector/src/runtime/library-store.ts'
 
 const directories: string[] = []
+const bytes = (value: string): AsyncIterable<Uint8Array> =>
+  (async function* () {
+    yield Buffer.from(value)
+  })()
+const meta = (version_id: string, version_number: number) => ({
+  version_id,
+  item_id: 'part',
+  version_number,
+  name: `${version_id}.gcode`,
+  kind: 'gcode' as const,
+})
 async function store(
   options: {
     quotaBytes?: number
-    keepNewestPerItem?: number
-    now?: () => number
+    keepVersions?: number
+    clock?: () => number
   } = {},
 ) {
   const directory = await mkdtemp(join(tmpdir(), 'connector-library-'))
   directories.push(directory)
-  return new ConnectorLibraryStore({
+  return {
     directory,
-    quotaBytes: options.quotaBytes ?? 1024,
-    ...options,
-  })
+    library: await createLibraryStore({
+      directory,
+      quotaBytes: 1024,
+      ...options,
+    }),
+  }
 }
 afterEach(async () => {
   await Promise.all(
@@ -31,126 +42,60 @@ afterEach(async () => {
   )
 })
 
-describe('ConnectorLibraryStore', () => {
+describe('shipped Connector library contract', () => {
   it('deduplicates content, lists metadata only, and verifies bytes before print', async () => {
-    const library = await store()
-    const bytes = Buffer.from('gcode payload')
-    const first = await library.put({
-      id: 'v1',
-      itemId: 'part',
-      name: 'part.gcode',
-      bytes,
-      thumbnail: 'cG5n',
+    const { library, directory } = await store()
+    const first = await library.put(bytes('gcode payload'), {
+      meta: { ...meta('v1', 1), thumbnail: 'cG5n' },
     })
-    const second = await library.put({
-      id: 'v2',
-      itemId: 'part',
-      name: 'copy.gcode',
-      bytes,
+    const second = await library.put(bytes('gcode payload'), {
+      meta: meta('v2', 2),
     })
     expect(first.sha256).toBe(second.sha256)
-    expect(await library.report()).toMatchObject({
-      usedBytes: bytes.length,
-      files: [{ id: 'v1', thumbnail: 'cG5n' }, { id: 'v2' }],
-    })
-    expect(await library.readForPrint('v1')).toEqual(bytes)
-    await writeFile(
-      join(
-        (library as any).options.directory,
-        first.sha256.slice(0, 2),
-        first.sha256.slice(2),
-      ),
-      'corrupt',
+    expect(second.deduplicated).toBe(true)
+    expect((await library.report()).used_bytes).toBe(
+      Buffer.byteLength('gcode payload'),
     )
-    await expect(library.readForPrint('v1')).rejects.toMatchObject<
-      Partial<LibraryStoreError>
-    >({ reason: 'hash-mismatch' })
+    expect((await library.list()).map((v) => v.version_id).sort()).toEqual([
+      'v1',
+      'v2',
+    ])
+    expect(
+      (await library.list()).find((v) => v.version_id === 'v1')?.thumbnail,
+    ).toBe('cG5n')
+    expect(JSON.stringify(await library.list())).not.toContain('gcode payload')
+    expect((await library.openForPrint(first.sha256)).size).toBe(
+      Buffer.byteLength('gcode payload'),
+    )
+    const verified = await library.readVerified(first.sha256)
+    const chunks: Buffer[] = []
+    for await (const chunk of verified.stream) chunks.push(Buffer.from(chunk))
+    expect(Buffer.concat(chunks)).toEqual(Buffer.from('gcode payload'))
+    await writeFile(join(directory, first.sha256), 'corrupt')
+    await expect(library.openForPrint(first.sha256)).rejects.toMatchObject({
+      code: 'hash-mismatch',
+    })
   })
 
-  it('evicts oldest unpinned versions to satisfy quota and retention and reports removals', async () => {
+  it('evicts unpinned content to satisfy quota and reports removals', async () => {
     let time = 1
-    const library = await store({
-      quotaBytes: 5,
-      keepNewestPerItem: 1,
-      now: () => time++,
+    const { library } = await store({ quotaBytes: 5, clock: () => time++ })
+    const old = await library.put(bytes('12345'), { meta: meta('old', 1) })
+    const next = await library.put(bytes('abcde'), {
+      meta: meta('new', 2),
+      evictToFit: true,
     })
-    await library.put({
-      id: 'old',
-      itemId: 'part',
-      name: 'old',
-      bytes: Buffer.from('12345'),
-    })
-    await library.put({
-      id: 'new',
-      itemId: 'part',
-      name: 'new',
-      bytes: Buffer.from('abcde'),
-    })
-    expect((await library.report()).removed).toContain('old')
-    expect(library.list().map(({ id }) => id)).toEqual(['new'])
+    expect(next.evicted).toMatchObject([
+      { sha256: old.sha256, version_ids: ['old'], reason: 'quota' },
+    ])
+    expect(
+      (await library.list()).find((v) => v.version_id === 'old')?.state,
+    ).toBe('removed')
     await expect(
-      library.put({
-        id: 'too-big',
-        itemId: 'x',
-        name: 'x',
-        bytes: Buffer.from('123456'),
-      }),
-    ).rejects.toMatchObject({ reason: 'full-disk' })
-  })
-
-  it('reports missing content and migrates every available version over the session adapter', async () => {
-    const library = await store()
-    const bytes = Buffer.from('version one')
-    const version = await library.put({
-      id: 'v1',
-      itemId: 'part',
-      name: 'part.gcode',
-      bytes,
+      library.put(bytes('123456'), { meta: meta('too-big', 1) }),
+    ).rejects.toMatchObject({ code: 'quota-exceeded' })
+    await expect(library.openForPrint(old.sha256)).rejects.toMatchObject({
+      code: 'not-found',
     })
-    const remote = new Map<string, Uint8Array>()
-    expect(
-      await library.switchMode('server', {
-        put: async (meta, payload) => {
-          remote.set(meta.id, payload)
-        },
-        get: async () => {
-          throw Error('unused')
-        },
-      }),
-    ).toEqual({ moved: ['v1'], stayed: [] })
-    expect(remote.get('v1')).toEqual(bytes)
-    expect(library.list()).toEqual([])
-    const replay = await store()
-    expect(
-      await replay.switchMode(
-        'connector',
-        { put: async () => {}, get: async () => bytes },
-        [version],
-      ),
-    ).toEqual({ moved: ['v1'], stayed: [] })
-    expect(await replay.readForPrint('v1')).toEqual(bytes)
-    await expect(library.readForPrint('v1')).rejects.toMatchObject({
-      reason: 'missing-file',
-    })
-    expect(version.sha256).toMatch(/^[a-f0-9]{64}$/)
-  })
-
-  it('keeps a version in the per-version stay list if transfer fails or has a hash mismatch', async () => {
-    const library = await store()
-    const version = await library.put({
-      id: 'v1',
-      itemId: 'part',
-      name: 'part.gcode',
-      bytes: Buffer.from('original'),
-    })
-    const empty = await store()
-    expect(
-      await empty.switchMode(
-        'connector',
-        { put: async () => {}, get: async () => Buffer.from('wrong') },
-        [version],
-      ),
-    ).toEqual({ moved: [], stayed: ['v1'] })
-    expect(empty.list()).toEqual([])
   })
 })

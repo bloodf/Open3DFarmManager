@@ -8,7 +8,10 @@ import {
   rtcRejectionKind,
   verifyRtcRejection,
 } from '../helpers/rtc-farm-rejections.ts'
-import { RTC_FARM_SCENARIOS } from '../helpers/rtc-farm-acceptance-scenarios.ts'
+import {
+  RTC_FARM_SCENARIOS,
+  selectRtcFarmScenarios,
+} from '../helpers/rtc-farm-acceptance-scenarios.ts'
 import { rejectionWire } from '../helpers/rtc-farm-rejection-wire.ts'
 import {
   decodeCommandV2,
@@ -32,6 +35,13 @@ const applied = {
   pausesObserved: 1,
   commandOutcome: 'applied',
 }
+
+test('scenario selection rejects inherited property names', () => {
+  assert.throws(
+    () => selectRtcFarmScenarios('toString'),
+    /Unknown RTC farm scenario/,
+  )
+})
 
 test('all six built-stack rejection rows require their own driver-free receipt', () => {
   assert.deepEqual(RTC_REJECTION_KINDS, [

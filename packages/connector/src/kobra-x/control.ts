@@ -1,5 +1,6 @@
 import {
   ControlArguments,
+  controlPrinterBusy,
   controlSourceState,
   type ExtendedControlAction,
 } from '../../../farm-protocol/src/control-actions.ts'
@@ -72,8 +73,11 @@ export function createKobraXControl(input: {
     if (!parsed.success) return refusedLocally('invalid-command')
     if (!KOBRA_X_CONTROLS.includes(action))
       return refusedLocally('unsupported-action')
-    if (!controlSourceState(action, input.state()))
-      return refusedLocally('state')
+    const state = input.state()
+    // Preserve Kobra X's established, more specific local refusal reason
+    // while retaining the shared idle-only safety gate.
+    if (controlPrinterBusy(action, state)) return refusedLocally('job-active')
+    if (!controlSourceState(action, state)) return refusedLocally('state')
     const command = parsed.data
     switch (command.action) {
       case 'pause':

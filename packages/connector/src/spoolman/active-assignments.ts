@@ -1,4 +1,5 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { dirname } from 'node:path'
 import { z } from 'zod'
 
@@ -39,6 +40,16 @@ function keyOf(printerKey: string, slot: string) {
  */
 export function createActiveSpoolAssignmentStore(path: string) {
   let cache: Map<string, ActiveSpoolAssignment> | undefined
+  let mutationQueue: Promise<void> = Promise.resolve()
+
+  function serializeMutation<T>(mutation: () => Promise<T>): Promise<T> {
+    const result = mutationQueue.then(mutation)
+    mutationQueue = result.then(
+      () => undefined,
+      () => undefined,
+    )
+    return result
+  }
 
   async function load(): Promise<Map<string, ActiveSpoolAssignment>> {
     if (cache) return cache
@@ -69,7 +80,7 @@ export function createActiveSpoolAssignmentStore(path: string) {
       assignments: [...map.values()],
     })
     await mkdir(dirname(path), { recursive: true })
-    const temp = `${path}.${process.pid}.tmp`
+    const temp = `${path}.${process.pid}.${randomUUID()}.tmp`
     await writeFile(temp, `${JSON.stringify(document)}\n`, { mode: 0o600 })
     await rename(temp, path)
     cache = map
@@ -85,15 +96,20 @@ export function createActiveSpoolAssignmentStore(path: string) {
     },
     async assign(input: ActiveSpoolAssignment): Promise<ActiveSpoolAssignment> {
       const row = Assignment.parse(input)
-      const map = new Map(await load())
-      map.set(keyOf(row.printerKey, row.slot), row)
-      await persist(map)
-      return row
+      return serializeMutation(async () => {
+        const map = new Map(await load())
+        map.set(keyOf(row.printerKey, row.slot), row)
+        await persist(map)
+        return row
+      })
     },
     async clear(printerKey: string, slot: string): Promise<void> {
-      const map = new Map(await load())
-      map.delete(keyOf(PrinterKey.parse(printerKey), Slot.parse(slot)))
-      await persist(map)
+      const key = keyOf(PrinterKey.parse(printerKey), Slot.parse(slot))
+      await serializeMutation(async () => {
+        const map = new Map(await load())
+        map.delete(key)
+        await persist(map)
+      })
     },
     /** Drop the in-memory cache so the next read reloads from disk (restart). */
     forget(): void {

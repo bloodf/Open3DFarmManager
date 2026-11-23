@@ -7,6 +7,7 @@ import tls from 'node:tls'
 import { readFileSync, readdirSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
+import { dirname, relative } from 'node:path'
 import {
   BAMBU_CLOUD_FLAG,
   assertBambuCloudOff,
@@ -278,6 +279,55 @@ test('UI hides the Bambu cloud account section when NUXT_BAMBU_CLOUD is off by d
   })
   assert.match(compiled.content, /bambuCloudEnabled/)
 
+  // The page imports its own vue helpers; keep only the ones the entry below
+  // does not already import, so the inlined page has no duplicate bindings.
+  const entryVueImports = new Set(['ref', 'nextTick', 'createSSRApp', 'h'])
+  compiled.content = compiled.content.replace(
+    /^import \{([^}]*)\} from 'vue'\n/m,
+    (_statement, names) => {
+      const extra = names
+        .split(',')
+        .map((name) => name.trim())
+        .filter((name) => name && !entryVueImports.has(name))
+      return extra.length > 0
+        ? `import { ${extra.join(', ')} } from 'vue'\n`
+        : ''
+    },
+  )
+
+  // The page's relative imports resolve from its own directory, and every
+  // imported .vue component compiles the same way as the page.
+  const contaDir = dirname(contaPath)
+  const vueSfcPlugin = {
+    name: 'vue-sfc',
+    setup(pluginBuild) {
+      pluginBuild.onResolve({ filter: /^\.\.?\// }, (args) => {
+        if (args.importer !== '<stdin>') return undefined
+        return { path: resolve(contaDir, args.path) }
+      })
+      pluginBuild.onLoad({ filter: /\.vue$/ }, (args) => {
+        const source = readFileSync(args.path, 'utf8')
+        const parsed = sfc.parse(source, { filename: args.path })
+        if (parsed.errors.length > 0) {
+          return {
+            errors: parsed.errors.map((error) => ({
+              text: String(error.message ?? error),
+            })),
+          }
+        }
+        const script = sfc.compileScript(parsed.descriptor, {
+          id: `e16-362-${relative(appDir, args.path)}`,
+          inlineTemplate: true,
+        })
+        return {
+          contents: script.content,
+          loader: 'ts',
+          resolveDir: dirname(args.path),
+        }
+      })
+    },
+  }
+
   const entry = `
 import { ref, nextTick, createSSRApp, h } from 'vue'
 import { renderToString } from 'vue/server-renderer'
@@ -296,6 +346,7 @@ export async function renderConta() {
     format: 'esm',
     write: false,
     nodePaths: [join(appDir, 'node_modules')],
+    plugins: [vueSfcPlugin],
     logLevel: 'silent',
   })
   const mod = await import(

@@ -1,0 +1,17 @@
+// spec-derived, not captured. Same sources as four-tools.jsonc; models a U1
+// whose Moonraker omits the active tool, one heater, one temperature, one
+// target and every filament sensor except one that reports no state.
+// https://www.klipper3d.org/Status_Reference.html
+// https://moonraker.readthedocs.io/en/latest/external_api/printer/
+// https://github.com/Snapmaker/u1-moonraker
+{
+  "objects": ["webhooks", "toolhead", "extruder", "extruder1", "extruder2"],
+  "status": {
+    "toolhead": {},
+    "extruder": { "temperature": 24.5 },
+    "extruder1": { "target": 0 },
+    "extruder2": { "temperature": "hot", "target": 200 },
+    "filament_switch_sensor e1_filament": { "enabled": true },
+    "filament_switch_sensor unrelated_name": { "filament_detected": true },
+  },
+}

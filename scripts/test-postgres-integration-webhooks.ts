@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import postgres from 'postgres'
 import { PostgresWebhooks } from '../apps/farm/server/storage/webhook-postgres.ts'
 import { deliverNextWebhook } from '../apps/farm/server/services/webhook-worker.ts'
+import { credentialKeyring } from '../apps/farm/server/utils/sealed-credential-key.ts'
 
 const port = Number(process.env.WEBHOOKS_SYNTHETIC_TEST_PORT)
 if (
@@ -30,7 +31,16 @@ const options = {
 }
 const admin = postgres({ ...options, username: 'fixture' })
 const runtime = postgres({ ...options, username: role })
-const store = new PostgresWebhooks(runtime)
+const store = new PostgresWebhooks(
+  runtime,
+  credentialKeyring({
+    credentialEncryptionKey: 'synthetic-webhook-encryption-key-'.padEnd(
+      32,
+      'x',
+    ),
+    sessionSecret: 'synthetic-webhook-session-secret-'.padEnd(32, 'y'),
+  }),
+)
 try {
   await admin`CREATE ROLE ${admin(role)} LOGIN IN ROLE farm_integration_apps`
   await admin`INSERT INTO farm.session_accounts (id) VALUES (${owner})`

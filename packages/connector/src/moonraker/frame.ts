@@ -1,12 +1,18 @@
 import { z } from 'zod'
 import { parseBoundedJson } from '@open3dfarmmanager/farm-protocol'
 
-/** JSON-RPC success reply envelope shared by every Moonraker WebSocket client. */
-export const Reply = z.strictObject({
-  jsonrpc: z.literal('2.0'),
-  id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
-  result: z.unknown(),
-})
+/**
+ * JSON-RPC success reply envelope shared by every Moonraker WebSocket client.
+ * Vendor firmware adds envelope members (Snapmaker U1: `cli_time`, `dev_time`),
+ * so unknown members are ignored. An error reply is never a success reply.
+ */
+export const Reply = z
+  .looseObject({
+    jsonrpc: z.literal('2.0'),
+    id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    result: z.unknown(),
+  })
+  .refine((reply) => Object.hasOwn(reply, 'result') && !('error' in reply))
 
 /** Decode one text frame with the shared size/structure bounds. Throws on any violation. */
 export function decodeMoonrakerFrame(

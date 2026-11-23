@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+import { validateMoonrakerInput } from '../../packages/connector/src/moonraker/client.ts'
 import { discoverMoonraker } from '../../packages/connector/src/moonraker/discovery.ts'
 import { listMoonrakerFiles } from '../../packages/connector/src/moonraker/files.ts'
 import { createMoonrakerSocket } from '../../packages/connector/src/moonraker/socket.ts'
@@ -44,7 +45,7 @@ export async function qualifyMoonraker(
 
   const identity: ObservedIdentity = {
     vendor: 'Klipper',
-    model: 'Moonraker Generic',
+    model: options.model ?? 'Moonraker Generic',
     firmware: null,
   }
 
@@ -114,38 +115,129 @@ export async function qualifyMoonraker(
       sample,
     }
 
-    // 2. Camera reachability check
-    if (discovery.webcams.length > 0) {
-      const primary = discovery.webcams[0]
-      camera.kind = 'webcam'
-      let checkUrl = primary?.snapshotUrl ?? primary?.streamUrl
-      if (!checkUrl && (primary?.snapshotPath || primary?.streamPath)) {
-        const path = primary.snapshotPath ?? primary.streamPath!
-        checkUrl = new URL(path, webcamOrigin).href
-      }
-      if (checkUrl) {
-        camera.url = checkUrl
+    // Read raw webcam locations and optional identity data without changing connector policy.
+    let extra: Awaited<ReturnType<typeof fetchMoonrakerFiles>> | undefined
+    try {
+      const checked = validateMoonrakerInput({
+        assignment: {
+          printerKey: 'qualification',
+          origin,
+          apiKeyFile: options.credentialFile,
+        },
+        allowedOrigins: [origin],
+        limits,
+      })
+      extra = await fetchMoonrakerFiles(
+        origin,
+        checked.limits,
+        controller.signal,
+      )
+      files = extra.files
+    } catch {}
+
+    const info = extra?.printerInfo
+    const system = extra?.systemInfo
+    const hostname =
+      typeof info?.hostname === 'string'
+        ? info.hostname
+        : typeof system?.hostname === 'string'
+          ? system.hostname
+          : null
+    if (hostname) identity.hostname = hostname
+    const reportedModel =
+      typeof info?.model === 'string' ? info.model.trim() : ''
+    const knownHostname = hostname?.toLowerCase() ?? ''
+    const detectedModel =
+      reportedModel ||
+      (/^(?:sovol[-_])?sv0?8(?:[-_]|$)/.test(knownHostname)
+        ? 'Sovol SV08'
+        : /^(?:creality[-_])?k1(?:[-_]|$)/.test(knownHostname)
+          ? 'Creality K1'
+          : /^voron[-_]2[-_]4(?:[-_]|$)/.test(knownHostname)
+            ? 'Voron 2.4'
+            : '')
+    if (!options.model && detectedModel) identity.model = detectedModel
+    const klipperVersion =
+      typeof info?.software_version === 'string'
+        ? info.software_version.trim()
+        : ''
+    if (klipperVersion)
+      identity.firmware = [`Klipper ${klipperVersion}`, identity.firmware]
+        .filter(Boolean)
+        .join('; ')
+
+    const rawWebcams = extra?.webcams
+    const cameras =
+      rawWebcams ??
+      discovery.webcams.map((cam) => ({
+        name: cam.name,
+        enabled: cam.enabled,
+        snapshot_url: cam.snapshotUrl ?? cam.snapshotPath,
+        stream_url: cam.streamUrl ?? cam.streamPath,
+      }))
+    camera.webcams = await Promise.all(
+      cameras.map(async (cam) => {
+        const name = typeof cam.name === 'string' ? cam.name : 'unknown'
+        const enabled = cam.enabled !== false
+        const location = cam.snapshot_url || cam.stream_url
+        let url: string | null = null
+        if (
+          typeof location === 'string' &&
+          location.length <= 2048 &&
+          !/[\u0000-\u0020\u007f\\]/u.test(location)
+        ) {
+          try {
+            const parsed = new URL(location, webcamOrigin)
+            if (
+              /^https?:$/.test(parsed.protocol) &&
+              !parsed.username &&
+              !parsed.password &&
+              !location.startsWith('//')
+            )
+              url = parsed.href
+          } catch {}
+        }
+        if (!enabled)
+          return { name, enabled, reachable: false, url, detail: 'Disabled' }
+        if (!url)
+          return {
+            name,
+            enabled,
+            reachable: false,
+            url,
+            detail: 'No usable URL',
+          }
         try {
-          const camRes = await fetch(checkUrl, {
+          const response = await fetch(url, {
             signal: AbortSignal.timeout(3000),
             redirect: 'error',
           })
-          if (camRes.ok) {
-            camera.reachable = true
-            camera.detail =
-              `HTTP ${camRes.status} ${camRes.headers.get('content-type') ?? ''}`.trim()
+          return {
+            name,
+            enabled,
+            reachable: response.ok,
+            url,
+            detail: `HTTP ${response.status}`,
           }
         } catch {
-          camera.detail =
-            'Camera declared in Moonraker webcams but probe failed'
+          return {
+            name,
+            enabled,
+            reachable: false,
+            url,
+            detail: 'Probe failed',
+          }
         }
-      } else {
-        camera.detail = `Declared webcam: ${primary?.name ?? 'unknown'}`
-      }
+      }),
+    )
+    const reachable = camera.webcams.find((cam) => cam.reachable)
+    if (reachable) {
+      camera.reachable = true
+      camera.kind = 'webcam'
+      camera.url = reachable.url
+      camera.detail = `${reachable.name}: ${reachable.detail}`
     }
-
-    // Fallback: direct snapshot check if not yet reachable
-    if (!camera.reachable) {
+    if (cameras.length === 0) {
       const camUrl = `http://${host}:${camPort}/?action=snapshot`
       try {
         const directCam = await fetch(camUrl, {
@@ -164,31 +256,6 @@ export async function qualifyMoonraker(
       } catch {}
     }
 
-    // 3. File listing via Moonraker WebSocket client
-    try {
-      const filesResult = await fetchMoonrakerFiles(
-        origin,
-        limits,
-        controller.signal,
-      )
-      if (Array.isArray(filesResult)) {
-        files = {
-          listable: true,
-          count: filesResult.length,
-          files: filesResult.slice(0, 100).map((f) => ({
-            name: f.name,
-            size: f.size,
-            modified: f.modified,
-            ...(f.estimatedTime !== undefined
-              ? { estimatedTime: f.estimatedTime }
-              : {}),
-          })),
-        }
-      }
-    } catch {
-      // Fallback: listable = false
-    }
-
     return { identity, telemetry, camera, files }
   } finally {
     clearTimeout(timer)
@@ -205,6 +272,8 @@ async function fetchMoonrakerFiles(
   _signal: AbortSignal,
 ) {
   const socket = createMoonrakerSocket(origin, limits as any)
+  // Metadata is requested for up to 100 files at once, one listener each.
+  socket.setMaxListeners(0)
   try {
     await new Promise<void>((resolve, reject) => {
       const onOpen = () => {
@@ -261,7 +330,48 @@ async function fetchMoonrakerFiles(
       },
     }
 
-    return await listMoonrakerFiles(client, { limit: 100 })
+    const optional = async (
+      method: string,
+    ): Promise<Record<string, unknown> | undefined> => {
+      try {
+        const value = await client.request(method, {})
+        return value && typeof value === 'object' && !Array.isArray(value)
+          ? (value as Record<string, unknown>)
+          : undefined
+      } catch {
+        return undefined
+      }
+    }
+    const printerInfo = await optional('printer.info')
+    const machine = await optional('machine.system_info')
+    const systemInfo =
+      machine?.system_info && typeof machine.system_info === 'object'
+        ? (machine.system_info as Record<string, unknown>)
+        : machine
+    const webcamResult = await optional('server.webcams.list')
+    const webcams = Array.isArray(webcamResult?.webcams)
+      ? webcamResult.webcams.filter(
+          (item: unknown): item is Record<string, unknown> =>
+            !!item && typeof item === 'object' && !Array.isArray(item),
+        )
+      : undefined
+    let files: ObservedFiles = { listable: false, count: 0, files: [] }
+    try {
+      const result = await listMoonrakerFiles(client, { limit: 100 })
+      files = {
+        listable: true,
+        count: result.length,
+        files: result.slice(0, 100).map((f) => ({
+          name: f.name,
+          size: f.size,
+          modified: f.modified,
+          ...(f.estimatedTime !== undefined
+            ? { estimatedTime: f.estimatedTime }
+            : {}),
+        })),
+      }
+    } catch {}
+    return { printerInfo, systemInfo, webcams, files }
   } finally {
     socket.terminate()
   }

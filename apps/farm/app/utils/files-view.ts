@@ -2,7 +2,11 @@ import {
   MAX_FILE_SIZE,
   parseOffer,
 } from '../../../../packages/farm-protocol/src/file-transfer.ts'
-import { ControlArguments } from '../../../../packages/farm-protocol/src/control-actions.ts'
+import type { PrinterFile } from '../../../../packages/farm-protocol/src/file-list.ts'
+import {
+  ControlArguments,
+  isAnycubicStartFile,
+} from '../../../../packages/farm-protocol/src/control-actions.ts'
 import { controlActionAvailability, type Clock } from './farm-control.ts'
 import type { FarmKeyState, FarmRow } from './farm-view.ts'
 import type { PauseCommandOutcome } from '../../../../packages/connector/src/webrtc/pause-control-session.ts'
@@ -47,11 +51,18 @@ export function filesAvailability(
     }
   return controlActionAvailability('start_print', row, keys, enabled, now)
 }
-export function printableFile(name: string): boolean {
+export function printableFile(name: string, vendor?: string): boolean {
+  if (vendor?.toLowerCase() === 'anycubic' && !isAnycubicStartFile(name))
+    return false
   return ControlArguments.safeParse({
     action: 'start_print',
     args: { file: name },
   }).success
+}
+export function printableEntry(
+  file: Pick<PrinterFile, 'name' | 'directory' | 'printUnsupported'>,
+): boolean {
+  return !file.directory && !file.printUnsupported && printableFile(file.name)
 }
 export function printOutcomeText(
   outcome: PauseCommandOutcome | undefined,

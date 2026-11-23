@@ -12,7 +12,16 @@ let active:
 function integrationRuntime() {
   if (active) return active
   const config = useRuntimeConfig().integrationAuth
-  if (config.enabled !== true)
+  if (
+    typeof config !== 'object' ||
+    config === null ||
+    !('enabled' in config) ||
+    config.enabled !== true ||
+    !('signingKey' in config) ||
+    !('tokenTtlSeconds' in config) ||
+    !('databaseUrl' in config) ||
+    typeof config.databaseUrl !== 'string'
+  )
     throw new Error('Autenticação de integrações indisponível.')
   const token = parseIntegrationTokenConfig(config)
   const url = new URL(config.databaseUrl)

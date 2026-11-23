@@ -7,7 +7,13 @@ export const MAX_TOOLS = 16
 export const MAX_WEBCAMS = 8
 const MAX_URL_CHARS = 2048
 const name = z.string().min(1).max(128)
-const temp = z.number().finite().min(-273.15).max(2000)
+export const MOONRAKER_TEMPERATURE_MIN_C = -273.15
+export const MOONRAKER_TEMPERATURE_MAX_C = 2000
+export const moonrakerTemperature = z
+  .number()
+  .finite()
+  .min(MOONRAKER_TEMPERATURE_MIN_C)
+  .max(MOONRAKER_TEMPERATURE_MAX_C)
 
 export type MoonrakerIdentity = Readonly<{ connectionId: number }>
 export function parseIdentifyResult(result: unknown): MoonrakerIdentity {
@@ -54,6 +60,24 @@ export function extruderIndex(object: string): number | undefined {
   return match[1] === undefined ? 0 : Number(match[1])
 }
 
+/** Return the active tool only when Moonraker names a Klipper extruder object. */
+export function selectActiveTool(status: unknown): string | null {
+  const parsed = z
+    .object({
+      toolhead: z
+        .object({ extruder: name.optional().catch(undefined) })
+        .optional()
+        .catch(undefined),
+    })
+    .passthrough()
+    .safeParse(status)
+  if (!parsed.success) return null
+  const activeObject = parsed.data.toolhead?.extruder
+  return activeObject && extruderIndex(activeObject) !== undefined
+    ? activeObject
+    : null
+}
+
 export function selectToolObjects(list: unknown): string[] {
   const parsed = z.object({ objects: z.array(z.unknown()) }).safeParse(list)
   if (!parsed.success) throw new TypeError('Invalid object list')
@@ -93,15 +117,15 @@ export function parseToolStatus(status: unknown): MoonrakerToolStatus {
     .safeParse(status)
   if (!parsed.success) throw new TypeError('Invalid Moonraker status')
   const record = status as Record<string, unknown>
-  const activeObject = parsed.data.toolhead?.extruder ?? null
+  const activeObject = selectActiveTool(status)
   const tools: MoonrakerTool[] = []
   for (const object of Object.keys(record)) {
     const index = extruderIndex(object)
     if (index === undefined) continue
     const sensor = z
       .object({
-        temperature: temp.optional().catch(undefined),
-        target: temp.optional().catch(undefined),
+        temperature: moonrakerTemperature.optional().catch(undefined),
+        target: moonrakerTemperature.optional().catch(undefined),
       })
       .safeParse(record[object])
     if (!sensor.success) continue

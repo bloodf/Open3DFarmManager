@@ -38,7 +38,6 @@ import {
   compareGoVersions,
   parseGoModMinVersion,
   parseGoVersionOutput,
-  RTSP_INGEST_BIN_DIR,
   RTSP_INGEST_DIR,
   RTSP_INGEST_GO_MOD,
 } from '../../scripts/build-rtsp-ingest.mjs'
@@ -113,14 +112,15 @@ test('go.mod declares the minimum Go version allowed by vendored modules (1.26.0
 test('offline build:rtsp-ingest and go test ./... pass with network blocked and empty GOMODCACHE', (t) => {
   const tempRoot = makeTempDir('e16-359-offline-go-')
   const emptyModCache = join(tempRoot, 'gomodcache')
+  const binDir = join(tempRoot, 'bin')
   t.after(() => {
-    rmSync(RTSP_INGEST_BIN_DIR, { recursive: true, force: true })
     rmSync(tempRoot, { recursive: true, force: true })
   })
 
   const offlineEnv = {
     ...process.env,
     GOPROXY: 'off',
+    RTSP_INGEST_BIN_DIR: binDir,
     GOTOOLCHAIN: 'local',
     GOFLAGS: '-mod=readonly',
     GOWORK: 'off',
@@ -148,8 +148,8 @@ test('offline build:rtsp-ingest and go test ./... pass with network blocked and 
   )
   assert.match(npmBuild.stdout, /rtsp-ingest built offline with go/)
 
-  const helperBin = join(RTSP_INGEST_BIN_DIR, 'rtsp-ingest')
-  const fixtureBin = join(RTSP_INGEST_BIN_DIR, 'rtspfixture')
+  const helperBin = join(binDir, 'rtsp-ingest')
+  const fixtureBin = join(binDir, 'rtspfixture')
   assert.ok(existsSync(helperBin), 'expected tools/rtsp-ingest/bin/rtsp-ingest')
   assert.ok(
     existsSync(fixtureBin),
@@ -159,7 +159,7 @@ test('offline build:rtsp-ingest and go test ./... pass with network blocked and 
   assert.ok((statSync(fixtureBin).mode & 0o111) !== 0)
 
   // Verify helper status reports available when built
-  const helperStatus = getRtspHelperStatusSync()
+  const helperStatus = getRtspHelperStatusSync({ path: helperBin })
   assert.equal(helperStatus.available, true)
   assert.equal(helperStatus.status, 'available')
   assert.match(helperStatus.sha256 ?? '', /^[a-f0-9]{64}$/)
@@ -218,7 +218,6 @@ test('build:rtsp-ingest reports clearly and exits 0 when Go is missing or older 
   const fakeBinDir = join(tempRoot, 'fake-bin')
   const outDir = join(tempRoot, 'out-bin')
   t.after(() => {
-    rmSync(RTSP_INGEST_BIN_DIR, { recursive: true, force: true })
     rmSync(tempRoot, { recursive: true, force: true })
   })
 
@@ -410,6 +409,7 @@ test('when Go helper is unavailable, Connector reports RTSP cameras unavailable 
     answer_sha256: digest(),
     browser_dtls: Array(32).fill('AA').join(':'),
     connector_dtls: Array(32).fill('BB').join(':'),
+    camera_printer_id: rtspAssignmentId,
     assignment_count: 1,
     assignment_digest: digest(),
   })

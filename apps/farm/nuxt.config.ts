@@ -1,7 +1,8 @@
 export default defineNuxtConfig({
   compatibilityDate: '2026-11-04',
   devtools: { enabled: false },
-  nitro: { preset: 'node-server' },
+  // The Spoolman websocket feeds (#545) are served by Nitro's websocket support.
+  nitro: { preset: 'node-server', experimental: { websocket: true } },
   hooks: {
     // impressoras.vue is a page, not a layout: serve the detail route beside
     // it instead of nesting it in a parent that has no <NuxtPage />.
@@ -42,6 +43,8 @@ export default defineNuxtConfig({
       enabled: false,
       origin: '',
       sessionSecret: '',
+      credentialEncryptionKey: '',
+      credentialEncryptionPreviousKey: '',
       databaseUrl: '',
       bootstrapToken: '',
       /** NUXT_AUTH_PASSWORD_RESET=true enables owner-issued reset links. */
@@ -86,6 +89,17 @@ export default defineNuxtConfig({
     library: { enabled: false, databaseUrl: '', directory: '' },
     /** A login that is a member of farm_spoolman_settings. */
     spoolmanSettings: { enabled: false, databaseUrl: '' },
+    /** A login that is a member of farm_spool_library and farm_spool_features. */
+    spoolLibrary: { enabled: false, databaseUrl: '' },
+    /**
+     * A login that is a member of farm_spool_import (migration 0086). `allowedOrigins` is a
+     * comma-separated list of exact Spoolman origins the server may read for an API import;
+     * empty means only JSON and CSV uploads are accepted.
+     */
+    spoolLibraryImport: { enabled: false, databaseUrl: '', allowedOrigins: '' },
+    spoolFeatures: { enabled: false, databaseUrl: '' },
+    /** A login that is a member of the roles listed in server/services/spool-usage-role.ts. */
+    spoolUsage: { enabled: false, databaseUrl: '' },
     printerStates: { enabled: false, databaseUrl: '' },
     jobHistory: { enabled: false, databaseUrl: '' },
     telemetryPrune: {

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -16,8 +16,15 @@ import { startBambuSimulator } from '../../packages/sim-tools/src/bambu-simulato
 
 type Simulator = Awaited<ReturnType<typeof startBambuSimulator>>
 const simulators: Simulator[] = []
+const directories = new Set<string>()
 afterEach(async () => {
-  await Promise.all(simulators.splice(0).map((sim) => sim.close()))
+  try {
+    await Promise.all(simulators.splice(0).map((sim) => sim.close()))
+  } finally {
+    for (const directory of directories)
+      rmSync(directory, { recursive: true, force: true })
+    directories.clear()
+  }
 })
 
 /** One guarded request on one local connection, as the signed path sends it. */
@@ -31,6 +38,7 @@ async function send(
   const sim = await startBambuSimulator({ initialState })
   simulators.push(sim)
   const directory = mkdtempSync(join(tmpdir(), 'bambu-control-extended-'))
+  directories.add(directory)
   writeFileSync(
     join(directory, 'credentials'),
     JSON.stringify({ accessCode: 'secret' }),

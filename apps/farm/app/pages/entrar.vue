@@ -1,4 +1,10 @@
 <script setup lang="ts">
+import AuthAlert from '../components/auth/AuthAlert.vue'
+import AuthField from '../components/auth/AuthField.vue'
+import AuthHeader from '../components/auth/AuthHeader.vue'
+import AuthPanel from '../components/auth/AuthPanel.vue'
+import AuthStatus from '../components/auth/AuthStatus.vue'
+import AuthSubmit from '../components/auth/AuthSubmit.vue'
 import { completeAuth } from '../utils/auth-invalidation.ts'
 
 const hydrated = ref(false)
@@ -12,7 +18,14 @@ const username = ref('')
 const password = ref('')
 const pending = ref(false)
 const errorMessage = ref('')
-const errorSummary = ref<HTMLElement | null>(null)
+const errorSummary = ref<{ focus: () => void } | null>(null)
+const formStatus = computed(() =>
+  !hydrated.value
+    ? 'Preparando o formulário'
+    : pending.value
+      ? 'Verificando seus dados.'
+      : '',
+)
 onMounted(async () => {
   hydrated.value = true
   if (window.location.hash === '#erro=oidc') {
@@ -137,20 +150,22 @@ async function login() {
 </script>
 
 <template>
-  <main id="conteudo">
-    <small>Open3DFarmManager</small>
-    <h1>Entrar</h1>
-    <p>Use sua conta do Open3DFarmManager.</p>
-    <form
+  <main id="conteudo" class="auth-page">
+    <AuthHeader eyebrow="Open3DFarmManager" title="Entrar">
+      Use sua conta do Open3DFarmManager.
+    </AuthHeader>
+    <AuthPanel
+      tag="form"
       method="post"
       action="/api/auth/login"
       :aria-busy="pending"
       @submit.prevent="login"
     >
-      <label for="username">Usuário</label>
-      <input
+      <AuthField
         id="username"
         v-model="username"
+        label="Usuário"
+        hint="Use letras minúsculas, números, hífen ou sublinhado."
         autocomplete="username"
         autocapitalize="none"
         :spellcheck="false"
@@ -158,40 +173,36 @@ async function login() {
         minlength="3"
         maxlength="64"
         pattern="[a-z0-9_\-]{3,64}"
-        aria-describedby="username-help"
         :disabled="pending"
       />
-      <p id="username-help">
-        Use letras minúsculas, números, hífen ou sublinhado.
-      </p>
-      <label for="password">Senha</label>
-      <input
+      <AuthField
         id="password"
         v-model="password"
+        label="Senha"
         type="password"
         autocomplete="current-password"
         required
         :disabled="pending"
       />
-      <p ref="errorSummary" role="alert" tabindex="-1">{{ errorMessage }}</p>
-      <button type="submit" :disabled="pending || !hydrated">
+      <AuthAlert ref="errorSummary" :message="errorMessage" />
+      <AuthSubmit :disabled="pending || !hydrated">
         {{ pending ? 'Entrando…' : 'Entrar' }}
-      </button>
-      <p role="status" v-if="!hydrated">Preparando o formulário</p>
-      <p role="status">{{ pending ? 'Verificando seus dados.' : '' }}</p>
-    </form>
-    <p><NuxtLink to="/">Voltar ao início</NuxtLink></p>
+      </AuthSubmit>
+      <AuthStatus :message="formStatus" />
+    </AuthPanel>
     <section
       v-if="googleEnabled || googleUnavailableReason"
+      class="provider"
       aria-labelledby="google-titulo"
     >
-      <h2 id="google-titulo">Google</h2>
-      <p v-if="googleUnavailableReason" role="status">
-        {{ googleUnavailableReason }}
-      </p>
-      <p v-else>
+      <AuthPanel>
+        <h2 id="google-titulo">Google</h2>
+        <p v-if="googleUnavailableReason" role="status">
+          {{ googleUnavailableReason }}
+        </p>
         <a
-          class="google-signin"
+          v-else
+          class="provider-link google-signin"
           href="/api/auth/google/start"
           aria-label="Entrar com Google"
         >
@@ -223,32 +234,36 @@ async function login() {
           </svg>
           <span>Entrar com Google</span>
         </a>
-      </p>
+      </AuthPanel>
     </section>
-    <section v-if="oidcEnabled" aria-labelledby="oidc-titulo">
-      <h2 id="oidc-titulo">Provedor OpenID Connect</h2>
-      <p>
-        O servidor aceita um provedor configurado. O e-mail do provedor não
-        localiza nem cria conta.
-      </p>
-      <p>
-        <a href="/api/auth/oidc/start">Entrar com OpenID Connect</a>
-      </p>
-      <form
+    <section v-if="oidcEnabled" class="provider" aria-labelledby="oidc-titulo">
+      <AuthPanel>
+        <h2 id="oidc-titulo">Provedor OpenID Connect</h2>
+        <p>
+          O servidor aceita um provedor configurado. O e-mail do provedor não
+          localiza nem cria conta.
+        </p>
+        <a class="provider-link" href="/api/auth/oidc/start"
+          >Entrar com OpenID Connect</a
+        >
+      </AuthPanel>
+      <AuthPanel
+        tag="form"
         method="post"
         action="/api/auth/oidc/start"
         :aria-busy="linking"
         @submit.prevent="linkOidc"
       >
         <h3>Vincular com um convite</h3>
-        <p id="oidc-invite-help">
+        <p id="oidc-invite-help" class="help">
           Um convite válido cria a conta e guarda só o identificador do
           provedor. O papel vem do convite.
         </p>
-        <label for="oidc-username">Usuário da nova conta</label>
-        <input
+        <AuthField
           id="oidc-username"
           v-model="oidcUsername"
+          label="Usuário da nova conta"
+          describedby="oidc-invite-help"
           autocomplete="username"
           autocapitalize="none"
           :spellcheck="false"
@@ -257,12 +272,12 @@ async function login() {
           maxlength="64"
           pattern="[a-z0-9_\-]{3,64}"
           :disabled="linking"
-          aria-describedby="oidc-invite-help"
         />
-        <label for="oidc-invite">Código do convite</label>
-        <input
+        <AuthField
           id="oidc-invite"
           v-model="invite"
+          label="Código do convite"
+          describedby="oidc-invite-help"
           autocomplete="off"
           autocapitalize="none"
           :spellcheck="false"
@@ -272,74 +287,64 @@ async function login() {
           pattern="[A-Za-z0-9_\-]{43}"
           :disabled="linking"
         />
-        <button type="submit" :disabled="linking || !hydrated">
+        <AuthSubmit variant="secondary" :disabled="linking || !hydrated">
           {{ linking ? 'Abrindo o provedor…' : 'Vincular convite e entrar' }}
-        </button>
-      </form>
+        </AuthSubmit>
+      </AuthPanel>
     </section>
+    <p class="links">
+      <NuxtLink to="/redefinir-senha">Esqueci a senha</NuxtLink>
+      <NuxtLink to="/">Voltar ao início</NuxtLink>
+    </p>
   </main>
 </template>
 
 <style scoped>
-form {
-  max-width: 26rem;
+.auth-page {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+  max-width: 30rem;
 }
-label {
-  display: block;
-  font-weight: 600;
-  margin-top: 1rem;
+.provider {
+  display: grid;
+  gap: var(--space-4);
 }
-input {
-  display: block;
-  width: 100%;
-  margin-top: 0.5rem;
-  padding: 0.75rem;
-  border: 1px solid currentColor;
-  border-radius: 0.25rem;
-  font: inherit;
+.provider .help {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
 }
-button {
-  min-height: 2.75rem;
-  padding: 0.65rem 1.25rem;
-  font: inherit;
-  cursor: pointer;
-}
-button:disabled {
-  cursor: wait;
-}
-input:focus-visible,
-button:focus-visible,
-a:focus-visible {
-  outline: 3px solid currentColor;
-  outline-offset: 3px;
-}
-a[href='/api/auth/oidc/start'] {
-  display: inline-block;
-  min-height: 2.75rem;
-  padding: 0.65rem 0;
-}
-.google-signin {
+.provider-link {
   display: inline-flex;
   align-items: center;
-  gap: 0.75rem;
+  justify-content: center;
+  gap: var(--space-3);
   min-height: 2.75rem;
-  padding: 0.5rem 1rem;
-  border: 1px solid #747775;
-  border-radius: 0.25rem;
-  background: #fff;
-  color: #1f1f1f;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-raised);
+  color: var(--color-accent);
+  font-weight: var(--font-weight-semibold);
+  text-align: center;
   text-decoration: none;
-  font: inherit;
-  font-weight: 500;
 }
-.google-signin:focus-visible {
-  outline: 3px solid currentColor;
-  outline-offset: 3px;
+.google-signin {
+  border-color: var(--color-border);
+  color: var(--color-text);
 }
 .google-mark {
   flex: none;
 }
-#username-help {
-  font-size: 0.875rem;
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+  margin: 0;
+}
+.links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
 }
 </style>

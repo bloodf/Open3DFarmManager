@@ -124,8 +124,12 @@ export function alertSettingsHandler(operation: Operation) {
         return result?.value ?? denied()
       }
 
-      if (request.body !== null)
+      try {
+        if ((await readText(request, 8192)).length !== 0)
+          return integrationProblem('invalid-request', headers)
+      } catch {
         return integrationProblem('invalid-request', headers)
+      }
       const result = await store.manage(
         principal.appId,
         farmId,

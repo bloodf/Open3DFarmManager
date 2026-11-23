@@ -1,3 +1,4 @@
+import { boundPrinterString } from '@open3dfarmmanager/farm-protocol'
 import type { PrinterState } from '../../../farm-protocol/src/state.ts'
 import { record } from './discovery.ts'
 
@@ -56,7 +57,7 @@ export function createKobraXStatus(printerKey: string, address: string) {
         data.version.length <= 64 &&
         data.version
       ) {
-        next.firmware = { current: data.version }
+        next.firmware = { current: boundPrinterString(data.version) }
       }
       const url = record(data.urls).rtspUrl
       if (typeof url === 'string') {
@@ -105,7 +106,7 @@ export function createKobraXStatus(printerKey: string, address: string) {
     if (type === 'print') {
       const phase = message.state
       if (typeof data.filename === 'string')
-        next.filename = data.filename.slice(0, 255)
+        next.filename = boundPrinterString(data.filename)
       if (phase === 'printing' || phase === 'paused') {
         next.state = phase
         const progress = nonnegative(data.progress)
@@ -169,7 +170,7 @@ export function createKobraXStatus(printerKey: string, address: string) {
               slot: `${boxIndex + 1}-${slotIndex + 1}`,
               active: (slot.index ?? slotIndex) === box.loaded_slot,
               ...(typeof slot.type === 'string'
-                ? { materialType: slot.type.slice(0, 64) }
+                ? { materialType: boundPrinterString(slot.type, 64) }
                 : {}),
               ...(remaining !== undefined && remaining <= 100
                 ? { remainingPercent: remaining }

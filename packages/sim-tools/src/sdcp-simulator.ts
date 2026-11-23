@@ -2,7 +2,19 @@ import dgram from 'node:dgram'
 import { WebSocketServer } from 'ws'
 
 /** Loopback-only SDCP v3 test double; never connects to a printer. */
-export async function startSdcpSimulator() {
+export async function startSdcpSimulator(
+  discovery = {
+    Id: 'fixture',
+    Data: {
+      Name: 'Test',
+      MachineName: 'Saturn 4 Ultra',
+      MainboardIP: '127.0.0.1',
+      MainboardID: 'fixture01',
+      ProtocolVersion: 'V3.0.0',
+      FirmwareVersion: 'V1.0.0',
+    },
+  },
+) {
   const udp = dgram.createSocket('udp4')
   const ws = new WebSocketServer({
     host: '127.0.0.1',
@@ -25,17 +37,6 @@ export async function startSdcpSimulator() {
       } catch {}
     }),
   )
-  const discovery = {
-    Id: 'fixture',
-    Data: {
-      Name: 'Test',
-      MachineName: 'Saturn 4 Ultra',
-      MainboardIP: '127.0.0.1',
-      MainboardID: 'fixture01',
-      ProtocolVersion: 'V3.0.0',
-      FirmwareVersion: 'V1.0.0',
-    },
-  }
   udp.on('message', (message, peer) => {
     if (message.toString() === 'M99999')
       udp.send(JSON.stringify(discovery), peer.port, peer.address)

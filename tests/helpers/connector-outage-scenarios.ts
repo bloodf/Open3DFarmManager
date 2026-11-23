@@ -59,6 +59,7 @@ export async function runConnectorOutageScenarios(input: {
     { name: prefix + '_pair', group: 'farm_pairing_runtime' },
     { name: prefix + '_owner', group: 'farm_printer_ownership' },
   ]
+  const rolePassword = randomUUID().replaceAll('-', '')
   const created: string[] = []
   const pools: Sql[] = []
   const closers: Array<() => Promise<void>> = []
@@ -69,6 +70,7 @@ export async function runConnectorOutageScenarios(input: {
   try {
     for (const role of roles) {
       await admin`CREATE ROLE ${admin(role.name)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS IN ROLE ${admin(role.group)}`
+      await admin.unsafe(`ALTER ROLE "${role.name}" PASSWORD '${rolePassword}'`)
       created.push(role.name)
       ledger({ resource: 'database-role', name: role.name })
     }
@@ -79,7 +81,7 @@ export async function runConnectorOutageScenarios(input: {
         port: ports.db,
         database: 'fixture',
         username,
-        password: '',
+        password: rolePassword,
         ssl: false,
         max: 2,
         connect_timeout: 3,
@@ -252,7 +254,7 @@ export async function runConnectorOutageScenarios(input: {
 
     // Process control.
     const databaseUrl = (user: string) =>
-      `postgres://${encodeURIComponent(user)}:synthetic@127.0.0.1:${ports.db}/fixture`
+      `postgres://${encodeURIComponent(user)}:${rolePassword}@127.0.0.1:${ports.db}/fixture`
     const appEnv = {
       PATH: process.env.PATH ?? '/usr/bin:/bin',
       NODE_ENV: 'production',

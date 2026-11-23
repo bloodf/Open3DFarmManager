@@ -1,0 +1,32 @@
+# Formlabs PreForm Local API
+
+The registered read-only Connector uses an explicitly configured private,
+link-local or loopback IPv4 address, or IPv6 loopback, with a configured port.
+It reads `GET /devices/` using the upstream [Local API 0.9.11 reference](https://formlabs-dashboard-api-resources.s3.us-east-1.amazonaws.com/formlabs-local-api-v0.9.11.html).
+Refresh validates the device list and count. HTTP failures, redirects and invalid
+lists clear the snapshot. Retrieval time expires independently of printer status.
+
+The collection selects the configured device ID and gates on connection state
+and model. The host list may include remote entries and other models. Form 4
+and Form 4L pass the model gate. Form Studio 1 lacks a qualified status schema
+and is unsupported. Because the response has no printer-side observation time,
+the collection reports status unavailable even after a successful retrieval of a
+connected supported device.
+
+The synthetic fixture exercises the Form 4 family and retains extra vendor fields
+for reference. The current adapter returns device ID, product name, status text,
+connection state and optional connection type, IP and firmware. It does not expose
+remaining time, tank or cartridge identity, material or estimated dispensing.
+Firmware 1.17.1 for Form 4 and Form 4L and 1.0.0 for Studio 1 refer to vendor
+listings and remain unqualified on hardware.
+
+The vendor v1 reference documents separate discovery, listing and scene endpoints.
+The Connector does not call those endpoints or offer dispatch or job controls.
+
+- [PreForm quickstart](https://developer.formlabs.com/getting-started/quickstart/)
+- [Device contract, v1.0.0-alpha.1](https://developer.formlabs.com/api-reference/devices/)
+- [Authentication](https://developer.formlabs.com/api-reference/authentication/)
+- [Firmware releases](https://formlabs.com/support/Firmware-Release-Notes/)
+- [PreForm releases](https://formlabs.com/support/PreForm-Release-Notes/)
+
+- [Scene submission](https://developer.formlabs.com/api-reference/scenes/)

@@ -1,3 +1,4 @@
+import { boundPrinterString } from '@open3dfarmmanager/farm-protocol'
 import type { SdcpBinding } from '../config/sdcp.ts'
 import { discoverSdcp } from '../discovery/sdcp.ts'
 import { connectSdcp } from '../sdcp/index.ts'
@@ -85,7 +86,7 @@ export function createSdcpCollection(input: {
                   : {}),
                 identity: {
                   vendor: 'Elegoo',
-                  model: identity.model,
+                  model: boundPrinterString(identity.model),
                   firmware: identity.firmwareVersion,
                 },
               },

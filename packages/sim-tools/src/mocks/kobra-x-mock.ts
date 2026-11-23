@@ -767,7 +767,7 @@ export async function startKobraXMock(
       curr_layer: isPreparation ? 0 : currLayer,
       total_layers: totalLayers,
       print_time: isPreparation ? 0 : printTimeSec,
-      remain_time: remainTimeSec,
+      remain_time: Math.ceil(remainTimeSec / 60),
       ...(errorCode !== undefined ? { error_code: errorCode } : {}),
     }
   }

@@ -1,4 +1,5 @@
 import type { PrinterState } from '@open3dfarmmanager/farm-protocol'
+import { boundPrinterString } from '@open3dfarmmanager/farm-protocol'
 
 /** One finished print read from Moonraker's own history. */
 export type MoonrakerHistoryJob = Readonly<{
@@ -60,9 +61,9 @@ export function parseMoonrakerHistoryPage(result: unknown): {
     const start = nonNegative(item.start_time)
     const filename =
       typeof item.filename === 'string'
-        ? item.filename
-            .replace(/[\u0000-\u001f\u007f-\u009f]/g, '')
-            .slice(0, 255)
+        ? boundPrinterString(
+            item.filename.replace(/[\u0000-\u001f\u007f-\u009f]/g, ''),
+          )
         : ''
     const printDuration = nonNegative(item.print_duration)
     const totalDuration = nonNegative(item.total_duration)

@@ -1,3 +1,4 @@
+import { PRINTER_STRING_MAX_UNITS } from '@open3dfarmmanager/farm-protocol'
 import type { MacroParamMap } from '../moonraker/control-macros.ts'
 import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
 import { moonrakerLastJob } from '../moonraker/normalize.ts'
@@ -123,15 +124,34 @@ export function createFarmSnapshotSource(input: {
   function snapshot(
     now: number,
     deadline: number,
-  ): CompleteFarmSnapshot | undefined {
+  ): { wakeAt: number; value: CompleteFarmSnapshot } | undefined {
     let captured = Infinity,
-      until = deadline
+      until = deadline,
+      wakeAt = deadline
     const printers = []
     for (const ref of refs) {
       const entry = entries.get(ref.printerKey)
       if (!entry) return
       const timing = fieldTimes(entry.fieldObservedAtMonoMs)
-      const independent = ['fans', 'light', 'materials']
+      const optional =
+        'anycubic' in entry.fieldObservedAtMonoMs
+          ? ([
+              'identity',
+              'statusReason',
+              'filename',
+              'currentLayer',
+              'totalLayer',
+              'estimatedRemainingSeconds',
+              'toolTemperatureCelsius',
+              'bedTemperatureCelsius',
+            ] as const)
+          : []
+      const independent: readonly string[] = [
+        'fans',
+        'light',
+        'materials',
+        ...optional,
+      ]
       const times = Object.entries(timing)
         .filter(([key]) => !independent.includes(key))
         .map(([, time]) => time)
@@ -167,15 +187,26 @@ export function createFarmSnapshotSource(input: {
       const linkHealth = input.linkHealthFor?.(ref.printerKey)
       if (linkHealth) printer.linkHealth = linkHealth
       const localWebUiOrigin = input.localWebUiOriginFor?.(ref.assignmentId)
-      if (localWebUiOrigin) printer.localWebUiOrigin = localWebUiOrigin
+      if (
+        localWebUiOrigin &&
+        localWebUiOrigin.length <= PRINTER_STRING_MAX_UNITS
+      )
+        printer.localWebUiOrigin = localWebUiOrigin
       const lastJob = lastJobs.get(ref.printerKey)
       if (lastJob) printer.lastJob = lastJob
-      for (const field of ['fans', 'light', 'materials'] as const) {
+      for (const field of [
+        'fans',
+        'light',
+        'materials',
+        ...optional,
+      ] as const) {
         if (field in timing) {
           const stamp = Object.entries(timing).find(
             ([key]) => key === field,
           )![1]
           if (stamp + 5000 <= now) delete printer[field]
+          else if ('anycubic' in entry.fieldObservedAtMonoMs)
+            wakeAt = Math.min(wakeAt, stamp + 5000)
           else until = Math.min(until, stamp + 5000)
         }
       }
@@ -246,14 +277,17 @@ export function createFarmSnapshotSource(input: {
         }
       }
     }
-    return Object.freeze({
-      assignmentRefs: refs,
-      complete: true,
-      printers: message.printers,
-      ...(message.inventory ? { inventory: message.inventory } : {}),
-      capturedAtMonoMs: captured,
-      validUntilMonoMs: until,
-    })
+    return {
+      wakeAt,
+      value: Object.freeze({
+        assignmentRefs: refs,
+        complete: true,
+        printers: message.printers,
+        ...(message.inventory ? { inventory: message.inventory } : {}),
+        capturedAtMonoMs: captured,
+        validUntilMonoMs: until,
+      }),
+    }
   }
   function invalidate(event: RawMoonrakerUnavailable) {
     if (closed || !refs.some((ref) => ref.printerKey === event.printerKey))
@@ -567,8 +601,14 @@ export function createFarmSnapshotSource(input: {
           stop(true)
           return
         }
-        timer = setTimeout(update, Math.max(1, value.validUntilMonoMs - now))
-        runSynchronous(() => options.onComplete(value))
+        timer = setTimeout(
+          update,
+          Math.max(
+            1,
+            Math.min(value.wakeAt, value.value.validUntilMonoMs) - now,
+          ),
+        )
+        runSynchronous(() => options.onComplete(value.value))
       } catch {
         stop(true)
       }

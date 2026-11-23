@@ -287,12 +287,20 @@ test('Anycubic field provenance expires independently and cannot grant controls'
     })
     f.open()
     assert.equal(f.received[0]?.printers[0]?.controls, undefined)
-    assert.equal(f.received[0]?.validUntilMonoMs, 5050)
+    assert.equal(f.received[0]?.printers[0]?.toolTemperatureCelsius, 0)
+    assert.equal(f.received[0]?.validUntilMonoMs, 5100)
     stamps.toolTemperatureCelsius = 100
     f.setNow(5050)
     t.mock.timers.tick(4950)
+    assert.equal(f.unavailable(), 0)
+    assert.equal(f.received.length, 2)
+    assert.equal(f.received[1]?.printers[0]?.toolTemperatureCelsius, undefined)
+    assert.equal(f.received[1]?.printers[0]?.controls, undefined)
+    assert.equal(f.received[1]?.validUntilMonoMs, 5100)
+    f.setNow(5100)
+    t.mock.timers.tick(50)
     assert.equal(f.unavailable(), 1)
-    assert.equal(f.received.length, 1)
+    assert.equal(f.received.length, 2)
     assert.throws(
       () =>
         f.source.observe({
@@ -304,8 +312,8 @@ test('Anycubic field provenance expires independently and cannot grant controls'
             progress: 0.42,
             observedAt: 10,
           },
-          receivedAtMonoMs: 5050,
-          fieldObservedAtMonoMs: { anycubic: { state: 5051, progress: 5050 } },
+          receivedAtMonoMs: 5100,
+          fieldObservedAtMonoMs: { anycubic: { state: 5101, progress: 5100 } },
         }),
       /Invalid observation time/,
     )

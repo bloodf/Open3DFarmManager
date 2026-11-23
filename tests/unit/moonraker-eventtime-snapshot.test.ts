@@ -9,7 +9,10 @@ const initialStatus = {
   fan: { speed: 0.4, power: 0.16 },
 }
 
-async function scenario(queryFan: { power: number; speed: number }) {
+async function scenario(
+  queryFan: { power: number; speed: number },
+  deltaEventtime = 11,
+) {
   const sockets = new Set<WsTestSocket>()
   let connectionCount = 0
   let queryAnswered!: () => void
@@ -41,7 +44,7 @@ async function scenario(queryFan: { power: number; speed: number }) {
               JSON.stringify({
                 jsonrpc: '2.0',
                 method: 'notify_status_update',
-                params: [{ fan: { power: 0.16, speed: 0.4 } }, 11],
+                params: [{ fan: { power: 0.16, speed: 0.4 } }, deltaEventtime],
               }),
             ),
           10,
@@ -101,6 +104,22 @@ test('same eventtime accepts equivalent status when nested object keys are reord
   const service = await scenario({ power: 0.16, speed: 0.4 })
   try {
     await service.queryAnswered
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(service.connectionCount()).toBe(1)
+    expect(service.events).not.toContainEqual(
+      expect.objectContaining({
+        kind: 'unavailable',
+        reason: 'invalid-response',
+      }),
+    )
+  } finally {
+    await service.close()
+  }
+})
+
+test('same eventtime delta accepts a reordered fan object', async () => {
+  const service = await scenario({ power: 0.16, speed: 0.4 }, 10)
+  try {
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(service.connectionCount()).toBe(1)
     expect(service.events).not.toContainEqual(

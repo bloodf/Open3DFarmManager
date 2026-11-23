@@ -18,7 +18,7 @@ export const ToolHeaters = z
   .array(
     z.strictObject({
       tool: ToolIndex,
-      maxC: z.number().int().nonnegative(),
+      maxC: z.number().int().nonnegative().max(1000),
     }),
   )
   .min(1)

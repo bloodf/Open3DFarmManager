@@ -170,6 +170,11 @@ export type V2DispatchOptions = {
   /** Wall and monotonic start time. */
   now?: number
   capability?: Partial<PauseCapabilityV1>
+  /** Override the wire to model a different issuer version. */
+  capabilityWire?: (
+    claims: PauseCapabilityV1,
+    key: CryptoKey,
+  ) => Promise<string>
   journalCapacity?: number
   storageDegraded?: () => boolean
   /** Extra actions the fake driver supports (through `execute`). */
@@ -352,6 +357,12 @@ export async function openV2Dispatch(
           authority.binding,
           'connector',
           authority.connector.privateKey,
+        ),
+      }),
+      ...(options.capabilityWire && {
+        capabilityWire: await options.capabilityWire(
+          capability,
+          authority.issuer.privateKey,
         ),
       }),
     })

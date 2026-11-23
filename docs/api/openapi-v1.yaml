@@ -4887,6 +4887,7 @@ components:
         - resume
         - cancel
         - set_temperature
+        - set_tool_temperature
         - set_fan
         - home
         - set_light
@@ -4958,6 +4959,25 @@ components:
                   type: string
                   enum: [extruder, bed, chamber]
                 targetCelsius:
+                  type: integer
+                  minimum: 0
+        - type: object
+          required: [action, args]
+          additionalProperties: false
+          properties:
+            action:
+              type: string
+              const: set_tool_temperature
+            args:
+              type: object
+              required: [tool, target_c]
+              additionalProperties: false
+              properties:
+                tool:
+                  type: integer
+                  minimum: 0
+                  maximum: 3
+                target_c:
                   type: integer
                   minimum: 0
         - type: object

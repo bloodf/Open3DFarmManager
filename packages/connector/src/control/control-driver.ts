@@ -28,13 +28,3 @@ export function toolTemperatureRefusal(
   if (!heater) return 'tool-heater-not-advertised'
   if (args.target_c > heater.maxC) return 'tool-temperature-above-maximum'
 }
-
-/** The existing journal groups heater writes under its temperature action.
- * Authorization, dispatch and the stored wire hash still use the original command.
- */
-export function temperatureJournalAction(target_c: number) {
-  return {
-    action: 'set_temperature',
-    args: { heater: 'extruder', target_c },
-  } as const
-}

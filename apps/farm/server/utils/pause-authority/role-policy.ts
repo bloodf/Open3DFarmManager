@@ -47,7 +47,8 @@ export async function validatePauseAuthorityRole(sql: Sql): Promise<void> {
       ('session_accounts'),('account_sessions'),('memberships'),('browser_device_keys'),
       ('connector_enrollments'),('connector_credentials'),('connector_revocations'),
       ('connector_credential_proofs'),('printer_assignments'),('pause_authority_watermark'),
-      ('pause_authority_sessions'),('pause_authority_challenges')),
+      ('pause_authority_sessions'),('pause_authority_challenges'),
+      ('pause_authority_advertised_controls')),
     insertable(name) AS (VALUES ('pause_authority_sessions'),('pause_authority_challenges')),
     updatable(name,col) AS (VALUES
       ('memberships','farm_id'),('browser_device_keys','key_id'),('connector_enrollments','agent_id'),

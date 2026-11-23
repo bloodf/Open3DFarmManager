@@ -105,6 +105,23 @@ export const SignedPauseCapabilityV1 = z
   .refine(lifetime)
   .refine(validRoles)
 export type SignedPauseCapabilityV1 = z.infer<typeof SignedPauseCapabilityV1>
+const receivedCapability = z
+  .strictObject({
+    ...fields,
+    actions: z
+      .array(z.string().min(1).max(256))
+      .min(1)
+      .max(100)
+      .refine((actions) => new Set(actions).size === actions.length),
+    signature,
+  })
+  .refine(lifetime)
+  .refine(({ role, actions }) =>
+    actions.every((action) => {
+      const known = ExtendedControlAction.safeParse(action)
+      return !known.success || controlRoleAllowed(role, known.data)
+    }),
+  )
 function bounded(input: unknown, max: number): string {
   const wire = canonicalize(input)
   if (new TextEncoder().encode(wire).byteLength > max)
@@ -117,10 +134,12 @@ export function encodePauseCapability(input: unknown): string {
     MAX_PAUSE_CAPABILITY_WIRE_BYTES,
   )
 }
-export function decodePauseCapability(wire: unknown): SignedPauseCapabilityV1 {
+export function decodePauseCapability(
+  wire: unknown,
+): z.infer<typeof receivedCapability> {
   if (typeof wire !== 'string' || wire.length > MAX_PAUSE_CAPABILITY_WIRE_BYTES)
     throw new Error('Invalid pause capability frame')
-  const parsed = SignedPauseCapabilityV1.parse(
+  const parsed = receivedCapability.parse(
     parseBoundedJson(wire, {
       maxBytes: MAX_PAUSE_CAPABILITY_WIRE_BYTES,
       maxDepth: 4,
@@ -128,26 +147,34 @@ export function decodePauseCapability(wire: unknown): SignedPauseCapabilityV1 {
       maxStringChars: 256,
     }),
   )
-  if (encodePauseCapability(parsed) !== wire)
+  if (bounded(parsed, MAX_PAUSE_CAPABILITY_WIRE_BYTES) !== wire)
     throw new Error('Canonical pause capability required')
   return parsed
 }
 export function pauseCapabilityPayload(
   input: unknown,
 ): Uint8Array<ArrayBuffer> {
+  return capabilityPayload(PauseCapabilityV1.parse(input))
+}
+function capabilityPayload(claims: unknown): Uint8Array<ArrayBuffer> {
   return new TextEncoder().encode(
     'Open3DFarmManager/pause-capability/v1\0' +
-      bounded(PauseCapabilityV1.parse(input), MAX_PAUSE_CAPABILITY_WIRE_BYTES),
+      bounded(claims, MAX_PAUSE_CAPABILITY_WIRE_BYTES),
   )
 }
 async function validateCapability(input: unknown): Promise<PauseCapabilityV1> {
   const parsed = PauseCapabilityV1.parse(input)
+  await validateCapabilityKey(parsed)
+  return parsed
+}
+async function validateCapabilityKey(
+  parsed: Pick<PauseCapabilityV1, 'browser_public_key' | 'browser_thumbprint'>,
+): Promise<void> {
   const binding = await validateBrowserDevicePublicKey(
     parsed.browser_public_key,
   )
   if (binding.thumbprint !== parsed.browser_thumbprint)
     throw new Error('Pause capability key mismatch')
-  return parsed
 }
 /** Trusted issuer key primitive only; issuance still requires current transactional authority. */
 export async function signPauseCapability(
@@ -181,15 +208,15 @@ export async function verifyPauseCapability(
 ): Promise<boolean> {
   try {
     if (key.type !== 'public' || key.algorithm.name !== 'Ed25519') return false
-    const parsed = SignedPauseCapabilityV1.parse(input),
+    const parsed = receivedCapability.parse(input),
       { signature: sig, ...unsigned } = parsed
-    encodePauseCapability(parsed)
-    const claims = await validateCapability(unsigned)
+    bounded(parsed, MAX_PAUSE_CAPABILITY_WIRE_BYTES)
+    await validateCapabilityKey(unsigned)
     return await crypto.subtle.verify(
       { name: 'Ed25519' },
       key,
       new Uint8Array(decodeBase64url(sig, 64)),
-      pauseCapabilityPayload(claims),
+      capabilityPayload(unsigned),
     )
   } catch {
     return false

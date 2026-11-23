@@ -112,10 +112,13 @@ test('job history preserves per-tool measurements and omits absent usage', () =>
 
 test('job storage serializes known usage and keeps unknown usage null', async () => {
   const statements: unknown[][] = []
-  const tx = ((parts: TemplateStringsArray, ...values: unknown[]) => {
-    statements.push(values)
-    return Promise.resolve([])
-  }) as never
+  const tx = Object.assign(
+    (_parts: TemplateStringsArray, ...values: unknown[]) => {
+      statements.push(values)
+      return Promise.resolve([])
+    },
+    { json: (value: unknown) => ({ type: 3802, value }) },
+  ) as never
   await recordJobs(
     tx,
     {
@@ -132,9 +135,9 @@ test('job storage serializes known usage and keeps unknown usage null', async ()
       { printerKey: 'printer', outcome: 'failed', endedAt: 11 },
     ],
   )
-  assert.equal(
-    statements[0]?.[7],
-    JSON.stringify([{ tool: 'external', millimetres: 12, grams: 0.03 }]),
-  )
+  assert.deepEqual(statements[0]?.[7], {
+    type: 3802,
+    value: [{ tool: 'external', millimetres: 12, grams: 0.03 }],
+  })
   assert.equal(statements[1]?.[7], null)
 })

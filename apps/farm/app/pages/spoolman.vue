@@ -49,6 +49,7 @@ const hasMemberships = ref(false)
 const status = ref('')
 const errorSummary = ref<HTMLElement | null>(null)
 const origin = ref('')
+const serviceId = ref('')
 const token = ref('')
 const username = ref('')
 const password = ref('')
@@ -133,6 +134,7 @@ async function submit() {
     return fail(describeSpoolmanKeyState(keyState.value))
   const validated = validateSpoolmanTargetInput({
     origin: origin.value,
+    serviceId: serviceId.value,
     token: token.value,
     username: username.value,
     password: password.value,
@@ -230,6 +232,7 @@ async function submit() {
         <SpoolmanForm
           v-else
           v-model:origin="origin"
+          v-model:service-id="serviceId"
           v-model:token="token"
           v-model:username="username"
           v-model:password="password"

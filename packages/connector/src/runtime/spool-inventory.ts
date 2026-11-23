@@ -41,6 +41,7 @@ export function summarizeSpoolman(snapshot: SpoolmanSnapshot) {
     }),
   )
   return Object.freeze({
+    serviceId: snapshot.inventory.serviceId,
     spools: Object.freeze(spools),
     total: Math.min(10_000, items.length),
     ageMs: snapshot.ageMs,
@@ -63,6 +64,7 @@ export function inventoryAt(
     observedAt: Math.max(0, Math.floor(wallNow - ageMs)),
     stale: state.kind !== 'observed' || ageMs >= STALE_MS,
     total: state.total,
+    serviceId: state.serviceId,
     spools: state.spools.slice(0, count),
   })
 }

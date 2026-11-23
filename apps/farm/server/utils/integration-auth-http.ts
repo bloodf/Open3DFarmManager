@@ -169,6 +169,10 @@ const problems = {
   'payload-too-large': [413, 'Solicitação muito grande.'],
   'unsupported-media-type': [415, 'Formato de solicitação não aceito.'],
   'unsafe-target': [422, 'Destino do webhook não permitido.'],
+  'spool-already-bound': [
+    409,
+    'A bobina do Spoolman já foi vinculada nesta farm.',
+  ],
   'spool-location-changed': [
     409,
     'O registro da bobina mudou. Consulte o local atual.',

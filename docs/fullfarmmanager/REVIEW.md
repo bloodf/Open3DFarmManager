@@ -1,5 +1,9 @@
 # FullFarmManager review
 
+## Simulated status journeys — 2026-11-23
+
+At integrated head `64cf4f6e5014af7471e409a4bf7754cf0fff0b95`, the Qidi, Flashforge and Phrozen browser journeys passed 3 of 3 tests with zero skipped in an isolated Docker runner with an internal bridge, Chromium 1254 and a disposable PostgreSQL 17.12 cluster. Each simulator reached authenticated direct status while printing, showed stale data after connection loss, and recovered authenticated idle status. The farm row exposed no pause, resume, cancel or start-print controls at any of those stages. The fixtures also checked the expected status requests. This is simulator proof of read-only status and recovery, not qualification of physical devices, firmware, camera or commands.
+
 ## Mac driver review matrix
 
 Historical review update — 2026-11-22. The matrix records protocol documentation, adapter coverage and synthetic evidence. End-to-end and owner hardware qualification remain pending for every row. Listed firmware identifies the source or fixture reviewed. Model support requires evidence for the matching identity and protocol.

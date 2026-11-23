@@ -26,8 +26,8 @@ Actions are the `ExtendedControlAction` values in `packages/farm-protocol/src/co
 | `load_filament`, `unload_filament`        | Unsupported ("ACE filament")                                                        | None. anycubic_ha_local exposes only ACE `setAutoFeed` ([`commands.py` L43–44](https://github.com/chrisfore/anycubic_ha_local/blob/aa93e1fbe8b0a3ca1dafe39f7427613a3f41a38d/custom_components/anycubic/anycubic_local/commands.py#L43-L44)) and drying. Its validated protocol notes list the same ACE commands ([`research/PROTOCOL-VALIDATED.md` L107–109](https://github.com/chrisfore/anycubic_ha_local/blob/aa93e1fbe8b0a3ca1dafe39f7427613a3f41a38d/research/PROTOCOL-VALIDATED.md#L107-L109)). kobra-connect has no ACE commands. | **No source found** for a load or unload command. The notes say load and unload reports do arrive when the printer is idle (`research/PROTOCOL-VALIDATED.md` L8–9), so the state is visible but the command is not documented. `setAutoFeed` is not a load. |
 | `firmware_restart`                        | Unsupported                                                                         | None. Searched both repositories for restart, reboot, firmware and OTA verbs. Only Docker `restart: unless-stopped` and Home Assistant wording matched.                                                                                                                                                                                                                                                                                                                                                                                  | **No source found.**                                                                                                                                                                                                                                        |
 | `emergency_stop`                          | Unsupported                                                                         | None dedicated. kobra-connect [§6, L224–251](https://github.com/rvanderp3/kobra-connect/blob/3edba24606d7122c4a68accd09af937ba4fdbd08/docs/mqtt-commands.md#L224-L251) documents `stop`, which is the print cancel and not an e-stop.                                                                                                                                                                                                                                                                                                    | **No source found** for an e-stop. Do not map `stop` or `cancel` to it.                                                                                                                                                                                     |
-| `list` (file listing)                     | Listed as a gap in issue #236                                                       | kobra-connect [§13, L460–490](https://github.com/rvanderp3/kobra-connect/blob/3edba24606d7122c4a68accd09af937ba4fdbd08/docs/mqtt-commands.md#L460-L490): `file` topic with `action: listLocal` and `listUdisk`.                                                                                                                                                                                                                                                                                                                          | **Source found** (kobra-connect only). anycubic_ha_local has no list request in its code.                                                                                                                                                                   |
-| `upload`                                  | Listed as a gap in issue #236                                                       | kobra-connect [§16, L538–546](https://github.com/rvanderp3/kobra-connect/blob/3edba24606d7122c4a68accd09af937ba4fdbd08/docs/mqtt-commands.md#L538-L546): `POST http://<printer>:18910/gcode_upload?s=<token>`, the token comes from the `info` report. anycubic_ha_local [`upload.py` L142](https://github.com/chrisfore/anycubic_ha_local/blob/aa93e1fbe8b0a3ca1dafe39f7427613a3f41a38d/custom_components/anycubic/anycubic_local/upload.py#L142) (`async_send_file`) sends the same upload.                                            | **Source found.**                                                                                                                                                                                                                                           |
+| `list`                                    | Experimental for `20024` on firmware `2.4.6.7`                                      | [kobra-connect §13](https://github.com/rvanderp3/kobra-connect/blob/3edba24606d7122c4a68accd09af937ba4fdbd08/docs/mqtt-commands.md#L460-L490)                                                                                                                                                                                                                                                                                                                                                                                            |
+| `upload`                                  | Experimental standalone upload for `20024` on firmware `2.4.6.7`                    | [kobra-connect §16](https://github.com/rvanderp3/kobra-connect/blob/3edba24606d7122c4a68accd09af937ba4fdbd08/docs/mqtt-commands.md#L538-L546), [Printer Protocol Orchard upload format](https://github.com/ChestnutLabs/printer-protocol-orchard/blob/fd5026ef9ec8b6b0f7b22884a2f2389e614c8fdf/protocols/anycubic.md#writing--control)                                                                                                                                                                                                   |
 | Any action on models other than `20024`   | Unsupported (`supportedAnycubicActions` returns `[]`)                               | anycubic_ha_local [README L85](https://github.com/chrisfore/anycubic_ha_local/blob/aa93e1fbe8b0a3ca1dafe39f7427613a3f41a38d/README.md#L85) says the Kobra 3, 4, X and S1 family shares one protocol. The README model table ([L61–65](https://github.com/chrisfore/anycubic_ha_local/blob/aa93e1fbe8b0a3ca1dafe39f7427613a3f41a38d/README.md#L61-L65)) gives `20024`, `20027` and `20026` for the Kobra 3 line.                                                                                                                          | **Source found for the protocol, not for each model's firmware.** The model ids are documented. Per-model behaviour needs captured fixtures.                                                                                                                |
 
 ## Concerns
@@ -42,8 +42,34 @@ Actions are the `ExtendedControlAction` values in `packages/farm-protocol/src/co
 
 The detail view uses the reported print state, temperatures, fan speeds,
 light and ACE slot data. ACE slots are read-only. The file action starts
-an existing file by name. Listing and upload remain unavailable.
+an existing raw G-code file by name.
 [Camera](anycubic-camera.md) requires per-assignment media configuration.
 Movement, extrusion, macros, console, object exclusion, queues, bed mesh,
 configuration, services, history, timelapse, power and updates are out of
 the documented detail control set above.
+
+### Kobra 3 LAN files
+
+The Connector verifies model `20024` through the local assignment and firmware
+`2.4.6.7` through a fresh, correlated MQTT info reply. That model and firmware
+pair appears in the [Printer Protocol Orchard capture notes](https://github.com/ChestnutLabs/printer-protocol-orchard/blob/fd5026ef9ec8b6b0f7b22884a2f2389e614c8fdf/fixtures/anycubic/gkapi/SOURCES.md).
+The [Anycubic firmware log](https://wiki.anycubic.com/en/fdm-3d-printer/kobra-3-combo/firmware-upgrade-log)
+confirms the version and LAN feature. The exact-version gate limits the scope of
+simulator coverage.
+
+For listing, the Connector asks for `listLocal` with `path: "/"` on the slicer
+file topic. It accepts a successful reply on the bound file report topic only
+when its message ID matches. The listing parser expects `data.records` with
+`is_dir`, `filename`, `size` and a millisecond `timestamp`. Those response
+fields are documented from a physically tested Kobra S1 in
+[anycubic-lan §7.3](https://github.com/Nino6689/anycubic-lan/blob/361aadae0cb0784ff11cafcc68226a21659346eb/docs/PROTOCOL.md#73-listing-files-and-starting-a-print).
+The Kobra 3 response is covered by simulation and still needs hardware confirmation.
+
+For upload, a fresh idle info reply must advertise a signed `/gcode_upload` URL
+on the bound host and port (`18910` by default). The Connector sends one
+multipart POST with a text `filename` part, an octet-stream `gcode` part and
+`X-File-Length` set to the raw byte count. It requires HTTP and printer code
+`200` and a valid stored name in `data.gcode`. The browser transfers the payload
+over WebRTC. A successful upload only stores the `.gcode.3mf` package. Starting
+that package requires a separate protocol implementation and is outside this
+slice. The existing start path handles stored raw `.gcode` files.

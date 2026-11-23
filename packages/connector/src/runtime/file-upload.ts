@@ -16,11 +16,16 @@ import type {
   createKobraLinkClient,
   PrinterBinding,
 } from '../kobralink/client.ts'
+import {
+  supportsAnycubicUpload,
+  uploadAnycubicFile,
+} from '../anycubic/files.ts'
+import type { PrinterBinding as LocalPrinterBinding } from '../control/printer-binding.ts'
 import { uploadBambuFile } from '../bambu/ftps.ts'
 
 export type FileUploadTarget =
   | { backend: 'creality'; origin: string }
-  | { backend: 'anycubic' }
+  | { backend: 'anycubic'; binding?: LocalPrinterBinding }
   | {
       backend: 'kobralink'
       client(
@@ -60,11 +65,13 @@ export type FileUploadResult =
 export function supportsFileUpload(
   target: FileUploadTarget,
   name: string,
+  standalone = false,
 ): boolean {
+  if (target.backend === 'anycubic')
+    return standalone && !!target.binding && supportsAnycubicUpload(name)
   return (
-    target.backend !== 'anycubic' &&
-    (!(target.backend === 'creality' || target.backend === 'kobralink') ||
-      /\.gcode$/i.test(name))
+    !(target.backend === 'creality' || target.backend === 'kobralink') ||
+    /\.gcode$/i.test(name)
   )
 }
 
@@ -74,9 +81,11 @@ export async function uploadFile(input: {
   name: string
   signal: AbortSignal
   authorize(): boolean
+  standalone?: boolean
 }): Promise<void> {
   const { target, filePath, name, signal } = input
-  if (!supportsFileUpload(target, name)) throw Error('unsupported')
+  if (!supportsFileUpload(target, name, input.standalone))
+    throw Error('unsupported')
   if (!input.authorize()) throw Error('unauthorized')
   const common = { filePath, name, signal }
   if (target.backend === 'moonraker')
@@ -85,6 +94,12 @@ export async function uploadFile(input: {
     await uploadBambuFile({ ...target, ...common })
   else if (target.backend === 'creality')
     await uploadCrealityFile({ ...target, ...common })
+  else if (target.backend === 'anycubic' && target.binding)
+    await uploadAnycubicFile({
+      ...common,
+      binding: target.binding,
+      authorized: input.authorize,
+    })
   else if (target.backend === 'kobralink') {
     signal.throwIfAborted()
     const client = await target.client(signal)
@@ -173,7 +188,7 @@ export function createFileUpload(
         if (
           offer.config
             ? target.backend !== 'moonraker'
-            : !supportsFileUpload(target, offer.name)
+            : !supportsFileUpload(target, offer.name, true)
         )
           throw Error('unsupported')
         transfer = await receiver.offer(offer)
@@ -224,6 +239,7 @@ export function createFileUpload(
           name: staged.offer.name,
           signal: controller.signal,
           authorize: () => !closed && authorized(),
+          standalone: true,
         })
       })
       send({

@@ -36,7 +36,7 @@ info:
     `RateLimit-Remaining` and `RateLimit-Reset` for the bucket the request
     consumed; a 429 or 503 also carries `Retry-After`.
 
-    **Idempotency.** Creating a job or action requires an `Idempotency-Key`
+    **Idempotency.** Creating a job, action or physical spool requires an `Idempotency-Key`
     header. Retrying with the same key and the same body returns the original
     resource; the same key with a different body answers 409
     (`idempotency-key-reused`). Keys are kept for at least 24 hours.
@@ -1324,11 +1324,12 @@ paths:
       operationId: registerPhysicalSpool
       tags: [Inventory]
       summary: Register a physical spool
-      description: Creates a spool using an existing filament in the farm-wide grant. Identical registrations create distinct physical spools.
+      description: Creates a spool using an existing filament in the farm-wide grant. A retry with the same key, farm and body returns the original response; reuse with different input returns 409.
       security:
         - clientCredentials: ['inventory:write']
       parameters:
         - $ref: '#/components/parameters/PhysicalSpoolFarmId'
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -1356,6 +1357,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '415':

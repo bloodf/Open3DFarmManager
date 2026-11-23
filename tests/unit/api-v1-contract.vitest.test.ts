@@ -393,6 +393,8 @@ function physicalSpoolScenarios(): Scenario[] {
         failPool?: boolean
         rateLimited?: boolean
         requiresApproval?: boolean
+        keyConflict?: boolean
+        replay?: boolean
       } = {},
     ): Scenario => ({
       op: `${method} ${path}`,
@@ -411,6 +413,7 @@ function physicalSpoolScenarios(): Scenario[] {
         )
         const token = options.noToken ? undefined : await tokenFor(world, app)
         let failPool = false
+        let stored: { request_hash: string; response: unknown } | undefined
         const spool = { id: 7, location: 'Gaveta A', revision: '71:(0,1)' }
         Object.assign(world.pool as object, {
           begin: (
@@ -422,10 +425,24 @@ function physicalSpoolScenarios(): Scenario[] {
             ) => unknown,
           ) => {
             if (failPool) throw new Error('pool down')
-            return work((query, ...values) => {
+            const tx = (query: TemplateStringsArray, ...values: unknown[]) => {
               const text = query.join('')
               if (text.includes('farm.integration_app_grants'))
                 return [{ id: 'grant' }]
+              if (text.includes('pg_advisory_xact_lock')) return []
+              if (text.includes('SELECT request_hash, response'))
+                return stored ? [stored] : []
+              if (
+                text.includes(
+                  'INSERT INTO farm.integration_physical_spool_registrations',
+                )
+              ) {
+                stored = {
+                  request_hash: values[2] as string,
+                  response: values[3],
+                }
+                return []
+              }
               if (text.includes('FROM farm.spool_filaments'))
                 return values[1] === 1 ? [{ id: 1 }] : []
               if (text.includes('INSERT INTO farm.spools'))
@@ -435,7 +452,9 @@ function physicalSpoolScenarios(): Scenario[] {
               if (text.includes('FROM farm.spools'))
                 return values[1] === spool.id ? [spool] : []
               throw new Error('Unexpected physical inventory query')
-            })
+            }
+            tx.json = (value: unknown) => value
+            return work(tx)
           },
         })
         let body
@@ -460,8 +479,24 @@ function physicalSpoolScenarios(): Scenario[] {
           ...(body ? { body } : {}),
           ...(token ? { token } : {}),
           ...options.input,
+          ...(suffix === '' && options.input?.headers === undefined
+            ? { headers: { 'idempotency-key': 'physical-key' } }
+            : {}),
         }
         failPool = options.failPool === true
+        if (options.keyConflict) {
+          await call(input)
+          input.body = { filamentId: 1, location: 'Gaveta B' }
+        }
+        if (options.replay) {
+          const original = await call(input)
+          const replay = await call(input)
+          expect(replay.status).toBe(original.status)
+          expect(replay.json).toEqual(original.json)
+          expect(replay.headers.get('location')).toBe(
+            original.headers.get('location'),
+          )
+        }
         if (options.rateLimited) {
           world.config.integrationAuth.readLimit = 1
           world.config.integrationAuth.writeLimit = 1
@@ -496,11 +531,30 @@ function physicalSpoolScenarios(): Scenario[] {
         scenario('413', 'JSON body exceeds 8 KiB', {
           input: {
             body: ' '.repeat(8193),
-            headers: { 'content-type': 'application/json' },
+            headers: {
+              'content-type': 'application/json',
+              ...(suffix === '' ? { 'idempotency-key': 'physical-key' } : {}),
+            },
           },
         }),
         scenario('415', 'JSON content type required', {
-          input: { headers: { 'content-type': 'text/plain' } },
+          input: {
+            headers: {
+              'content-type': 'text/plain',
+              ...(suffix === '' ? { 'idempotency-key': 'physical-key' } : {}),
+            },
+          },
+        }),
+      )
+    }
+    if (suffix === '') {
+      cases.push(
+        scenario('400', 'idempotency key required', { input: { headers: {} } }),
+        scenario('409', 'idempotency key reused with different body', {
+          keyConflict: true,
+        }),
+        scenario('201', 'idempotent replay returns original response', {
+          replay: true,
         }),
       )
     }

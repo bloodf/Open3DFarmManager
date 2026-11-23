@@ -82,28 +82,55 @@ it.runIf(process.env.OPENFARM_TEST_PHYSICAL_PG === '1')(
           sql,
           { ...access, appId: anotherAppId },
           input,
+          'unauthorized',
         ),
       ).toBeNull()
       expect(
-        await registerPhysicalSpool(sql, access, { ...input, filamentId: 2 }),
+        await registerPhysicalSpool(
+          sql,
+          access,
+          { ...input, filamentId: 2 },
+          'missing',
+        ),
       ).toBeNull()
       const [first, second] = await Promise.all([
-        registerPhysicalSpool(sql, access, input),
-        registerPhysicalSpool(sql, access, input),
+        registerPhysicalSpool(sql, access, input, 'first'),
+        registerPhysicalSpool(sql, access, input, 'second'),
       ])
-      if (!first || !second)
+      if (first?.outcome !== 'registered' || second?.outcome !== 'registered')
         throw new Error('Expected both spools to be registered')
-      expect([first.spoolId, second.spoolId].sort()).toEqual([1, 2])
-      expect(first.label.href).toBe(
-        `/api/farms/${farmId}/spool-library/labels?spoolIds=${first.spoolId}`,
+      const firstSpool = first.spool
+      const secondSpool = second.spool
+      expect(await registerPhysicalSpool(sql, access, input, 'first')).toEqual(
+        first,
       )
-      expect(first.label.href).not.toBe(second.label.href)
+      expect(
+        await registerPhysicalSpool(
+          sql,
+          access,
+          { ...input, location: 'Other' },
+          'first',
+        ),
+      ).toEqual({ outcome: 'key-reused' })
+      const concurrent = await Promise.all([
+        registerPhysicalSpool(sql, access, input, 'concurrent'),
+        registerPhysicalSpool(sql, access, input, 'concurrent'),
+      ])
+      expect(concurrent[0]).toEqual(concurrent[1])
+      expect([firstSpool.spoolId, secondSpool.spoolId].sort()).toEqual([1, 2])
+      expect(firstSpool.label.href).toBe(
+        `/api/farms/${farmId}/spool-library/labels?spoolIds=${firstSpool.spoolId}`,
+      )
+      expect(firstSpool.label.href).not.toBe(secondSpool.label.href)
       await root`INSERT INTO farm.account_sessions (id, account_id, account_version, created_at, last_seen_at, absolute_expires_at)
         VALUES ('spool-label-session', 'spool-test-owner', 0, 100, 100, 10000000)`
       await root`INSERT INTO farm.memberships (farm_id, account_id, role)
         VALUES (${farmId}, 'spool-test-owner', 'owner')`
       const labels = new PostgresSpoolDrying(sql, () => 500)
-      const labelUrl = new URL(first.label.href, 'https://farm.example.invalid')
+      const labelUrl = new URL(
+        firstSpool.label.href,
+        'https://farm.example.invalid',
+      )
       expect(
         await labels.run(
           {
@@ -115,10 +142,15 @@ it.runIf(process.env.OPENFARM_TEST_PHYSICAL_PG === '1')(
           { spoolIds: [Number(labelUrl.searchParams.get('spoolIds'))] },
         ),
       ).toEqual([
-        expect.objectContaining({ id: first.spoolId, name: 'Synthetic PLA' }),
+        expect.objectContaining({
+          id: firstSpool.spoolId,
+          name: 'Synthetic PLA',
+        }),
       ])
-      expect(first.binLight.status).toBe('unsupported')
-      expect(await readPhysicalSpool(sql, read, first.spoolId)).toEqual(first)
+      expect(firstSpool.binLight.status).toBe('unsupported')
+      expect(await readPhysicalSpool(sql, read, firstSpool.spoolId)).toEqual(
+        firstSpool,
+      )
       const found = await searchIntegrationSpools(sql, [farmId], {
         limit: 10,
         farmId,
@@ -132,28 +164,34 @@ it.runIf(process.env.OPENFARM_TEST_PHYSICAL_PG === '1')(
       ).toEqual([
         { farmId, spoolId: 1 },
         { farmId, spoolId: 2 },
+        { farmId, spoolId: 3 },
       ])
 
       const oldTake = {
         expectedLocation: input.location,
-        version: first.version,
+        version: firstSpool.version,
       }
       const secondTake = {
         expectedLocation: input.location,
-        version: second.version,
+        version: secondSpool.version,
       }
       expect(
-        await withdrawPhysicalSpool(sql, access, first.spoolId, secondTake),
+        await withdrawPhysicalSpool(
+          sql,
+          access,
+          firstSpool.spoolId,
+          secondTake,
+        ),
       ).toEqual({ outcome: 'changed' })
-      await root`UPDATE farm.spools SET location = 'Gaveta B' WHERE farm_id = ${farmId} AND id = ${first.spoolId}`
+      await root`UPDATE farm.spools SET location = 'Gaveta B' WHERE farm_id = ${farmId} AND id = ${firstSpool.spoolId}`
       expect(
-        await withdrawPhysicalSpool(sql, access, first.spoolId, oldTake),
+        await withdrawPhysicalSpool(sql, access, firstSpool.spoolId, oldTake),
       ).toEqual({ outcome: 'changed' })
-      await root`UPDATE farm.spools SET location = ${input.location} WHERE farm_id = ${farmId} AND id = ${first.spoolId}`
+      await root`UPDATE farm.spools SET location = ${input.location} WHERE farm_id = ${farmId} AND id = ${firstSpool.spoolId}`
       expect(
-        await withdrawPhysicalSpool(sql, access, first.spoolId, oldTake),
+        await withdrawPhysicalSpool(sql, access, firstSpool.spoolId, oldTake),
       ).toEqual({ outcome: 'changed' })
-      const current = await readPhysicalSpool(sql, read, first.spoolId)
+      const current = await readPhysicalSpool(sql, read, firstSpool.spoolId)
       if (!current?.location)
         throw new Error('Expected the spool back in the original bin')
       const take = {
@@ -161,21 +199,33 @@ it.runIf(process.env.OPENFARM_TEST_PHYSICAL_PG === '1')(
         version: current.version,
       }
       const outcomes = await Promise.all([
-        withdrawPhysicalSpool(sql, access, first.spoolId, take),
-        withdrawPhysicalSpool(sql, access, first.spoolId, take),
+        withdrawPhysicalSpool(sql, access, firstSpool.spoolId, take),
+        withdrawPhysicalSpool(sql, access, firstSpool.spoolId, take),
       ])
       expect(outcomes.map((result) => result?.outcome).sort()).toEqual([
         'already-unlocated',
         'withdrawn',
       ])
-      expect(await readPhysicalSpool(sql, read, first.spoolId)).toMatchObject({
+      expect(
+        await readPhysicalSpool(sql, read, firstSpool.spoolId),
+      ).toMatchObject({
         location: null,
       })
-      expect(await readPhysicalSpool(sql, read, second.spoolId)).toEqual(second)
+      expect(await registerPhysicalSpool(sql, access, input, 'first')).toEqual(
+        first,
+      )
+      expect(await readPhysicalSpool(sql, read, secondSpool.spoolId)).toEqual(
+        secondSpool,
+      )
 
       await root`UPDATE farm.integration_app_grants SET disabled_at = 1, disabled_reason = 'revoked' WHERE id = ${grantId}`
       expect(
-        await withdrawPhysicalSpool(sql, access, second.spoolId, secondTake),
+        await withdrawPhysicalSpool(
+          sql,
+          access,
+          secondSpool.spoolId,
+          secondTake,
+        ),
       ).toBeNull()
     } finally {
       try {

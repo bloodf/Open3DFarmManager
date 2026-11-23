@@ -3580,6 +3580,15 @@ components:
           type: string
           description: '`unknown` when nothing publishable has been observed.'
           enum: [idle, printing, paused, error, offline, unknown]
+        statusReason:
+          type: string
+          enum:
+            [
+              client-certificate-missing,
+              prusa-link-unqualified,
+              firmware-shutdown,
+            ]
+          description: Specific reason for the observed status, when known.
         progress:
           type: number
           minimum: 0
@@ -3777,6 +3786,7 @@ components:
             - error
             - unknown-state
             - client-certificate-missing
+            - firmware-shutdown
             - stale
             - null
         setupPath:

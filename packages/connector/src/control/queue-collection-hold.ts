@@ -121,11 +121,17 @@ export function withCollectionHold<D extends PauseDriver>(
       } catch {
         // Starts are refused anyway; a confirmation cannot be recorded.
       }
-      // Advertised only while a run awaits collection: the live state tells
-      // the operator which printers hold their next copy.
-      return awaiting && !base.includes('confirm_collection')
-        ? Object.freeze([...base, 'confirm_collection' as const])
-        : base
+      // While a run awaits collection the printer stops advertising starts
+      // and offers confirm_collection, so a client can see the hold first.
+      if (!awaiting) return base
+      const advertised = base.filter(
+        (action) => !COLLECTION_HELD_ACTIONS.has(action),
+      )
+      return Object.freeze(
+        advertised.includes('confirm_collection')
+          ? advertised
+          : [...advertised, 'confirm_collection' as const],
+      )
     },
     async execute(
       action: ExtendedControlAction,

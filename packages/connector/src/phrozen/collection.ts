@@ -68,10 +68,9 @@ export function createPhrozenCollection(input: {
           },
           receivedAtMonoMs: mono,
           fieldObservedAtMonoMs: {
-            sdcp: {
+            phrozen: {
               state: mono,
               identity: mono,
-              controls: mono,
               statusReason: mono,
             },
           },

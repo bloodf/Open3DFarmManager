@@ -72,7 +72,11 @@ export function createFlashforgeCollection(input: {
         printerKey: binding.printerKey,
         state,
         ...(progress === undefined ? {} : { progress }),
-        identity: { vendor: 'Flashforge', model: result.model },
+        identity: {
+          vendor: 'Flashforge',
+          model: result.model,
+          firmware: result.firmware,
+        },
         statusReason: binding.simulated
           ? 'flashforge-simulated'
           : 'flashforge-unqualified',

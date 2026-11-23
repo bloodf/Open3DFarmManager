@@ -40,6 +40,15 @@ export type RawPrinterObservation = Omit<
       observedAtMonoMs: number
     }>
     fieldObservedAtMonoMs:
+      | Readonly<{
+          qidi: Readonly<Partial<Record<keyof PrinterState, number>>>
+        }>
+      | Readonly<{
+          flashforge: Readonly<Partial<Record<keyof PrinterState, number>>>
+        }>
+      | Readonly<{
+          phrozen: Readonly<Partial<Record<keyof PrinterState, number>>>
+        }>
       | RawMoonrakerObservation['fieldObservedAtMonoMs']
       | Readonly<{ connection: number }>
       | Readonly<{
@@ -63,6 +72,9 @@ export type RawPrinterObservation = Omit<
   }
 
 function fieldTimes(timing: RawPrinterObservation['fieldObservedAtMonoMs']) {
+  if ('qidi' in timing) return timing.qidi
+  if ('flashforge' in timing) return timing.flashforge
+  if ('phrozen' in timing) return timing.phrozen
   if ('prusaLink' in timing) return timing.prusaLink
   if ('formlabs' in timing) return timing.formlabs
   return 'sdcp' in timing
@@ -339,14 +351,9 @@ export function createFarmSnapshotSource(input: {
       invalidate({ printerKey: value.printerKey, epoch: previous.epoch })
     }
     const timing = value.fieldObservedAtMonoMs
-    const fieldStamped =
-      'prusaLink' in timing ||
-      'formlabs' in timing ||
-      'sdcp' in timing ||
-      'anycubic' in timing ||
-      'bambu' in timing ||
-      'creality' in timing
     const times = fieldTimes(timing)
+    const fieldStamped = times !== timing
+
     const connectionOnly = 'connection' in times
     const previousTiming = previous?.fieldObservedAtMonoMs
     const previousTimes = previousTiming
@@ -393,13 +400,8 @@ export function createFarmSnapshotSource(input: {
         const boundaryTime =
           previousTimes &&
           ('connection' in previousTimes !== connectionOnly ||
-            (!!previousTiming &&
-              ('prusaLink' in previousTiming ||
-                'formlabs' in previousTiming ||
-                'sdcp' in previousTiming ||
-                'anycubic' in previousTiming ||
-                'bambu' in previousTiming ||
-                'creality' in previousTiming)) !== fieldStamped)
+            (!!previousTiming && previousTimes !== previousTiming) !==
+              fieldStamped)
             ? Math.max(...Object.values(previousTimes))
             : previousTime
         return (

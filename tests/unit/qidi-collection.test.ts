@@ -61,7 +61,7 @@ test('collects, withdraws failed sources, and recovers in new read-only epochs',
           state: 'printing',
           progress: 0.25,
           statusReason: 'qidi-simulated',
-          identity: { vendor: 'Qidi', model: 'Q1 Pro', firmware: '4.4.24' },
+          identity: { vendor: 'Qidi' },
         },
       }),
     )

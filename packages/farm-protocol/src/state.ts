@@ -146,7 +146,16 @@ function printerStateSchema(legacy: boolean) {
       ]),
       preformStatus: text(256, 1).optional(),
       statusReason: z
-        .enum(['client-certificate-missing', 'prusa-link-unqualified'])
+        .enum([
+          'client-certificate-missing',
+          'prusa-link-unqualified',
+          'flashforge-simulated',
+          'flashforge-unqualified',
+          'phrozen-simulated',
+          'phrozen-unqualified',
+          'qidi-simulated',
+          'qidi-unqualified',
+        ])
         .optional(),
       alarms: z
         .strictObject({
@@ -252,6 +261,15 @@ function printerStateSchema(legacy: boolean) {
         (value.statusReason === 'prusa-link-unqualified' &&
           value.identity?.vendor === 'Prusa' &&
           !value.controls?.length) ||
+        (!value.controls?.length &&
+          ((value.identity?.vendor === 'Phrozen' &&
+            (value.statusReason === 'phrozen-simulated' ||
+              value.statusReason === 'phrozen-unqualified')) ||
+            (value.identity?.vendor === 'Flashforge' &&
+              value.state !== 'printing' &&
+              value.state !== 'paused' &&
+              (value.statusReason === 'flashforge-simulated' ||
+                value.statusReason === 'flashforge-unqualified')))) ||
         value.progress !== undefined,
       {
         path: ['progress'],

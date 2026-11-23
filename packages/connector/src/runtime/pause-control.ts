@@ -1,3 +1,4 @@
+import { moonrakerOrigins } from '../config/moonraker.ts'
 import type { MacroParamMap } from '../moonraker/control-macros.ts'
 import {
   readPrinterBinding,
@@ -331,7 +332,7 @@ async function runAssignmentControl(
       if (printer) {
         const selected = validateMoonrakerInput({
           assignment: printer,
-          allowedOrigins: collection.allowedOrigins,
+          allowedOrigins: moonrakerOrigins(collection),
           limits: collection.limits,
         })
         const apiKey = moonrakerAuthHeaders(selected.origin, selected.limits)[
@@ -356,7 +357,7 @@ async function runAssignmentControl(
   try {
     const router = createPauseDriverRouter({
       allowedOrigins: [
-        ...config.collection.allowedOrigins,
+        ...moonrakerOrigins(config.collection),
         ...(config.collection.version === 2
           ? config.collection.kobralink.allowedOrigins
           : []),

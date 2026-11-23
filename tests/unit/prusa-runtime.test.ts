@@ -1,4 +1,4 @@
-import { test, expect } from 'vitest'
+import { test, expect, vi } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { generateKeyPairSync, randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
@@ -66,7 +66,7 @@ test('real PrusaLink collection binds identity, withdraws failed reads and recov
       version: 8,
       collection: {
         version: 8,
-        allowedOrigins: [],
+        allowedOrigins: [simulator.endpoint],
         printers: [],
         limits: { requestTimeoutMs: 350 },
         drivers: [
@@ -90,6 +90,108 @@ test('real PrusaLink collection binds identity, withdraws failed reads and recov
       telemetry: { endpoint: 'https://farm.example', audience: 'telemetry' },
     }
     writeFileSync(path, JSON.stringify(config), { mode: 0o600 })
+    const collection = config.collection
+    const driver = collection.drivers[0]!
+    const otherOrigin = 'http://192.168.1.40'
+    const wrongKeyFile = join(dir, 'wrong-key.json')
+    writeFileSync(
+      wrongKeyFile,
+      JSON.stringify({
+        origin: simulator.endpoint,
+        apiKey: 'wrong-target-key',
+      }),
+      { mode: 0o600 },
+    )
+    const denied = [
+      { ...collection, allowedOrigins: undefined },
+      { ...collection, allowedOrigins: [otherOrigin] },
+      {
+        ...collection,
+        allowedOrigins: [simulator.endpoint, simulator.endpoint],
+      },
+      {
+        ...collection,
+        allowedOrigins: [simulator.endpoint, otherOrigin + '/'],
+      },
+      ...[
+        'http://example.com',
+        'http://8.8.8.8',
+        'http://0.0.0.0',
+        'http://127.1',
+        'http://[::ffff:127.0.0.1]',
+      ].map((origin) => ({
+        ...collection,
+        allowedOrigins: [origin],
+        drivers: [{ ...driver, origin }],
+      })),
+      {
+        ...collection,
+        drivers: [driver, { ...driver, printerKey: 'duplicate' }],
+      },
+      {
+        ...collection,
+        printers: [{ printerKey: 'moonraker', origin: simulator.endpoint }],
+      },
+      {
+        ...collection,
+        spoolman: {
+          origin: simulator.endpoint,
+          farmId: credential.farm_id,
+          serviceId: randomUUID(),
+        },
+      },
+      {
+        ...collection,
+        allowedOrigins: [simulator.endpoint, otherOrigin],
+        spoolman: {
+          origin: otherOrigin,
+          farmId: credential.farm_id,
+          serviceId: randomUUID(),
+          credentialFile: wrongKeyFile,
+        },
+      },
+      {
+        ...collection,
+        allowedOrigins: [simulator.endpoint, otherOrigin],
+        drivers: [
+          driver,
+          {
+            ...driver,
+            printerKey: 'second',
+            origin: otherOrigin,
+            apiKeyFile: wrongKeyFile,
+          },
+        ],
+      },
+      {
+        ...collection,
+        drivers: [{ ...driver, apiKeyFile: join(dir, 'missing.json') }],
+      },
+    ]
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockRejectedValue(new Error('Denied config attempted fetch'))
+    try {
+      for (const invalid of denied) {
+        writeFileSync(path, JSON.stringify({ ...config, collection: invalid }))
+        expect(() => readAgentRuntimeConfig(path, credential)).toThrow()
+        // The collector also validates when invoked without the runtime reader.
+        await expect(
+          collectIntoQueue({
+            // @ts-expect-error Exercise the runtime boundary with unparsed input.
+            config: invalid,
+            queue,
+            signal: controller.signal,
+            onDiagnostic() {},
+          }),
+        ).rejects.toThrow()
+      }
+      expect(fetch).not.toHaveBeenCalled()
+      expect(methods).toEqual([])
+    } finally {
+      fetch.mockRestore()
+    }
+    writeFileSync(path, JSON.stringify(config))
     const runtime = readAgentRuntimeConfig(path, credential)
     const handle = runtime.bindingFor(assignment_id)
     expect(handle).toBeDefined()

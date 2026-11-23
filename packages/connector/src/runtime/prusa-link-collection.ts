@@ -1,14 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises'
-import { z } from 'zod'
-import { readPrivateJsonFile } from '../config/local.ts'
-import type { PrusaLinkBinding } from '../prusa/config.ts'
+import { readPrusaLinkApiKey, type PrusaLinkBinding } from '../prusa/config.ts'
 import { createPrusaLink } from '../prusa/index.ts'
 import type { RawPrinterObservation } from './farm-snapshot-provider.ts'
-
-const Credential = z.strictObject({
-  origin: z.string(),
-  apiKey: z.string().regex(/^[!-~]{1,256}$/),
-})
 
 export function createPrusaLinkCollection(input: {
   binding: PrusaLinkBinding
@@ -18,14 +11,9 @@ export function createPrusaLinkCollection(input: {
   onUnavailable: (epoch: number) => void
 }) {
   const { binding, signal } = input
-  const credential = Credential.safeParse(
-    readPrivateJsonFile(binding.apiKeyFile, { maxBytes: 8192 }),
-  )
-  if (!credential.success || credential.data.origin !== binding.origin)
-    throw Error('Invalid PrusaLink credential')
   const { discover, status } = createPrusaLink(
     binding.origin,
-    credential.data.apiKey,
+    readPrusaLinkApiKey(binding),
     input.timeoutMs,
   )
   let epoch = 1

@@ -9,12 +9,14 @@ import {
   unlinkSync,
   writeFileSync,
   rmSync,
+  realpathSync,
 } from 'node:fs'
 import { request } from 'node:https'
 import { join } from 'node:path'
 import { setTimeout } from 'node:timers/promises'
 import postgres from 'postgres'
 import { seedSandbox } from './sandbox-seed.ts'
+import { loadMigrationCatalog, runMigrations } from './db/migrations.ts'
 import { acquireSandboxLock, sandboxState } from './sandbox-support.ts'
 
 const action = process.argv[2]
@@ -25,16 +27,20 @@ const uid = process.getuid?.()
 const gid = process.getgid?.()
 if (uid === undefined || gid === undefined)
   throw new Error('O sandbox requer Docker local em um sistema Unix.')
-const project =
+const legacyProject =
   'o3dfm-sandbox-' +
   createHash('sha256').update(process.cwd()).digest('hex').slice(0, 12)
-const state = sandboxState(project, uid)
+const state = sandboxState(legacyProject, uid)
 mkdirSync(state, { mode: 0o700, recursive: true })
 // Bind-mounted for the Connector only; create it here so Docker does not
 // invent a root-owned directory on first start.
 mkdirSync(join(state, 'connector-data'), { mode: 0o700, recursive: true })
 // Postgres data bind volume (compose.yml); the image chowns it to its own user.
 const databaseDir = join(state, 'database')
+if (existsSync(databaseDir) && !lstatSync(databaseDir).isDirectory())
+  throw new Error(
+    'O diretório de banco do sandbox deve ser um diretório local.',
+  )
 mkdirSync(databaseDir, { mode: 0o700, recursive: true })
 const stateInfo = lstatSync(state)
 if (
@@ -57,6 +63,47 @@ try {
     ).trim()
   if (!endpoint.startsWith('unix://'))
     throw new Error('O sandbox requer um daemon Docker local.')
+  // A legacy project is adopted only when Docker proves its database belongs
+  // to this state directory. Otherwise each canonical state has its own name.
+  const canonicalState = realpathSync(state)
+  const scopedProject =
+    'o3dfm-sandbox-state-' +
+    createHash('sha256').update(canonicalState).digest('hex').slice(0, 12)
+  const legacyVolume = `${legacyProject}_database`
+  const volumes = execFileSync(
+    'docker',
+    ['volume', 'ls', '-q', '--filter', `name=^${legacyVolume}$`],
+    { encoding: 'utf8' },
+  )
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+  let project = scopedProject
+  if (volumes.includes(legacyVolume)) {
+    const inspected = JSON.parse(
+      execFileSync('docker', ['volume', 'inspect', legacyVolume], {
+        encoding: 'utf8',
+      }),
+    )
+    const volume = inspected[0]
+    let deviceMatches = false
+    try {
+      deviceMatches =
+        realpathSync(volume.Options.device) === join(canonicalState, 'database')
+    } catch {
+      /* Missing or invalid device cannot prove ownership. */
+    }
+    if (
+      volume.Name === legacyVolume &&
+      volume.Driver === 'local' &&
+      volume.Labels?.['com.docker.compose.project'] === legacyProject &&
+      volume.Labels?.['com.docker.compose.volume'] === 'database' &&
+      volume.Options?.type === 'none' &&
+      volume.Options?.o === 'bind' &&
+      deviceMatches
+    )
+      project = legacyProject
+  }
   const passwordFile = join(state, 'db-password')
   const resetMarker = join(state, 'reset-containers')
   if (!existsSync(passwordFile)) {
@@ -192,17 +239,25 @@ try {
         throw new Error(`Mapeamento local indisponível para ${service}.`)
       return publicPort
     }
-    if (!existsSync(clientPath)) {
-      writeFileSync(seedMarker, '', { mode: 0o600 })
-      const url = new URL(
-        `postgres://sandbox_bootstrap:${password}@127.0.0.1:${port('postgres', 5432)}/sandbox`,
-      )
-      const sql = postgres(url.href, { max: 1, ssl: false })
+    const url = new URL(
+      `postgres://sandbox_bootstrap:${password}@127.0.0.1:${port('postgres', 5432)}/sandbox`,
+    )
+    const sql = postgres(url.href, { max: 1, ssl: false })
+    try {
       try {
-        await seedSandbox(sql, url, state)
-      } finally {
-        await sql.end()
+        await runMigrations(sql, await loadMigrationCatalog(), { kind: 'up' })
+      } catch (error) {
+        throw new Error(
+          'Falha ao aplicar migrações do sandbox; tente iniciar novamente.',
+          { cause: error },
+        )
       }
+      if (!existsSync(clientPath)) {
+        writeFileSync(seedMarker, '', { mode: 0o600 })
+        await seedSandbox(sql, url, state)
+      }
+    } finally {
+      await sql.end()
     }
     docker([
       'up',

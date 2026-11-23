@@ -13,6 +13,10 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { seedSandbox } from '../../scripts/sandbox-seed.ts'
 import {
+  loadMigrationCatalog,
+  runMigrations,
+} from '../../scripts/db/migrations.ts'
+import {
   disposablePostgres,
   findPostgresBin,
   getFreePort,
@@ -81,6 +85,7 @@ test(
       )
       const previousUmask = process.umask(0o022)
       try {
+        await runMigrations(sql, await loadMigrationCatalog(), { kind: 'up' })
         await seedSandbox(
           sql,
           new URL(`postgres://fixture:fixture@127.0.0.1:${pg.port}/fixture`),

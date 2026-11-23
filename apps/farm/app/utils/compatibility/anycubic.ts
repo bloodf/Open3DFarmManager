@@ -150,6 +150,7 @@ export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
     hardwareReports: {
       telemetry: [
         'docs/hardware-reports/2026-11-21-anycubic-kobra-x-native.json',
+        'docs/hardware-reports/2026-11-23-anycubic-kobra-x-native-pinned.json',
       ],
     },
     sources: [
@@ -157,6 +158,7 @@ export const anycubicCatalog: readonly AnycubicCatalogProduct[] = [
       'https://www.prnewswire.com/apac/news-releases/anycubic-introduces-three-breakthrough-products-at-formnext-2025-marking-a-new-step-in-desktop-manufacturing-302620524.html',
       'https://wiki.anycubic.com/fr/fdm-3d-printer/anycubic-kobra-x/firmware-update-guide',
       'https://github.com/bloodf/Open3DFarmManager/blob/main/docs/hardware-reports/2026-11-21-anycubic-kobra-x-native.json',
+      'https://github.com/bloodf/Open3DFarmManager/blob/main/docs/hardware-reports/2026-11-23-anycubic-kobra-x-native-pinned.json',
     ],
     limitations: [
       'Telemetria comprovada em hardware somente por leitura, em um Kobra X real (firmware 2.0.2.8) pelo caminho nativo MQTTS: estado, temperaturas do bico e da mesa, ventoinhas e os slots ACE. Pausar, retomar e cancelar continuam apenas simulados e não comprovados em hardware; o agente ainda não encaminha comandos assinados para a atribuição nativa.',

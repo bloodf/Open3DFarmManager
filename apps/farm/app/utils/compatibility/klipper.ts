@@ -122,12 +122,17 @@ const commonLimitations = [
 
 /**
  * Qualificação somente leitura (`scripts/qualify-printer.ts`) em impressoras
- * reais. Cada relatório casa com `klipper-generic-moonraker` e comprova apenas
- * telemetria; ver `docs/hardware-reports/README.md`.
+ * reais. Os relatórios recentes comprovam telemetria em SV06 e U1, e câmera
+ * somente leitura na U1; ver `docs/hardware-reports/README.md`.
  */
 const genericHardwareReports = [
   'docs/hardware-reports/2026-11-21-sovol-sv06-moonraker.json',
   'docs/hardware-reports/2026-11-21-snapmaker-u1-moonraker.json',
+  'docs/hardware-reports/2026-11-23-sovol-sv06-moonraker.json',
+  'docs/hardware-reports/2026-11-23-snapmaker-u1-moonraker.json',
+] as const
+const genericCameraHardwareReports = [
+  'docs/hardware-reports/2026-11-23-snapmaker-u1-moonraker.json',
 ] as const
 const reportUrl = (path: string) =>
   `https://github.com/bloodf/Open3DFarmManager/blob/main/${path}`
@@ -153,8 +158,15 @@ export const klipperCatalog: readonly KlipperCatalogProduct[] = [
     ],
     connection:
       'API HTTP e WebSocket do Moonraker na rede local; autenticação depende da configuração do usuário',
-    capabilities: { ...simulatedControl, telemetry: 'hardware' },
-    hardwareReports: { telemetry: genericHardwareReports },
+    capabilities: {
+      ...simulatedControl,
+      telemetry: 'hardware',
+      camera: 'hardware',
+    },
+    hardwareReports: {
+      telemetry: genericHardwareReports,
+      camera: genericCameraHardwareReports,
+    },
     sources: [
       'https://www.klipper3d.org/',
       'https://moonraker.readthedocs.io/en/latest/',
@@ -164,10 +176,10 @@ export const klipperCatalog: readonly KlipperCatalogProduct[] = [
     ],
     limitations: [
       controlAreasLimitation,
-      'Telemetria comprovada em hardware somente por leitura, em uma Sovol SV06 (Moonraker v0.11.0) e uma Snapmaker U1 (Moonraker 2.0.0): identificação, estado do Klippy, ferramenta ativa e temperaturas dos bicos. Progresso da impressão, outras versões e outros modelos não fazem parte dessa prova.',
-      'Câmera, pausar, retomar e cancelar foram exercitados apenas contra simuladores Klipper/Moonraker em loopback, nunca em hardware.',
+      'Relatórios de hardware somente por leitura, na Sovol SV06 (Moonraker v0.11.0) e na Snapmaker U1 (Moonraker 2.0.0), registram identificação, estado do Klippy, ferramenta ativa e temperaturas dos bicos. O suplemento HTTP somente por leitura observou progresso de 28,6% na SV06; o progresso na interface da fazenda continua pendente.',
+      'Na Snapmaker U1, o Moonraker anunciou um JPEG em uma origem de snapshot configurada separadamente, e o leitor de snapshot do Connector validou a imagem. A origem exige configuração; a evidência cobre apenas uma leitura isolada de JPEG.',
+      'Pausar, retomar e cancelar foram exercitados apenas contra simuladores Klipper/Moonraker em loopback.',
       ...sharedLimitations,
-      'Câmera depende das entradas de webcam configuradas no Moonraker; a leitura da lista de webcams é a única integração coberta.',
       'Arquivos permanecem desconhecidos: o OpenFarm lê e envia arquivos por Moonraker no código, mas nenhuma configuração de coleta produz um alvo de arquivos para a coleção Moonraker, então a operação não é alcançável pelo produto.',
       'Materiais dependem do espelho Spoolman configurado; sem ele, a leitura do filamento ativo não é observada.',
       'Configurações personalizadas, macros e plugins do usuário podem alterar o comportamento esperado.',

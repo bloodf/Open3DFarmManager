@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID, X509Certificate } from 'node:crypto'
 import {
   existsSync,
   mkdirSync,
@@ -30,6 +30,7 @@ import {
 } from '../../apps/farm/app/utils/kobralink-onboarding.ts'
 import { sanitizeTargetForClientStorage } from '../../apps/farm/app/utils/kobra-client-cert-ui.ts'
 import { discoveryPrefill } from '../../apps/farm/app/utils/printer-discovery-view.ts'
+import { captureAnycubicPeerPin } from '../../packages/connector/src/anycubic/tls-trust.ts'
 import {
   readKobraXOnboardedConfig,
   kobraXBindingsPath,
@@ -543,6 +544,24 @@ test('native onboarding: certificate, real login on the mock, private persistenc
   t.after(uninstallNetworkGuard)
   const mock = await startKobraXMock({ reportIntervalMs: 0 })
   t.after(() => mock.close())
+  const server = new X509Certificate(mock.tls.serverCert)
+  const expectedPin = createHash('sha256')
+    .update(server.publicKey.export({ type: 'spki', format: 'der' }))
+    .digest('hex')
+  assert.equal(
+    await captureAnycubicPeerPin(
+      {
+        host: '127.0.0.1',
+        port: mock.mqttPort,
+        cert: mock.tls.clientCert,
+        key: mock.tls.clientKey,
+      },
+      AbortSignal.timeout(3000),
+    ),
+    expectedPin,
+  )
+  assert.equal(mock.calls().CONNECT ?? 0, 0)
+  assert.equal(mock.calls.all.length, 0)
   const world = await engineWorld(t, { mock })
   const cert = inlineCert(mock.tls.clientCert, mock.tls.clientKey)
 
@@ -651,7 +670,7 @@ test('native onboarding: certificate, real login on the mock, private persistenc
   assert.equal(binding.host, PRINTER_IP)
   assert.equal(binding.deviceId, mock.credentials.deviceId)
   assert.equal(binding.clientCertFile, certFile)
-  assert.match(binding.pinSha256, /^[a-f0-9]{64}$/)
+  assert.equal(binding.pinSha256, expectedPin)
   // Recovered credentials and the /info token are never written anywhere; the
   // private key lives only in the 0600 client-certificate files.
   const files = (secret) =>
@@ -690,6 +709,13 @@ test('native onboarding: certificate, real login on the mock, private persistenc
   const again = await world.prepare(nativeTarget(cert), 1)
   assert.equal(again.response.type, 'error')
   assert.equal(again.response.code, 'identity-conflict')
+  assert.deepEqual(
+    readKobraXOnboardedConfig(world.runtimePath, {
+      agent_id: ids.agent,
+      farm_id: ids.farm,
+    }),
+    bindings,
+  )
 
   // Collection reads only the confirmed binding and fails closed on drift.
   const endpoints = {

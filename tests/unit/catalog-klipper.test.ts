@@ -84,7 +84,9 @@ describe('catálogo Klipper/Moonraker', () => {
       expect(c.pause).toBe('simulated')
       expect(c.resume).toBe('simulated')
       expect(c.cancel).toBe('simulated')
-      expect(c.camera).toBe('simulated')
+      expect(c.camera).toBe(
+        product.id === 'klipper-generic-moonraker' ? 'hardware' : 'simulated',
+      )
       // `createFileTargets` never builds a Moonraker file target, so file
       // listing and upload stay unreachable for the whole family.
       expect(c.files).toBe('unknown')

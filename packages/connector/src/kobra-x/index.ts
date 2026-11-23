@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto'
-import { connect, createSecureContext } from 'node:tls'
+import { createSecureContext } from 'node:tls'
 import { MqttClient } from 'mqtt'
+import {
+  anycubicTlsTrustError,
+  connectAnycubicTls,
+  normalizeAnycubicPin,
+} from '../anycubic/tls-trust.ts'
 import { readKobraXInfo, recoverKobraXCredentials } from './discovery.ts'
 import { createKobraXControl } from './control.ts'
 import { createKobraXFacts } from './facts.ts'
@@ -41,9 +46,7 @@ export async function connectKobraX(options: {
   } catch {
     throw new Error('Kobra X client certificate or key is invalid')
   }
-  let pin = options.pinSha256?.toLowerCase()
-  if (pin !== undefined && !/^[a-f0-9]{64}$/.test(pin))
-    throw new Error('Invalid Kobra X certificate fingerprint')
+  const pin = normalizeAnycubicPin(options.pinSha256)
   const info = await readKobraXInfo(address, options.httpPort)
   const { modeId, deviceId, username, password } =
     await recoverKobraXCredentials(info, options.httpPort)
@@ -67,32 +70,16 @@ export async function connectKobraX(options: {
     tempature: 'query',
     multiColorBox: 'getInfo',
   }
-  let fingerprint: string | undefined
-  let connectionError: Error | undefined
+  let tlsEstablished = false
   const client = new MqttClient(
     () => {
-      connectionError = undefined
-      fingerprint = undefined
-      const socket = connect({
-        host: address,
-        port: options.mqttPort ?? 9883,
-        secureContext,
-        rejectUnauthorized: false,
-      })
-      socket.cork()
+      tlsEstablished = false
+      const socket = connectAnycubicTls(
+        { host: address, port: options.mqttPort ?? 9883, secureContext },
+        pin,
+      )
       socket.once('secureConnect', () => {
-        fingerprint = socket
-          .getPeerCertificate()
-          .fingerprint256?.replaceAll(':', '')
-          .toLowerCase()
-        if (!fingerprint || (pin && fingerprint !== pin)) {
-          connectionError = new Error(
-            'Kobra X printer certificate fingerprint mismatch',
-          )
-          socket.destroy(connectionError)
-          return
-        }
-        socket.uncork()
+        tlsEstablished = !socket.destroyed
       })
       return socket
     },
@@ -162,8 +149,12 @@ export async function connectKobraX(options: {
       else reject(error)
     }
     client.on('error', (error: Error & { code?: string | number }) => {
-      if (connectionError) return
-      else if (typeof error.code === 'number')
+      const trustError = anycubicTlsTrustError(error)
+      if (trustError) {
+        tlsEstablished = false
+        failed(trustError)
+        if (ready) void close()
+      } else if (typeof error.code === 'number')
         failed(new Error('Kobra X MQTT credentials were refused'))
       else if (/alert.*(?:certificate|unknown ca)/i.test(error.message))
         failed(new Error('Kobra X printer rejected the client certificate'))
@@ -172,10 +163,7 @@ export async function connectKobraX(options: {
     client.on('close', () => {
       state.disconnect()
       facts.reset()
-      if (connectionError) {
-        failed(connectionError)
-        if (ready) void close()
-      } else if (!ready && !accepted && fingerprint) {
+      if (!ready && !accepted && tlsEstablished) {
         failed(
           new Error(
             'Kobra X printer closed TLS before MQTT login. Check the client certificate.',
@@ -186,7 +174,6 @@ export async function connectKobraX(options: {
     })
     client.on('connect', () => {
       accepted = true
-      pin ??= fingerprint
       // The public tree carries `<type>/report` and the per-request
       // `response` acknowledgements ("received" only).
       client.subscribe(`${reports}#`, (error, grants) => {

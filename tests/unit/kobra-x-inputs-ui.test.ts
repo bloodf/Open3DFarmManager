@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { kobraXInputs } from '../../apps/farm/app/utils/kobra-x-inputs.ts'
+import {
+  kobraXInputs,
+  kobraXMapping,
+} from '../../apps/farm/app/utils/kobra-x-inputs.ts'
 
 describe('Kobra X input selection', () => {
   it('maps observed holders and ACE slots to physical indices', () => {
@@ -35,5 +38,20 @@ describe('Kobra X input selection', () => {
     ).toEqual([])
     expect(kobraXInputs([{ slot: '0:0' }])).toEqual([])
     expect(kobraXInputs(undefined)).toEqual([])
+  })
+  it('maps ordered filament selections and rejects unavailable inputs', () => {
+    const inputs = kobraXInputs(
+      ['-1:0', '-1:1', '-1:2', '0:0', '0:1', '0:2', '0:3'].map((slot) => ({
+        slot,
+      })),
+    )
+    expect(
+      kobraXMapping(['0', '1', '2', '4', '5', '6', '7'], 7, inputs),
+    ).toEqual([0, 1, 2, 4, 5, 6, 7])
+    expect(kobraXMapping(['4', '', '', '', '', '', ''], 1, inputs)).toEqual([4])
+    expect(kobraXMapping(['0', '3'], 2, inputs)).toBeUndefined()
+    expect(kobraXMapping(['0'], 2, inputs)).toBeUndefined()
+    expect(kobraXMapping(['0'], 0, inputs)).toBeUndefined()
+    expect(kobraXMapping(['0'], 8, inputs)).toBeUndefined()
   })
 })

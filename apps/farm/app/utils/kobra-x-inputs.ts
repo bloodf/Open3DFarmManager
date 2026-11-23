@@ -17,3 +17,17 @@ export function kobraXInputs(materials: PrinterState['materials']) {
     ]
   })
 }
+
+export function kobraXMapping(
+  selections: readonly string[],
+  count: number,
+  inputs: ReturnType<typeof kobraXInputs>,
+): number[] | undefined {
+  if (!Number.isInteger(count) || count < 1 || count > 7) return undefined
+  const selected = selections
+    .slice(0, count)
+    .map((selection) => inputs.find((input) => String(input.id) === selection))
+  if (selected.length !== count || selected.some((input) => !input))
+    return undefined
+  return selected.flatMap((input) => (input ? [input.id] : []))
+}

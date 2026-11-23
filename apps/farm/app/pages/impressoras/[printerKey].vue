@@ -36,7 +36,7 @@ import {
   liveControlActionAvailability,
 } from '../../utils/farm-control.ts'
 import { printableFile } from '../../utils/files-view.ts'
-import { kobraXInputs } from '../../utils/kobra-x-inputs.ts'
+import { kobraXInputs, kobraXMapping } from '../../utils/kobra-x-inputs.ts'
 import { extendedLabel } from '../../utils/farm-control-extended.ts'
 import {
   formatPrinterStateLabel,
@@ -76,13 +76,21 @@ const vendorCatalog = computed(() => {
   return vendor ? vendorDetailCatalog[vendor] : undefined
 })
 const printFile = ref('')
-const kobraInput = ref('')
+const kobraInputCount = ref(1)
+const kobraInputs = ref(['', '', '', '', '', '', ''])
 const availableKobraInputs = computed(() =>
   kobraXInputs(state.value?.materials),
 )
 const selectedKobraInput = computed(() =>
   availableKobraInputs.value.find(
-    (input) => String(input.id) === kobraInput.value,
+    (input) => String(input.id) === kobraInputs.value[0],
+  ),
+)
+const selectedKobraMapping = computed(() =>
+  kobraXMapping(
+    kobraInputs.value,
+    kobraInputCount.value,
+    availableKobraInputs.value,
   ),
 )
 const canStartStoredFile = computed(
@@ -94,10 +102,10 @@ const canStartStoredFile = computed(
 function startStoredFile(event: Event) {
   if (!canStartStoredFile.value) return
   if (vendorFrame.value?.vendor === 'kobra-x') {
-    if (!selectedKobraInput.value) return
+    if (!selectedKobraMapping.value) return
     control('start_print', event, {
       file: printFile.value,
-      ams_mapping: [selectedKobraInput.value.id],
+      ams_mapping: selectedKobraMapping.value,
     })
     return
   }
@@ -1061,17 +1069,33 @@ watch(
           Informe o nome de um arquivo .gcode já armazenado na impressora.
         </span>
         <template v-if="vendorFrame.vendor === 'kobra-x'">
-          <label for="detail-kobra-input">Entrada de filamento</label>
-          <select id="detail-kobra-input" v-model="kobraInput" required>
-            <option value="">Selecione uma entrada</option>
-            <option
-              v-for="input in availableKobraInputs"
-              :key="input.id"
-              :value="String(input.id)"
-            >
-              {{ input.label }}
+          <label for="detail-kobra-count"
+            >Quantidade de filamentos do arquivo</label
+          >
+          <select id="detail-kobra-count" v-model.number="kobraInputCount">
+            <option v-for="count in 7" :key="count" :value="count">
+              {{ count }}
             </option>
           </select>
+          <template v-for="index in kobraInputCount" :key="index">
+            <label :for="`detail-kobra-input-${index}`"
+              >Entrada do filamento {{ index }}</label
+            >
+            <select
+              :id="`detail-kobra-input-${index}`"
+              v-model="kobraInputs[index - 1]"
+              required
+            >
+              <option value="">Selecione uma entrada</option>
+              <option
+                v-for="input in availableKobraInputs"
+                :key="input.id"
+                :value="String(input.id)"
+              >
+                {{ input.label }}
+              </option>
+            </select>
+          </template>
           <Button
             v-if="state?.controls?.includes('load_filament')"
             type="button"
@@ -1086,7 +1110,7 @@ watch(
                 control('load_filament', event, { tray: selectedKobraInput.id })
             "
           >
-            Carregar filamento
+            Carregar filamento da entrada 1
           </Button>
           <span
             >Selecione um arquivo .3mf ou .gcode já armazenado na
@@ -1099,7 +1123,7 @@ watch(
         <Button
           type="submit"
           :disabled="
-            (vendorFrame.vendor === 'kobra-x' && !selectedKobraInput) ||
+            (vendorFrame.vendor === 'kobra-x' && !selectedKobraMapping) ||
             !availability('start_print').available ||
             commandInFlight ||
             !canStartStoredFile

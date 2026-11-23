@@ -11,7 +11,7 @@ import type { Sql } from 'postgres'
 const farmId = '00000000-0000-4000-8000-000000000001'
 const connectorId = '00000000-0000-4000-8000-000000000002'
 
-test('duplicate names retain distinct IDs and truncated snapshots are labelled', async () => {
+test('duplicate names retain distinct IDs in the existing snapshot contract', async () => {
   const wire = JSON.stringify(
     Array.from({ length: 9 }, (_, i) => ({
       id: i + 1,
@@ -37,8 +37,8 @@ test('duplicate names retain distinct IDs and truncated snapshots are labelled',
     limit: 10,
     cursor: null,
   })
+  expect(page.data[0]).not.toHaveProperty('partial')
   expect(page.data[0]).toMatchObject({
-    partial: true,
     total: 9,
     observedAt: 1000,
   })
@@ -69,8 +69,8 @@ test('older complete snapshots remain readable without fabricated identity', asy
     limit: 10,
     cursor: null,
   })
+  expect(page.data[0]).not.toHaveProperty('partial')
   expect(page.data[0]).toMatchObject({
-    partial: false,
     spools: snapshot.spools,
   })
 })

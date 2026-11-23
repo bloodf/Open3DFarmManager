@@ -2405,9 +2405,6 @@ components:
           minimum: 0
           maximum: 10000
           description: Spools known to Spoolman; `spools` may be a bounded subset.
-        partial:
-          type: boolean
-          description: Present on inventory read responses; true when the snapshot contains fewer spools than total.
         spools:
           type: array
           maxItems: 8

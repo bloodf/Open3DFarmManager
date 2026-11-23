@@ -134,7 +134,6 @@ export async function listIntegrationInventory(
       farmId: row.farmId,
       connectorId: row.connectorId,
       ...parsed.data,
-      partial: parsed.data.spools.length < parsed.data.total,
     }
   })
   const last = data.at(-1)

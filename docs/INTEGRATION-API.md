@@ -99,9 +99,9 @@ Connector's Spoolman service and may be absent in older observations.
 
 New Connector observations include `spoolId` for each spool. The ID belongs
 to that Connector's configured Spoolman service, not to the display name;
-older observations may omit it. `partial` is true when the bounded snapshot
-contains fewer entries than `total`. Neither the snapshot cursor nor this flag
-provides a complete spool-level inventory feed.
+older observations may omit it. The existing snapshot response retains its
+original contract; compare the number of entries with `total` to identify a
+bounded snapshot. The spool page labels each observation with `partial`.
 
 A `GET /printers` item may carry a read-only `specs` object with what the
 Connector or printer profile reported: `buildVolumeMm` (`x`, `y`, `z` in mm),

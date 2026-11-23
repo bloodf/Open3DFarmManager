@@ -98,7 +98,15 @@ export const PrinterState = z
       })
       .optional(),
     localWebUiOrigin: LocalWebUiOrigin.optional(),
-    state: z.enum(['idle', 'printing', 'paused', 'error', 'offline']),
+    state: z.enum([
+      'idle',
+      'printing',
+      'paused',
+      'error',
+      'offline',
+      'unknown',
+    ]),
+    preformStatus: z.string().min(1).max(256).optional(),
     statusReason: z.enum(['client-certificate-missing']).optional(),
     progress: z.number().min(0).max(1).optional(),
     materials: z
@@ -158,7 +166,10 @@ export const PrinterState = z
     observedAt: z.number().int().nonnegative(),
   })
   .refine(
-    (value) => value.state === 'offline' || value.progress !== undefined,
+    (value) =>
+      value.state === 'offline' ||
+      (value.state === 'unknown' && value.preformStatus !== undefined) ||
+      value.progress !== undefined,
     {
       path: ['progress'],
       message: 'Online state requires progress',

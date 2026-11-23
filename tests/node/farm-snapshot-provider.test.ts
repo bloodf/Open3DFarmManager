@@ -527,3 +527,38 @@ test('inventory is omitted when even zero spools cannot fit, printers still flow
   assert.ok(full)
   assert.equal(emitWithSpools(full.keys), undefined)
 })
+
+test('PreForm host readings expire and cannot return from a withdrawn epoch', () => {
+  const f = fixture(['a'])
+  const observe = (epoch: number, preformStatus: string, mono: number) =>
+    f.source.observe({
+      printerKey: 'a',
+      epoch,
+      printer: {
+        printerKey: 'a',
+        state: 'unknown',
+        preformStatus,
+        observedAt: 10,
+      },
+      receivedAtMonoMs: mono,
+      fieldObservedAtMonoMs: { formlabs: { state: mono, preformStatus: mono } },
+    })
+  try {
+    observe(1, 'Printing', 100)
+    f.open()
+    assert.equal(f.received.at(-1)?.printers[0]?.preformStatus, 'Printing')
+    assert.equal(f.received.at(-1)?.validUntilMonoMs, 5100)
+    f.source.invalidate({ printerKey: 'a', epoch: 1 })
+    assert.equal(f.unavailable(), 1)
+    observe(1, 'Printing', 100)
+    assert.equal(f.received.length, 1)
+    f.setNow(200)
+    observe(2, 'Idle', 200)
+    f.open()
+    assert.equal(f.received.at(-1)?.printers[0]?.preformStatus, 'Idle')
+    assert.equal(f.received.at(-1)?.validUntilMonoMs, 5200)
+  } finally {
+    f.controller.abort()
+    f.source.close()
+  }
+})

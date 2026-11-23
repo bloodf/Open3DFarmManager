@@ -448,16 +448,24 @@ it('executes a sandbox print journey through the reference client over loopback'
 
 describe('documented response headers', () => {
   it('sends Retry-After on all documented 503 scenarios', async () => {
-    const cases = scenarios.filter((entry) => entry.status === '503')
-    expect(cases.length).toBeGreaterThan(0)
-    for (const scenario of cases) {
+    const expected = scenarios
+      .filter((entry) => entry.status === '503')
+      .map(({ op, name }) => `${op}: ${name}`)
+      .sort()
+    expect(expected.length).toBeGreaterThan(0)
+    const observed: string[] = []
+    for (const scenario of scenarios.filter(
+      (entry) => entry.status === '503',
+    )) {
       const { result } = await scenario.run(freshWorld())
       expect(result.status, `${scenario.op}: ${scenario.name}`).toBe(503)
       expect(
         result.headers.get('retry-after'),
         `${scenario.op}: ${scenario.name}`,
       ).toBe('30')
+      observed.push(`${scenario.op}: ${scenario.name}`)
     }
+    expect(observed.sort()).toEqual(expected)
   })
 
   it('rejects blank and hexadecimal integer response headers', () => {

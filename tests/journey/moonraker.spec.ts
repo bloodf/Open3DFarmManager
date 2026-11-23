@@ -432,3 +432,269 @@ if (journeyEnabled())
       await journey.close()
     }
   })
+
+// Browser file upload over an authorized direct WebRTC control session against
+// the loopback Moonraker fixture. The page offers the file to the Connector,
+// which stores it through the fixture's own `/server/files/upload` endpoint;
+// nothing here calls the fixture's HTTP surface. Assertions pair the page
+// outcome with the bytes and name the fixture stored, and with a listing read
+// back by a fresh page.
+const UPLOAD = 'peca-moonraker.gcode'
+const UPLOAD_BYTES = Buffer.from('; journey\nG28\nG1 X10 Y10 F3000\nM84\n')
+const UPLOADED =
+  'Arquivo enviado. Selecione-o e confirme para iniciar a impressão.'
+const LISTED = 'Arquivos atualizados.'
+const escapeRegExp = (text: string) =>
+  text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+if (journeyEnabled())
+  test.describe('journey: Moonraker file upload', () => {
+    test.describe.configure({ mode: 'serial' })
+    let harness: JourneyHarness | undefined
+
+    const started = () => {
+      if (!harness) throw new Error('Harness did not start')
+      return harness
+    }
+    /** Fixture request counts for every method that could change the printer. */
+    const written = () => {
+      const calls = started().printer.calls()
+      return Object.fromEntries(
+        PRINT_CALLS.map((method) => [method, calls[method] ?? 0]),
+      )
+    }
+
+    // Each signed file operation consumes one control session of the
+    // Connector, which then needs a moment to listen again; an early attempt
+    // fails closed with nothing sent, so the journey waits for a fresh inbox.
+    let inboxesUsed = 0
+    async function controlInbox() {
+      const observe = () => started().simulatorObservation()
+      await expect
+        .poll(
+          () => {
+            const { pauseInboxReady, pauseInboxes } = observe()
+            return pauseInboxReady && pauseInboxes > inboxesUsed
+          },
+          { timeout: 90_000 },
+        )
+        .toBe(true)
+      inboxesUsed = observe().pauseInboxes
+    }
+
+    /** Opens the files page with the journey printer selected. */
+    async function openFiles(page: Page) {
+      const journey = started()
+      await page.goto(journey.origin + '/arquivos', {
+        waitUntil: 'domcontentloaded',
+      })
+      await expect(
+        page.getByRole('heading', { name: 'Arquivos', exact: true }),
+      ).toBeVisible()
+      const printers = page.locator('#files-printer')
+      await expect(
+        printers.locator('option', { hasText: journey.printerKey }),
+      ).toHaveCount(1, { timeout: 30_000 })
+      await printers.selectOption({ label: journey.printerKey })
+      await expect(page.locator('#files-upload')).toBeEnabled({
+        timeout: 45_000,
+      })
+    }
+
+    /**
+     * One file operation over a fresh control session. The page reports a
+     * session that failed, or that it cancelled because the live state
+     * blinked, before the work was done; the operator repeats the operation,
+     * and so does the journey.
+     */
+    async function fileOperation(page: Page, label: string, result: string) {
+      const undone = [
+        'Não foi possível concluir pela conexão direta. Verifique a impressora antes de tentar novamente.',
+        'Operação cancelada neste navegador. Confira o estado da impressora e seus arquivos antes de tentar novamente.',
+      ]
+      const settled = new RegExp(
+        `^(${[result, ...undone].map(escapeRegExp).join('|')})$`,
+      )
+      const status = page.getByRole('status').last()
+      for (let attempt = 1; ; attempt++) {
+        await controlInbox()
+        await expect(page.locator('#files-upload')).toBeEnabled({
+          timeout: 45_000,
+        })
+        await page.getByRole('button', { name: label, exact: true }).click()
+        await expect(status).toHaveText(settled, { timeout: 60_000 })
+        const text = (await status.textContent()) ?? ''
+        if (text === result) return
+        expect(attempt, text).toBeLessThan(5)
+      }
+    }
+
+    test.beforeAll(async ({ browser }) => {
+      test.setTimeout(5 * 60_000)
+      harness = await startJourneyHarness({
+        browser,
+        simulator: 'moonraker-fixture',
+        openFarmInspector: true,
+        signedControl: true,
+      })
+    })
+
+    test.afterAll(async () => {
+      test.setTimeout(2 * 60_000)
+      await harness?.close()
+      harness = undefined
+    })
+
+    test('uploads a file over the direct connection, stores it and lists it', async () => {
+      test.setTimeout(6 * 60_000)
+      const journey = started()
+      const page = journey.ownerPage
+      try {
+        await journey.expectLiveTelemetry()
+        // Safe idle: uploading needs no running job, and none is touched.
+        journey.printer.update({ state: 'standby', progress: 0 })
+        await openFiles(page)
+
+        await fileOperation(
+          page,
+          'Consultar arquivos',
+          'Nenhum arquivo nesta impressora.',
+        )
+        expect([...journey.printer.control.files.keys()]).toEqual([])
+
+        await page.locator('#files-upload').setInputFiles({
+          name: UPLOAD,
+          mimeType: 'text/plain',
+          buffer: UPLOAD_BYTES,
+        })
+        await fileOperation(page, 'Enviar arquivo', UPLOADED)
+
+        // The fixture's own upload endpoint stored exactly what the browser
+        // sent, under the name it sent.
+        expect(journey.printer.calls()['HTTP POST /server/files/upload']).toBe(
+          1,
+        )
+        expect([...journey.printer.control.files.keys()]).toEqual([
+          `gcodes:${UPLOAD}`,
+        ])
+        const stored = journey.printer.control.files.get(`gcodes:${UPLOAD}`)
+        expect(stored).toMatchObject({
+          path: UPLOAD,
+          root: 'gcodes',
+          size: UPLOAD_BYTES.length,
+        })
+        expect(stored?.content.equals(UPLOAD_BYTES)).toBe(true)
+
+        // A fresh page forgets the local post-upload entry, so the listing
+        // below can only come from the printer.
+        await openFiles(page)
+        await expect(page.locator('#files-existing')).toHaveCount(0)
+        const listings = () =>
+          journey.printer.calls()['HTTP GET /server/files/list'] ?? 0
+        const before = listings()
+        await fileOperation(page, 'Consultar arquivos', LISTED)
+        expect(listings()).toBeGreaterThan(before)
+        await expect(
+          page.locator('#files-existing').locator('option', {
+            hasText: new RegExp(
+              `^${escapeRegExp(UPLOAD)} \\(${UPLOAD_BYTES.length} bytes\\)$`,
+            ),
+          }),
+        ).toHaveCount(1)
+
+        // Uploading starts nothing: no lifecycle or G-code call, and the
+        // printer stays idle.
+        expect(written()).toEqual(
+          Object.fromEntries(PRINT_CALLS.map((method) => [method, 0])),
+        )
+        expect(journey.printer.control.gcodeScripts).toEqual([])
+        expect(journey.printer.model().state).toBe('standby')
+        expect(journey.simulatorObservation()).toMatchObject({ failure: false })
+      } catch (error) {
+        console.error(
+          JSON.stringify(journey.simulatorObservation()),
+          journey.appLog(),
+        )
+        throw error
+      }
+    })
+  })
+
+// The Connector reads `server.history.list` from the printer's Moonraker
+// (its HTTP twin) when the live connection first reports a state, and stores
+// each finished job it has not seen live. A job seeded only in the fixture's
+// history therefore reaches the history page, which proves the import path.
+const SEEDED = 'historico-importado.gcode'
+
+if (journeyEnabled())
+  test('importa um trabalho do histórico do Moonraker e o mostra no histórico', async ({
+    browser,
+  }) => {
+    test.setTimeout(6 * 60_000)
+    const now = Math.floor(Date.now() / 1000)
+    const journey = await startJourneyHarness({
+      browser,
+      simulator: 'moonraker-fixture',
+      openFarmInspector: true,
+      history: true,
+      moonraker: {
+        mock: {
+          history: [
+            {
+              job_id: 'seed001',
+              filename: SEEDED,
+              status: 'completed',
+              start_time: now - 1800,
+              end_time: now - 900,
+              print_duration: 800,
+              total_duration: 900,
+            },
+          ],
+        },
+      },
+    })
+    try {
+      const page = journey.ownerPage
+      expect(journey.printer.control.historyJobs).toMatchObject([
+        { job_id: 'seed001', filename: SEEDED, status: 'completed' },
+      ])
+      await journey.expectLiveTelemetry()
+      // The import is one read of the fixture's history by the Connector.
+      await expect
+        .poll(
+          () => journey.printer.calls()['HTTP GET /server/history/list'] ?? 0,
+          { timeout: 60_000 },
+        )
+        .toBeGreaterThanOrEqual(1)
+
+      await page.goto(journey.origin + '/historico', {
+        waitUntil: 'domcontentloaded',
+      })
+      await expect(
+        page.getByRole('heading', { name: 'Histórico de trabalhos' }),
+      ).toBeVisible()
+      const entry = page
+        .getByRole('table', { name: 'Trabalhos finalizados' })
+        .getByRole('row')
+        .filter({ hasText: SEEDED })
+        .filter({ hasText: 'Concluído' })
+      await expect(async () => {
+        await page.getByRole('button', { name: 'Atualizar histórico' }).click()
+        await expect(entry).toHaveCount(1, { timeout: 3000 })
+      }).toPass({ timeout: 90_000 })
+      await expect(
+        entry.getByRole('cell', { name: journey.printerKey, exact: true }),
+      ).toBeVisible()
+      // Read-only import: it wrote nothing to the printer.
+      expect(journey.printer.control.gcodeScripts).toEqual([])
+      expect(journey.simulatorObservation()).toMatchObject({ failure: false })
+    } catch (error) {
+      console.error(
+        JSON.stringify(journey.simulatorObservation()),
+        journey.appLog(),
+      )
+      throw error
+    } finally {
+      await journey.close()
+    }
+  })

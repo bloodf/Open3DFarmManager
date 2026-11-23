@@ -53,6 +53,7 @@ export const API_ENVELOPE_ACTIONS = [
   'resume',
   'cancel',
   'set_temperature',
+  'set_tool_temperature',
   'set_fan',
   'home',
   'set_light',

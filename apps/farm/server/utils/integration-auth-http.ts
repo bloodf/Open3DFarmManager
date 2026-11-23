@@ -229,7 +229,11 @@ const policies: RoutePolicy[] = [
     path: /^\/printers\/[^/]+\/actions$/,
     scopes: ['control:basic', 'control:extended'],
   },
-  { method: 'GET', path: /^\/inventory$/, scopes: ['inventory:read'] },
+  {
+    method: 'GET',
+    path: /^\/inventory(?:\/spools(?:\/(?:search|usage))?)?$/,
+    scopes: ['inventory:read'],
+  },
   {
     method: 'GET',
     path: /^\/resin\/(?:lots|vats|usage)$/,
@@ -452,6 +456,9 @@ export async function authorizeIntegrationRequest(
       '/printers/status',
       '/printers/readiness',
       '/inventory',
+      '/inventory/spools',
+      '/inventory/spools/search',
+      '/inventory/spools/usage',
       '/jobs',
       '/library',
       '/library/settings',
@@ -488,7 +495,8 @@ export async function authorizeIntegrationRequest(
           grant.printerAssignmentId === printerId,
       )
       .filter(
-        (grant) => path !== '/inventory' || grant.printerAssignmentId === null,
+        (grant) =>
+          !path.startsWith('/inventory') || grant.printerAssignmentId === null,
       )
       .map((grant) => ({
         ...grant,

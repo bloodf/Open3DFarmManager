@@ -17,7 +17,7 @@ import {
   type StorageMode,
   type StorageUsage,
 } from './quota.ts'
-import { DEFAULT_RETENTION_DAYS } from './retention.ts'
+import { DEFAULT_RETENTION_DAYS, lockLibraryBlob } from './retention.ts'
 
 export { DEFAULT_QUOTA_BYTES } from './quota.ts'
 export { DEFAULT_RETENTION_DAYS }
@@ -59,9 +59,9 @@ export interface LibraryVersion {
   storageLocation: StorageMode
   agentId: string | null
   originalName: string
-  kind: 'gcode' | '3mf'
+  kind: 'gcode' | '3mf' | 'resin'
   plateCount: number
-  metadata: PrintFileMetadata
+  metadata: PrintFileMetadata & { resinProfile?: string }
   hasThumbnail: boolean
   notes: string
   uploadedBy: string
@@ -142,7 +142,8 @@ const ITEM_COLUMNS = (tx: Sql) =>
 /** `lite` drops the thumbnail payload (up to 256 KiB per version) from lists. */
 const VERSION_COLUMNS = (tx: Sql, lite = false) =>
   tx`${lite ? tx`v.metadata - 'thumbnail' AS metadata` : tx`v.metadata`}, jsonb_exists(v.metadata, 'thumbnail') AS "hasThumbnail", v.id, v.item_id AS "itemId", v.version_number AS "versionNumber", v.sha256, v.size_bytes::float8 AS "sizeBytes",
-     v.storage_location AS "storageLocation", COALESCE(v.agent_id, b.agent_id) AS "agentId", v.original_name AS "originalName", v.kind,
+     v.storage_location AS "storageLocation", COALESCE(v.agent_id, b.agent_id) AS "agentId", v.original_name AS "originalName",
+     CASE WHEN v.metadata ? 'resinProfile' THEN 'resin' ELSE v.kind END AS kind,
      v.plate_count AS "plateCount", v.notes, v.uploaded_by AS "uploadedBy",
      v.created_at::float8 AS "createdAt", v.deleted_at::float8 AS "deletedAt", b.purged_at::float8 AS "purgedAt"`
 const VERSION_BLOB_JOIN = (tx: Sql) =>
@@ -387,6 +388,7 @@ export class PostgresLibrary {
         }
         // Serialise concurrent uploads of one farm so item numbers and the quota stay exact.
         await tx`SELECT pg_advisory_xact_lock(hashtextextended(${'library:' + farm}, 0))`
+        await lockLibraryBlob(tx as unknown as Sql, v.sha256)
 
         let item: LibraryItem | undefined
         if (v.itemId !== undefined) {

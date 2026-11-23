@@ -142,6 +142,56 @@ export class IntegrationClient {
       body: JSON.stringify({ action, args }),
     })
   }
+
+  startPrint(
+    printerId: string,
+    job: {
+      fileUrl: string
+      sha256: string
+      sizeBytes: number
+      displayName: string
+    },
+    idempotencyKey?: string,
+  ): Promise<{ id: string; status: string }> {
+    return this.submitJob(printerId, job, idempotencyKey) as Promise<{
+      id: string
+      status: string
+    }>
+  }
+
+  pausePrint(
+    printerId: string,
+    idempotencyKey?: string,
+  ): Promise<{ id: string; action: string; status: string }> {
+    return this.submitAction(
+      printerId,
+      'pause',
+      {},
+      idempotencyKey,
+    ) as Promise<{ id: string; action: string; status: string }>
+  }
+
+  cancelPrint(
+    printerId: string,
+    idempotencyKey?: string,
+  ): Promise<{ id: string; action: string; status: string }> {
+    return this.submitAction(
+      printerId,
+      'cancel',
+      {},
+      idempotencyKey,
+    ) as Promise<{ id: string; action: string; status: string }>
+  }
+
+  getJob(jobId: string): Promise<{ id: string; status: string }> {
+    return this.request(`jobs/${encodeURIComponent(jobId)}`)
+  }
+
+  getAction(
+    actionId: string,
+  ): Promise<{ id: string; action: string; status: string }> {
+    return this.request(`actions/${encodeURIComponent(actionId)}`)
+  }
 }
 
 export function verifyWebhook(
@@ -151,6 +201,14 @@ export function verifyWebhook(
   secret: string,
 ): boolean {
   if (!/^\d{1,16}$/.test(timestamp)) return false
+  const timestampValue = Number(timestamp)
+  const timestampMs =
+    timestampValue < 100_000_000_000 ? timestampValue * 1000 : timestampValue
+  if (
+    !Number.isSafeInteger(timestampMs) ||
+    Math.abs(Date.now() - timestampMs) > 5 * 60 * 1000
+  )
+    return false
   const expected = createHmac('sha256', secret)
     .update(`${timestamp}.`)
     .update(rawBody)

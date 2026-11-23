@@ -87,7 +87,13 @@ async function readDecision(request: Request): Promise<unknown> {
   } catch {
     return undefined
   } finally {
-    void reader.cancel().catch(() => {})
+    try {
+      await reader.cancel()
+    } catch {
+      // Cancellation is best-effort; releasing the lock is unconditional.
+    } finally {
+      reader.releaseLock()
+    }
   }
 }
 

@@ -1,3 +1,4 @@
+import { credentialKeyring } from '../sealed-credential-key.ts'
 import postgres, { type Sql } from 'postgres'
 import { createLogger } from '@open3dfarmmanager/shared'
 import { createError, useRuntimeConfig, type RequestEvent } from 'nuxt/server'
@@ -89,7 +90,7 @@ function masterKey(): string {
   ) {
     throw createError({ status: 503, message: 'Histórico indisponível.' })
   }
-  return auth.sessionSecret
+  return credentialKeyring(auth)
 }
 function db(url: string): Sql {
   if (!sqlClient)

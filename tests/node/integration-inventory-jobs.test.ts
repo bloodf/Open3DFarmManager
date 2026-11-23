@@ -12,16 +12,10 @@ import type { IntegrationPrincipal } from '../../apps/farm/server/utils/integrat
 
 function mockSql(rows: unknown[]) {
   const calls: { text: string; values: unknown[] }[] = []
-  const sql = Object.assign(
-    async (parts: TemplateStringsArray, ...values: unknown[]) => {
-      calls.push({ text: parts.join('?'), values })
-      return rows
-    },
-    {
-      array: (values: unknown[], type?: string) =>
-        type === undefined ? { values } : { values, type },
-    },
-  )
+  const sql = async (parts: TemplateStringsArray, ...values: unknown[]) => {
+    calls.push({ text: parts.join('?'), values })
+    return rows
+  }
   return { sql, calls }
 }
 
@@ -73,6 +67,7 @@ test('inventory page returns validated latest snapshots and stable keyset cursor
   )
   assert.deepEqual(cursor, { farmId, connectorId })
   assert.match(fake.calls[0]!.text, /farm_id = ANY/)
+  assert.deepEqual(fake.calls[0]!.values[0], [farmId])
   await assert.rejects(() =>
     listIntegrationInventory(fake.sql as never, {
       farmIds: [farmId],
@@ -141,8 +136,8 @@ test('job history query scopes printers, filters time and uses immutable keyset 
   assert.match(call.text, /h\.ended_at >=/)
   assert.match(call.text, /\(h\.ended_at, h\.id\) </)
   assert.match(call.text, /ORDER BY h\.ended_at DESC, h\.id DESC/)
-  assert.deepEqual(call.values[0], { values: [] })
-  assert.deepEqual(call.values[1], { values: [printerId] })
+  assert.deepEqual(call.values[0], [])
+  assert.deepEqual(call.values[1], [printerId])
   await assert.rejects(() =>
     listIntegrationJobs(fake.sql as never, {
       farmWideFarmIds: [farmId],

@@ -1,5 +1,8 @@
 import postgres from 'postgres'
+import { PostgresFleetMode } from '../storage/fleet-mode-postgres.ts'
+import { integrationAuthPool } from './integration-auth-runtime.ts'
 import { useRuntimeConfig } from 'nuxt/server'
+import { z } from 'zod'
 import {
   IntegrationDeliveryService,
   type EnvelopeInbox,
@@ -13,7 +16,7 @@ import {
   IntegrationJobsService,
 } from '../services/integration-jobs.ts'
 import { PostgresIntegrationAudit } from '../storage/integration-audit-postgres.ts'
-import { PostgresIntegrationDelivery } from '../storage/integration-delivery-postgres.ts'
+import { PostgresIntegrationJobDelivery } from '../storage/integration-jobs-history.ts'
 import { PostgresIntegrationJobs } from '../storage/integration-jobs-postgres.ts'
 import { PostgresIntegrationActions } from '../storage/integration-actions-postgres.ts'
 import { PostgresIntegrationApprovals } from '../storage/integration-approval-postgres.ts'
@@ -24,9 +27,21 @@ import { PostgresIntegrationLibrary } from '../storage/integration-library-postg
 const noInbox: EnvelopeInbox = { sendToAgentInbox: () => 'no-inbox' }
 let inbox: EnvelopeInbox = noInbox
 
+const integrationJobsConfig = z.object({
+  enabled: z.literal(true),
+  databaseUrl: z.unknown().optional(),
+  envelopeSigningKey: z.unknown().optional(),
+  envelopeKid: z.unknown().optional(),
+  maxFileBytes: z.unknown().optional(),
+  envelopeTtlMs: z.unknown().optional(),
+})
+
 /** The Connector inbox hook (E7.22): replaces the default that never delivers. */
 export function setIntegrationEnvelopeInbox(next: EnvelopeInbox | null) {
+  const previous = inbox
   inbox = next ?? noInbox
+  const delivery = active?.delivery
+  if (next && next !== previous && delivery) next.bindApiDelivery?.(delivery)
 }
 
 let active:
@@ -64,9 +79,14 @@ async function importSigningKey(encoded: string) {
 
 export async function integrationJobsRuntime() {
   if (active) return active
-  const config = useRuntimeConfig().integrationJobs
-  if (config.enabled !== true)
+  const parsed = integrationJobsConfig.safeParse(
+    useRuntimeConfig().integrationJobs,
+  )
+  if (!parsed.success)
     throw new Error('Envio de trabalhos de integrações indisponível.')
+  const config = parsed.data
+  if (typeof config.databaseUrl !== 'string')
+    throw new Error('Configuração de trabalhos de integrações inválida.')
   const url = new URL(config.databaseUrl)
   if (
     !['postgres:', 'postgresql:'].includes(url.protocol) ||
@@ -94,12 +114,13 @@ export async function integrationJobsRuntime() {
       search_path: 'pg_catalog',
     },
   })
-  const deliveryStore = new PostgresIntegrationDelivery(pool)
+  const deliveryStore = new PostgresIntegrationJobDelivery(pool)
   const delivery = signer
     ? new IntegrationDeliveryService({
         store: deliveryStore,
         inbox: {
           sendToAgentInbox: (...args) => inbox.sendToAgentInbox(...args),
+          bindApiDelivery: (delivery) => inbox.bindApiDelivery?.(delivery),
         },
         audit: new IntegrationAuditService(new PostgresIntegrationAudit(pool)),
         signer,
@@ -109,6 +130,9 @@ export async function integrationJobsRuntime() {
   const library = new IntegrationLibraryService(libraryStore)
   const service = new IntegrationJobsService({
     store: new PostgresIntegrationJobs(pool),
+    fleetMode: async (id) =>
+      (await new PostgresFleetMode(integrationAuthPool()).read(id))?.mode ??
+      'in-service',
     library: {
       version: (id) => library.version(id),
       recordReplay: (entry) => library.recordReplay(entry),

@@ -22,6 +22,7 @@ let peer: ReadonlyBrowserPeer | undefined,
 let resolveBinding: (value: unknown) => void = () => {}
 let callbacks = 0,
   printerId: string | undefined,
+  cameraId: string | undefined,
   attachments = 0,
   detachments = 0
 const digests = new Set<string>()
@@ -60,10 +61,11 @@ export function create(
   camera = new BrowserCameraMedia({
     privateKey: key.privateKey,
     authorizedPrinterIds: authorized,
-    onStream(stream, printer) {
+    onStream(stream, printer, camera) {
       if (stream) {
         attachments++
         printerId = printer
+        cameraId = camera
         video.srcObject = stream
         void video.play().catch(() => peer?.close('play-failed'))
         onFrame()
@@ -97,6 +99,7 @@ export function snapshot() {
     peer: peer?.snapshot(),
     camera: camera?.snapshot(),
     printerId,
+    cameraId,
     attachments,
     detachments,
     attached: video.srcObject !== null,

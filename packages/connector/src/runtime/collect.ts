@@ -1,3 +1,4 @@
+import type { ApiJobLifecycle } from './api-job-lifecycle.ts'
 import type { MoonrakerLinkHealth } from '../moonraker/subscription.ts'
 import { readMoonrakerFirmware } from '../moonraker/firmware.ts'
 import { readMoonrakerMachineProfile } from '../machine-profile/moonraker.ts'
@@ -12,19 +13,24 @@ import {
   moonrakerAuthHeaders,
   moonrakerSession,
 } from '../config/moonraker.ts'
+import type { AnycubicCollectorConfig } from '../config/anycubic.ts'
 import type { CrealityCollectorConfig } from '../config/creality.ts'
 import { createAnycubicCollection } from './anycubic-collection.ts'
+import { createFormlabsCollection } from './formlabs-collection.ts'
+import { readPrivateJsonFile } from '../config/local.ts'
+import type { FormlabsCollectorConfig } from '../formlabs/config.ts'
+import { createSdcpCollection } from './sdcp-collection.ts'
 import { createKobraXCollection } from './kobra-x-collection.ts'
 import type { KobraXBinding } from '../config/kobra-x.ts'
 import { createBambuRuntimeSubscription } from '../bambu/runtime.ts'
 import type { createBambuTransport } from '../bambu/transport.ts'
 import type { RawPrinterObservation } from './farm-snapshot-provider.ts'
 import { createKobraLinkRuntimeSubscription } from '../kobralink/runtime.ts'
+import { createPrusaLinkCollection } from './prusa-link-collection.ts'
 import {
   parseCollectorConfig,
-  readCollectorConfig,
-  type AnycubicCollectorConfig,
-} from '../config/anycubic.ts'
+  type PrusaCollectorConfig,
+} from '../prusa/config.ts'
 import { readKobraClientCertMaterial } from '../config/kobra-x-cert.ts'
 import { createCrealityCollection } from './creality-collection.ts'
 import type { MoonrakerEvent } from '../moonraker/subscription.ts'
@@ -37,6 +43,7 @@ import {
 import type { RawMoonrakerUnavailable } from '../moonraker/subscription.ts'
 import { join } from 'node:path'
 import type { PrinterState } from '@open3dfarmmanager/farm-protocol'
+import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
 import { TelemetryQueue, type QueueLoss } from '../cloud/queue.ts'
 import { type LocalCollectorConfig } from '../config/local.ts'
 import { assertUnscopedCollection } from './queue-scope.ts'
@@ -56,7 +63,12 @@ export type Diagnostic =
   | {
       kind: 'unavailable'
       reason:
-        'connecting' | 'offline' | 'stale' | 'not-ready' | 'invalid-response'
+        | 'connecting'
+        | 'offline'
+        | 'stale'
+        | 'not-ready'
+        | 'invalid-response'
+        | 'unsupported-protocol'
     }
   | {
       kind: 'summary'
@@ -74,7 +86,9 @@ export async function collectLocalTelemetry(input: {
   signal: AbortSignal
   onDiagnostic: (diagnostic: Diagnostic) => void
 }): Promise<void> {
-  const config = readCollectorConfig(input.configPath)
+  const config = parseCollectorConfig(
+    readPrivateJsonFile(input.configPath, { maxBytes: 65536 }),
+  )
   if (input.signal.aborted) return
   const directory = join(input.dataDirectory, 'telemetry')
   assertUnscopedCollection(directory)
@@ -98,6 +112,11 @@ export async function collectLocalTelemetry(input: {
 
 /** Caller owns the already-open queue and its scope/close lifecycle. */
 export async function collectIntoQueue(input: {
+  apiJobs?: ApiJobLifecycle
+  controlsFor?: (
+    printerKey: string,
+  ) => readonly ExtendedControlAction[] | undefined
+  onControlsRefresh?: (refresh: () => void) => void
   onLoss?: (value: Extract<Diagnostic, { kind: 'loss' }>) => void
   linkHealthFor?: (printerKey: string) => MoonrakerLinkHealth | undefined
   discoverMoonrakerObjects?: boolean
@@ -121,8 +140,14 @@ export async function collectIntoQueue(input: {
     connect?: Parameters<typeof createKobraXCollection>[0]['connect']
   }
   config:
-    LocalCollectorConfig | CrealityCollectorConfig | AnycubicCollectorConfig
+    | LocalCollectorConfig
+    | CrealityCollectorConfig
+    | AnycubicCollectorConfig
+    | FormlabsCollectorConfig
+    | PrusaCollectorConfig
+    | import('../config/sdcp.ts').SdcpCollectorConfig
   onInventory?: (snapshot: SpoolmanSnapshot) => void
+  onPrinterState?: (printer: PrinterState) => void
   onRawObservation?: (observation: RawPrinterObservation) => void
   onRawUnavailable?: (event: RawMoonrakerUnavailable) => void
   /** Links a finished job to the library version that was started on this printer (#385). */
@@ -151,6 +176,8 @@ export async function collectIntoQueue(input: {
   // Transitions are detected in memory; the first observation after a restart emits none.
   // Changes during unreachability fold into one transition from the last-known state at reconnect.
   const lastState = new Map<string, PrinterState['state']>()
+  const latestStates = new Map<string, PrinterState>()
+  const lastControls = new Map<string, string>()
   // The machine block is queued only when it changes.
   const machineGate = createMachineProfileGate()
   function diagnostic(value: Diagnostic) {
@@ -177,7 +204,20 @@ export async function collectIntoQueue(input: {
       if (event.kind === 'unavailable') {
         totals.unavailable++
         diagnostic({ kind: 'unavailable', reason: event.reason })
+        const previous = latestStates.get(event.printerKey)
+        if (previous && previous.state !== 'offline') {
+          const { controls: _controls, ...rest } = previous
+          onEvent({
+            kind: 'snapshot',
+            printer: {
+              ...rest,
+              state: 'offline',
+              observedAt: Math.max(Date.now(), previous.observedAt + 1),
+            },
+          })
+        }
       } else {
+        input.onPrinterState?.(event.printer)
         const now = Date.now()
         // Degraded storage drops records; they count as lost, never as queued.
         const lostBefore = queue.storageLost
@@ -190,6 +230,9 @@ export async function collectIntoQueue(input: {
               from: previous,
               to: event.printer.state,
               observedAt: event.printer.observedAt,
+              ...(event.printer.statusReason
+                ? { reason: event.printer.statusReason }
+                : {}),
             },
             now,
           )
@@ -198,7 +241,18 @@ export async function collectIntoQueue(input: {
         }
         const printer =
           input.libraryLinks?.attach(event.printer) ?? event.printer
-        const queued = machineGate.apply(printer)
+        const controls =
+          printer.state === 'offline'
+            ? undefined
+            : input.controlsFor?.(printer.printerKey)
+        const { controls: _controls, ...withoutControls } = printer
+        const current = {
+          ...withoutControls,
+          ...(controls === undefined ? {} : { controls: [...controls] }),
+        }
+        latestStates.set(printer.printerKey, current)
+        lastControls.set(printer.printerKey, JSON.stringify(controls ?? null))
+        const queued = machineGate.apply(current)
         let receipt
         try {
           receipt = queue.enqueue(queued, now)
@@ -217,6 +271,23 @@ export async function collectIntoQueue(input: {
       fail(error)
     }
   }
+  input.onControlsRefresh?.(() => {
+    for (const printer of latestStates.values()) {
+      if (printer.state === 'offline') continue
+      const controls = input.controlsFor?.(printer.printerKey)
+      if (
+        lastControls.get(printer.printerKey) !==
+        JSON.stringify(controls ?? null)
+      )
+        onEvent({
+          kind: 'snapshot',
+          printer: {
+            ...printer,
+            observedAt: Math.max(Date.now(), printer.observedAt + 1),
+          },
+        })
+    }
+  })
   const materialReads = new Set<Promise<void>>()
   let inventory: SpoolmanSnapshot | undefined
   let lastInventoryObservedAt = -1
@@ -292,6 +363,7 @@ export async function collectIntoQueue(input: {
         limits: config.limits,
         signal,
         onRawObservation(value) {
+          input.apiJobs?.observe(value)
           latest = value
           const at = performance.now()
           if (
@@ -483,6 +555,9 @@ export async function collectIntoQueue(input: {
               ? { ...event, printer: { ...event.printer, machine } }
               : event,
           )
+          if (event.kind === 'unavailable')
+            input.apiJobs?.unavailable(assignment.printerKey)
+          else if (!signal.aborted) input.apiJobs?.record(event.printer)
           if (!history) return
           if (event.kind === 'unavailable') history.reconnecting()
           else history.observe(event.printer.state)
@@ -730,6 +805,69 @@ export async function collectIntoQueue(input: {
             onEvent({ kind: 'snapshot', printer: value.printer })
           },
           onUnavailable(epoch) {
+            input.onRawUnavailable?.({ printerKey: binding.printerKey, epoch })
+            onEvent({
+              kind: 'unavailable',
+              printerKey: binding.printerKey,
+              reason: 'stale',
+            })
+          },
+        })
+        subscriptions.push({ done: sub.done.catch(fail) })
+      }
+    }
+    if (config.version === 8) {
+      for (const binding of config.drivers) {
+        const sub = createPrusaLinkCollection({
+          binding,
+          signal,
+          timeoutMs: Math.min(30000, config.limits.requestTimeoutMs),
+          onObservation(value) {
+            input.onRawObservation?.(value)
+          },
+          onUnavailable(epoch) {
+            input.onRawUnavailable?.({ printerKey: binding.printerKey, epoch })
+          },
+        })
+        subscriptions.push({ done: sub.done.catch(fail) })
+      }
+    }
+    if (config.version === 7) {
+      for (const binding of config.formlabs.printers) {
+        const sub = createFormlabsCollection({
+          binding,
+          signal,
+          onObservation(value) {
+            // PreForm reports host data. Keep it out of printer history.
+            input.onRawObservation?.(value)
+          },
+          onUnavailable(epoch) {
+            input.onRawUnavailable?.({ printerKey: binding.printerKey, epoch })
+            onEvent({
+              kind: 'unavailable',
+              printerKey: binding.printerKey,
+              reason: 'stale',
+            })
+          },
+        })
+        subscriptions.push({ done: sub.done.catch(fail) })
+      }
+    }
+    if (config.version === 6) {
+      for (const binding of config.sdcp.printers) {
+        const sub = createSdcpCollection({
+          binding,
+          signal,
+          onObservation(value) {
+            input.onRawObservation?.(value)
+            onEvent({ kind: 'snapshot', printer: value.printer })
+          },
+          onUnavailable(epoch, reason) {
+            if (reason.startsWith('Unsupported SDCP protocol version:'))
+              diagnostic({
+                kind: 'unavailable',
+                reason: 'unsupported-protocol',
+              })
             input.onRawUnavailable?.({ printerKey: binding.printerKey, epoch })
             onEvent({
               kind: 'unavailable',

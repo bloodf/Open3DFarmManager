@@ -3,6 +3,9 @@ import test from 'node:test'
 import {
   allAcceptanceRows,
   buildAcceptanceSummary,
+  deferredAcceptanceRows,
+  HARDWARE_ACCEPTANCE_DEFERRED,
+  NETWORK_FAULT_PROFILES,
   parseLastJson,
   rowPassed,
   runnableAcceptanceRows,
@@ -14,7 +17,12 @@ test('all mode selects every registered RTC farm row, including opt-in resource 
   assert.ok(rows.includes('farm-page-simulator-inventory'))
   assert.ok(rows.includes('farm-page-printing-pause'))
   assert.equal(new Set(rows).size, rows.length)
-  assert.ok(!runnableAcceptanceRows().includes('farm-page-camera'))
+  assert.deepEqual(runnableAcceptanceRows({ OPENFARM_SIM: 'mock' }), rows)
+  assert.ok(
+    !runnableAcceptanceRows({ OPENFARM_SIM: 'docker' }).includes(
+      'farm-page-camera',
+    ),
+  )
 })
 
 test('summary binds row pass/fail results to the candidate commit', () => {
@@ -53,5 +61,17 @@ test('an overall suite failure preserves each row outcome', () => {
       'command-rejected-tampered',
     ),
     true,
+  )
+})
+
+test('mock mode defers network-fault profiles; docker mode keeps only hardware deferred', () => {
+  assert.deepEqual(NETWORK_FAULT_PROFILES, ['nat', 'netem', 'udp-block'])
+  const mock = deferredAcceptanceRows({ OPENFARM_SIM: 'mock' })
+  assert.equal(mock.length, 4)
+  assert.ok(mock.every((row) => row.row !== undefined))
+  assert.equal(mock.at(-1)?.row, HARDWARE_ACCEPTANCE_DEFERRED.row)
+  assert.deepEqual(
+    deferredAcceptanceRows({ OPENFARM_SIM: 'docker' }).map((row) => row.row),
+    [HARDWARE_ACCEPTANCE_DEFERRED.row],
   )
 })

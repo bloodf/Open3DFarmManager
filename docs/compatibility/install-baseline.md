@@ -4,13 +4,13 @@ Data de corte: 2026-11-13. Produto base `bad76165aa4fbe86949ae624ddedc973721d5fc
 
 ## README.md
 
-Node 24.22.2, engine >=24.22.2 <25; pnpm 12.18.0. Instalação: pnpm install --frozen-lockfile --ignore-scripts; interface: pnpm run dev. Imagem usa node:24.22.2-alpine e inicia node server/index.mjs como UID 10001, copiando migrations. Não configura contas automaticamente.
+Node conforme `^22.22.3 || >=24.22.2 <25`; npm. Instalação: `npm ci --ignore-scripts`; interface: `npm run dev`. Imagem usa node:24.22.2-alpine e inicia node server/index.mjs como UID 10001, copiando migrations. Não configura contas automaticamente.
 
 Fontes inspecionadas: `README.md; package.json; apps/farm/Dockerfile`.
 
 ## docs/LOCAL-CI.md
 
-Verificação prevista: bash scripts/test-local-ci.sh; bash scripts/local-ci.sh code; pnpm run check:all; pnpm exec playwright install chromium; pnpm run test:e2e após build. Ubuntu CI usa pnpm exec playwright install --with-deps chromium. Chromium e bibliotecas do SO devem ser preparados separadamente. Instalação com --ignore-scripts não comprova preparação de módulos nativos. Experimentos RTC e farm-view são separados.
+Verificação prevista: bash scripts/test-local-ci.sh; bash scripts/local-ci.sh code; npm run check:all; npx playwright install chromium; npm run test:e2e após build. Ubuntu CI usa npx playwright install --with-deps chromium. Chromium e bibliotecas do SO devem ser preparados separadamente. Instalação com --ignore-scripts não comprova preparação de módulos nativos. Experimentos RTC e farm-view são separados.
 
 Fontes inspecionadas: `docs/LOCAL-CI.md; scripts/local-ci.sh; .github/workflows/ci.yml`.
 

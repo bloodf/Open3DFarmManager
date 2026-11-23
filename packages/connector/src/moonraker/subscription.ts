@@ -1,11 +1,22 @@
+import { isDeepStrictEqual } from 'node:util'
 import { z } from 'zod'
 import type { PrinterState } from '@open3dfarmmanager/farm-protocol'
 import {
   parseTemperatureFields,
+  isChamberTemperatureObject,
+  chamberTemperatureReading,
+  observedTemperatureDetails,
   type TemperatureFields,
 } from './temperature-observation.ts'
 import { moonrakerLastJob } from './normalize.ts'
 import { parseMoonrakerSnapshot } from './parse.ts'
+import { hasMoonrakerPendingDispatch } from './pending-dispatch.ts'
+import {
+  SNAPMAKER_U1_STATUS_OBJECTS,
+  isSnapmakerU1Model,
+  isSnapmakerU1StatusObject,
+  mapSnapmakerU1Tools,
+} from './u1-tools.ts'
 import {
   MoonrakerClientError,
   openMoonrakerClient,
@@ -18,6 +29,8 @@ import {
 export type MoonrakerAssignment = Readonly<{
   printerKey: string
   origin: string
+  /** Locally declared model; "Snapmaker U1" opts into the U1 tool mapping. */
+  model?: string | undefined
 }>
 export type RawMoonrakerObservation = Readonly<{
   printerKey: string
@@ -32,6 +45,8 @@ export type RawMoonrakerObservation = Readonly<{
     progress: number
   }>
   receivedAtMonoMs: number
+  /** Source time of the duration sample, when it was in this status update. */
+  durationSourceTime?: number
   temperatureObservation?: Readonly<{
     fields: TemperatureFields
     observedAtMonoMs: number
@@ -51,6 +66,16 @@ export type MoonrakerEvent =
     }
 
 const webhookState = z.enum(['ready', 'startup', 'shutdown', 'error'])
+/**
+ * A chamber reading this far from the last recorded one is a meaningful
+ * change and earns its own durable telemetry record.
+ */
+const CHAMBER_TEMPERATURE_THRESHOLD_CELSIUS = 1
+/**
+ * Chamber-only changes are also rate limited: at most one durable record per
+ * interval, however often the sensor jitters.
+ */
+const CHAMBER_TEMPERATURE_MIN_INTERVAL_MS = 60_000
 const printState = z.enum([
   'standby',
   'printing',
@@ -62,16 +87,22 @@ const printState = z.enum([
 const progress = z.number().finite().min(0).max(1)
 const OptionalTelemetry = z
   .record(z.string(), z.unknown())
-  .transform((status) =>
-    Object.fromEntries(
-      Object.entries(status).filter(
-        ([name]) =>
-          name === 'fan' ||
-          name.startsWith('fan_generic ') ||
-          name === 'output_pin caselight',
-      ),
-    ),
-  )
+  .transform((status) => {
+    const fields: Record<string, unknown> = {}
+    for (const [name, value] of Object.entries(status)) {
+      if (/^extruder(?:[1-9][0-9]{0,2})?$/.test(name)) {
+        if (typeof value === 'object' && value !== null && 'target' in value)
+          fields[name] = { target: value.target }
+      } else if (
+        name === 'fan' ||
+        name.startsWith('fan_generic ') ||
+        name === 'output_pin caselight' ||
+        isChamberTemperatureObject(name)
+      )
+        fields[name] = value
+    }
+    return fields
+  })
 const Status = z
   .object({
     webhooks: z.object({ state: webhookState }),
@@ -80,6 +111,7 @@ const Status = z
       filename: z.unknown().optional(),
       print_duration: z.unknown().optional(),
       total_duration: z.unknown().optional(),
+      filament_used: z.unknown().optional(),
       info: z.unknown().optional(),
     }),
     virtual_sdcard: z.object({ progress }),
@@ -110,6 +142,7 @@ const Delta = z.tuple([
           filename: z.unknown().optional(),
           print_duration: z.unknown().optional(),
           total_duration: z.unknown().optional(),
+          filament_used: z.unknown().optional(),
           info: z.unknown().optional(),
         })
         .optional(),
@@ -146,6 +179,11 @@ export function createMoonrakerSubscription(input: {
   discoverObjects?: boolean
   /** Request job fields and report the last job this subscription watched end. */
   jobFields?: boolean
+  /**
+   * Whether OpenFarm has a pending dispatch for this printer. Defaults to the
+   * registered resolvers (see `pending-dispatch.ts`).
+   */
+  hasPendingDispatch?: () => boolean
   linkHealth?: MoonrakerLinkHealth
   onEvent: (event: MoonrakerEvent) => void
   onRawObservation?: (observation: RawMoonrakerObservation) => void
@@ -153,6 +191,7 @@ export function createMoonrakerSubscription(input: {
   signal: AbortSignal
 }): { done: Promise<void> } {
   const { printerKey, origin, limits } = validateMoonrakerInput(input)
+  const snapmakerU1 = isSnapmakerU1Model(input.assignment.model)
   const controller = new AbortController()
   const signal = AbortSignal.any([input.signal, controller.signal])
   let callbackFailure: { error: unknown } | undefined
@@ -190,9 +229,12 @@ export function createMoonrakerSubscription(input: {
     }
   }
   let epoch = 0
-  // Last job this subscription watched end. Telemetry repeats it until the
-  // next one ends; jobs that ended unwatched come from the history import.
+  // Keep the latest watched finish, or a first terminal snapshot when OpenFarm
+  // has a pending dispatch on this printer; other unwatched ends come from the
+  // history import. Reconnects must not assign a new end time to terminal
+  // status that Moonraker retains.
   let lastJob: PrinterState['lastJob']
+  let hasObservedStatus = false
   async function run() {
     let backoff = limits.reconnectMinMs
     emit({ kind: 'unavailable', printerKey, reason: 'connecting' })
@@ -217,13 +259,44 @@ export function createMoonrakerSubscription(input: {
       let stale = false
       let baseline: z.infer<typeof Snapshot> | undefined
       let fingerprint: string | undefined
+      // Last chamber reading carried by a durable record, and when it was
+      // recorded. The raw reading jitters; it must not drive a record alone.
+      let lastChamberReading: number | undefined
+      let lastChamberAtMonoMs = 0
       // Reset per connection: an end seen only after a reconnect is unwatched.
       let watchingJob = false
+      // U1 only: latest per-tool status, and every tool seen active while the
+      // watched job ran (`null` when the printer did not say).
+      const toolStatus: Record<string, Record<string, unknown>> = {}
+      const jobTools = new Set<string | null>()
+      function observeTools(status: unknown) {
+        if (!snapmakerU1 || !status || typeof status !== 'object') return
+        for (const [name, value] of Object.entries(status)) {
+          if (
+            !isSnapmakerU1StatusObject(name) ||
+            !value ||
+            typeof value !== 'object' ||
+            Array.isArray(value)
+          )
+            continue
+          toolStatus[name] = { ...toolStatus[name], ...value }
+        }
+      }
+      function u1Materials(): PrinterState['materials'] {
+        if (!snapmakerU1) return undefined
+        return mapSnapmakerU1Tools(toolStatus).tools.map((tool) => ({
+          slot: tool.tool,
+          ...(tool.active === null ? {} : { active: tool.active }),
+        }))
+      }
       function publish(
         value: z.infer<typeof Snapshot>,
         temperatureObservation?: RawMoonrakerObservation['temperatureObservation'],
+        durationSourceTime?: number,
       ) {
         if (signal.aborted) return
+        const firstObservation = !hasObservedStatus
+        hasObservedStatus = true
         baseline = value
         clearTimeout(staleTimer)
         staleTimer = setTimeout(() => {
@@ -236,7 +309,15 @@ export function createMoonrakerSubscription(input: {
               ...value,
               status: {
                 ...value.status,
-                print_stats: { state: value.status.print_stats.state },
+                print_stats: {
+                  state: value.status.print_stats.state,
+                  ...(input.jobFields
+                    ? {
+                        info: value.status.print_stats.info,
+                        print_duration: value.status.print_stats.print_duration,
+                      }
+                    : {}),
+                },
               },
             },
           }),
@@ -245,6 +326,10 @@ export function createMoonrakerSubscription(input: {
             observedAt: Date.now(),
           },
         )
+        const materials = u1Materials()
+        // The raw chamber reading is live evidence: it is always published,
+        // whatever the durable record rate allows.
+        const chamberReading = chamberTemperatureReading(value.status)
         if (input.onRawObservation && fieldTimes && !invalidated) {
           const observedTimes = fieldTimes
           rawCallback(() =>
@@ -252,7 +337,13 @@ export function createMoonrakerSubscription(input: {
               Object.freeze({
                 printerKey,
                 epoch: currentEpoch,
-                printer: Object.freeze({ ...parsed.printer }),
+                printer: Object.freeze({
+                  ...parsed.printer,
+                  ...(materials ? { materials } : {}),
+                  ...(chamberReading === undefined
+                    ? {}
+                    : { chamberTemperatureCelsius: chamberReading }),
+                }),
                 status: Object.freeze({
                   webhooks: Object.freeze({ ...value.status.webhooks }),
                   print_stats: Object.freeze({ ...value.status.print_stats }),
@@ -262,6 +353,9 @@ export function createMoonrakerSubscription(input: {
                 }),
                 fieldObservedAtMonoMs: Object.freeze({ ...observedTimes }),
                 receivedAtMonoMs: performance.now(),
+                ...(durationSourceTime === undefined
+                  ? {}
+                  : { durationSourceTime }),
                 ...(temperatureObservation
                   ? {
                       temperatureObservation: Object.freeze({
@@ -284,31 +378,108 @@ export function createMoonrakerSubscription(input: {
         }
         const jobState = value.status.print_stats.state
         if (!input.jobFields) watchingJob = false
-        else if (jobState === 'printing' || jobState === 'paused')
+        else if (jobState === 'printing' || jobState === 'paused') {
+          if (!watchingJob) jobTools.clear()
           watchingJob = true
-        else if (watchingJob) {
+          if (materials)
+            jobTools.add(
+              materials.some((tool) => tool.active === undefined)
+                ? null
+                : (materials.find((tool) => tool.active)?.slot ?? null),
+            )
+        } else if (
+          watchingJob ||
+          (firstObservation &&
+            (input.hasPendingDispatch
+              ? input.hasPendingDispatch()
+              : hasMoonrakerPendingDispatch(printerKey)))
+        ) {
           const ended = moonrakerLastJob(
             value.status,
             parsed.printer.observedAt,
           )
           if (ended) {
-            lastJob = ended
+            // A U1 reports one total length for all tools: it is attributed
+            // to a tool only when that tool alone was active for the whole job.
+            const [only] = jobTools
+            lastJob =
+              materials && ended.filamentUsedMillimetres !== undefined
+                ? {
+                    ...ended,
+                    filamentUsage: [
+                      {
+                        tool:
+                          jobTools.size === 1 && typeof only === 'string'
+                            ? only
+                            : 'unknown',
+                        millimetres: ended.filamentUsedMillimetres,
+                      },
+                    ],
+                  }
+                : ended
             watchingJob = false
           }
         }
+        const temperatures = input.jobFields
+          ? observedTemperatureDetails(value.status)
+          : undefined
+        // The raw chamber reading is excluded from the change fingerprint: it
+        // jitters on an idle printer and would enqueue a durable record per
+        // update. Its presence still matters, so the sensor appearing or
+        // disappearing is a real change.
+        const stableTemperatures =
+          temperatures && temperatures.chamberTemperatureCelsius !== undefined
+            ? (({ chamberTemperatureCelsius: _raw, ...rest }) => rest)(
+                temperatures,
+              )
+            : temperatures
+        // The chamber reading this durable record would carry, if any.
+        const durableChamber = temperatures?.chamberTemperatureCelsius
         const nextFingerprint = JSON.stringify([
           parsed.printer.state,
           parsed.printer.progress,
           parsed.printer.fans,
           parsed.printer.light,
+          parsed.printer.currentLayer,
+          parsed.printer.totalLayer,
+          parsed.printer.printDuration,
+          stableTemperatures,
+          durableChamber !== undefined,
+          materials,
           lastJob?.endedAt,
         ])
-        if (nextFingerprint === fingerprint) return
+        const now = performance.now()
+        let changed = nextFingerprint !== fingerprint
+        if (
+          !changed &&
+          durableChamber !== undefined &&
+          durableChamber !== lastChamberReading
+        ) {
+          // Only the chamber reading moved: record it when the change is
+          // meaningful or when the bounded rate allows another record.
+          const significant =
+            lastChamberReading === undefined ||
+            Math.abs(durableChamber - lastChamberReading) >=
+              CHAMBER_TEMPERATURE_THRESHOLD_CELSIUS
+          const due =
+            now - lastChamberAtMonoMs >= CHAMBER_TEMPERATURE_MIN_INTERVAL_MS
+          changed = significant || due
+        }
+        if (!changed) return
         fingerprint = nextFingerprint
+        if (durableChamber !== undefined) {
+          lastChamberReading = durableChamber
+          lastChamberAtMonoMs = now
+        }
+        const printer = {
+          ...parsed.printer,
+          ...temperatures,
+          ...(materials ? { materials } : {}),
+        }
         emit({
           kind: 'snapshot',
           ...parsed,
-          printer: lastJob ? { ...parsed.printer, lastJob } : parsed.printer,
+          printer: lastJob ? { ...printer, lastJob } : printer,
         })
       }
       try {
@@ -323,6 +494,7 @@ export function createMoonrakerSubscription(input: {
           signal,
           ...(input.discoverObjects ? { discoverObjects: true } : {}),
           ...(input.jobFields ? { jobFields: true } : {}),
+          ...(snapmakerU1 ? { extraObjects: SNAPMAKER_U1_STATUS_OBJECTS } : {}),
           ...(input.onRawObservation
             ? {
                 onInvalidated: invalidate,
@@ -330,8 +502,13 @@ export function createMoonrakerSubscription(input: {
                   observation: import('./client.ts').MoonrakerCompleteObservation,
                 ) {
                   const complete = TemperatureSnapshot.parse(observation.result)
+                  observeTools(complete.status)
                   const value = Snapshot.parse(complete)
                   const stamp = observation.requestStartedAtMonoMs
+                  const fields = parseTemperatureFields(
+                    complete.status,
+                    observation.activeToolQuery,
+                  )
                   // A delta received during this query has a newer local field
                   // observation. Discard this overlapping response rather than
                   // regress evidence or advance its conservative request anchor.
@@ -368,12 +545,7 @@ export function createMoonrakerSubscription(input: {
                       // Temperature is independent display evidence from this
                       // complete query. Keep the newer delta's state/progress
                       // while publishing those conservatively timed readings.
-                      const fields = parseTemperatureFields(complete.status)
-                      if (
-                        fields.tool.kind === 'reading' ||
-                        fields.bed.kind === 'reading'
-                      )
-                        publish(baseline, { fields, observedAtMonoMs: stamp })
+                      publish(baseline, { fields, observedAtMonoMs: stamp })
                     }
                     return
                   }
@@ -381,8 +553,7 @@ export function createMoonrakerSubscription(input: {
                     baseline &&
                     (value.eventtime < baseline.eventtime ||
                       (value.eventtime === baseline.eventtime &&
-                        JSON.stringify(value.status) !==
-                          JSON.stringify(baseline.status)))
+                        !isDeepStrictEqual(value.status, baseline.status)))
                   )
                     throw Error('Ambiguous complete response ordering')
                   fieldTimes = {
@@ -390,20 +561,34 @@ export function createMoonrakerSubscription(input: {
                     printState: stamp,
                     progress: stamp,
                   }
-                  publish(value, {
-                    fields: parseTemperatureFields(complete.status),
-                    observedAtMonoMs: stamp,
-                  })
+                  publish(
+                    value,
+                    { fields, observedAtMonoMs: stamp },
+                    value.eventtime,
+                  )
                 },
               }
             : {}),
           onStatus(params) {
             const [delta, eventtime] = Delta.parse(params)
             if (!baseline) throw new Error('No baseline')
+            if (eventtime >= baseline.eventtime) observeTools(delta)
             const optional = OptionalTelemetry.parse(delta)
+            const optionalStatus = OptionalTelemetry.parse(baseline.status)
+            for (const [name, fields] of Object.entries(optional)) {
+              const previous = optionalStatus[name]
+              optionalStatus[name] =
+                fields &&
+                previous &&
+                typeof fields === 'object' &&
+                typeof previous === 'object' &&
+                !Array.isArray(fields) &&
+                !Array.isArray(previous)
+                  ? { ...previous, ...fields }
+                  : fields
+            }
             const status = {
-              ...OptionalTelemetry.parse(baseline.status),
-              ...optional,
+              ...optionalStatus,
               webhooks: {
                 state: delta.webhooks?.state ?? baseline.status.webhooks.state,
               },
@@ -421,7 +606,7 @@ export function createMoonrakerSubscription(input: {
             }
             if (eventtime < baseline.eventtime) return
             if (eventtime === baseline.eventtime) {
-              if (JSON.stringify(status) !== JSON.stringify(baseline.status))
+              if (!isDeepStrictEqual(status, baseline.status))
                 throw new Error('Conflicting source time')
               return
             }
@@ -452,10 +637,18 @@ export function createMoonrakerSubscription(input: {
                     : now,
               }
             }
-            publish({ eventtime, status })
+            publish(
+              { eventtime, status },
+              undefined,
+              delta.print_stats?.total_duration === undefined
+                ? undefined
+                : eventtime,
+            )
           },
         })
-        const initial = Snapshot.parse(await client.snapshot)
+        const raw = await client.snapshot
+        const initial = Snapshot.parse(raw)
+        observeTools((raw as { status?: unknown }).status)
         if (!input.onRawObservation) publish(initial)
         backoff = limits.reconnectMinMs
         const reason = await client.closed

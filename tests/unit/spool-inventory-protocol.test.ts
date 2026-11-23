@@ -93,6 +93,13 @@ describe('spool inventory schema', () => {
 
 describe('tolerant browser parsing', () => {
   const base = { t: 'snapshot' as const, seq: 1, printers: [] }
+  const printer = {
+    printerKey: 'printer-a',
+    state: 'idle' as const,
+    observedAt: 1,
+    progress: 0,
+  }
+  const withPrinter = { ...base, printers: [printer] }
   test('drops only an invalid inventory and keeps printers', () => {
     const bad = { ...inventory, spools: [{ ...spool, extra: 1 }] }
     const result = parseStatusMessageTolerant({ ...base, inventory: bad })
@@ -100,6 +107,12 @@ describe('tolerant browser parsing', () => {
     expect(StatusMessage.safeParse({ ...base, inventory: bad }).success).toBe(
       false,
     )
+    const preserved = parseStatusMessageTolerant({
+      ...withPrinter,
+      inventory: bad,
+    })
+    expect(preserved.success && preserved.data).toEqual(withPrinter)
+    expect(preserved.success && preserved.data.printers).toEqual([printer])
   })
   test('an unknown top-level key is rejected even with an invalid inventory', () => {
     const bad = { ...inventory, spools: [{ ...spool, extra: 1 }] }

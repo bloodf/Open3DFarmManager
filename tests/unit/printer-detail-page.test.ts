@@ -256,3 +256,44 @@ describe('configuration editor placement', () => {
     expect(dashboard).not.toContain('config-editor')
   })
 })
+
+describe('Bambu alarm placement', () => {
+  it('keeps the status slot outside the tabs that hide inactive panels', async () => {
+    const read = (path: string) =>
+      readFile(new URL(path, import.meta.url), 'utf8')
+    const dashboard = await read(
+      '../../apps/farm/app/components/printer-detail/PrinterDetailDashboard.vue',
+    )
+    const page = await read(
+      '../../apps/farm/app/pages/impressoras/[printerKey].vue',
+    )
+
+    const statusSlot = dashboard.indexOf('<slot name="status" />')
+    const tabs = dashboard.indexOf('<Tabs')
+    expect(statusSlot).toBeGreaterThan(-1)
+    expect(statusSlot).toBeLessThan(tabs)
+    expect(page).toMatch(/<template #status>\s*<BambuAlarmStatus/)
+  })
+})
+
+describe('Bambu alarm status', () => {
+  it('renders current, unavailable, and cleared alarm states accessibly', async () => {
+    const file = '../printer-detail/BambuAlarmStatus.vue'
+    const active = await renderFarmComponent(file, {
+      message: 'Erro de impressão: 0300-8005.',
+    })
+    expect(active).toContain('role="status"')
+    expect(active).toContain('aria-live="polite"')
+    expect(active).toContain('Alertas da impressora')
+    expect(active).toContain('0300-8005')
+    const unavailable = await renderFarmComponent(file, {
+      message: 'Alertas ainda não informados pela impressora.',
+    })
+    expect(unavailable).toContain(
+      'Alertas ainda não informados pela impressora.',
+    )
+    expect(unavailable).not.toContain('0300-8005')
+    const cleared = await renderFarmComponent(file, { message: '' })
+    expect(cleared).toContain('Nenhum alerta informado.')
+  })
+})

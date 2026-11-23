@@ -11,7 +11,7 @@ import type { BlobStore } from './blob-store.ts'
  *  3. sweep stored files no blob row references (server disk, or the Connector
  *     host in Connector mode).
  * A blob is marked purged and its file removed in one transaction under the
- * farm's upload lock; if removal fails the mark rolls back and a later run retries.
+ * the farm and blob-hash advisory locks; if removal fails the mark rolls back and a later run retries.
  */
 const DAY_MS = 86_400_000
 /** Files and rows younger than this may belong to an upload still in flight. */
@@ -19,6 +19,11 @@ export const ORPHAN_GRACE_MS = 3_600_000
 export const DEFAULT_RETENTION_DAYS = 30
 /** Shown for a replay of a version whose file was purged. */
 export const PURGED_LABEL = 'arquivo removido'
+
+/** Transaction lock: one server file per sha256 is shared across farms. */
+export function lockLibraryBlob(tx: Sql, sha256: string) {
+  return tx`SELECT pg_advisory_xact_lock(hashtextextended(${'library-blob:' + sha256}, 0))`
+}
 
 export type ReplayAvailability =
   { available: true } | { available: false; label: typeof PURGED_LABEL }
@@ -166,7 +171,6 @@ async function removeStoredFile(
   // One file per hash is shared by every farm: keep it while another farm still uses it.
   const shared =
     await tx`SELECT 1 FROM farm.library_blobs WHERE sha256=${facts.sha256} AND storage_location='server' AND purged_at IS NULL LIMIT 1`
-  // ponytail: a concurrent upload of the same bytes by another farm can race this delete; it must re-upload.
   if (!shared[0]) await deps.blobs!.remove(facts.sha256)
 }
 
@@ -179,8 +183,8 @@ async function purgeOne(
   return deps.sql.begin(async (tx) => {
     await tx`SET LOCAL statement_timeout = '5000ms'`
     await tx`SET LOCAL lock_timeout = '2000ms'`
-    // Same lock addVersion takes: a repeat upload cannot slip in between the check and the purge.
     await tx`SELECT pg_advisory_xact_lock(hashtextextended(${'library:' + facts.farmId}, 0))`
+    await lockLibraryBlob(tx as unknown as Sql, facts.sha256)
     const [fresh] = await factsOf(tx as unknown as Sql, facts)
     if (!fresh || !isPurgeable(fresh, now, graceMs)) return false
     const marked =

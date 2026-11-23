@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdtemp, readdir } from 'node:fs/promises'
+import { mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Sql } from 'postgres'
@@ -578,7 +578,11 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
-  await server?.stop()
+  try {
+    await server?.stop()
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
   server = undefined
 })
 
@@ -617,6 +621,9 @@ async function handle(request: Request, rt: LibraryRuntime) {
 }
 
 async function serve(rt: LibraryRuntime = runtime) {
+  const previous = server
+  await previous?.stop()
+  if (previous) await expect(fetch(previous.url)).rejects.toThrow()
   server = await withNetworkGuard(() =>
     serveTestServer((request) => handle(request, rt)),
   )

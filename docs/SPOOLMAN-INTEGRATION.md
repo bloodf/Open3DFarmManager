@@ -10,7 +10,10 @@ calculated, and how to verify a connection against the simulator. The
 protocol details live in [SPOOLMAN-MIRROR.md](SPOOLMAN-MIRROR.md); the farm
 page flow is in [SPOOLMAN-FARM-CONFIG.md](SPOOLMAN-FARM-CONFIG.md); the public
 read contract is in [INTEGRATION-API.md](INTEGRATION-API.md) and
-[`api/openapi-v1.yaml`](api/openapi-v1.yaml).
+[`api/openapi-v1.yaml`](api/openapi-v1.yaml). The built-in spool library storage
+and the per-farm credential for existing Spoolman clients are described in
+[SPOOL-LIBRARY-STORAGE.md](SPOOL-LIBRARY-STORAGE.md); this guide's external
+Spoolman integration is unaffected.
 
 ## 1. Requirements
 

@@ -134,7 +134,17 @@ export async function startBambuSimulator({
       ? {}
       : { nozzle_diameter: nozzleDiameter }),
   }
-  const requests: { command: string; sequence_id: string }[] = []
+  // Commands that act on the printer (pause, resume, stop, gcode, ...), in arrival order.
+  const requests: {
+    command: string
+    sequence_id: string
+    ams_mapping?: unknown
+    use_ams?: unknown
+  }[] = []
+  // Read-only queries (pushall and get_version). Kept apart from `requests`: the connector's telemetry
+  // transport asks for the version as soon as it subscribes, concurrently with the first report,
+  // so mixing it into `requests` makes "no command was sent" checks depend on socket timing.
+  const queries: { command: string; sequence_id: string }[] = []
 
   let brokerRef: MqttMockInstance | undefined
   let closed = false
@@ -202,8 +212,16 @@ export async function startBambuSimulator({
     onPublish: async (msg) => {
       if (msg.topic !== requestTopic) throw new Error('Invalid request topic')
       const value = JSON.parse(msg.payload.toString('utf8'))
+      if (value?.pushing?.command === 'pushall') {
+        queries.push({
+          command: 'pushall',
+          sequence_id: value.pushing.sequence_id,
+        })
+        emitCurrentReport()
+        return
+      }
       if (value?.info?.command === 'get_version') {
-        requests.push({
+        queries.push({
           command: 'get_version',
           sequence_id: value.info.sequence_id,
         })
@@ -233,7 +251,14 @@ export async function startBambuSimulator({
         typeof request?.sequence_id !== 'string'
       )
         throw new Error('Invalid request')
-      requests.push({ command, sequence_id: request.sequence_id })
+      requests.push({
+        command,
+        sequence_id: request.sequence_id,
+        ...(request.ams_mapping !== undefined
+          ? { ams_mapping: request.ams_mapping }
+          : {}),
+        ...(request.use_ams !== undefined ? { use_ams: request.use_ams } : {}),
+      })
       if (!confirmCommands) return
 
       if (command === 'gcode_line') {
@@ -403,20 +428,30 @@ export async function startBambuSimulator({
     host,
     port: broker.ports.default,
     ftpsPort: ftps.port,
+    ftpsListingRequests: ftps.listingRequests,
     origin: broker.origin,
     ports: broker.ports,
     syntheticTrust,
     reportTopic,
     requests,
+    queries,
     uploads,
     timelapse,
     gcodeLines,
     calls: broker.calls,
     control: {
+      setFtpsMlsdRejection: ftps.setMlsdRejection,
       faults: broker.control.faults,
       scenario,
       publish: broker.control.publish,
       publishReport,
+      setAlarmReport(delta: {
+        print_error?: number
+        hms?: { attr: number; code: number }[]
+      }) {
+        Object.assign(extended, delta)
+        publishReport({ print: { ...delta, command: 'push_status' } })
+      },
       disconnectClients,
       subscriptions: broker.control.subscriptions,
       sockets: broker.control.sockets,

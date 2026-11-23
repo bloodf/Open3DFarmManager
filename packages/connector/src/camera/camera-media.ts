@@ -66,7 +66,7 @@ export type ConnectorCameraMediaOptions = Readonly<{
 type State = 'new' | 'prepared' | 'offering' | 'offered' | 'live' | 'terminal'
 
 /** Connector side of camera-purpose V3: offer one signed statement for the
- * first configured camera in the admitted assignment set, then send H.264
+ * requested camera in the admitted assignment set, then send H.264
  * passthrough only after the browser device countersigns that exact statement. */
 export class ConnectorCameraMedia implements FixtureOnlyMediaHooks {
   #options: ConnectorCameraMediaOptions
@@ -140,7 +140,8 @@ export class ConnectorCameraMedia implements FixtureOnlyMediaHooks {
         entry.scope.farmId === binding.farm_id &&
         entry.scope.agentId === binding.agent_id &&
         entry.scope.agentId === this.#options.expectedAgentId &&
-        assigned.has(entry.scope.printerId),
+        assigned.has(entry.scope.printerId) &&
+        entry.scope.printerId === binding.camera_printer_id,
     )
     // No camera for this assignment set: the channel stays idle (unavailable).
     if (!camera) return

@@ -234,6 +234,110 @@ test('lost, malformed and disconnected pause acknowledgements never retry or cla
   }
 })
 
+// Recorded Snapmaker U1 success envelope. Pause expects result "ok", not the
+// identify payload this capture carried.
+const u1Envelope = {
+  jsonrpc: '2.0',
+  result: { connection_id: 1 },
+  id: 1,
+  cli_time: -1,
+  dev_time: 1795235005,
+}
+
+test('Snapmaker U1 pause reply envelope with vendor members is accepted', async () => {
+  const f = await fixture({
+    pause: (socket, id) => {
+      socket.send(JSON.stringify({ ...u1Envelope, id, result: 'ok' }))
+      return true
+    },
+  })
+  try {
+    await f.driver.prepare()
+    assert.deepEqual(
+      await f.driver.driver.pauseOnce({
+        binding: f.binding,
+        signal: f.command.signal,
+        beforeSend: () => true,
+      }),
+      { acknowledged: true },
+    )
+    assert.equal(f.remote.counts().pauses, 1)
+  } finally {
+    await f.cleanup()
+  }
+})
+
+test('U1 pause replies reject wrong or missing jsonrpc and mismatched id', async () => {
+  for (const fault of [
+    'wrong-jsonrpc',
+    'missing-jsonrpc',
+    'wrong-id',
+  ] as const) {
+    const f = await fixture({
+      pause: (socket, id) => {
+        const reply = {
+          ...u1Envelope,
+          id,
+          result: 'ok',
+          jsonrpc: fault === 'wrong-jsonrpc' ? '1.0' : '2.0',
+        }
+        if (fault === 'missing-jsonrpc')
+          delete (reply as { jsonrpc?: string }).jsonrpc
+        if (fault === 'wrong-id') reply.id = id + 1
+        socket.send(JSON.stringify(reply))
+        return true
+      },
+    })
+    try {
+      await f.driver.prepare()
+      await assert.rejects(
+        f.driver.driver.pauseOnce({
+          binding: f.binding,
+          signal: f.command.signal,
+          beforeSend: () => true,
+        }),
+        fault,
+      )
+      await f.driver.closed
+      assert.equal(f.remote.counts().pauses, 1, fault)
+      assert.equal(f.observations.at(-1), null, fault)
+    } finally {
+      await f.cleanup()
+    }
+  }
+})
+test('error-as-success pause reply with vendor members is rejected', async () => {
+  const f = await fixture({
+    pause: (socket, id) => {
+      socket.send(
+        JSON.stringify({
+          ...u1Envelope,
+          id,
+          result: 'ok',
+          error: { code: -32603, message: 'fail' },
+        }),
+      )
+      return true
+    },
+  })
+  try {
+    await f.driver.prepare()
+    await assert.rejects(
+      f.driver.driver.pauseOnce({
+        binding: f.binding,
+        signal: f.command.signal,
+        beforeSend: () => true,
+      }),
+    )
+    await f.driver.closed
+    assert.equal(f.remote.counts().pauses, 1)
+    assert.equal(f.remote.counts().connections, 1)
+    assert.equal(f.observations.at(-1), null)
+  } finally {
+    await f.cleanup()
+  }
+})
+
 test('post-send repeated source time rejects instead of refreshing paused evidence', async () => {
   const f = await fixture({
     query: (index, socket, id) => {

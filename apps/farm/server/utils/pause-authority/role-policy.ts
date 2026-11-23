@@ -5,12 +5,13 @@ import {
 
 export { controlRoleAllowed }
 
-/** The default retains the v1 action projection for existing consumers. */
+/** Explicit action lists use the shared role policy, including both heater controls. */
 export function actionsForControlRole(
   role: string,
   actions: readonly ExtendedControlAction[] = ExtendedControlAction.options.filter(
     (action) =>
       ![
+        'set_tool_temperature',
         'run_macro',
         'config_write',
         'service',
@@ -31,6 +32,7 @@ export function actionsForControlRole(
         'set_factor',
         'queue_op',
         'start_library_print',
+        'confirm_collection',
       ].includes(action),
   ),
 ): ExtendedControlAction[] {

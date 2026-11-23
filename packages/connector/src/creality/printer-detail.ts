@@ -159,7 +159,14 @@ export function buildCrealityConsoleLine(
 
 /** A lazy, reference-counted, read-only stream for a stock firmware endpoint. */
 export function createCrealityDetailStream(
-  binding: { printerKey: string; host: string; port?: number | undefined },
+  binding: {
+    printerKey: string
+    host: string
+    port?: number | undefined
+    transport?: 'ws' | 'wss' | undefined
+    httpsPort?: number | undefined
+    caFile?: string | undefined
+  },
   options: CrealityDetailOptions = {},
 ) {
   const listeners = new Set<(frame: unknown) => void>()
@@ -184,8 +191,7 @@ export function createCrealityDetailStream(
     subscribe(listener: (frame: unknown) => void) {
       listeners.add(listener)
       client ??= createCrealityTelemetryClient({
-        host: binding.host,
-        ...(binding.port === undefined ? {} : { port: binding.port }),
+        ...binding,
         onTelemetry: publish,
         onDisconnect: () => {
           latest = undefined

@@ -21,6 +21,9 @@ test('login rejects credentials without retaining the password or following retu
     const root = document.querySelector('#__nuxt')
     return root !== null && '__vue_app__' in root
   })
+  await expect(
+    page.getByRole('button', { name: 'Entrar', exact: true }),
+  ).toBeEnabled()
   await page.getByLabel('Usuário', { exact: true }).fill('fixture_user')
   await page.getByLabel('Senha', { exact: true }).fill('synthetic-password')
   await page.getByRole('button', { name: 'Entrar', exact: true }).click()
@@ -56,6 +59,9 @@ test('pending login disables duplicate submissions and shows unavailable safely'
     const root = document.querySelector('#__nuxt')
     return root !== null && '__vue_app__' in root
   })
+  await expect(
+    page.getByRole('button', { name: 'Entrar', exact: true }),
+  ).toBeEnabled()
   await page.getByLabel('Usuário', { exact: true }).fill('fixture_user')
   await page.getByLabel('Senha', { exact: true }).fill('synthetic-password')
   await page.getByRole('button', { name: 'Entrar', exact: true }).click()

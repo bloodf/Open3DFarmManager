@@ -1941,12 +1941,16 @@ function gitOutput(args) {
  */
 export function repositoryExclusionRoots() {
   const roots = new Set()
-  const add = (path) => {
+  const add = (path, allowMissing = false) => {
     if (!path || !isAbsolute(path))
       throw diagnostic('invalid repository exclusion root', 'preflight')
     try {
       roots.add(realpathSync(path))
-    } catch {
+    } catch (error) {
+      if (allowMissing && error.code === 'ENOENT') {
+        roots.add(canonicalPath(path))
+        return
+      }
       throw diagnostic('unresolved repository exclusion root', 'preflight')
     }
   }
@@ -1990,13 +1994,13 @@ export function repositoryExclusionRoots() {
     if (paths.includes(first.slice(9)))
       throw diagnostic('duplicate worktree record', 'preflight')
     paths.push(first.slice(9))
+    add(first.slice(9), seen.has('prunable'))
   }
   if (
     !paths.length ||
-    !paths.some((path) => path === realpathSync(REPOSITORY_ROOT))
+    !paths.some((path) => canonicalPath(path) === realpathSync(REPOSITORY_ROOT))
   )
     throw diagnostic('incomplete worktree discovery', 'preflight')
-  for (const path of paths) add(path)
   return [...roots]
 }
 

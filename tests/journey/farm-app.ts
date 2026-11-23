@@ -131,9 +131,12 @@ export async function startFarmApp(
     // farm workspace resolves instead of assuming apps/farm/node_modules.
     const nuxt = await resolveNuxtInstall(farm)
     await symlink(nuxt.nodeModules, join(layer, 'node_modules'), 'dir')
+    // The account plugin makes the client entry async. On loopback it can
+    // run before Nuxt's inline runtime config, so keep the default deferred
+    // entry in the journey build.
     await writeFile(
       join(layer, 'nuxt.config.ts'),
-      `export default defineNuxtConfig({ extends: ${JSON.stringify(farm)}, srcDir: ${JSON.stringify(join(farm, 'app'))}, runtimeConfig: { connectorSignalling: { enabled: true } }, nitro: { preset: 'node-server', output: { dir: ${JSON.stringify(built)} } } })\n`,
+      `export default defineNuxtConfig({ extends: ${JSON.stringify(farm)}, srcDir: ${JSON.stringify(join(farm, 'app'))}, runtimeConfig: { connectorSignalling: { enabled: true } }, nitro: { preset: 'node-server', ignore: ['plugins/pre-hydration.ts'], experimental: { websocket: true }, output: { dir: ${JSON.stringify(built)} } } })\n`,
       { mode: 0o600 },
     )
     const buildEnv = {
@@ -234,6 +237,42 @@ export async function startFarmApp(
       }),
       { mode: 0o600, flag: 'wx' },
     )
+    const apiEnvelopeKeys =
+      process.env.OPENFARM_JOURNEY_INTEGRATION_API === '1'
+        ? generateKeyPairSync('ed25519')
+        : undefined
+    if (apiEnvelopeKeys) {
+      process.env.SIGNALLING_HTTPS_API_ENVELOPE_PUBLIC_KEY =
+        apiEnvelopeKeys.publicKey
+          .export({ format: 'der', type: 'spki' })
+          .toString('base64url')
+      process.env.SIGNALLING_HTTPS_API_ENVELOPE_KID = 'integration-journey'
+      process.env.OPENFARM_JOURNEY_CERT = cert
+      process.env.OPENFARM_JOURNEY_CERT_KEY = tlsKey
+    } else {
+      delete process.env.SIGNALLING_HTTPS_API_ENVELOPE_PUBLIC_KEY
+      delete process.env.SIGNALLING_HTTPS_API_ENVELOPE_KID
+      delete process.env.OPENFARM_JOURNEY_CERT
+      delete process.env.OPENFARM_JOURNEY_CERT_KEY
+    }
+    const integrationNuxtEnv: NodeJS.ProcessEnv = apiEnvelopeKeys
+      ? {
+          NUXT_INTEGRATION_AUTH_ENABLED: 'true',
+          NUXT_INTEGRATION_AUTH_DATABASE_URL: database.url(
+            'farm_integration_apps',
+          ),
+          NUXT_INTEGRATION_AUTH_SIGNING_KEY:
+            randomBytes(32).toString('base64url'),
+          NUXT_INTEGRATION_JOBS_ENABLED: 'true',
+          NUXT_INTEGRATION_JOBS_DATABASE_URL: database.url(
+            'farm_integration_jobs',
+          ),
+          NUXT_INTEGRATION_JOBS_ENVELOPE_SIGNING_KEY: apiEnvelopeKeys.privateKey
+            .export({ format: 'der', type: 'pkcs8' })
+            .toString('base64url'),
+          NUXT_INTEGRATION_JOBS_ENVELOPE_KID: 'integration-journey',
+        }
+      : {}
     // No renewal is configured: with telemetry flowing for the whole journey
     // the credential must outlive it.
     // Control journeys too: at expiry the Connector stops opening control
@@ -327,11 +366,20 @@ export async function startFarmApp(
       NUXT_JOB_HISTORY_DATABASE_URL: database.url('farm_job_history_reader'),
       NUXT_LIBRARY_ENABLED: 'true',
       NUXT_LIBRARY_DATABASE_URL: database.url('farm_library'),
+      NUXT_SPOOL_LIBRARY_ENABLED: 'true',
+      NUXT_SPOOL_LIBRARY_DATABASE_URL: database.url('farm_spool_library'),
+      NUXT_SPOOL_LIBRARY_IMPORT_ENABLED: 'true',
+      NUXT_SPOOL_LIBRARY_IMPORT_DATABASE_URL: database.url('farm_spool_import'),
+      NUXT_SPOOL_FEATURES_ENABLED: 'true',
+      NUXT_SPOOL_FEATURES_DATABASE_URL: database.url('farm_spool_features'),
+      NUXT_SPOOL_USAGE_ENABLED: 'true',
+      NUXT_SPOOL_USAGE_DATABASE_URL: database.url('farm_spool_usage'),
       NUXT_LIBRARY_DIRECTORY: join(directory, 'library'),
       NUXT_PRINTER_STATES_ENABLED: 'true',
       NUXT_PRINTER_STATES_DATABASE_URL: database.url(
         'farm_printer_state_reader',
       ),
+      ...integrationNuxtEnv,
     }
     delete env.NODE_TLS_REJECT_UNAUTHORIZED
     app = spawn(process.execPath, [join(built, 'server/index.mjs')], {

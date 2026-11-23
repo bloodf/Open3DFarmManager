@@ -1,0 +1,40 @@
+// spec-derived, not captured. Shape from the Klipper status reference
+// (https://www.klipper3d.org/Status_Reference.html) and the Moonraker printer
+// objects API (https://moonraker.readthedocs.io/en/latest/external_api/printer/),
+// with the four extruder objects of Snapmaker's U1 Moonraker configuration
+// (https://github.com/Snapmaker/u1-moonraker). Temperatures echo the values in
+// docs/hardware-reports/2026-11-21-snapmaker-u1-moonraker.json.
+{
+  "objects": [
+    "webhooks",
+    "toolhead",
+    "extruder",
+    "extruder1",
+    "extruder2",
+    "extruder3",
+    "heater_bed",
+  ],
+  "status": {
+    "toolhead": { "extruder": "extruder2" },
+    "extruder": { "temperature": 30, "target": 0 },
+    "extruder1": { "temperature": 30, "target": 0 },
+    "extruder2": { "temperature": 215.4, "target": 215 },
+    "extruder3": { "temperature": 30, "target": 0 },
+    "filament_switch_sensor e0_filament": {
+      "filament_detected": true,
+      "enabled": true,
+    },
+    "filament_switch_sensor e1_filament": {
+      "filament_detected": false,
+      "enabled": true,
+    },
+    "filament_motion_sensor filament_2": {
+      "filament_detected": true,
+      "enabled": true,
+    },
+    "filament_switch_sensor e3_filament": {
+      "filament_detected": true,
+      "enabled": true,
+    },
+  },
+}

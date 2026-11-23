@@ -1,13 +1,15 @@
 // Caller owns a disposable loopback PostgreSQL database with the maintained full migration journal.
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { readFile, realpath, lstat, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, relative } from 'node:path'
-import postgres from 'postgres'
+import postgres, { type Sql } from 'postgres'
 import {
   loadMigrationCatalog,
   validateMigrationHistory,
 } from './db/migrations.ts'
+import { ExtendedControlAction } from '../packages/farm-protocol/src/control-actions.ts'
 import {
   testPostgresPauseAuthority,
   verifyPauseAuthorityReplayRestart,
@@ -96,6 +98,124 @@ const admin = postgres({
   max: 6,
   connect_timeout: 3,
 })
+
+/**
+ * This fixture stops at 0018, where the capability constraint does not yet
+ * exist. Restore the shipped 0093 constraint, then its latest catalogued
+ * redefinition, without applying unrelated migrations to the reduced schema.
+ */
+async function applyConfirmCollectionConstraint(admin: Sql): Promise<string[]> {
+  const catalog = await loadMigrationCatalog()
+  const initial = catalog.find(
+    (entry) =>
+      entry.up.includes('ADD CONSTRAINT control_capability_actions') &&
+      entry.up.includes('"confirm_collection"') &&
+      !entry.up.includes('"set_tool_temperature"'),
+  )
+  const latest = catalog.findLast(
+    (entry) =>
+      entry.up.includes('ADD CONSTRAINT control_capability_actions') &&
+      entry.up.includes('"set_tool_temperature"'),
+  )
+  if (!initial || !latest || initial.id >= latest.id)
+    throw new Error('Missing shipped pause authority constraint chain')
+  const definition = async () =>
+    await admin`SELECT pg_catalog.pg_get_constraintdef(c.oid) AS definition FROM pg_catalog.pg_constraint c WHERE c.conname='control_capability_actions' AND c.conrelid='farm.pause_authority_challenges'::regclass`
+  if ((await definition()).length === 0) {
+    // The placeholder only gives the shipped drop its target.
+    await admin.begin(async (tx) => {
+      await tx`ALTER TABLE farm.pause_authority_challenges ADD CONSTRAINT control_capability_actions CHECK (true) NOT VALID`
+      await tx.unsafe(initial.up).simple()
+    })
+  }
+  const afterInitial = await definition()
+  assert.equal(afterInitial.length, 1)
+  assert.ok(
+    afterInitial[0]?.definition.includes('confirm_collection'),
+    'the shipped 0093 constraint must accept confirm_collection',
+  )
+  assert.ok(
+    !afterInitial[0]?.definition.includes('set_tool_temperature'),
+    '0093 must retain its own action allow-list before the later redefinition',
+  )
+
+  const redefinition = latest.up.match(
+    /ALTER TABLE farm\.pause_authority_challenges DROP CONSTRAINT control_capability_actions;\s*ALTER TABLE farm\.pause_authority_challenges ADD CONSTRAINT control_capability_actions CHECK \([\s\S]*?\);/,
+  )
+  assert.ok(
+    redefinition,
+    'latest catalogued constraint redefinition is present',
+  )
+  await admin.begin(async (tx) => {
+    await tx.unsafe(redefinition[0]).simple()
+  })
+  const applied = await definition()
+  assert.equal(applied.length, 1)
+  assert.ok(
+    applied[0]?.definition.includes('set_tool_temperature'),
+    'the latest shipped constraint must accept set_tool_temperature',
+  )
+  assert.ok(
+    applied[0]?.definition.includes('confirm_collection'),
+    'the latest shipped constraint must retain confirm_collection',
+  )
+  return [
+    'shipped 0093 constraint guards stored capabilities, followed by latest catalogued redefinition ' +
+      latest.id,
+  ]
+}
+
+/** Store a capability carrying confirm_collection, exactly as a browser journey does. */
+async function storeConfirmCollectionCapability(admin: Sql): Promise<string[]> {
+  const sources =
+    await admin`SELECT session_id,account_id,farm_id,agent_id,key_id,credential_jti,assignment_id FROM farm.pause_authority_challenges ORDER BY challenge_id LIMIT 1`
+  const source = sources[0]
+  assert.ok(source, 'the fixture must hold a synthetic pause authority scope')
+  const insert = async (capability: Record<string, unknown>) => {
+    const challengeId = randomUUID()
+    const now = Date.now()
+    await admin`INSERT INTO farm.pause_authority_challenges(challenge_id,session_id,account_id,farm_id,agent_id,key_id,credential_jti,assignment_id,transport_id,admission_nonce,binding,challenge,issued_at,expires_at,binding_expires_at,credential_expires_at) VALUES(${challengeId}::uuid,${source.session_id},${source.account_id},${source.farm_id}::uuid,${source.agent_id}::uuid,${source.key_id}::uuid,${source.credential_jti}::uuid,${source.assignment_id}::uuid,${randomUUID()}::uuid,${randomBytes(32).toString('base64url')},'{}'::jsonb,'{}'::jsonb,${now},${now + 8000},${now + 8000},${now + 8000})`
+    const consumed = now + 1000
+    const hash = createHash('sha256')
+      .update(JSON.stringify(capability))
+      .digest('base64url')
+    await admin`UPDATE farm.pause_authority_challenges SET status='issued',consumed_at=${consumed},capability_id=${randomUUID()}::uuid,capability=${admin.json(capability)},capability_hash=${hash},capability_expires_at=${consumed + 30000},retain_until=greatest(${consumed},expires_at,binding_expires_at,credential_expires_at,${consumed + 30000})+3600000 WHERE challenge_id=${challengeId}::uuid`
+    return challengeId
+  }
+  // An owner holds every control action, the bed-collection hold included.
+  const owner = await insert({
+    actions: [...ExtendedControlAction.options],
+    role: 'owner',
+  })
+  const stored =
+    await admin`SELECT status,capability->'actions' ? 'confirm_collection' AS has_confirm,capability->'actions' ? 'set_tool_temperature' AS has_tool_temperature FROM farm.pause_authority_challenges WHERE challenge_id=${owner}::uuid`
+  assert.ok(stored[0], 'the stored capability must be readable')
+  assert.deepEqual(
+    { ...stored[0] },
+    {
+      status: 'issued',
+      has_confirm: true,
+      has_tool_temperature: true,
+    },
+  )
+  // An action outside the protocol stays refused by the same constraint.
+  await assert.rejects(
+    insert({
+      actions: ['confirm_collection', 'teleport_printer'],
+      role: 'operator',
+    }),
+    (error: unknown) =>
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      error.code === '23514' &&
+      'constraint_name' in error &&
+      error.constraint_name === 'control_capability_actions',
+  )
+  return [
+    'stored capability with confirm_collection and set_tool_temperature accepted, unknown action refused',
+  ]
+}
 try {
   const identity = (
     await admin`SELECT current_database() AS database,current_user AS username`
@@ -135,6 +255,8 @@ try {
     ]
   } else {
     const catalogChecks = await testPauseAuthorityCatalog(admin, port)
+    // The catalog check rebuilds 0018, so the shipped constraint comes next.
+    const constraintChecks = await applyConfirmCollectionConstraint(admin)
     const revocationChecks = await testPauseConnectorRevocations(admin, port)
     assert.ok(serverLogPath)
     timeout = await testPauseAuthorityTransactionTimeout(
@@ -144,6 +266,7 @@ try {
     )
     checks = [
       ...catalogChecks,
+      ...constraintChecks,
       ...revocationChecks,
       'server-attributed-ten-second-transaction-timeout-before-main-pool',
       ...(await testPostgresPauseAuthority(
@@ -153,6 +276,7 @@ try {
           ? base + '.private.json'
           : undefined,
       )),
+      ...(await storeConfirmCollectionCapability(admin)),
     ]
     if (phase === 'prepare-restart') {
       if (!base) throw new Error('Missing restart base')

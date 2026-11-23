@@ -384,6 +384,8 @@ for (const [action, args, script] of [
       {
         kind: 'moonraker',
         mode: {
+          // Idle-only actions (#605) are dispatched from a stopped printer.
+          initialState: 'standby' as never,
           objects: [
             'gcode_macro CLEAN',
             'gcode_macro LOAD_FILAMENT',

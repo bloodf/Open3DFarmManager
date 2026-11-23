@@ -1,0 +1,20 @@
+// spec-derived, not captured. A single-extruder Klipper printer; exists to
+// prove the U1 mapping is opt-in and the generic path is unchanged.
+// https://www.klipper3d.org/Status_Reference.html
+// https://moonraker.readthedocs.io/en/latest/external_api/printer/
+{
+  "result": {
+    "eventtime": 42.5,
+    "status": {
+      "webhooks": { "state": "ready" },
+      "print_stats": {
+        "state": "printing",
+        "filename": "benchy.gcode",
+        "print_duration": 120,
+      },
+      "virtual_sdcard": { "progress": 0.25 },
+      "extruder": { "temperature": 200, "target": 210 },
+      "heater_bed": { "temperature": 60, "target": 60 },
+    },
+  },
+}

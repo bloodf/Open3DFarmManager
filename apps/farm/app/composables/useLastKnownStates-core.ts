@@ -1,10 +1,11 @@
 import { z } from 'zod'
+import { PrinterState } from '../../../../packages/farm-protocol/src/state.ts'
 
 /**
  * The published projection of `/api/farms/[farmId]/printer-states`. The route
  * answers the last state the server observed for each active assignment: the
- * state, the progress, the temperatures and the instant the Connector observed
- * it. Absent optional values stay absent instead of becoming zero.
+ * state, alarms, progress, temperatures and the instant the Connector observed
+ * them. Absent optional values stay absent instead of becoming zero.
  */
 export const LastKnownPrinterState = z.strictObject({
   assignmentId: z.string().min(1).max(128),
@@ -14,6 +15,7 @@ export const LastKnownPrinterState = z.strictObject({
   location: z.string().nullable().optional(),
   sortOrder: z.number().int().nullable().optional(),
   state: z.enum(['idle', 'printing', 'paused', 'error', 'offline']),
+  alarms: PrinterState.shape.alarms,
   progress: z.number().min(0).max(1).optional(),
   temperatures: z.strictObject({
     toolCelsius: z.number().finite().optional(),
@@ -39,6 +41,7 @@ export type LastKnownState = {
   location?: string | null
   sortOrder?: number | null
   state: LastKnownPrinterState['state']
+  alarms?: LastKnownPrinterState['alarms']
   progress: number | undefined
   temperatures: {
     toolCelsius: number | undefined
@@ -125,6 +128,7 @@ export function parseLastKnownStates(
     ...(state.location !== undefined ? { location: state.location } : {}),
     ...(state.sortOrder !== undefined ? { sortOrder: state.sortOrder } : {}),
     state: state.state,
+    ...(state.alarms !== undefined && { alarms: state.alarms }),
     progress: state.progress,
     // A missing reading is not a reading of zero: the key stays present and
     // the value stays undefined.
@@ -160,13 +164,16 @@ export function lastKnownStatesFailureReason(status: number | undefined) {
 /**
  * The assignments the live feed already owns.
  *
- * A live row with no observation yet is still a live row: the feed owns that
- * printer and its stored state must not be shown next to it.
+ * An authenticated row owns its printer even before the first observation.
  */
 export function liveAssignmentIds<
-  Live extends { assignment: { assignmentId: string } },
+  Live extends { assignment: { assignmentId: string }; connection: string },
 >(liveRows: readonly Live[]): ReadonlySet<string> {
-  return new Set(liveRows.map((row) => row.assignment.assignmentId))
+  return new Set(
+    liveRows
+      .filter((row) => row.connection === 'authenticated')
+      .map((row) => row.assignment.assignmentId),
+  )
 }
 
 /**
@@ -178,7 +185,7 @@ export function liveAssignmentIds<
  * always one card.
  */
 export function offlineCards<
-  Live extends { assignment: { assignmentId: string } },
+  Live extends { assignment: { assignmentId: string }; connection: string },
 >(
   liveRows: readonly Live[],
   storedStates: readonly LastKnownState[],

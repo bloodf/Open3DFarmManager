@@ -3,8 +3,10 @@ import {
   closeIntegrationAuthRuntime,
   integrationAuthPool,
 } from '../utils/integration-auth-runtime.ts'
+import { PostgresAlertNotifications } from '../storage/alert-rules-notifications-postgres.ts'
 import { PostgresWebhooks } from '../storage/webhook-postgres.ts'
 import { deliverNextWebhook } from '../services/webhook-worker.ts'
+import { credentialKeyring } from '../utils/sealed-credential-key.ts'
 
 export default defineNitroPlugin((nitro) => {
   let stopped = false
@@ -19,8 +21,14 @@ export default defineNitroPlugin((nitro) => {
   async function tick() {
     let worked = false
     try {
-      worked = await deliverNextWebhook(
-        new PostgresWebhooks(integrationAuthPool()),
+      const sql = integrationAuthPool()
+      const keyring = credentialKeyring(useRuntimeConfig().auth)
+      const results = await Promise.allSettled([
+        deliverNextWebhook(new PostgresWebhooks(sql, keyring)),
+        deliverNextWebhook(new PostgresAlertNotifications(sql, keyring)),
+      ])
+      worked = results.some(
+        (result) => result.status === 'fulfilled' && result.value,
       )
     } catch {
       // The lease makes an interrupted delivery available again.

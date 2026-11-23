@@ -30,9 +30,7 @@ describe('Bambu catalog', () => {
         // FTPS listing and upload are implemented and exercised against the
         // Bambu simulator.
         files: 'simulated',
-        camera: ['H2C', 'P2S', 'H2S'].includes(product.model)
-          ? 'simulated'
-          : 'unknown',
+        camera: 'unknown',
         // AMS tray reading and load/unload commands are covered by tests, so
         // materials is no longer unknown.
         materials: 'simulated',

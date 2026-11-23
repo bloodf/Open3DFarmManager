@@ -19,6 +19,7 @@ test('discovers test-postgres-*.ts suites sorted and ignores the runner itself',
     for (const name of [
       'test-postgres-b.ts',
       'test-postgres-a.ts',
+      'test-postgres-resin-ledger.ts',
       'test-postgres.ts', // the runner must not discover itself
       'test-postgres-notes.md',
       'unrelated.ts',
@@ -27,6 +28,7 @@ test('discovers test-postgres-*.ts suites sorted and ignores the runner itself',
     assert.deepEqual(await discoverPostgresSuites(dir), [
       'test-postgres-a.ts',
       'test-postgres-b.ts',
+      'test-postgres-resin-ledger.ts',
     ])
   } finally {
     await rm(dir, { recursive: true, force: true })

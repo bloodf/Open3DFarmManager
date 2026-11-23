@@ -44,6 +44,23 @@ import {
 import { MoonrakerConfigurationRegistrationResponseDto } from '../../apps/farm/app/utils/moonraker-onboarding-session.ts'
 import { serveWsTestServer } from './ws-serve.ts'
 
+// The fixture is a loopback WebSocket peer. Printer-network policy (#593)
+// refuses that address. Admit only the fixture address here; every other
+// address still goes through the real policy.
+vi.mock('../../packages/connector/src/provisioning/policy.ts', async (load) => {
+  const actual =
+    await load<
+      typeof import('../../packages/connector/src/provisioning/policy.ts')
+    >()
+  return {
+    ...actual,
+    createPrinterNetworkPolicy: (cidrs: readonly string[]) => {
+      const real = actual.createPrinterNetworkPolicy(cidrs)
+      return { allows: (ip: string) => ip === '127.0.0.1' || real.allows(ip) }
+    },
+  }
+})
+
 const directories: string[] = []
 const cleanups: (() => Promise<void>)[] = []
 afterEach(async () => {

@@ -32,7 +32,7 @@ it('migrates the lifecycle journal and preserves recorded actions', () => {
     const db = new DatabaseSync(join(directory, 'pause-commands.sqlite'))
     try {
       db.exec(
-        "DROP TABLE control_command_actions; CREATE TABLE control_command_actions (cmd_id TEXT PRIMARY KEY, action TEXT NOT NULL CHECK(action IN ('pause','resume','cancel'))) STRICT; INSERT INTO control_command_actions VALUES ('existing', 'pause'); PRAGMA user_version=2;",
+        "DROP INDEX pause_active_assignment; DROP INDEX pause_active_printer; CREATE UNIQUE INDEX pause_active_assignment ON pause_commands(assignment_id) WHERE status IN ('claimed','write-started','outcome-unknown'); CREATE UNIQUE INDEX pause_active_printer ON pause_commands(farm_id,printer_key) WHERE status IN ('claimed','write-started','outcome-unknown'); DROP TABLE control_command_actions; CREATE TABLE control_command_actions (cmd_id TEXT PRIMARY KEY, action TEXT NOT NULL CHECK(action IN ('pause','resume','cancel'))) STRICT; INSERT INTO control_command_actions VALUES ('existing', 'pause'); PRAGMA user_version=2;",
       )
     } finally {
       db.close()

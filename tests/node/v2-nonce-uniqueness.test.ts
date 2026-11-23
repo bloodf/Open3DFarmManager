@@ -147,9 +147,14 @@ for (const version of [1, 2, 3]) {
       closeCommandJournal(journal)
       // Rewind the file to an older schema generation.
       const raw = new DatabaseSync(join(f.directory, 'pause-commands.sqlite'))
-      if (version === 1) raw.exec('DROP TABLE control_command_actions')
-      else {
-        raw.exec('DROP TABLE control_command_actions')
+      raw.exec(`
+        DROP INDEX pause_active_assignment;
+        DROP INDEX pause_active_printer;
+        CREATE UNIQUE INDEX pause_active_assignment ON pause_commands(assignment_id) WHERE status IN ('claimed','write-started','outcome-unknown');
+        CREATE UNIQUE INDEX pause_active_printer ON pause_commands(farm_id,printer_key) WHERE status IN ('claimed','write-started','outcome-unknown');
+        DROP TABLE control_command_actions;
+      `)
+      if (version !== 1) {
         raw.exec(
           version === 2
             ? legacyActions

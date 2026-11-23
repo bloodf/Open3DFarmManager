@@ -429,8 +429,6 @@
         "packages/connector/package.json",
         "packages/sim-cams/Dockerfile",
         "packages/webrtc-experiment/README.md",
-        "packages/webrtc-experiment/interop-child.ts",
-        "packages/webrtc-experiment/interop.test.ts",
         "packages/webrtc-experiment/package.json",
         "packages/webrtc-experiment/real-identity/child.ts",
         "packages/webrtc-experiment/real-identity/interop.test.ts",

@@ -20,13 +20,42 @@ Owners can grant one or more scopes across a farm or limit them to a printer ass
 - `GET` and `POST /api/farms/{farmId}/integrations/apps/{appId}/grants` list or grant scopes.
 - `DELETE /api/farms/{farmId}/integrations/grants/{grantId}` removes a grant.
 
+### Scopes
+
+| Scope                 | Grants                                                                       |
+| --------------------- | ---------------------------------------------------------------------------- |
+| `printers:read`       | Read printers, their status, readiness and qualified capabilities.           |
+| `files:read`          | List files stored on printers.                                               |
+| `inventory:read`      | Read Spoolman inventory snapshots and the resin ledger (lots, vats, usage).  |
+| `jobs:read`           | Read job history and API-submitted jobs.                                     |
+| `jobs:start`          | Submit print jobs.                                                           |
+| `control:basic`       | Pause, resume and cancel.                                                    |
+| `control:extended`    | Temperatures, fans, lights, speed, homing, filament and macros; list macros. |
+| `events:subscribe`    | Manage webhook subscriptions and receive events.                             |
+| `jobs:write`          | Start a library replay on a granted printer.                                 |
+| `library:read`        | Read library files and the storage mode.                                     |
+| `library:write`       | Upload library files and set the storage mode.                               |
+| `environment:read`    | Read enclosure and room environment and power measurements.                  |
+| `plates:confirm`      | Confirm that a printer's build plate is clear.                               |
+| `alerts:write`        | Acknowledge or silence alerts on granted printers.                           |
+| `camera:view`         | Open the camera view for a granted printer.                                  |
+| `inventory:write`     | Register and withdraw physical spools.                                       |
+| `environment:control` | Control drying programs, smart plugs and extraction.                         |
+| `alerts:manage`       | Change alert rules and configure or test notification channels.              |
+
+Each scope in the table authorizes the operations listed above.
+`environment:control` is used by the environment control endpoints below.
+Commands that reach a printer travel as issuer-signed envelopes that the
+Connector enforces and may refuse with a reason.
+
 Revocations are audited and take effect on the next API request. Revoking an app
 also makes its webhook subscriptions ineligible for delivery, including events
 already waiting in the outbox.
 
 The OpenAPI document below describes the separate client-facing API. Sandbox apps can be granted sandbox farms only; they cannot be attached to a non-sandbox farm.
 
-Server-side storage of print files is out of scope for the integration API: [E7, #204](https://github.com/bloodf/Open3DFarmManager/issues/204) excludes it. Print library storage, retention and replay are specified in [PRINT-LIBRARY.md](PRINT-LIBRARY.md) (E17.1, [#373](https://github.com/bloodf/Open3DFarmManager/issues/373)) and are not part of this API until that document's implementation lands.
+Library storage, retention and replay are available through the routes described
+below. See [PRINT-LIBRARY.md](PRINT-LIBRARY.md) for their storage model.
 
 ## Authenticate
 
@@ -47,6 +76,84 @@ curl -u "$CLIENT_ID:$CLIENT_SECRET" \
   "$OPENFARM_URL/api/integrations/v1/oauth/token"
 ```
 
+## Observed telemetry and health
+
+`GET /telemetry/{printerId}` requires `printers:read` on the assignment. It returns
+at most 500 observed samples over a window of at most seven days (`since` is
+inclusive and `until` exclusive, in Unix milliseconds). The default window is
+one day and default limit is 100. `truncated` signals that more observations
+exist; `until` is the end of the returned window. When timestamps tie at
+the limit, reduce the window and do not treat truncation as a complete export. State intervals use `gap` for
+offline or observations older than two minutes. Metrics include explicit units;
+missing values remain unknown. Moonraker can report layers, elapsed time,
+tool targets and chamber readings when the configured objects provide them.
+A Connector-reported run energy reading is expressed in Wh, including a
+reported zero. No current Moonraker collector reports run energy. Raw payloads and local
+camera URLs are never returned. The `events` array contains up to 500 observed
+state transitions with timestamps and states; `eventsTruncated` signals that
+additional transitions were omitted.
+
+`GET /health/{printerId}` requires the same grant and reports heartbeat freshness,
+assignment connection state and degraded reasons. `assignmentObservedAt` is
+the last successful printer observation. After two minutes, an expired
+heartbeat or a connected assignment without a successful observation is
+reported as unknown.
+Both endpoints are read-only.
+
+### Camera view
+
+`GET /camera/{printerId}` requires `camera:view` on the assignment and a
+fresh Connector heartbeat advertising its camera. The result's relative
+`url` opens on the OpenFarm origin and expires after two minutes. The
+viewer needs an authenticated OpenFarm account in that farm and a browser
+approved for direct WebRTC. Revoking the grant prevents link redemption.
+The Connector offers one camera per WebRTC session, so it advertises its
+first configured camera for this link. The stream and its credentials
+stay on the existing Connector camera path.
+
+### Alert lifecycle
+
+`GET /alerts/{printerId}` requires `printers:read`. It lists up to 500
+occurrences for the assignment, with open alerts first. Each occurrence has
+its own ID and an observed `openedAt`. An observed recovery sets
+`resolvedAt`. The latest 500 resolved occurrences per assignment are
+retained. Tracking begins with observations accepted after this update.
+Use `needsAttention` to filter the inbox. Resolution, acknowledgement or
+an active silence removes the occurrence from that inbox.
+
+`POST /alerts/{printerId}/{alertId}` requires `alerts:write` on the
+assignment. Send `{"action":"acknowledge"}` or
+`{"action":"silence","until":<Unix milliseconds>}`. Acknowledgement keeps
+the first acknowledgement timestamp. A silence can last up to seven days
+and can be extended. These actions affect the inbox and issue no printer
+commands. An occurrence that has resolved returns `404` on update.
+
+### Farm alert rules and notification channels
+
+Use `GET /alert-rules/{farmId}` with a farm-wide `printers:read` grant to read
+the farm's rule settings. Rules default to enabled. Send
+`PATCH /alert-rules/{farmId}/{kind}` with `{"enabled":false}` to save an
+override for the farm.
+
+Use `PUT /notification-channels/{farmId}` with an HTTPS `url` and a
+`secret` of 32 to 256 characters to configure or replace an app's webhook
+channel for the farm. OpenFarm seals the URL and secret and omits both from
+responses. Channels belong to the farm and the app that configured them.
+These endpoints manage settings and send test notifications. Live event
+subscriptions use the separate webhook subscription API.
+
+Rule and channel changes and channel tests require a farm-wide
+`alerts:manage` grant from a current farm owner that does not require
+interactive approval. Outside the farm-wide grant, the API returns `404`.
+A grant whose owner lost the required role is denied with `403`.
+
+Send an empty `POST /notification-channels/{farmId}/test` to attempt one
+signed `farm.notification.test` event to a public destination. The result reports `delivered` when
+the receiver returned 2xx, `failed` when an outbound attempt failed, or
+`not-run` when target validation prevented an attempt. The `attempted`
+boolean distinguishes those cases. A channel that has never been configured
+returns `404`. The test does not retry or follow redirects.
+
 ## Read printers, state and inventory
 
 Use `GET /printers` with `printers:read`; follow the opaque `nextCursor` as
@@ -59,10 +166,255 @@ be a bounded subset of `total`. The Connector's Spoolman setup, active spool
 sources, usage calculation and read-only behaviour are described in
 [SPOOLMAN-INTEGRATION.md](SPOOLMAN-INTEGRATION.md).
 
+### Observed spool page
+
+`GET /inventory/spools` requires a farm-wide `inventory:read` grant. It
+accepts `farmId`, `limit` (1–100), and an opaque `cursor`, returning `data`
+and `nextCursor`. Each item includes the Connector, observation time, stale
+and partial flags, and one spool summary. This pages the latest bounded
+Connector observations; a partial snapshot omits spools, and a changing
+snapshot can change page membership between requests. IDs are scoped to the
+Connector's Spoolman service and may be absent in older observations.
+
+### Spool snapshot identity
+
+New Connector observations include `spoolId` for each spool. The ID belongs
+to that Connector's configured Spoolman service, not to the display name;
+older observations may omit it. The existing snapshot response retains its
+original contract; compare the number of entries with `total` to identify a
+bounded snapshot. The spool page labels each observation with `partial`.
+
+### Spool finder and run usage
+
+`GET /inventory/spools/search` and `GET /inventory/spools/usage` require a
+farm-wide `inventory:read` grant and the spool usage database runtime.
+Both accept `farmId` and `limit` (1–100, default 50).
+
+Search reads the full OpenFarm spool library. Optional filters are `color`
+(six hex digits, with an optional URL-encoded `#`), `material` (case
+insensitive), `availability` (`any`, `stored`, or `loaded`), and
+`minRemainingGrams`. Archived spools are excluded. Matches are ordered
+by Euclidean RGB distance, then farm and spool ID. Colour filtering
+excludes unknown colours and a weight threshold excludes unknown weights.
+A missing location is `null`. The response includes `assessedAt` (Unix
+milliseconds) and each active slot's `assignedAt` timestamp. Loaded
+state reflects the library's assignment ledger at query time.
+
+Usage accepts the numeric `id` from the history endpoint `GET /jobs`
+as `jobId`, plus the optional `cursor` returned in `nextCursor`. Each
+record includes the library spool ID, the source, grams and `observedAt`
+(Unix milliseconds, the run end for telemetry and entry time otherwise).
+Corrections retain the original `usageId` and observation time, replace
+the grams and set `corrected`. Re-fetch the run to reconcile corrections
+and upsert by `(farmId, usageId)` to avoid replaying stock movements.
+Unattributed consumption has no spool ledger record.
+
+Join finder results and usage records by `(farmId, spoolId)`. Connector
+observations share that ID space when the Connector reads the farm's
+OpenFarm Spoolman-compatible library. External Spoolman IDs belong to
+their own service and can overlap with library IDs.
+
+### Physical spool registration and withdrawal
+
+All three routes require a `farmId` query parameter and a farm-wide grant.
+Use `POST /inventory/spools/physical?farmId=…` with `inventory:write` and a
+JSON body containing an existing library `filamentId`, a bin `location`,
+and optional `initialWeightGrams`. Each successful registration creates a
+distinct spool, even when the filament and location match. Use its
+`(farmId, spoolId)` in the finder and in subsequent requests. The ID also
+appears in Connector observations when the Connector reads that farm's
+OpenFarm library.
+
+Use `GET /inventory/spools/physical/{spoolId}?farmId=…` with
+`inventory:read` to find its current location. Open `label.href` on the
+same OpenFarm origin in a signed-in browser with farm access to print
+the exact spool's QR label. A null location means the location is unknown.
+`binLight.status` is `unsupported` because OpenFarm has no qualified bin-light
+capability.
+
+Use `POST /inventory/spools/physical/{spoolId}/withdraw?farmId=…` with
+`inventory:write`. Send the non-null `location` as `expectedLocation`,
+and the `version` from the same lookup or registration. A successful
+withdrawal clears that spool's location and returns `withdrawn`. A request
+for a spool with no current location returns `already-unlocated` without
+a write, including when replayed after a successful withdrawal. If the
+spool is still located and the location or version differs, the API
+returns `409 spool-location-changed`. Fetch the spool again to decide
+whether to start a new withdrawal. An old request stays harmless even
+if the spool later returns to the original bin.
+
+To exercise two identical registrations and concurrent withdrawal against a
+disposable local PostgreSQL sandbox, run
+`OPENFARM_TEST_PHYSICAL_PG=1 npx vitest run tests/unit/integration-spool-physical`.
+
+A `GET /printers` item may carry a read-only `specs` object with what the
+Connector or printer profile reported: `buildVolumeMm` (`x`, `y`, `z` in mm),
+`nozzles` (`[{ diameterMm }]`, one per tool), `spoolSlots` (integer) and
+`multicolor` (boolean; `true` when more than one tool or spool slot is
+reported, `false` only for exactly one of each). Unknown members are omitted,
+and `specs` is absent when nothing is known; values are never defaulted per
+model.
+
+## Printer readiness and qualified capabilities
+
+`GET /printers/readiness` with `printers:read` returns one page of readiness
+summaries for granted printers. Each item reports `paired` (OpenFarm has an
+assignment), `eligible` (Shop may treat the printer as ready to observe or, when
+the operation allows it, control), `observedAt` (the last observation, or null),
+`degradedReason` and `setupPath`. `setupPath` is an owner-facing path on this
+OpenFarm server, such as `/impressoras/{printerKey}?farm={farmId}`. Open it in
+OpenFarm to finish pairing or repair the printer. It is not a printer address
+and it accepts no commands.
+
+`eligible` is true only when the printer is paired, the latest observation is
+present and not degraded, and the qualified operation is `supported-control` or
+`monitoring-only`.
+
+`GET /printers/{printerId}/capabilities` returns that operation and the catalog
+evidence revision that justified it. Machine specs stay on `GET /printers` and
+are not repeated here. `operation` is one of:
+
+- `supported-control` — pause, resume and cancel are hardware-qualified for the reported firmware.
+- `monitoring-only` — telemetry is hardware-qualified and control is not. Shop can observe the printer and must not start or control a job.
+- `unknown-firmware` — the model matches a hardware-qualified catalog entry, but the reported firmware is absent or is not one of the recorded qualification versions.
+- `temporarily-unavailable` — the catalog entry has hardware evidence, and the latest observation is degraded. Wait for a newer observation. Do not resend an uncertain command.
+- `unqualified` — no hardware evidence covers this printer. Documented, simulated and unverified catalog rows do not enable operations.
+
+Degradation is considered only after hardware evidence exists, so an unqualified
+model stays `unqualified` while it is offline. Firmware is checked after
+degradation. `catalogId` is the compatibility catalog entry, or null when
+nothing matched. `evidenceRevision` is the SHA-256 of that entry's capability
+grades, hardware-report paths, sources and, when the same brand and model are in
+the fleet catalog, its evidence grades. It changes when that evidence changes.
+It does not cover build volume or other machine specs.
+
+`degradedReason` is `offline`, `reconnecting`, `error`, `stale`,
+`unknown-state` or `client-certificate-missing`, and null when the latest observation is not
+degraded. A printer outside the grant answers `404 not-found`.
+
+Recorded firmware versions used for `monitoring-only` are the hardware reports
+for the Sovol SV06 (`Moonraker v0.11.0-4-gb559b9a`), the Snapmaker U1
+(`Moonraker 2.0.0`) and the Anycubic Kobra X (`2.0.2.8`). A simulator build is
+not one of those versions.
+
 Other read operations include printer files (`files:read`), macros
 (`control:extended`), job history (`jobs:read`) and individual job/action
 status. File and macro listing are answered live by the Connector and may be
 unavailable even when the printer list and status projection are readable.
+
+## Printer operational availability
+
+`GET /printers/{printerId}/mode` requires `printers:read` and returns
+`mode`, its pt-BR `label`, and the current `version`. A new assignment starts
+in `in-service` with a null version. Availability is an OpenFarm setting for
+fleet planning. It preserves observed print state, including unknown state.
+Job dispatch and printer controls keep their existing safety checks.
+
+`POST /printers/mode` requires a covering `control:extended` grant for each
+target. Submit 1–50 distinct printer IDs in `targets` with an
+`expectedVersion` for each printer. Use `action: "set"` and
+`mode: "maintenance"` or `mode: "in-service"`. Use `expectedVersion: null`
+only before the first change. Use `action: "restore"` with the version returned
+by a successful set by the same app. The restore applies only while that version
+is current and produces a new version.
+
+The batch returns `applied`, `denied` or `unsupported` per target in request
+order. Missing and out-of-grant targets both return `denied` with `not-found`
+in a mixed batch. A batch with no covered targets returns HTTP 404. Approvals
+are not available for this operation. An unavailable observation is denied.
+The driver must advertise print-start capability in a fresh, hardware-qualified
+observation. A missing capability or unqualified firmware yields
+`unsupported`. The capability is used only to qualify the availability setting.
+There are no printer commands or automatic retries. After an uncertain HTTP
+response, read the current version before deciding whether another change is
+needed.
+
+## Resin and environment reads
+
+Both are read-only. Switching, pairing and safety controls stay in OpenFarm and
+are never reachable through these routes.
+
+### Resin lots, vats and usage
+
+`GET /resin/lots`, `GET /resin/vats` and `GET /resin/usage` require
+`inventory:read`. They read the farm resin ledger: a farm-wide grant covers
+every printer of the farm, a printer grant only its printer. Printers without
+ledger entries are not listed. Pagination is by printer (`limit` counts printers;
+follow `nextCursor`).
+
+- Every quantity carries `source` and `observedAt`. `manual` is an operator
+  record; `measured` is what the Connector reported. `observedAt` is when that
+  ledger entry was recorded or reported.
+- Unknown stays unknown: a bottle or vat without a recorded amount has
+  `quantity: null` and `quantityState: "unknown"`. It is never `0`.
+- The ledger has no lot register: `lotRef` is the label given to the bottle.
+  The current vat (`current: true`) is the newest vat change; a reading taken
+  before that vat's latest change is not applied to it.
+- `/resin/usage` returns observed `readings` (newest first, at most 50 per
+  printer) and `runs` (the last 20 finished runs). The ledger never ties a
+  reading to a run, so each run has `consumption: { "state": "unknown" }`.
+  Consumption is not estimated and never derived from a filament slot; compare
+  measured readings and their `observedAt` yourself.
+
+### Environment measurements
+
+`GET /environment/measurements` requires `environment:read`, with the same
+grant scoping and pagination as printers. Each printer lists `temperature`,
+`humidity`, `air` and `power` measurements. A measurement is:
+
+- `known`: `value`, `unit` and `lastObservedAt`.
+- `unknown`: `reason` (`never-observed`, `offline` or `stale`) and, when
+  something was seen before, `lastObservedAt`. A reading older than 60 seconds
+  is `stale` and its old value is not returned.
+- `unsupported`: the device does not report this measurement.
+
+Today the Connector reports only the chamber fan speed (`air`, percent) to the
+farm; `temperature`, `humidity` and `power` are `unsupported` until it observes
+chamber/enclosure sensors and Moonraker sensors or power devices. Each printer
+carries its `printerId`, `farmId`, `printerKey`, `displayName` and `location`,
+so a storage warning can link to the responsible farm device.
+
+### Environment controls
+
+`GET /environment/controls` (`environment:read` or `environment:control`, same
+grant scoping and pagination as measurements) lists, per printer, the
+`drying`, `plug` and `extraction` controls. Each control has:
+
+- `readiness`: `ready`, `not-ready` (`offline`, `never-observed` or
+  `printer-error`), `stale` (no observation in the last 60 seconds) or
+  `unsupported` (`no-qualified-capability`).
+- `observed`: the Connector's last observation as an environment measurement
+  (extraction is the chamber fan, `air`; plugs report `power`).
+- `actions`: what this app may request now; empty without
+  `environment:control` on the printer or without a qualified capability.
+- `managementUrl`: the OpenFarm printer page. Safety interlocks, plug setup and
+  credential enrollment stay in OpenFarm.
+
+Extraction is qualified when the Connector advertises `set_fan` and reports a
+chamber fan. Smart plugs and drying programs have no qualified Connector
+capability yet and always report `unsupported`.
+
+`POST /environment/controls/{printerId}/actions` (`environment:control`, with
+`Idempotency-Key`) takes `{"control":"extraction","action":"set","args":{"percent":60}}`,
+`{"control":"plug","action":"on"|"off","args":{"device":"…"}}` or
+`{"control":"drying","action":"start","args":{"targetCelsius":55,"durationMinutes":240}}`
+/ `"stop"`. A printer outside the grants is 404. An unsupported control, or a
+grant that requires owner approval, is 422 `unsupported` with `managementUrl`;
+a stale observation is 409 `device-stale` and an offline, never-observed or
+failed printer 409 `device-not-ready`. None of these sends anything. Otherwise
+the server issues one `environment:control` envelope and delivers it once.
+The Connector checks the signed scope and grant, refuses smart plugs and drying
+as `unsupported`, refuses on an unknown state (`not-ready`), never turns
+extraction off during a print (`printer-busy`,
+`extraction-interlock-print-active`) and never switches a plug during one.
+
+`GET /environment/controls/{printerId}/actions/{actionId}` returns the action
+with `status` (from Connector results only) and `outcome`: `pending`,
+`accepted`, `refused` or `unsupported` (with `refusal.code` and `detail`),
+`failed`, `not-delivered` or `unknown`. Nothing is retried automatically; an
+uncertain delivery stays `queued` or becomes `outcome-unknown`. Until the
+environment-control action storage is configured on a server, a qualified
+request answers 503 `service-unavailable` and sends nothing.
 
 ## Start and track a job
 
@@ -82,6 +434,88 @@ optional `plate`) instead of a URL. The grant needs `jobs:start` and
 return the farm's storage mode. `POST /library` stores the file in that mode,
 and `PATCH /library/settings` (`library:write`) changes it. The Connector
 prints the stored file and refuses a printer the file does not fit.
+
+### Resin artifacts
+
+`GET /library?farmId=…` publishes `resinArtifactFormats`. Each entry
+contains an extension, a printer family, exact compatible profile IDs,
+and the vendor source for the `spec-derived` declaration. Profile IDs
+refer to models in the [resin catalog](fullfarmmanager/catalog-resin.md).
+
+| Family           | Extensions     | Compatible profiles                                                         |
+| ---------------- | -------------- | --------------------------------------------------------------------------- |
+| Elegoo SDCP      | `.ctb`, `.goo` | `elegoo:saturn-4-ultra`, `elegoo:saturn-4-ultra-16k`, `elegoo:mars-5-ultra` |
+| Anycubic Photon  | `.pm7m`        | `anycubic:photon-mono-m7-max`                                               |
+| Anycubic Photon  | `.pp1m`        | `anycubic:photon-p1-max`                                                    |
+| Anycubic Photon  | `.pwsz`        | `anycubic:photon-mono-m7-pro`                                               |
+| Formlabs PreForm | `.form`        | `formlabs:form-4`, `formlabs:form-4l`                                       |
+
+Upload with `name`, `contentBase64`, `farmId` and the exact
+`resinProfile` from the catalog. The upload checks the extension and
+declared profile and stores a `resin` version with one plate and a SHA-256.
+A mismatched declaration returns 422 with a reason in `errors`. Catalog
+compatibility is model-specific. The qualified Connector driver validates
+the actual vendor file and firmware compatibility before starting it.
+
+Replay by `libraryVersionId` with plate 1 or omit `plate` to select it.
+Another plate returns 422 with `plate-mismatch`. The signed command carries
+the immutable version ID, digest, filename, profile and plate. Operator
+approval uses that same command. The Connector checks for an explicit
+artifact-dispatch capability for the assigned printer before any file
+transfer to the printer. When the Connector receives the command and
+lacks that capability, the receipt shows `status: refused`,
+`refusal.code: unsupported` and
+`refusal.detail: resin-artifact-dispatch-unavailable`. The receipt retains
+the version ID, digest, profile and plate alongside the result. Connector
+mode requires the target Connector to have the retained bytes. A successful resin dispatch reports `completed` once the driver confirms
+the start. This is the dispatch result. An uncertain start is never retried
+automatically.
+
+### Plate checks at dispatch
+
+Read `GET /jobs/{jobId}/eligibility?printerId={printerId}` for an advisory
+eligibility decision and its reasons. Use
+`GET /jobs/{jobId}/plate?printerId={printerId}` for the plate observation alone.
+Both reads accept `jobs:read` or `jobs:start` and require the job's assigned
+printer. For Moonraker, the Connector combines live printer state with its
+collection journal. The plate state is `awaiting-collection`,
+`operator-confirmed`, or `unknown`. An available attempt ID identifies the
+journal entry. Eligibility requires a pending job, an idle printer and a
+confirmed plate. For a stopped Moonraker printer with no collection history,
+the read reports `unknown` with attempt ID `0`. An operator can inspect and
+clear the bed, then acknowledge that initial attempt before the first API
+start.
+
+For a signed start, the Connector checks its local collection journal before
+staging the file and again at the printer send boundary. A start refused with
+`wrong-state` may include `awaiting-collection` when a completed run still
+requires plate clearance, or `plate-state-uncertain` when the Connector cannot
+establish clearance from its journal. Resolve the plate state locally before
+submitting another start.
+
+### Acknowledge plate clearance or control a job run
+
+Send `POST /jobs/{jobId}/actions` with an `Idempotency-Key` and JSON.
+The job must belong to the calling integration, and the grant must cover its
+assigned printer. A grant that requires operator approval holds the action.
+
+- For plate clearance, use `plates:confirm` and send
+  `{"action":"confirm_collection","args":{"attempt":"<attemptId>"}}` after an
+  operator clears the bed. Take the attempt ID from the plate read for the
+  assigned printer. The Connector records the acknowledgement while the
+  printer is stopped. Confirming the current collected attempt again is safe.
+  An older attempt cannot release a newer hold. The refusal details are
+  `plate-attempt-mismatch` and `plate-state-uncertain`.
+- For job control, use `control:basic` and send `pause`, `resume`, or `cancel`
+  with `"args":{}`. The Farm binds the command to that job's original start
+  envelope. The Moonraker Connector checks the active run immediately before
+  dispatch and reports `already-ended` for a stopped printer or
+  `run-mismatch` when it cannot verify that the active run is the expected one.
+
+Follow the response's `Location` to read the action result. Reuse the same
+idempotency key and request to retrieve the existing action, including after
+a lost response. An `outcome-unknown` requires reconciliation before making
+another request. The service never automatically retries an uncertain write.
 
 ## Request actions
 
@@ -142,6 +576,14 @@ export function verifyWebhook(
   secret: string,
 ): boolean {
   if (!/^\d{1,16}$/.test(timestamp)) return false
+  const timestampValue = Number(timestamp)
+  const timestampMs =
+    timestampValue < 100_000_000_000 ? timestampValue * 1000 : timestampValue
+  if (
+    !Number.isSafeInteger(timestampMs) ||
+    Math.abs(Date.now() - timestampMs) > 5 * 60 * 1000
+  )
+    return false
   const expected = createHmac('sha256', secret)
     .update(`${timestamp}.`)
     .update(rawBody)
@@ -164,9 +606,12 @@ Use a sandbox app and sandbox farm for development. Sandbox credentials can
 never authorize a non-sandbox farm. Keep sandbox and production credentials,
 data and base URLs separate. The reference client in
 [`../examples/integration-client/`](../examples/integration-client/) has
-offline tests and an explicitly opt-in sandbox test. The latter needs a
-sandbox URL, client credentials and a printer ID; it reads printer state and
-inventory without sending a physical command.
+offline tests and an explicitly opt-in sandbox journey. `startPrint`,
+`pausePrint` and `cancelPrint` send the published job and action operations;
+authenticate with `jobs:start` and `control:basic` before calling them.
+`tests/e2e/epic-204.spec.ts` runs that client against a loopback sandbox, a
+simulated Moonraker printer and the Connector, which accepts only a signed
+envelope. The run does not contact a physical printer.
 
 With Node 22 and workspace dependencies installed, run the offline command checks:
 
@@ -202,5 +647,5 @@ change behavior within v1 when needed to protect owners or printers.
 
 ## Out of scope
 
-E7 does not provide the print-library storage, retention or replay contract;
-see [PRINT-LIBRARY.md](PRINT-LIBRARY.md).
+The v1 API does not expose arbitrary filesystem access or direct printer commands.
+Library storage and replay use the scoped routes described above.

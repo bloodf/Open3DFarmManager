@@ -14,13 +14,49 @@ watchPostEffect(() => {
   else element.close()
 })
 
+function containFocus(event: KeyboardEvent) {
+  if (event.key !== 'Tab' || !dialog.value) return
+  const controls = [
+    ...dialog.value.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ),
+  ].filter((element) => element.getClientRects().length > 0)
+  if (!controls.length) {
+    event.preventDefault()
+    dialog.value.focus()
+    return
+  }
+  const first = controls[0]!
+  const last = controls[controls.length - 1]!
+  if (
+    event.shiftKey &&
+    (document.activeElement === first ||
+      !dialog.value.contains(document.activeElement))
+  ) {
+    event.preventDefault()
+    last.focus()
+  } else if (
+    !event.shiftKey &&
+    (document.activeElement === last ||
+      !dialog.value.contains(document.activeElement))
+  ) {
+    event.preventDefault()
+    first.focus()
+  }
+}
+
 function syncClosed() {
   if (!dialog.value?.open) open.value = false
 }
 </script>
 
 <template>
-  <dialog ref="dialog" :aria-labelledby="titleId" @close="syncClosed">
+  <dialog
+    ref="dialog"
+    :aria-labelledby="titleId"
+    @close="syncClosed"
+    @keydown="containFocus"
+  >
     <h2 :id="titleId">{{ title }}</h2>
     <slot />
     <IconButton label="Fechar" icon="close" @click="open = false" />

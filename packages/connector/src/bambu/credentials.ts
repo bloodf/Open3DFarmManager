@@ -10,7 +10,9 @@ const Credential = z.strictObject({
     .regex(/^[^\u0000-\u001f\u007f]+$/u),
 })
 
-export function readBambuCredentials(binding: BambuBinding) {
+export function readBambuCredentials(
+  binding: Pick<BambuBinding, 'credentialFile'>,
+) {
   try {
     const credential = Credential.parse(
       readPrivateJsonFile(binding.credentialFile, {

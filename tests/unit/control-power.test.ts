@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync } from 'node:fs'
+import { chmodSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -181,6 +181,7 @@ it.each([
     const directory = mkdtempSync(
       join(process.env.OPENFARM_POWER_TEST_TMP ?? tmpdir(), 'power-journal-'),
     )
+    onTestFinished(() => rmSync(directory, { recursive: true, force: true }))
     chmodSync(directory, 0o700)
     closeCommandJournal(openCommandJournal({ directory, clock: Date.now }))
     const db = new DatabaseSync(join(directory, 'pause-commands.sqlite'))
@@ -200,7 +201,7 @@ it.each([
           `'service',${actions}`,
         )
       db.exec(
-        `DROP TABLE control_command_actions; ${prior}; PRAGMA user_version=${version};`,
+        `DROP INDEX pause_active_assignment; DROP INDEX pause_active_printer; CREATE UNIQUE INDEX pause_active_assignment ON pause_commands(assignment_id) WHERE status IN ('claimed','write-started','outcome-unknown'); CREATE UNIQUE INDEX pause_active_printer ON pause_commands(farm_id,printer_key) WHERE status IN ('claimed','write-started','outcome-unknown'); DROP TABLE control_command_actions; ${prior}; PRAGMA user_version=${version};`,
       )
       db.prepare('INSERT INTO control_command_actions VALUES (?, ?)').run(
         'retained',

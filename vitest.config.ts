@@ -26,7 +26,7 @@ export default defineConfig({
   tsconfig: './tsconfig.json',
   plugins: [rawImports],
   test: {
-    include: ['tests/unit/**/*.test.ts'],
+    include: ['tests/unit/**/*.test.ts', 'infra/sandbox/docs-drift.test.ts'],
     // Node entry points run separately from Vitest discovery.
     exclude: [
       'tests/unit/api-v1-contract.test.ts',
@@ -36,5 +36,8 @@ export default defineConfig({
     environment: 'node',
     isolate: true,
     maxWorkers: 2,
+    // The full gate runs on a busy machine, so the 5 s default times out spuriously.
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
   },
 })

@@ -28,7 +28,8 @@ export async function testPostgresIntegrationApproval(
 ) {
   const checks: string[] = []
   const check = (name: string) => checks.push(name)
-  const clock = { now: 9_000_000 }
+  // The fixture advances through two held-job lifetimes. Keep those audit writes within the database clock window.
+  const clock = { now: Date.now() - 2 * HELD_TTL_MS }
   const sent: string[] = []
   const pair = await crypto.subtle.generateKey('Ed25519', false, [
     'sign',

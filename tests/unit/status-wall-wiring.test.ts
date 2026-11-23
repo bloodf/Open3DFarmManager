@@ -115,7 +115,10 @@ describe('farm page', () => {
         name: 'Bancada Alfa',
         exact: true,
       })
-      await pw(link).toHaveAttribute('href', '/impressoras/voron%2024')
+      await pw(link).toHaveAttribute(
+        'href',
+        `/impressoras/voron%2024?farm=${FARM}`,
+      )
       await pw(inspector).toContainText('Produção · Sala 1')
       await pw(inspector).toContainText('Sem dados')
       await pw(
@@ -130,7 +133,7 @@ describe('farm page', () => {
       await beta.click()
       await pw(
         inspector.getByRole('link', { name: 'Bancada Beta', exact: true }),
-      ).toHaveAttribute('href', '/impressoras/ender-3')
+      ).toHaveAttribute('href', `/impressoras/ender-3?farm=${FARM}`)
     } finally {
       await opened.close()
     }
@@ -185,10 +188,15 @@ describe('farm page', () => {
         .click({ timeout: WAIT })
       const table = page.getByRole('table', { name: 'Impressoras atribuídas' })
       await table.waitFor({ state: 'visible', timeout: WAIT })
-      const hrefs = await table
+      const scopedHrefs = await table
         .locator('tbody th a')
         .evaluateAll((anchors) => anchors.map((a) => a.getAttribute('href')))
+      const hrefs = scopedHrefs.map((href) => href?.split('?')[0])
       expect(hrefs).toEqual(['/impressoras/voron%2024', '/impressoras/ender-3'])
+      expect(scopedHrefs).toEqual([
+        `/impressoras/voron%2024?farm=${FARM}`,
+        `/impressoras/ender-3?farm=${FARM}`,
+      ])
       expect(await table.locator('a[href^="#"]').count()).toBe(0)
     } finally {
       await opened.close()

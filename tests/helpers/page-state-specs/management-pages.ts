@@ -6,6 +6,7 @@ import {
   rawFailure,
   reply,
   visibleText,
+  type OpenOptions,
   type PageHarness,
   type Routes,
 } from '../page-harness'
@@ -27,8 +28,9 @@ async function using(
   name: string,
   routes: Routes,
   run: (opened: Opened) => Promise<void>,
+  options?: OpenOptions,
 ) {
-  const opened = await harness().open(name, routes)
+  const opened = await harness().open(name, routes, options)
   try {
     await run(opened)
   } finally {
@@ -394,6 +396,7 @@ export const register: RegisterStates = (harness) => {
           await expectNotStale(page)
           await expectNoRawText(page)
         },
+        { followRoute: true },
       ))
   })
 

@@ -2,8 +2,8 @@ import type { FarmAlert } from './farm-alerts.ts'
 import type { FarmRow } from './farm-view.ts'
 
 /** The detail page of a printer, the target of every wall card and table row. */
-export function printerDetailHref(printerKey: string): string {
-  return `/impressoras/${encodeURIComponent(printerKey)}`
+export function printerDetailHref(printerKey: string, farmId?: string): string {
+  return `/impressoras/${encodeURIComponent(printerKey)}${farmId ? `?farm=${encodeURIComponent(farmId)}` : ''}`
 }
 
 /**
@@ -11,11 +11,15 @@ export function printerDetailHref(printerKey: string): string {
  * there is none), group, location and the observation. Targets and thumbnail
  * are not part of the status feed, so they stay absent instead of invented.
  */
-export function wallCardProps(row: FarmRow, alerts: readonly FarmAlert[]) {
+export function wallCardProps(
+  row: FarmRow,
+  alerts: readonly FarmAlert[],
+  farmId?: string,
+) {
   const { assignment, observation } = row
   return {
     name: assignment.displayName || assignment.printerKey,
-    detailHref: printerDetailHref(assignment.printerKey),
+    detailHref: printerDetailHref(assignment.printerKey, farmId),
     group: assignment.groupName || undefined,
     location: assignment.location || undefined,
     observation,

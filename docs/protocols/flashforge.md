@@ -58,3 +58,5 @@ To activate through the Connector, the farm integration must:
   labels in the farm UI. Leave command, file and camera routes disabled for
   this collection binding. Qualify each hardware and firmware combination
   before claiming physical support.
+
+The v8 live snapshot advertises an empty controls list for this collector.

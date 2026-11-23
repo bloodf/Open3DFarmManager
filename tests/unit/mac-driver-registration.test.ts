@@ -7,6 +7,7 @@ import { readAgentRuntimeConfig } from '../../packages/connector/src/config/runt
 import { readPrinterBinding } from '../../packages/connector/src/control/printer-binding.ts'
 import { TelemetryQueue } from '../../packages/connector/src/cloud/queue.ts'
 import { createFarmSnapshotSource } from '../../packages/connector/src/runtime/farm-snapshot-provider.ts'
+import { createPrinterDetailSources } from '../../packages/connector/src/runtime/printer-detail-session.ts'
 import { collectIntoQueue } from '../../packages/connector/src/runtime/collect.ts'
 import { parseCollectorConfig } from '../../packages/connector/src/prusa/config.ts'
 
@@ -178,6 +179,10 @@ test('mixed v8 drivers publish read-only snapshots and withdraw stale epochs', a
     expect(
       readPrinterBinding(mixed.bindingFor(moonraker.assignment_id)!),
     ).toMatchObject(moonraker)
+    const detail = createPrinterDetailSources(mixed)
+    expect(detail.sourceFor(moonraker.printer_key)).toBeDefined()
+    for (const driver of drivers)
+      expect(detail.sourceFor(driver.printerKey)).toBeUndefined()
     const runtime = read(config)
     for (const a of config.assignments) {
       const handle = runtime.bindingFor(a.assignment_id)
@@ -189,7 +194,10 @@ test('mixed v8 drivers publish read-only snapshots and withdraw stale epochs', a
       agentId: a.agent_id,
       printerKey: a.printer_key,
     }))
-    const source = createFarmSnapshotSource({ assignmentRefs: refs })
+    const source = createFarmSnapshotSource({
+      assignmentRefs: refs,
+      controlsFor: () => ['pause'],
+    })
     const binding: Parameters<typeof source.open>[0]['binding'] = {
       v: 1,
       purpose: 'read-only-rtc',
@@ -237,7 +245,14 @@ test('mixed v8 drivers publish read-only snapshots and withdraw stale epochs', a
       queue,
       signal: controller.signal,
       onDiagnostic() {},
-      onRawObservation: (value) => source.observe(value),
+      onRawObservation: (value) => {
+        if (value.printerKey === 'phrozen') {
+          expect(value.printer.controls).toEqual([])
+        } else {
+          expect(value.printer).not.toHaveProperty('controls')
+        }
+        source.observe(value)
+      },
       onRawUnavailable: (value) => {
         withdrawn.push(value.printerKey)
         source.invalidate(value)
@@ -269,7 +284,7 @@ test('mixed v8 drivers publish read-only snapshots and withdraw stale epochs', a
       },
     ])
     for (const printer of snapshot())
-      expect(printer).not.toHaveProperty('controls')
+      expect(printer).toHaveProperty('controls', [])
     info.result.moonraker_version = 'wrong-version'
     flashReply = { code: 1 }
     phrozen.setFault('denied')

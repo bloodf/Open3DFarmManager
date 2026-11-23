@@ -190,7 +190,13 @@ export function createFarmSnapshotSource(input: {
       const macroParams = macros?.length
         ? input.macroParamsFor?.(ref.assignmentId)
         : undefined
-      const controls = input.controlsFor?.(ref.assignmentId)
+      const provenance = entry.fieldObservedAtMonoMs
+      const controls =
+        'qidi' in provenance ||
+        'flashforge' in provenance ||
+        'phrozen' in provenance
+          ? []
+          : input.controlsFor?.(ref.assignmentId)
       const advertisedControls =
         controls !== undefined ? { controls: [...controls] } : {}
       const {

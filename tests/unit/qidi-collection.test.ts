@@ -66,6 +66,7 @@ test('collects, withdraws failed sources, and recovers in new read-only epochs',
       }),
     )
 
+    expect(observations[0]?.printer.identity).toEqual({ vendor: 'Qidi' })
     info.result.moonraker_version = 'wrong-version'
     await wait(() => expect(withdrawn).toEqual([1]))
     expect(observations).toHaveLength(1)
@@ -123,6 +124,11 @@ test('requires an explicitly allowed canonical local IP origin', () => {
     auth: { kind: 'trusted-lan' },
   }
   expect(parseQidiBinding(binding, [origin]).origin).toBe(origin)
+  expect(
+    parseQidiBinding({ ...binding, expect: { moonrakerVersion: 'v0.8.0' } }, [
+      origin,
+    ]).expect,
+  ).toEqual({ moonrakerVersion: 'v0.8.0' })
   expect(() => parseQidiBinding(binding, [])).toThrow('not allowlisted')
   for (const target of [
     'http://8.8.8.8',

@@ -24,9 +24,9 @@ describe('migration catalog', () => {
     expect(repository[95]?.id).toBe('0096_integration_telemetry_reads')
     expect(repository[96]?.id).toBe('0097_telemetry_transition_index')
     expect(repository[97]?.id).toBe('0098_integration_alert_lifecycle')
-    expect(repository[101]?.id).toBe('0102_integration_alert_rules')
-    expect(repository[102]?.id).toBe(
-      '0103_integration_physical_spool_idempotency',
+    expect(repository[103]?.id).toBe('0104_integration_alert_rules')
+    expect(repository[104]?.id).toBe(
+      '0105_integration_physical_spool_idempotency',
     )
     expect(migrationCatalog(pair)).toEqual(
       migrationCatalog([...pair].reverse()),

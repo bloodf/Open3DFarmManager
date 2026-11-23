@@ -409,6 +409,7 @@ test('when Go helper is unavailable, Connector reports RTSP cameras unavailable 
     answer_sha256: digest(),
     browser_dtls: Array(32).fill('AA').join(':'),
     connector_dtls: Array(32).fill('BB').join(':'),
+    camera_printer_id: rtspAssignmentId,
     assignment_count: 1,
     assignment_digest: digest(),
   })

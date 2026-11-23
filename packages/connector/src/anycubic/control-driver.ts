@@ -1,4 +1,4 @@
-import { startAnycubicPrint } from './files.ts'
+import { AnycubicStartRefused, startAnycubicPrint } from './files.ts'
 import { readFileSync } from 'node:fs'
 import { z } from 'zod'
 import { parseBoundedJson } from '../../../farm-protocol/src/json.ts'
@@ -287,7 +287,11 @@ export function openFixedAnycubicControl(input: {
       return !request.signal.aborted && request.beforeSend()
     }
     if (next === 'start_print') {
-      if (typeof args.file !== 'string') throw failure()
+      if (typeof args.file !== 'string')
+        throw new AnycubicStartRefused(
+          'invalid-command',
+          'Invalid Anycubic filename',
+        )
       await startAnycubicPrint({
         model: local!.modelId,
         deviceId: local!.deviceId,

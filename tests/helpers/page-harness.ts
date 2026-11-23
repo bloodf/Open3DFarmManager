@@ -23,6 +23,7 @@ import { startHttpMock } from '../../packages/sim-tools/src/mocks/http-mock'
  */
 const root = process.cwd()
 const appDir = join(root, 'apps/farm/app')
+const layout = join(appDir, 'layouts/default.vue')
 
 export type RouteReply = {
   status?: number
@@ -104,15 +105,38 @@ function entrySource() {
     ${modules.map((m, i) => `import * as m${i} from ${JSON.stringify(m)}`).join('\n')}
     ${components.map((c, i) => `import c${i} from ${JSON.stringify(c)}`).join('\n')}
     ${pageFiles.map((p, i) => `import p${i} from ${JSON.stringify(p)}`).join('\n')}
+    import DefaultLayout from ${JSON.stringify(layout)}
     import ${JSON.stringify(join(appDir, 'assets/css/main.css'))}
     import { pageFetch } from ${JSON.stringify(fileURLToPath(new URL('./page-fetch.ts', import.meta.url)))}
 
-    const state = { navigated: [], route: reactive({ path: '/', query: {}, params: {} }) }
+    const state = { navigated: [], route: reactive({ path: '/', query: {}, params: {}, hash: '' }) }
+    let followRoute = false
+    const queryString = (query) => Object.entries(query ?? {})
+      .filter(([, value]) => value !== undefined)
+      .flatMap(([key, values]) => [values].flat().map(value =>
+        encodeURIComponent(key) + (value === null ? '' : '=' + encodeURIComponent(value))))
+      .join('&')
+    const href = (to) => {
+      if (typeof to === 'string') return to
+      const query = queryString(to.query)
+      return (to.path ?? state.route.path) + (query ? '?' + query : '') + (to.hash ?? '')
+    }
+    const navigate = async (to) => {
+      state.navigated.push(to)
+      if (followRoute) {
+        const target = new URL(href(to), location.origin)
+        Object.assign(state.route, {
+          path: target.pathname,
+          query: Object.fromEntries(target.searchParams),
+          hash: target.hash,
+        })
+      }
+    }
     const shared = new Map()
     const globals = {
       useRoute: () => state.route,
-      useRouter: () => ({ push: async (to) => void state.navigated.push(to), replace: async (to) => void state.navigated.push(to) }),
-      navigateTo: async (to) => void state.navigated.push(to),
+      useRouter: () => ({ push: navigate, replace: navigate, currentRoute: vue.computed(() => state.route) }),
+      navigateTo: navigate,
       definePageMeta: () => {},
       // Nuxt's shared state: one ref per key for the life of the page.
       useState: (key, init) => (shared.get(key) ?? (shared.set(key, vue.ref(init ? init() : undefined)), shared.get(key))),
@@ -124,20 +148,31 @@ function entrySource() {
     for (const mod of [${modules.map((_, i) => `m${i}`).join(', ')}]) for (const [key, value] of Object.entries(mod)) if (/^[a-z]/.test(key)) globalThis[key] ??= value
     Object.assign(globalThis, globals)
     // The part of ofetch the pages use; failures carry statusCode like Nuxt's.
-    globalThis.$fetch = (url, options) => pageFetch(url, options)
+    globalThis.$fetch = (url, options) => {
+      const response = pageFetch(url, options)
+      if (!window.__beforePageFetchResult) return response
+      return response.then(async (data) => {
+        await window.__beforePageFetchResult(url, options)
+        return data
+      })
+    }
     const NuxtLink = defineComponent({
       props: { to: { type: [String, Object], default: '/' } },
-      setup: (props, { slots }) => () => h('a', { href: typeof props.to === 'string' ? props.to : props.to.path }, slots.default?.()),
+      setup: (props, { slots }) => () => h('a', { href: href(props.to) }, slots.default?.()),
     })
     const components = { ${components.map((c, i) => `${JSON.stringify(componentName(c))}: c${i}`).join(', ')} }
     const pages = { ${pageNames.map((p, i) => `${JSON.stringify(p)}: p${i}`).join(', ')} }
-    window.__mount = (name, route = {}) => {
-      Object.assign(state.route, { path: '/', query: {}, params: {} }, route)
-      const app = createApp(pages[name])
+    window.__mount = (name, options = {}) => {
+      followRoute = options.followRoute
+      Object.assign(state.route, { path: '/', query: {}, params: {}, hash: '' }, options.route)
+      const app = options.layout
+        ? createApp({ render: () => h(DefaultLayout, null, { default: () => h(pages[name]) }) })
+        : createApp(pages[name])
       app.component('NuxtLink', NuxtLink)
       for (const [key, value] of Object.entries(components)) app.component(key, value)
       app.mount('#app')
     }
+    window.__pageRoute = state.route
     window.__navigated = () => state.navigated
   `
 }
@@ -243,6 +278,10 @@ const shell = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><me
 
 export type OpenOptions = {
   route?: PageRoute
+  /** Apply router pushes and replacements to the reactive route. */
+  followRoute?: boolean
+  /** Render the default layout around the page. */
+  layout?: boolean
   /** Install a fake clock so polling and stale ages can be fast-forwarded. */
   clock?: boolean
   /** Script run in the page before the app starts, e.g. to seed a stand-in module. */
@@ -346,11 +385,13 @@ export async function createPageHarness(
       if (options.clock) await page.clock.install()
       await page.goto(server.origin)
       await page.evaluate(
-        ([name, route]) =>
+        ([name, options]) =>
           (
-            window as unknown as { __mount: (n: string, r: unknown) => void }
-          ).__mount(name, route),
-        [pageName, options.route ?? {}] as const,
+            window as unknown as {
+              __mount: (name: string, options: OpenOptions) => void
+            }
+          ).__mount(name, options),
+        [pageName, options] as const,
       )
       return {
         page,

@@ -115,8 +115,21 @@ watch([() => route.query.farm, () => ready.value?.farms], ([farmId, farms]) => {
   )
     void selectFarm(farmId)
 })
+watch(
+  () => route.query.farm,
+  (id, previous) => {
+    if (!id && previous && ready.value?.scope) void selectFarm('')
+  },
+)
 
 const router = useRouter()
+watch(
+  () => ready.value?.scope?.farmId,
+  (id) => {
+    if (id && !route.query.farm)
+      void router.replace({ query: { ...route.query, farm: id } })
+  },
+)
 const wallQuery = computed({
   get: () => ({
     ...readFarmWallQuery(route.query),
@@ -227,9 +240,12 @@ watch(inspectedId, async (id, _old, onCleanup) => {
 })
 const inspectedRow = computed(
   () =>
-    renderedRows.value.find(
-      (row) => row.assignment.assignmentId === inspectedId.value,
-    ) ?? null,
+    (ready.value?.rows ?? [])
+      .map((row) => ({
+        ...row,
+        draft: drafts.value[row.assignment.assignmentId],
+      }))
+      .find((row) => row.assignment.assignmentId === inspectedId.value) ?? null,
 )
 watch(inspectedRow, (row) => {
   if (!row && inspector.value?.open) inspector.value.close()
@@ -334,7 +350,14 @@ function cancelPause(event: Event) {
       <div class="setup-grid">
         <FarmScopeSelector
           :ready="ready"
-          @select="selectFarm"
+          @select="
+            (id) => {
+              void router.replace({
+                query: { ...route.query, farm: id || undefined },
+              })
+              if (!id) void selectFarm(id)
+            }
+          "
           @discover="discover"
         />
         <FarmDeviceSelector
@@ -432,6 +455,7 @@ function cancelPause(event: Event) {
               v-if="rows.length"
               v-slot="{ rows: wallRows }"
               :rows="renderedRows"
+              :farm-id="ready.scope.farmId"
               :live-now="liveNow"
             >
               <template
@@ -564,6 +588,7 @@ function cancelPause(event: Event) {
                   alertsSummary.byAssignment[
                     inspectedRow.assignment.assignmentId
                   ] ?? [],
+                  ready.scope.farmId,
                 )
               "
               :now="liveNow()"

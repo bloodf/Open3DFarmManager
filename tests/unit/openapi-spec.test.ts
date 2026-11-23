@@ -28,6 +28,12 @@ const committed = parse(source) as {
 type OperationObject = {
   security?: Record<string, string[]>[]
   responses: Record<string, unknown>
+  parameters?: {
+    $ref?: string
+    name?: string
+    in?: string
+    required?: boolean
+  }[]
 }
 
 const served = async () => {
@@ -168,6 +174,53 @@ describe('integration API v1 OpenAPI spec', () => {
         'printer.alert.raised',
       ]),
     )
+  })
+
+  it('requires farmId for both library reads', () => {
+    const parameters = (
+      committed.components as unknown as {
+        parameters: Record<
+          string,
+          { name: string; in: string; required?: boolean }
+        >
+      }
+    ).parameters
+    for (const path of ['/library', '/library/settings']) {
+      const entries = committed.paths[path]!.get!.parameters!
+      const farmId = entries
+        .map((entry) =>
+          entry.$ref ? parameters[entry.$ref.split('/').at(-1)!] : entry,
+        )
+        .find((entry) => entry?.name === 'farmId')
+      expect(farmId, path).toMatchObject({
+        name: 'farmId',
+        in: 'query',
+        required: true,
+      })
+    }
+  })
+
+  it('describes shipped integration scopes, library routes and readiness reasons', async () => {
+    const guide = await readFile(
+      new URL('../../docs/INTEGRATION-API.md', import.meta.url),
+      'utf8',
+    )
+    expect(guide).toContain('Each scope in the table authorizes')
+    expect(guide).toContain(
+      'Library storage, retention and replay are available',
+    )
+    expect(guide).toContain('Library storage and replay use the scoped routes')
+    const readiness = guide.match(/`degradedReason` is[\s\S]*?degraded\./)?.[0]
+    expect(readiness).toBeDefined()
+    for (const reason of [
+      'offline',
+      'reconnecting',
+      'error',
+      'stale',
+      'unknown-state',
+      'client-certificate-missing',
+    ])
+      expect(readiness).toContain(`\`${reason}\``)
   })
 
   it('keeps the spec and token endpoint public and everything else scoped', () => {

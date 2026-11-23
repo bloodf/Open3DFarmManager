@@ -1,5 +1,5 @@
 import { defineEventHandler } from 'nuxt/server'
-import { integrationSpoolPool } from '../../../../../services/spool-usage.ts'
+import { integrationAuthPool } from '../../../../../utils/integration-auth-runtime.ts'
 import { integrationProblem } from '../../../../../utils/integration-auth-http.ts'
 import type { IntegrationPrincipal } from '../../../../../utils/integration-auth.ts'
 import {
@@ -18,11 +18,7 @@ export default defineEventHandler(async (event) => {
   )
   if (!farms.length) return integrationProblem('not-found', headers)
   try {
-    return await searchIntegrationSpools(
-      await integrationSpoolPool(),
-      farms,
-      query,
-    )
+    return await searchIntegrationSpools(integrationAuthPool(), farms, query)
   } catch {
     return integrationProblem('service-unavailable', headers)
   }

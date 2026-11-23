@@ -1,60 +1,92 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Locator } from '@playwright/test'
 import { journeyEnabled, startJourneyHarness } from './harness.ts'
+import { recordJourneyDiagnostics } from './journey-diagnostics.ts'
 import type { startStatusFixture, StatusVendor } from './status-fixtures.ts'
+
+const ROW_CONTROLS = /pausar|retomar|cancelar|iniciar impressão/i
+const SURFACE_CONTROLS = /pausar|retomar|cancelar impressão|iniciar impressão/i
+
+async function noControls(surface: Locator, name: RegExp) {
+  await expect
+    .soft(surface.getByRole('button', { name }))
+    .toHaveCount(0, { timeout: 2000 })
+}
 
 export function statusJourney(name: StatusVendor) {
   if (journeyEnabled())
     test(`${name}: status is withdrawn and recovers read-only`, async ({
       browser,
-    }) => {
+    }, testInfo) => {
       const journey = await startJourneyHarness({ browser, simulator: name })
+      const page = journey.ownerPage
+      const diagnostics = recordJourneyDiagnostics()
+      diagnostics.watch('owner', page)
+      page.context().on('page', (other) => diagnostics.watch('other', other))
+      // Connector, app and browser signalling evidence for a failed journey.
+      const attach = () =>
+        diagnostics.attach(testInfo, {
+          connector: journey.simulatorObservation(),
+          app: journey.appLog().slice(-6000),
+        })
       try {
         const fixture = journey.vendor?.raw as Awaited<
           ReturnType<typeof startStatusFixture>
         >
-        const row = await journey.openFarm()
-        await journey.ownerPage
-          .getByRole('button', {
-            name: new RegExp(`^Inspecionar journey-${name}\\b`),
+        // The Connector serves one read-only browser link at a time; a second
+        // live tab competes for it and can starve the farm row. The farm row,
+        // inspector and detail page are therefore visited in turn on one page,
+        // and each is checked while it holds the direct connection.
+        let detailHref = ''
+        const openFarmSurfaces = async () => {
+          const row = await journey.openFarm(page)
+          await page
+            .getByRole('button', {
+              name: new RegExp(`^Inspecionar journey-${name}\\b`),
+            })
+            .click()
+          const inspector = page.getByRole('dialog', {
+            name: 'Inspeção da impressora',
           })
-          .click()
-        const inspector = journey.ownerPage.getByRole('dialog', {
-          name: 'Inspeção da impressora',
-        })
-        await expect(inspector).toBeVisible()
-        const detail = await journey.ownerPage.context().newPage()
-        await detail.goto(
-          new URL(
+          await expect(inspector).toBeVisible()
+          detailHref = new URL(
             (await inspector
               .getByRole('link', { name: 'Abrir detalhes da impressora' })
               .getAttribute('href')) ?? '',
-            journey.ownerPage.url(),
-          ).href,
-        )
-        await expect(detail.getByText(`journey-${name}`).first()).toBeVisible()
-        const readOnly = async () => {
-          await expect
-            .soft(
-              row.getByRole('button', {
-                name: /pausar|retomar|cancelar|iniciar impressão/i,
-              }),
-            )
-            .toHaveCount(0, { timeout: 2000 })
-          for (const surface of [inspector, detail]) {
-            await expect
-              .soft(
-                surface.getByRole('button', {
-                  name: /pausar|retomar|cancelar impressão|iniciar impressão/i,
-                }),
-              )
-              .toHaveCount(0, { timeout: 2000 })
-          }
+            page.url(),
+          ).href
+          return { row, inspector }
         }
+        const farmReadOnly = async (row: Locator, inspector: Locator) => {
+          await noControls(row, ROW_CONTROLS)
+          await noControls(inspector, SURFACE_CONTROLS)
+        }
+        const detailReadOnly = async (live?: string) => {
+          await page.goto(detailHref)
+          const main = page.getByRole('main')
+          await expect(main.getByText(`journey-${name}`).first()).toBeVisible()
+          if (live) {
+            await expect(
+              main.getByText('Connector: conexão direta ativa', {
+                exact: true,
+              }),
+            ).toBeVisible({ timeout: 90_000 })
+            await expect(main).toContainText(live, { timeout: 30_000 })
+          }
+          await noControls(main, SURFACE_CONTROLS)
+        }
+
+        let { row, inspector } = await openFarmSurfaces()
         await expect(
           row.getByText('Conexão direta autenticada', { exact: true }),
         ).toBeVisible({ timeout: 90_000 })
         await expect(row).toContainText('Imprimindo', { timeout: 30_000 })
-        await readOnly()
+        await farmReadOnly(row, inspector)
+        await detailReadOnly('Imprimindo')
+
+        ;({ row, inspector } = await openFarmSurfaces())
+        await expect(
+          row.getByText('Conexão direta autenticada', { exact: true }),
+        ).toBeVisible({ timeout: 90_000 })
         const count = fixture.requests.length
         fixture.loseConnection()
         await expect
@@ -69,13 +101,17 @@ export function statusJourney(name: StatusVendor) {
         await expect(
           row.getByText(/Dados desatualizados/).first(),
         ).toBeVisible()
-        await readOnly()
+        await farmReadOnly(row, inspector)
+        await detailReadOnly()
+
         fixture.recover()
+        ;({ row, inspector } = await openFarmSurfaces())
         await expect(
           row.getByText('Conexão direta autenticada', { exact: true }),
         ).toBeVisible({ timeout: 90_000 })
         await expect(row).toContainText('Ociosa', { timeout: 30_000 })
-        await readOnly()
+        await farmReadOnly(row, inspector)
+        await detailReadOnly('Ociosa')
         if (name === 'qidi') {
           expect(new Set<string | number>([...fixture.requests])).toEqual(
             new Set([
@@ -92,6 +128,10 @@ export function statusJourney(name: StatusVendor) {
             new Set([0]),
           )
         }
+        if (testInfo.errors.length) await attach()
+      } catch (error) {
+        await attach()
+        throw error
       } finally {
         await journey.close()
       }

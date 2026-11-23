@@ -12,7 +12,10 @@ import {
   type PrinterDetailStreamQueryRequest,
 } from '../../../farm-protocol/src/printer-detail.ts'
 import type { AgentRuntimeConfig } from '../config/runtime.ts'
-import { validateMoonrakerInput } from '../config/moonraker.ts'
+import {
+  moonrakerOrigins,
+  validateMoonrakerInput,
+} from '../config/moonraker.ts'
 import {
   readDetailHistory,
   readDetailTotals,
@@ -49,7 +52,8 @@ type PrinterDetailSource = Pick<MoonrakerDetailStream, 'subscribe'> &
 /** Moonraker, Bambu and Creality streams connect on subscription. Anycubic frames reuse collection. */
 export function createPrinterDetailSources(config: AgentRuntimeConfig) {
   const sources = new Map<string, PrinterDetailSource>()
-  const { printers, limits, allowedOrigins } = config.collection
+  const { printers, limits } = config.collection
+  const allowedOrigins = moonrakerOrigins(config.collection)
   if (config.collection.version === 3)
     for (const binding of config.collection.bambu.printers)
       if (

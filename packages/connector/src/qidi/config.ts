@@ -24,16 +24,18 @@ export const Binding = z.strictObject({
   origin: LocalOrigin,
   simulated: z.boolean(),
   expect: z.strictObject({
-    model: z.enum([
-      'Q1 Pro',
-      'Plus4',
-      'Q2',
-      'Max4',
-      'X-Max 3',
-      'X-Plus 3',
-      'X-Smart 3',
-    ]),
-    firmware: Key,
+    model: z
+      .enum([
+        'Q1 Pro',
+        'Plus4',
+        'Q2',
+        'Max4',
+        'X-Max 3',
+        'X-Plus 3',
+        'X-Smart 3',
+      ])
+      .optional(),
+    firmware: Key.optional(),
     moonrakerVersion: Key,
   }),
   auth: z.discriminatedUnion('kind', [

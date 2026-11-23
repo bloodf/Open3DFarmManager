@@ -13,7 +13,7 @@ import {
   type IntegrationPrincipal,
 } from '../../../../../utils/integration-auth.ts'
 
-import { authorizedPrinter } from '../../../../../utils/integration-telemetry.ts'
+import { authorizedPrinterForScope } from '../../../../../utils/integration-telemetry.ts'
 
 export default defineEventHandler(async (event) => {
   const headers = event.res.headers
@@ -48,7 +48,7 @@ export default defineEventHandler(async (event) => {
     const store = integrationAuthRuntime().store
     if (!store.readPrinter)
       return integrationProblem('service-unavailable', headers)
-    const printer = authorizedPrinter(
+    const printer = authorizedPrinterForScope(
       event.context.integrationAuth as IntegrationPrincipal,
       await store.readPrinter(printerId),
       printerId,

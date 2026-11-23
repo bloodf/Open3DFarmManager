@@ -4,6 +4,7 @@ import type { PrinterState } from '@open3dfarmmanager/farm-protocol'
 import {
   parseTemperatureFields,
   isChamberTemperatureObject,
+  observedTemperatureDetails,
   type TemperatureFields,
 } from './temperature-observation.ts'
 import { moonrakerLastJob } from './normalize.ts'
@@ -398,6 +399,9 @@ export function createMoonrakerSubscription(input: {
             watchingJob = false
           }
         }
+        const temperatures = input.jobFields
+          ? observedTemperatureDetails(value.status)
+          : undefined
         const nextFingerprint = JSON.stringify([
           parsed.printer.state,
           parsed.printer.progress,
@@ -406,17 +410,17 @@ export function createMoonrakerSubscription(input: {
           parsed.printer.currentLayer,
           parsed.printer.totalLayer,
           parsed.printer.printDuration,
-          parsed.printer.toolTargetsCelsius,
-          parsed.printer.chamberTemperatureCelsius,
-          parsed.printer.chamberTargetCelsius,
+          temperatures,
           materials,
           lastJob?.endedAt,
         ])
         if (nextFingerprint === fingerprint) return
         fingerprint = nextFingerprint
-        const printer = materials
-          ? { ...parsed.printer, materials }
-          : parsed.printer
+        const printer = {
+          ...parsed.printer,
+          ...temperatures,
+          ...(materials ? { materials } : {}),
+        }
         emit({
           kind: 'snapshot',
           ...parsed,

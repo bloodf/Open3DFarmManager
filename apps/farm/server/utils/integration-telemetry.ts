@@ -3,7 +3,6 @@ import {
   PrinterState,
   PrinterTransition,
 } from '@open3dfarmmanager/farm-protocol'
-import type { IntegrationScope } from '../services/integration-apps.ts'
 import { integrationGrantFor } from './integration-auth-http.ts'
 import {
   uuidPattern,
@@ -63,7 +62,20 @@ export function authorizedPrinter(
   principal: IntegrationPrincipal,
   row: IntegrationPrinterRow | null,
   id: string,
-  scope: IntegrationScope = 'printers:read',
+) {
+  return uuidPattern.test(id) &&
+    row &&
+    row.id === id &&
+    integrationGrantFor(principal, 'printers:read', row.farmId, row.id)
+    ? row
+    : null
+}
+
+export function authorizedPrinterForScope(
+  principal: IntegrationPrincipal,
+  row: IntegrationPrinterRow | null,
+  id: string,
+  scope: 'camera:view' | 'alerts:write',
 ) {
   return uuidPattern.test(id) &&
     row &&

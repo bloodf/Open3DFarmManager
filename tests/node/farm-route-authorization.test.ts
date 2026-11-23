@@ -201,14 +201,24 @@ function checkRoute(file: string, text: string): string | undefined {
     /FROM farm\.memberships/.test(text)
   )
     return
+  if (
+    file.startsWith(`${server}/api/integrations/v1/`) &&
+    /event\.context\.integrationAuth/.test(text) &&
+    (called(parsed, 'utils/integration-telemetry.ts', 'authorizedPrinter') ||
+      called(
+        parsed,
+        'utils/integration-telemetry.ts',
+        'authorizedPrinterForScope',
+      ))
+  )
+    return
   // The integration middleware authenticates the bearer and places its principal
   // in the request context; these handlers must additionally narrow farm grants.
   if (
     file.startsWith(`${server}/api/integrations/v1/`) &&
     /event\.context\.integrationAuth/.test(text) &&
     (called(parsed, 'utils/integration-read.ts', 'inventoryGrantFarms') ||
-      called(parsed, 'utils/integration-read.ts', 'jobGrantScope') ||
-      called(parsed, 'utils/integration-telemetry.ts', 'authorizedPrinter'))
+      called(parsed, 'utils/integration-read.ts', 'jobGrantScope'))
   )
     return
   if (file in EXEMPT) return
@@ -267,13 +277,16 @@ function functionBody(module: string, name: string): string {
   return declaration.body.getText(tree)
 }
 
-test('telemetry, health and alert guard checks the requested printer grant', () => {
-  assert.match(
-    source(`${server}/utils/integration-telemetry.ts`),
-    /scope: IntegrationScope = 'printers:read'/,
-  )
+test('telemetry and health guard checks the printer grant', () => {
   assert.match(
     functionBody('utils/integration-telemetry.ts', 'authorizedPrinter'),
+    /integrationGrantFor\(principal, 'printers:read', row\.farmId, row\.id\)/,
+  )
+})
+
+test('camera and alert write guard checks the requested scope', () => {
+  assert.match(
+    functionBody('utils/integration-telemetry.ts', 'authorizedPrinterForScope'),
     /integrationGrantFor\(principal, scope, row\.farmId, row\.id\)/,
   )
 })

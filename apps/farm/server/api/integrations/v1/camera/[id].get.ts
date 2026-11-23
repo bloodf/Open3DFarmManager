@@ -11,7 +11,7 @@ import {
   uuidPattern,
   type IntegrationPrincipal,
 } from '../../../../utils/integration-auth.ts'
-import { authorizedPrinter } from '../../../../utils/integration-telemetry.ts'
+import { authorizedPrinterForScope } from '../../../../utils/integration-telemetry.ts'
 import { cameraEnabled } from '../../../../utils/integration-telemetry-camera.ts'
 
 export default defineEventHandler(async (event) => {
@@ -27,7 +27,7 @@ export default defineEventHandler(async (event) => {
     if (!auth.store.readPrinter)
       return integrationProblem('service-unavailable', headers)
     const principal = event.context.integrationAuth as IntegrationPrincipal
-    const printer = authorizedPrinter(
+    const printer = authorizedPrinterForScope(
       principal,
       await auth.store.readPrinter(printerId),
       printerId,

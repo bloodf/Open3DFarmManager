@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import CameraDisplay from '../components/CameraDisplay.vue'
-import { useFarmView } from '../composables/useFarmView.ts'
+import CameraDisplay from '../../components/CameraDisplay.vue'
+import { useFarmView } from '../../composables/useFarmView.ts'
+
+// The viewer is an integration link destination. Its ticket arrives in the fragment.
+definePageMeta({ layout: false })
 
 const target = ref<{ farmId: string; printerId: string } | null>(null)
 const status = ref('Abrindo link da câmera…')

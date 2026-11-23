@@ -54,6 +54,9 @@ const scopeOptions = [
   ['plates:confirm', 'Confirmar placa livre'],
   ['alerts:write', 'Enviar alertas'],
   ['camera:view', 'Ver câmera'],
+  ['inventory:write', 'Registrar e retirar carretéis'],
+  ['environment:control', 'Controlar ambiente'],
+  ['alerts:manage', 'Gerenciar regras de alerta e testar notificações'],
 ] as const
 
 async function load() {

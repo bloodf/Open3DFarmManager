@@ -2428,6 +2428,9 @@ components:
             plates:confirm: Confirm that a printer's build plate is clear.
             alerts:write: Acknowledge or silence alerts on granted printers.
             camera:view: Open the camera view for a granted printer.
+            inventory:write: Register and withdraw physical spools.
+            environment:control: Control drying programs, smart plugs and extraction.
+            alerts:manage: Change alert rules and test notification channels.
   parameters:
     PrinterId:
       name: printerId

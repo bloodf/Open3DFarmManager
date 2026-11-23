@@ -17,6 +17,7 @@ const Runtime = z.looseObject({
     z.literal(5),
     z.literal(6),
     z.literal(7),
+    z.literal(8),
   ]),
   collection: z.looseObject({
     version: z.union([
@@ -25,8 +26,10 @@ const Runtime = z.looseObject({
       z.literal(5),
       z.literal(6),
       z.literal(7),
+      z.literal(8),
     ]),
     printers: z.array(Loose).optional(),
+    drivers: z.array(Loose).optional(),
     formlabs: z.strictObject({ printers: z.array(Loose) }).optional(),
     sdcp: z.strictObject({ printers: z.array(Loose) }).optional(),
     anycubic: z.strictObject({ printers: z.array(Loose) }).optional(),
@@ -61,6 +64,24 @@ export function collectableRuntime(
   const filteredCollection = {
     ...runtime.collection,
     ...(moonrakerPrinters ? { printers: moonrakerPrinters } : {}),
+  }
+  if (runtime.collection.drivers) {
+    const { drivers, ...collection } = filteredCollection
+    const visible = runtime.collection.drivers.filter(
+      (p) => !hidden.has(String(p.printerKey)),
+    )
+    if (visible.length)
+      return {
+        ...runtime,
+        collection: { ...collection, drivers: visible },
+        assignments,
+      }
+    return {
+      ...runtime,
+      version: 1,
+      collection: { ...collection, version: 1 },
+      assignments,
+    }
   }
   if (runtime.collection.formlabs) {
     const printers = runtime.collection.formlabs.printers.filter(

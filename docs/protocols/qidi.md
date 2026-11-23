@@ -76,3 +76,34 @@ and there are no new dependencies.
    surfaces in pt-BR. Show unavailable capabilities and enable controls only
    when the Connector advertises qualified support and the session has
    authority.
+
+## Read-only collection activation
+
+The brand collector accepts a `qidi` binding with `printerKey`, a canonical
+HTTP(S) `origin`, an explicit `simulated` boolean, and `expect` containing the
+model from the table above, locally verified vendor firmware, and the expected
+Moonraker version. Match the origin exactly against the Connector's local
+allowlist. Use a private, link-local IPv4 or loopback IP literal and the
+operator-confirmed Moonraker port. The shared loader must reject duplicate
+printer keys and duplicate endpoint ownership across all configured drivers.
+
+Use `auth.kind` of `trusted-lan`, `api-key`, or `bearer`. The latter two
+require an absolute `credentialFile` path to private JSON containing
+`origin` and `secret`. The credential origin must match the binding exactly.
+The collector reloads credentials on each poll and follows no redirects.
+
+The shared runtime must provision and dispatch the binding, register the
+`qidi` field timestamps with the snapshot provider, and route withdrawal to
+the provider using the printer key and epoch. Wire
+`qidi-simulated` and `qidi-unqualified` into the shared status schema and
+display them in the UI. The polling interface takes the local allowlist,
+a lifecycle abort signal and a request timeout from 1 through 3000 ms.
+Each poll requires the expected Moonraker version, ready Klippy, a known
+print state, and reported progress. Recovery publishes a new epoch.
+The model and firmware label come from provisioning. The probe verifies
+the protocol version and readiness and has no device-unique identity.
+
+For hardware qualification, verify the installed model and vendor firmware
+on the printer, confirm its local endpoint and authentication mode, and
+capture live state and withdrawal/recovery evidence for that exact pairing.
+Camera, history, upload and controls require separate integration and evidence.

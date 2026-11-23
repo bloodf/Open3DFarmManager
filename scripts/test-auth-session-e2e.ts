@@ -73,7 +73,7 @@ const database = disposablePostgres({
 })
 
 try {
-  await database.start()
+  const sql = await database.start()
 
   const migrated = await run(
     process.execPath,
@@ -81,9 +81,14 @@ try {
     {
       MIGRATION_SYNTHETIC_TEST_DISPOSABLE: 'yes',
       MIGRATION_SYNTHETIC_TEST_PORT: String(dbPort),
+      PGPASSWORD: database.password,
     },
   )
   assert.equal(migrated, 0, 'Migrations failed')
+  // The suite reuses this least-privilege role when it already exists.
+  await sql.unsafe(
+    `CREATE ROLE o3dfm_w05_auth LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE IN ROLE farm_password_auth PASSWORD '${database.password}'`,
+  )
   process.exitCode = await run(
     'npm',
     [
@@ -96,6 +101,7 @@ try {
       'playwright.auth-session.config.ts',
     ],
     {
+      PGPASSWORD: database.password,
       AUTH_E2E_DISPOSABLE: 'yes',
       AUTH_E2E_DB_PORT: String(dbPort),
       AUTH_E2E_APP_PORT: String(appPort),

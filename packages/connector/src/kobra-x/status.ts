@@ -1,4 +1,5 @@
 import { boundPrinterString } from '@open3dfarmmanager/farm-protocol'
+import type { KobraXPrinterState } from './gate.ts'
 import type { PrinterState } from '../../../farm-protocol/src/state.ts'
 import { record } from './discovery.ts'
 
@@ -25,7 +26,7 @@ function nonnegative(value: unknown) {
 }
 
 export function createKobraXStatus(printerKey: string, address: string) {
-  let status: PrinterState = {
+  let status: PrinterState & { state: KobraXPrinterState } = {
     printerKey,
     state: 'offline',
     observedAt: Date.now(),

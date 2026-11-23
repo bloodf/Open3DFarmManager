@@ -132,7 +132,7 @@ export async function createRuntimeMoonrakerFixture() {
        * replace the Moonraker ones (the packaged Connector is unchanged).
        */
       runtime?: {
-        version: 1 | 2 | 3 | 4 | 5
+        version: 1 | 2 | 3 | 4 | 5 | 6 | 7
         collection: Record<string, unknown>
         assignment?: Record<string, unknown>
         assignments?: readonly Record<string, unknown>[]

@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { readAgentRuntimeConfig } from '../../packages/connector/src/config/runtime.ts'
 import { readPrinterBinding } from '../../packages/connector/src/control/printer-binding.ts'
 import { collectableRuntime } from '../../packages/connector/src/runtime/configuration-snapshot.ts'
+import type { RawPrinterObservation } from '../../packages/connector/src/runtime/farm-snapshot-provider.ts'
 import { createFormlabsCollection } from '../../packages/connector/src/runtime/formlabs-collection.ts'
 import { startFormlabsSimulator } from '../../packages/sim-tools/src/formlabs-simulator.ts'
 import { devices } from '../fixtures/formlabs/devices.ts'
@@ -57,10 +58,11 @@ describe('Formlabs collection', () => {
       rmSync(dir, { recursive: true, force: true })
     }
   })
-  it('withdraws a cached reading with unknown observation time', async () => {
+  it('publishes host status, withdraws on 503 and resumes in a new epoch', async () => {
     const sim = await startFormlabsSimulator()
     const abort = new AbortController()
-    const reasons: string[] = []
+    const events: unknown[] = []
+    const observations: RawPrinterObservation[] = []
     sim.setResponse(devices)
     const sub = createFormlabsCollection({
       binding: {
@@ -71,16 +73,44 @@ describe('Formlabs collection', () => {
       },
       signal: abort.signal,
       pollMs: 10,
-      onObservation: () => {
-        throw Error('Unexpected fresh telemetry')
+      onObservation: (observation) => {
+        observations.push(observation)
+        const { epoch, printer } = observation
+        events.push({
+          epoch,
+          state: printer.state,
+          status: printer.preformStatus,
+          progress: printer.progress,
+        })
+        if (epoch === 1) sim.setResponse({}, 503)
+        else abort.abort()
       },
-      onUnavailable: (_epoch, reason) => reasons.push(reason),
+      onUnavailable: (epoch, reason) => {
+        events.push({ epoch, reason })
+        sim.setResponse({
+          count: 1,
+          devices: [{ ...devices.devices[0], status: 'Idle' }],
+        })
+      },
     })
     try {
-      for (let i = 0; i < 100 && !reasons.length; i++)
-        await new Promise((resolve) => setTimeout(resolve, 5))
-      expect(reasons).toContain('printer observation time unknown')
-      expect(sim.requests).toEqual(['GET /devices/'])
+      await expect.poll(() => events.length).toBe(3)
+      expect(events).toEqual([
+        { epoch: 1, state: 'unknown', status: 'Printing', progress: undefined },
+        { epoch: 1, reason: 'PreForm host unavailable' },
+        { epoch: 2, state: 'unknown', status: 'Idle', progress: undefined },
+      ])
+      for (const { fieldObservedAtMonoMs, receivedAtMonoMs } of observations) {
+        expect(fieldObservedAtMonoMs).toEqual({
+          formlabs: {
+            state: receivedAtMonoMs,
+            preformStatus: receivedAtMonoMs,
+            identity: receivedAtMonoMs,
+          },
+        })
+      }
+      expect(sim.deviceResponseStatuses).toEqual([200, 503, 200])
+      expect(sim.requests).toEqual(Array(3).fill('GET /devices/'))
     } finally {
       abort.abort()
       await sub.done

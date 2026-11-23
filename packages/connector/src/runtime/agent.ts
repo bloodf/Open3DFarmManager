@@ -541,7 +541,24 @@ async function runConnectorAgentOnce(
             const { printerKey: _printerKey, ...status } = health.read()
             return status
           },
-          controlsFor: (id) => controlsFor?.(id),
+          controlsFor: (id) => {
+            const ref = refs.find((item) => item.assignmentId === id)
+            if (
+              config.collection.version === 7 &&
+              config.collection.formlabs.printers.some(
+                (printer) => printer.printerKey === ref?.printerKey,
+              )
+            )
+              return []
+            if (
+              config.collection.version === 6 &&
+              config.collection.sdcp.printers.some(
+                (printer) => printer.printerKey === ref?.printerKey,
+              )
+            )
+              return []
+            return controlsFor?.(id)
+          },
           macrosFor: (id) => macrosFor?.(id),
           macroParamsFor: (id) => macroParamsFor?.(id),
           localWebUiOriginFor: (id) => {

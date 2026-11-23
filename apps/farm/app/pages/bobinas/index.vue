@@ -81,6 +81,22 @@ const deleteError = ref('')
 const archivingId = ref<number | null>(null)
 
 let listController: AbortController | undefined
+let scopeController = new AbortController()
+let farmGeneration = 0
+function scope() {
+  const id = farmId.value
+  const generation = farmGeneration
+  const signal = scopeController.signal
+  return {
+    id,
+    signal,
+    current: () =>
+      !!id &&
+      id === farmId.value &&
+      generation === farmGeneration &&
+      !signal.aborted,
+  }
+}
 
 const availableMaterials = computed(() =>
   distinctMaterials(filaments.value.length ? filaments.value : spools.value),
@@ -97,23 +113,36 @@ const hasActiveFilters = computed(() =>
 )
 
 async function loadCatalogOptions() {
-  if (!farmId.value) return
+  const request = scope()
+  if (!request.id) return
   const [filRes, venRes] = await Promise.allSettled([
     $fetch<SpoolLibraryListResponse<FilamentItem>>(
-      `/api/farms/${farmId.value}/spool-library/filaments`,
-      { query: { sort: 'name:asc' }, retry: 0, timeout: 15_000 },
+      `/api/farms/${request.id}/spool-library/filaments`,
+      {
+        query: { sort: 'name:asc' },
+        retry: 0,
+        timeout: 15_000,
+        signal: request.signal,
+      },
     ),
     $fetch<SpoolLibraryListResponse<VendorItem>>(
-      `/api/farms/${farmId.value}/spool-library/vendors`,
-      { query: { sort: 'name:asc' }, retry: 0, timeout: 15_000 },
+      `/api/farms/${request.id}/spool-library/vendors`,
+      {
+        query: { sort: 'name:asc' },
+        retry: 0,
+        timeout: 15_000,
+        signal: request.signal,
+      },
     ),
   ])
+  if (!request.current()) return
   if (filRes.status === 'fulfilled') filaments.value = filRes.value.items
   if (venRes.status === 'fulfilled') vendors.value = venRes.value.items
 }
 
 async function loadSpools() {
   if (!farmId.value) return
+  const request = scope()
   listController?.abort()
   const signal = (listController = new AbortController()).signal
   loadingList.value = true
@@ -128,18 +157,19 @@ async function loadSpools() {
         signal,
       },
     )
+    if (!request.current() || signal.aborted) return
     spools.value = response.items
     total.value = response.total
     canWrite.value = response.canWrite
     canImport.value = response.canImport
   } catch (cause) {
-    if (signal.aborted) return
+    if (signal.aborted || !request.current()) return
     listError.value = extractApiError(
       cause,
       'Não foi possível carregar as bobinas. Tente novamente.',
     ).message
   } finally {
-    if (!signal.aborted) loadingList.value = false
+    if (!signal.aborted && request.current()) loadingList.value = false
   }
 }
 
@@ -167,31 +197,48 @@ function openEdit(spool: SpoolItem) {
 
 async function saveSpool(payload: Record<string, unknown>) {
   if (!farmId.value || formBusy.value) return
+  const request = scope()
+  const editingId = editingSpool.value?.id
   formBusy.value = true
   formError.value = ''
   try {
-    if (editingSpool.value) {
+    if (editingId !== undefined) {
       await $fetch<SpoolLibraryItemResponse<SpoolItem>>(
-        `/api/farms/${farmId.value}/spool-library/spools/${editingSpool.value.id}`,
-        { method: 'PATCH', body: payload, retry: 0, timeout: 15_000 },
+        `/api/farms/${request.id}/spool-library/spools/${editingId}`,
+        {
+          method: 'PATCH',
+          body: payload,
+          retry: 0,
+          timeout: 15_000,
+          signal: request.signal,
+        },
       )
-      statusMessage.value = `Bobina #${editingSpool.value.id} atualizada.`
+      if (!request.current()) return
+      statusMessage.value = `Bobina #${editingId} atualizada.`
     } else {
       const created = await $fetch<SpoolLibraryItemResponse<SpoolItem>>(
-        `/api/farms/${farmId.value}/spool-library/spools`,
-        { method: 'POST', body: payload, retry: 0, timeout: 15_000 },
+        `/api/farms/${request.id}/spool-library/spools`,
+        {
+          method: 'POST',
+          body: payload,
+          retry: 0,
+          timeout: 15_000,
+          signal: request.signal,
+        },
       )
+      if (!request.current()) return
       statusMessage.value = `Bobina #${created.item.id} cadastrada.`
     }
     formOpen.value = false
     await loadSpools()
   } catch (cause) {
+    if (!request.current()) return
     formError.value = extractApiError(
       cause,
       'Não foi possível salvar a bobina. Tente novamente.',
     ).message
   } finally {
-    formBusy.value = false
+    if (request.current()) formBusy.value = false
   }
 }
 
@@ -207,74 +254,98 @@ async function handleUse(payload: {
   use_length?: number
 }) {
   if (!farmId.value || !actionSpool.value || actionBusy.value) return
+  const request = scope()
+  const id = actionSpool.value.id
   actionBusy.value = true
   actionError.value = ''
   try {
     await $fetch<SpoolLibraryItemResponse<SpoolItem>>(
-      `/api/farms/${farmId.value}/spool-library/spools/${actionSpool.value.id}/use`,
-      { method: 'PUT', body: payload, retry: 0, timeout: 15_000 },
+      `/api/farms/${request.id}/spool-library/spools/${id}/use`,
+      {
+        method: 'PUT',
+        body: payload,
+        retry: 0,
+        timeout: 15_000,
+        signal: request.signal,
+      },
     )
-    statusMessage.value = `Uso registrado na bobina #${actionSpool.value.id}.`
+    if (!request.current()) return
+    statusMessage.value = `Uso registrado na bobina #${id}.`
     actionOpen.value = false
     await loadSpools()
   } catch (cause) {
+    if (!request.current()) return
     actionError.value = extractApiError(
       cause,
       'Não foi possível registrar o uso da bobina.',
     ).message
   } finally {
-    actionBusy.value = false
+    if (request.current()) actionBusy.value = false
   }
 }
 
 async function handleMeasure(payload: { weight: number }) {
   if (!farmId.value || !actionSpool.value || actionBusy.value) return
+  const request = scope()
+  const id = actionSpool.value.id
   actionBusy.value = true
   actionError.value = ''
   try {
     await $fetch<SpoolLibraryItemResponse<SpoolItem>>(
-      `/api/farms/${farmId.value}/spool-library/spools/${actionSpool.value.id}/measure`,
-      { method: 'PUT', body: payload, retry: 0, timeout: 15_000 },
+      `/api/farms/${request.id}/spool-library/spools/${id}/measure`,
+      {
+        method: 'PUT',
+        body: payload,
+        retry: 0,
+        timeout: 15_000,
+        signal: request.signal,
+      },
     )
-    statusMessage.value = `Pesagem registrada na bobina #${actionSpool.value.id}.`
+    if (!request.current()) return
+    statusMessage.value = `Pesagem registrada na bobina #${id}.`
     actionOpen.value = false
     await loadSpools()
   } catch (cause) {
+    if (!request.current()) return
     actionError.value = extractApiError(
       cause,
       'Não foi possível registrar a pesagem da bobina.',
     ).message
   } finally {
-    actionBusy.value = false
+    if (request.current()) actionBusy.value = false
   }
 }
 
 async function toggleArchive(spool: SpoolItem) {
   if (!farmId.value || archivingId.value !== null) return
+  const request = scope()
   archivingId.value = spool.id
   listError.value = ''
   const nextArchived = !spool.archived
   try {
     await $fetch<SpoolLibraryItemResponse<SpoolItem>>(
-      `/api/farms/${farmId.value}/spool-library/spools/${spool.id}`,
+      `/api/farms/${request.id}/spool-library/spools/${spool.id}`,
       {
         method: 'PATCH',
         body: { archived: nextArchived },
         retry: 0,
         timeout: 15_000,
+        signal: request.signal,
       },
     )
+    if (!request.current()) return
     statusMessage.value = nextArchived
       ? `Bobina #${spool.id} arquivada.`
       : `Bobina #${spool.id} desarquivada.`
     await loadSpools()
   } catch (cause) {
+    if (!request.current()) return
     listError.value = extractApiError(
       cause,
       'Não foi possível atualizar o arquivamento da bobina.',
     ).message
   } finally {
-    archivingId.value = null
+    if (request.current()) archivingId.value = null
   }
 }
 
@@ -286,44 +357,81 @@ function openDelete(spool: SpoolItem) {
 
 async function confirmDelete() {
   if (!farmId.value || !deletingSpool.value || deleteBusy.value) return
+  const request = scope()
   deleteBusy.value = true
   deleteError.value = ''
   const id = deletingSpool.value.id
   try {
-    await $fetch(`/api/farms/${farmId.value}/spool-library/spools/${id}`, {
+    await $fetch(`/api/farms/${request.id}/spool-library/spools/${id}`, {
       method: 'DELETE',
       retry: 0,
       timeout: 15_000,
+      signal: request.signal,
     })
+    if (!request.current()) return
     statusMessage.value = `Bobina #${id} excluída.`
     deleteOpen.value = false
     await loadSpools()
   } catch (cause) {
+    if (!request.current()) return
     deleteError.value = extractApiError(
       cause,
       'Não foi possível excluir a bobina.',
     ).message
   } finally {
-    deleteBusy.value = false
+    if (request.current()) deleteBusy.value = false
   }
 }
 
 async function retryLoad() {
+  const previous = farmId.value
   await loadFarms()
-  if (farmId.value) await loadAll()
+  if (farmId.value && farmId.value === previous) await loadAll()
 }
 
 onMounted(async () => {
   await loadFarms()
-  if (farmId.value) await loadAll()
 })
 
-watch(farmId, (next, prev) => {
-  if (next && next !== prev) void loadAll()
-})
+watch(
+  farmId,
+  (next, prev) => {
+    if (next === prev) return
+    farmGeneration++
+    scopeController.abort()
+    scopeController = new AbortController()
+    listController?.abort()
+    spools.value = []
+    filaments.value = []
+    vendors.value = []
+    total.value = 0
+    canWrite.value = false
+    canImport.value = false
+    formOpen.value = false
+    editingSpool.value = null
+    formBusy.value = false
+    formError.value = ''
+    actionOpen.value = false
+    actionSpool.value = null
+    actionBusy.value = false
+    actionError.value = ''
+    deleteOpen.value = false
+    deletingSpool.value = null
+    deleteBusy.value = false
+    deleteError.value = ''
+    archivingId.value = null
+    statusMessage.value = ''
+    listError.value = ''
+    loadingList.value = false
+    if (next) void loadAll()
+  },
+  { flush: 'sync' },
+)
 
 onBeforeUnmount(() => {
   listController?.abort()
+  scopeController.abort()
+  farmGeneration++
 })
 </script>
 

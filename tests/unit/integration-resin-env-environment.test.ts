@@ -84,6 +84,57 @@ describe('environment measurements', () => {
     },
   )
 
+  it('reports chamber temperature with freshness and preserves zero', () => {
+    const withTemperature = (row: IntegrationPrinterRow, value: number) => ({
+      ...row,
+      state: { ...(row.state as object), chamberTemperatureCelsius: value },
+    })
+    expect(
+      measurement(withTemperature(freshChamber, 0), 'temperature'),
+    ).toEqual({
+      kind: 'temperature',
+      state: 'known',
+      value: 0,
+      unit: 'celsius',
+      lastObservedAt: now - 5_000,
+    })
+    expect(
+      measurement(withTemperature(staleChamber, 32), 'temperature'),
+    ).toEqual({
+      kind: 'temperature',
+      state: 'unknown',
+      reason: 'stale',
+      lastObservedAt: now - 600_000,
+    })
+    expect(
+      measurement(withTemperature(offlineChamber, 32), 'temperature'),
+    ).toEqual({
+      kind: 'temperature',
+      state: 'unknown',
+      reason: 'offline',
+      lastObservedAt: now - 10_000,
+    })
+    expect(measurement(neverObserved, 'temperature')).toEqual({
+      kind: 'temperature',
+      state: 'unknown',
+      reason: 'never-observed',
+    })
+    const at = (age: number) => ({
+      ...withTemperature(freshChamber, 32),
+      state: {
+        ...(freshChamber.state as object),
+        chamberTemperatureCelsius: 32,
+        observedAt: now - age,
+      },
+    })
+    expect(
+      measurement(at(ENVIRONMENT_STALE_AFTER_MS), 'temperature')?.state,
+    ).toBe('known')
+    expect(
+      measurement(at(ENVIRONMENT_STALE_AFTER_MS + 1), 'temperature')?.state,
+    ).toBe('unknown')
+  })
+
   it('turns a stale reading into unknown and keeps the last observed time', () => {
     expect(measurement(staleChamber, 'air')).toEqual({
       kind: 'air',

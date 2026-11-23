@@ -14,13 +14,6 @@ export const authRuntime = () => ({
   integrationAuthPool: () => currentWorld().pool,
 })
 
-export const spoolUsage = async (
-  importOriginal: () => Promise<Record<string, unknown>>,
-) => ({
-  ...(await importOriginal()),
-  integrationSpoolPool: async () => currentWorld().pool,
-})
-
 export const jobsRuntime = async () => ({
   integrationJobsRuntime: async () => {
     const world = currentWorld()

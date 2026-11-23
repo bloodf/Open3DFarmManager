@@ -157,7 +157,7 @@ export async function integrationTokenRequest(
       headers: { ...noStore, pragma: 'no-cache' },
     })
   } catch {
-    return oauthError('temporarily_unavailable', 503)
+    return oauthError('temporarily_unavailable', 503, { 'retry-after': '30' })
   }
 }
 
@@ -191,6 +191,7 @@ export function integrationProblem(
   const responseHeaders = new Headers(headers)
   responseHeaders.set('content-type', 'application/problem+json')
   responseHeaders.set('cache-control', 'no-store')
+  if (status === 503) responseHeaders.set('retry-after', '30')
   return Response.json(
     { type: 'https://openfarm.dev/problems/' + code, title, status, code },
     {

@@ -16,11 +16,6 @@ vi.mock('../../apps/farm/server/utils/integration-auth-runtime.ts', async () =>
 vi.mock('../../apps/farm/server/utils/integration-jobs-runtime.ts', async () =>
   (await import('../helpers/api-v1-contract/mocks.ts')).jobsRuntime(),
 )
-vi.mock('../../apps/farm/server/services/spool-usage.ts', async (original) =>
-  (await import('../helpers/api-v1-contract/mocks.ts')).spoolUsage(
-    original as never,
-  ),
-)
 vi.mock(
   '../../apps/farm/server/services/signalling-runtime-bootstrap.ts',
   async () =>
@@ -81,19 +76,10 @@ function responseSpecFor(op: OperationSpec, actual: number) {
 const mediaType = (value: string | null) =>
   value?.split(';')[0]?.trim().toLowerCase()
 
-/**
- * Documented headers no handler sends yet. The 503 response documents
- * Retry-After but every 503 is produced without one; a test below asserts the
- * header is still absent so the exception cannot outlive a fix.
- */
-const unsentHeaders = new Set(['503 Retry-After'])
-
 function headerViolations(response: ResponseSpec, headers: Headers) {
   const out: string[] = []
   for (const { name, schema } of response.headers) {
     const value = headers.get(name)
-    if (value === null && unsentHeaders.has(`${response.status} ${name}`))
-      continue
     if (value === null) {
       out.push(`${name}: documented header is missing`)
       continue
@@ -262,6 +248,62 @@ describe('responses match the spec', () => {
   }
 })
 
+it('validates stored unknown telemetry against the response contract', async () => {
+  const world = freshWorld()
+  const app = world.addApp([{ scopes: ['printers:read'] }])
+  const token = await tokenFor(world, app)
+  const observedAt = world.clock - 1000
+  world.telemetryFixture = {
+    states: [
+      {
+        state: {
+          printerKey: 'printer-a',
+          state: 'unknown',
+          preformStatus: 'unrecognized',
+          observedAt,
+        },
+      },
+    ],
+    transitions: [
+      {
+        transition: {
+          printerKey: 'printer-a',
+          from: 'idle',
+          to: 'unknown',
+          observedAt,
+        },
+      },
+      {
+        transition: {
+          printerKey: 'printer-a',
+          from: 'unknown',
+          to: 'idle',
+          observedAt: observedAt + 1,
+        },
+      },
+    ],
+  }
+  const input = {
+    method: 'GET',
+    path: `/telemetry/${ids.printerA1}?since=${observedAt}&until=${world.clock}`,
+    token,
+  }
+  const result = await call(input)
+  const op = ops.find((entry) => entry.key === 'GET /telemetry/{printerId}')!
+  const scenario = scenarios.find(
+    (entry) => entry.op === op.key && entry.status === '200',
+  )!
+  expect(result.status).toBe(200)
+  expect(result.json).toMatchObject({
+    events: [
+      { from: 'idle', to: 'unknown' },
+      { from: 'unknown', to: 'idle' },
+    ],
+    intervals: [{ state: 'unknown' }],
+  })
+  expect(violationsOf(op, scenario, { input, result })).toEqual([])
+})
+
 it('routes reference-client start, pause and cancel requests through v1', async () => {
   const world = freshWorld()
   const scopes = ['jobs:start', 'control:basic'] as const
@@ -399,26 +441,26 @@ it('executes a sandbox print journey through the reference client over loopback'
   }
 }, 15_000)
 
-describe('documented headers no handler sends yet', () => {
-  it('503 answers still carry no Retry-After', async () => {
-    const withHeader: string[] = []
+describe('documented response headers', () => {
+  it('sends Retry-After on all documented 503 scenarios', async () => {
+    const expected = scenarios
+      .filter((entry) => entry.status === '503')
+      .map(({ op, name }) => `${op}: ${name}`)
+      .sort()
+    expect(expected.length).toBeGreaterThan(0)
+    const observed: string[] = []
     for (const scenario of scenarios.filter(
       (entry) => entry.status === '503',
     )) {
       const { result } = await scenario.run(freshWorld())
-      if (
-        responseSpecFor(
-          ops.find((op) => op.key === scenario.op)!,
-          503,
-        )?.headers.some((header) => header.name === 'Retry-After') &&
-        result.headers.has('retry-after')
-      )
-        withHeader.push(`${scenario.op}: ${scenario.name}`)
+      expect(result.status, `${scenario.op}: ${scenario.name}`).toBe(503)
+      expect(
+        result.headers.get('retry-after'),
+        `${scenario.op}: ${scenario.name}`,
+      ).toBe('30')
+      observed.push(`${scenario.op}: ${scenario.name}`)
     }
-    expect(
-      withHeader,
-      'Retry-After is now sent on 503: remove it from unsentHeaders',
-    ).toEqual([])
+    expect(observed.sort()).toEqual(expected)
   })
 
   it('rejects blank and hexadecimal integer response headers', () => {

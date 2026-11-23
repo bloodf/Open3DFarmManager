@@ -23,6 +23,7 @@ export const SignallingClientControl = z.discriminatedUnion('t', [
   z.strictObject({
     ...base,
     t: z.literal('browser.begin'),
+    camera_printer_id: BrowserDeviceUuid.optional(),
     farm_id: BrowserDeviceUuid,
     agent_id: BrowserDeviceUuid,
     key_id: BrowserDeviceUuid,

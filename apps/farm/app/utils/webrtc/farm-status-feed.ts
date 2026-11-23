@@ -35,6 +35,7 @@ type ClientInput = {
     audience: string
     publicKey: unknown
     privateKey: CryptoKey
+    cameraPrinterId?: string
   }
   assignmentRefs: readonly Assignment[]
   onVerifiedAdmission: (value: {
@@ -302,6 +303,7 @@ export function createAuthenticatedFarmStatusFeed(
           const cameraIds = refs
             .map((ref) => ref.assignmentId)
             .filter((id) => !options.cameraTarget || id === target)
+          const cameraPrinterId = onCamera ? cameraIds[0] : undefined
           let attached: string | undefined
           const cameraMedia =
             onCamera &&
@@ -336,6 +338,7 @@ export function createAuthenticatedFarmStatusFeed(
               audience: resolved.audience,
               publicKey: key.publicKey,
               privateKey: resolved.privateKey,
+              ...(cameraPrinterId ? { cameraPrinterId } : {}),
             },
             assignmentRefs: refs,
             ...(hasWebcamDetail && webcamDetail
@@ -383,6 +386,7 @@ export function createAuthenticatedFarmStatusFeed(
                   b.v !== 2 ||
                   b.assignment_count !== assignments.count ||
                   b.assignment_digest !== assignments.digest ||
+                  b.camera_printer_id !== cameraPrinterId ||
                   b.account_id !== scope.accountId ||
                   b.farm_id !== scope.farmId ||
                   b.agent_id !== agentId ||

@@ -91,6 +91,15 @@ const PrintFileName = z
   .min(1)
   .max(255)
   .refine((v) => !/[\\/\x00-\x1f\x7f]/.test(v) && !v.includes('..'))
+/** The Anycubic LAN start envelope accepts stored raw G-code paths. */
+export function isAnycubicStartFile(name: string): boolean {
+  return (
+    name.length <= 255 &&
+    name.endsWith('.gcode') &&
+    !/[\\\x00-\x1f\x7f%]/.test(name) &&
+    !name.split('/').some((part) => !part || part === '.' || part === '..')
+  )
+}
 const PlateNumber = z.number().int().min(1).max(1000)
 export const LibraryPrintArgs = z.strictObject({
   sha256: z.string().regex(/^[0-9a-f]{64}$/),

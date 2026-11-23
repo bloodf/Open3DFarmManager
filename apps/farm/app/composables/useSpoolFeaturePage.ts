@@ -23,6 +23,7 @@ export function featureFetch<T>(
     method?: 'GET' | 'POST' | 'PUT' | 'PATCH'
     query?: Record<string, string | number | undefined>
     body?: Record<string, unknown>
+    signal?: AbortSignal
   } = {},
 ): Promise<T> {
   return $fetch(spoolApi(farmId, path), {
@@ -32,10 +33,15 @@ export function featureFetch<T>(
   }) as Promise<unknown> as Promise<T>
 }
 
-export async function fetchSpools(farmId: string) {
+export async function fetchSpools(farmId: string, signal?: AbortSignal) {
   const response = await $fetch<SpoolLibraryListResponse<SpoolItem>>(
     spoolApi(farmId, 'spools'),
-    { query: { sort: EMPTY_SPOOL_FILTERS.sort }, retry: 0, timeout: 15_000 },
+    {
+      query: { sort: EMPTY_SPOOL_FILTERS.sort },
+      retry: 0,
+      timeout: 15_000,
+      signal,
+    },
   )
   return {
     items: response.items,
@@ -63,7 +69,11 @@ export async function fetchPrinters(farmId: string): Promise<PrinterRef[]> {
  * loading, error and status-message state.
  */
 export function useSpoolFeaturePage(
-  load: (farmId: string, current: () => boolean) => Promise<void>,
+  load: (
+    farmId: string,
+    current: () => boolean,
+    signal: AbortSignal,
+  ) => Promise<void>,
 ) {
   const farm = useSpoolLibraryFarm()
   const loading = ref(false)
@@ -71,15 +81,20 @@ export function useSpoolFeaturePage(
   const statusMessage = ref('')
   const actionError = ref('')
   const guard = createFarmRequestGuard(() => farm.farmId.value)
+  let controller = new AbortController()
 
   async function reload() {
     const id = farm.farmId.value
     if (!id) return
-    const current = guard.start(id)
+    controller.abort()
+    controller = new AbortController()
+    const signal = controller.signal
+    const guarded = guard.start(id)
+    const current = () => !signal.aborted && guarded()
     loading.value = true
     error.value = ''
     try {
-      await load(id, current)
+      await load(id, current, signal)
     } catch (cause) {
       if (current())
         error.value = extractApiError(
@@ -92,8 +107,9 @@ export function useSpoolFeaturePage(
   }
 
   async function retry() {
+    const previous = farm.farmId.value
     await farm.loadFarms()
-    await reload()
+    if (farm.farmId.value === previous) await reload()
   }
 
   /** Runs a mutation, reporting success in the status region or failure inline. */
@@ -115,13 +131,24 @@ export function useSpoolFeaturePage(
 
   onMounted(async () => {
     await farm.loadFarms()
-    await reload()
   })
-  watch(farm.farmId, (next, prev) => {
-    if (next && next !== prev) void reload()
-  })
+  watch(
+    farm.farmId,
+    (next, prev) => {
+      if (next === prev) return
+      controller.abort()
+      guard.invalidate()
+      loading.value = false
+      error.value = ''
+      statusMessage.value = ''
+      actionError.value = ''
+      if (next) void reload()
+    },
+    { flush: 'sync' },
+  )
   onBeforeUnmount(() => {
     guard.invalidate()
+    controller.abort()
   })
 
   return {

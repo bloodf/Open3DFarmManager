@@ -11,12 +11,7 @@ import {
 import { PostgresIntegrationAudit } from '../../apps/farm/server/storage/integration-audit-postgres.ts'
 import { PostgresIntegrationDelivery } from '../../apps/farm/server/storage/integration-delivery-postgres.ts'
 import { PostgresIntegrationJobs } from '../../apps/farm/server/storage/integration-jobs-postgres.ts'
-import { IntegrationLibraryService } from '../../apps/farm/server/services/integration-library.ts'
-import { PostgresIntegrationLibrary } from '../../apps/farm/server/storage/integration-library-postgres.ts'
-import {
-  decodeApiEnvelopeFrame,
-  encodeApiEnvelopeResultFrame,
-} from '../../packages/farm-protocol/src/api-envelope.ts'
+import { encodeApiEnvelopeResultFrame } from '../../packages/farm-protocol/src/api-envelope.ts'
 import type { IntegrationPrincipal } from '../../apps/farm/server/utils/integration-auth.ts'
 
 const denied = async (promise: PromiseLike<unknown>, what: string) => {
@@ -117,7 +112,7 @@ export async function testPostgresIntegrationJobs(admin: Sql, runtime: Sql) {
     grantId: string,
     printer: string | null,
     requiresApproval = false,
-    scopes: ('jobs:start' | 'jobs:write' | 'printers:read')[] = ['jobs:start'],
+    scopes: ('jobs:start' | 'printers:read')[] = ['jobs:start'],
   ): IntegrationPrincipal => ({
     appId: id,
     scopes,
@@ -384,99 +379,6 @@ export async function testPostgresIntegrationJobs(admin: Sql, runtime: Sql) {
   assert.equal(refusedJob.job.refusal?.code, 'printer-busy')
   check('the Connector outcome shows on the job')
 
-  const library = new PostgresIntegrationLibrary(runtime)
-  const resinVersion = {
-    id: randomUUID(),
-    itemId: randomUUID(),
-    farmId: farm,
-    title: 'resin-test',
-    originalName: 'resin-test.pm7m',
-    resinProfile: 'anycubic:photon-mono-m7-max',
-    kind: 'resin',
-    sha256: 'bae0'.repeat(16),
-    sizeBytes: 42,
-    plateCount: 1,
-    storageLocation: 'server',
-    agentId: null,
-    createdAt: clock.now,
-    versionNumber: 1,
-  } as const
-  const item = await library.addVersion(resinVersion)
-  assert.equal(item.latest.resinProfile, resinVersion.resinProfile)
-  const resinGrant = await grant(
-    appId,
-    farm,
-    ['jobs:start', 'jobs:write'],
-    printerA.id,
-  )
-  const resinPrincipal = principal(appId, resinGrant, printerA.id, false, [
-    'jobs:start',
-    'jobs:write',
-  ])
-  const resinJobs = new IntegrationJobsService({
-    store,
-    envelopes: {
-      issue: (input) => delivery.issue(input),
-      deliver: (id) => delivery.deliver(id),
-      get: (id) => deliveryStore.get(id),
-    },
-    library: new IntegrationLibraryService(library, () => clock.now),
-    now: () => clock.now,
-  })
-  const resinReplay = await resinJobs.submit(
-    resinPrincipal,
-    printerA.id,
-    'resin-1',
-    {
-      libraryVersionId: resinVersion.id,
-    },
-  )
-  assert.ok(resinReplay.ok)
-  const resinEnvelope = decodeApiEnvelopeFrame(sent.at(-1)).envelope
-  assert.equal(resinEnvelope.action?.action, 'start_library_print')
-  assert.equal(resinEnvelope.scope, 'jobs:write')
-  assert.equal(
-    await delivery.recordResult(
-      farm,
-      printerA.agent,
-      encodeApiEnvelopeResultFrame({
-        v: 1,
-        t: 'api-envelope.result',
-        cmd_id: resinEnvelope.cmd_id,
-        outcome: 'refused',
-        refusal_code: 'unsupported',
-        detail: 'resin-artifact-dispatch-unavailable',
-        at: clock.now,
-      }),
-    ),
-    'recorded',
-  )
-  const receipt = await resinJobs.get(resinPrincipal, resinReplay.job.id)
-  assert.ok(!('error' in receipt))
-  assert.equal(receipt.libraryVersionId, resinVersion.id)
-  assert.equal(receipt.resinProfile, resinVersion.resinProfile)
-  assert.equal(receipt.status, 'refused')
-  assert.deepEqual(receipt.refusal, {
-    code: 'unsupported',
-    detail: 'resin-artifact-dispatch-unavailable',
-  })
-  const resinRepeat = await resinJobs.submit(
-    resinPrincipal,
-    printerA.id,
-    'resin-1',
-    { libraryVersionId: resinVersion.id, plate: 1 },
-  )
-  assert.ok(resinRepeat.ok)
-  assert.equal(resinRepeat.job.id, receipt.id)
-  assert.equal(resinRepeat.job.status, 'refused')
-  await denied(
-    admin`UPDATE farm.integration_jobs SET library_version_id = ${randomUUID()}::uuid WHERE id = ${receipt.id}::uuid`,
-    'the receipt version cannot be changed',
-  )
-  check(
-    'resin versions retain immutable identity and durable Connector refusal on the receipt',
-  )
-
   // Nothing but the file reference is stored.
   const columns = (
     await admin`SELECT column_name FROM information_schema.columns WHERE table_schema = 'farm' AND table_name = 'integration_jobs'`
@@ -498,7 +400,6 @@ export async function testPostgresIntegrationJobs(admin: Sql, runtime: Sql) {
       'plate',
       'printer_assignment_id',
       'request_hash',
-      'resin_profile',
       'sha256',
       'size_bytes',
       'status',

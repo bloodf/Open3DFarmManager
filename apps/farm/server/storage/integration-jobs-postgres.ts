@@ -12,9 +12,13 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const validTime = (value: number) => Number.isSafeInteger(value) && value >= 0
 
 const columns = (sql: Sql) =>
-  sql`j.id::text AS "id", j.app_id::text AS "appId", j.grant_id::text AS "grantId", j.farm_id::text AS "farmId", j.printer_assignment_id::text AS "printerAssignmentId", j.idempotency_key AS "idempotencyKey", j.request_hash AS "requestHash", j.file_url AS "fileUrl", j.sha256, j.size_bytes::float8 AS "sizeBytes", j.display_name AS "displayName", j.library_version_id::text AS "libraryVersionId", j.plate, j.storage_mode AS "storageMode", j.resin_profile AS "resinProfile", j.status, j.created_at::float8 AS "createdAt", j.updated_at::float8 AS "updatedAt"`
+  sql`j.id::text AS "id", j.app_id::text AS "appId", j.grant_id::text AS "grantId", j.farm_id::text AS "farmId", j.printer_assignment_id::text AS "printerAssignmentId", j.idempotency_key AS "idempotencyKey", j.request_hash AS "requestHash", j.file_url AS "fileUrl", j.sha256, j.size_bytes::float8 AS "sizeBytes", j.display_name AS "displayName", j.library_version_id::text AS "libraryVersionId", j.plate, j.storage_mode AS "storageMode", v.metadata->>'resinProfile' AS "resinProfile", j.status, j.created_at::float8 AS "createdAt", j.updated_at::float8 AS "updatedAt"`
 const returning = (sql: Sql) =>
-  sql`id::text AS "id", app_id::text AS "appId", grant_id::text AS "grantId", farm_id::text AS "farmId", printer_assignment_id::text AS "printerAssignmentId", idempotency_key AS "idempotencyKey", request_hash AS "requestHash", file_url AS "fileUrl", sha256, size_bytes::float8 AS "sizeBytes", display_name AS "displayName", library_version_id::text AS "libraryVersionId", plate, storage_mode AS "storageMode", resin_profile AS "resinProfile", status, created_at::float8 AS "createdAt", updated_at::float8 AS "updatedAt"`
+  sql`id::text AS "id", app_id::text AS "appId", grant_id::text AS "grantId", farm_id::text AS "farmId", printer_assignment_id::text AS "printerAssignmentId", idempotency_key AS "idempotencyKey", request_hash AS "requestHash", file_url AS "fileUrl", sha256, size_bytes::float8 AS "sizeBytes", display_name AS "displayName", library_version_id::text AS "libraryVersionId", plate, storage_mode AS "storageMode", status, created_at::float8 AS "createdAt", updated_at::float8 AS "updatedAt"`
+// Versions are retained after soft deletion and their metadata is immutable.
+const versionJoin = (sql: Sql) =>
+  sql`LEFT JOIN farm.library_versions v ON v.id = j.library_version_id
+    AND v.farm_id = j.farm_id AND v.sha256 = j.sha256`
 function present(row: JobRecord): JobRecord {
   const record = { ...row }
   if (record.libraryVersionId == null) delete record.libraryVersionId
@@ -37,7 +41,9 @@ export class PostgresIntegrationJobs implements IntegrationJobsStore {
     if (!uuid.test(id) || !uuid.test(appId)) return null
     const rows = await this.sql<
       JobRecord[]
-    >`SELECT ${columns(this.sql)} FROM farm.integration_jobs j WHERE j.id = ${id}::uuid AND j.app_id = ${appId}::uuid`
+    >`SELECT ${columns(this.sql)} FROM farm.integration_jobs j
+    ${versionJoin(this.sql)}
+    WHERE j.id = ${id}::uuid AND j.app_id = ${appId}::uuid`
     if (!rows[0]) return null
     const envelopes = await this.sql<
       EnvelopeRecord[]
@@ -62,12 +68,17 @@ export class PostgresIntegrationJobs implements IntegrationJobsStore {
         await tx`SET LOCAL statement_timeout = '2000ms'`
         await tx`SET LOCAL lock_timeout = '1000ms'`
         const rows = await tx<JobRecord[]>`
-          INSERT INTO farm.integration_jobs (id, app_id, grant_id, farm_id, printer_assignment_id, idempotency_key, request_hash, file_url, sha256, size_bytes, display_name, library_version_id, plate, storage_mode, resin_profile, status, created_at, updated_at)
-          VALUES (${job.id}::uuid, ${job.appId}::uuid, ${job.grantId}::uuid, ${job.farmId}::uuid, ${job.printerAssignmentId}::uuid, ${job.idempotencyKey}, ${job.requestHash}, ${job.fileUrl}, ${job.sha256}, ${job.sizeBytes}, ${job.displayName}, ${job.libraryVersionId ?? null}::uuid, ${job.plate ?? null}, ${job.storageMode ?? null}, ${job.resinProfile ?? null}, ${job.status}, ${now}, ${now})
+          INSERT INTO farm.integration_jobs (id, app_id, grant_id, farm_id, printer_assignment_id, idempotency_key, request_hash, file_url, sha256, size_bytes, display_name, library_version_id, plate, storage_mode, status, created_at, updated_at)
+          VALUES (${job.id}::uuid, ${job.appId}::uuid, ${job.grantId}::uuid, ${job.farmId}::uuid, ${job.printerAssignmentId}::uuid, ${job.idempotencyKey}, ${job.requestHash}, ${job.fileUrl}, ${job.sha256}, ${job.sizeBytes}, ${job.displayName}, ${job.libraryVersionId ?? null}::uuid, ${job.plate ?? null}, ${job.storageMode ?? null}, ${job.status}, ${now}, ${now})
           ON CONFLICT (app_id, idempotency_key) DO NOTHING
           RETURNING ${returning(tx as unknown as Sql)}`
         if (rows[0]) {
-          const record = present(rows[0]!)
+          const record = present({
+            ...rows[0],
+            ...(job.resinProfile === undefined
+              ? {}
+              : { resinProfile: job.resinProfile }),
+          })
           await tx`
             INSERT INTO farm.integration_audit (farm_id, app_id, printer_assignment_id, actor_kind, actor_id, action, resource_type, resource_id, outcome, occurred_at, details)
             VALUES (${record.farmId}::uuid, ${record.appId}::uuid, ${record.printerAssignmentId}::uuid, 'app', ${record.appId}, 'job.submitted', 'job', ${record.id}, ${record.status === 'held' ? 'held' : 'accepted'}, ${now}, ${tx.json({ status: record.status })})`
@@ -77,6 +88,7 @@ export class PostgresIntegrationJobs implements IntegrationJobsStore {
           SELECT ${columns(tx as unknown as Sql)},
             (SELECT e.cmd_id::text FROM farm.integration_envelopes e WHERE e.kind IN ('job', 'action') AND e.resource_id = j.id ORDER BY CASE e.kind WHEN 'job' THEN 0 ELSE 1 END LIMIT 1) AS "cmdId"
           FROM farm.integration_jobs j
+          ${versionJoin(tx as unknown as Sql)}
           WHERE j.app_id = ${job.appId}::uuid AND j.idempotency_key = ${job.idempotencyKey}`
         if (!existing[0]) return { kind: 'refused' }
         const { cmdId, ...rest } = existing[0]

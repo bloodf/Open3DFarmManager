@@ -115,7 +115,8 @@ export class PostgresIntegrationApprovals implements IntegrationApprovalStore {
   ) {
     const extra =
       kind === 'job'
-        ? sql`x.file_url AS "fileUrl", x.sha256, x.size_bytes::float8 AS "sizeBytes", x.display_name AS "displayName", x.library_version_id::text AS "libraryVersionId", x.plate, x.resin_profile AS "resinProfile"`
+        ? sql`x.file_url AS "fileUrl", x.sha256, x.size_bytes::float8 AS "sizeBytes", x.display_name AS "displayName", x.library_version_id::text AS "libraryVersionId", x.plate, (SELECT v.metadata->>'resinProfile' FROM farm.library_versions v
+              WHERE v.id = x.library_version_id AND v.farm_id = x.farm_id AND v.sha256 = x.sha256) AS "resinProfile"`
         : sql`x.action`
     return sql<HeldRow[]>`
       SELECT x.id::text AS id, x.farm_id::text AS "farmId", x.app_id::text AS "appId", a.name AS "appName",
@@ -183,7 +184,8 @@ export class PostgresIntegrationApprovals implements IntegrationApprovalStore {
       for (const kind of ['job', 'action'] as const) {
         const extra =
           kind === 'job'
-            ? tx`x.file_url AS "fileUrl", x.sha256, x.size_bytes::float8 AS "sizeBytes", x.display_name AS "displayName", x.library_version_id::text AS "libraryVersionId", x.plate, x.resin_profile AS "resinProfile"`
+            ? tx`x.file_url AS "fileUrl", x.sha256, x.size_bytes::float8 AS "sizeBytes", x.display_name AS "displayName", x.library_version_id::text AS "libraryVersionId", x.plate, (SELECT v.metadata->>'resinProfile' FROM farm.library_versions v
+              WHERE v.id = x.library_version_id AND v.farm_id = x.farm_id AND v.sha256 = x.sha256) AS "resinProfile"`
             : tx`x.action`
         const found = await tx<HeldRow[]>`
           SELECT x.id::text AS id, x.farm_id::text AS "farmId", x.app_id::text AS "appId", a.name AS "appName",

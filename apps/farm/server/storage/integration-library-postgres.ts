@@ -71,7 +71,7 @@ export class PostgresIntegrationLibrary implements IntegrationLibraryStore {
         sizeBytes: row.sizeBytes,
         storageLocation: asMode(row.storageLocation),
         originalName: row.originalName,
-        kind: row.kind,
+        kind: row.resinProfile == null ? row.kind : 'resin',
         ...(row.resinProfile == null ? {} : { resinProfile: row.resinProfile }),
         plateCount: row.plateCount,
         createdAt: row.createdAt,
@@ -184,9 +184,12 @@ export class PostgresIntegrationLibrary implements IntegrationLibraryStore {
         INSERT INTO farm.library_blobs (farm_id, sha256, size_bytes, storage_location, agent_id, created_at)
         VALUES (${version.farmId}::uuid, ${version.sha256}, ${version.sizeBytes}, ${version.storageLocation}, ${version.agentId}, ${version.createdAt})
         ON CONFLICT DO NOTHING`
+      // The existing kind constraint only permits G-code and 3MF. The
+      // immutable profile in version metadata identifies the resin artifact.
+      const storedKind = version.kind === 'resin' ? '3mf' : version.kind
       await tx`
         INSERT INTO farm.library_versions (id, farm_id, item_id, version_number, sha256, size_bytes, storage_location, agent_id, original_name, kind, plate_count, metadata, notes, uploaded_by, created_at)
-        VALUES (${version.id}::uuid, ${version.farmId}::uuid, ${version.itemId}::uuid, ${version.versionNumber}, ${version.sha256}, ${version.sizeBytes}, ${version.storageLocation}, ${version.agentId}, ${version.originalName}, ${version.kind}, ${version.plateCount}, ${tx.json(version.resinProfile === undefined ? {} : { resinProfile: version.resinProfile })}, '', 'integration', ${version.createdAt})`
+        VALUES (${version.id}::uuid, ${version.farmId}::uuid, ${version.itemId}::uuid, ${version.versionNumber}, ${version.sha256}, ${version.sizeBytes}, ${version.storageLocation}, ${version.agentId}, ${version.originalName}, ${storedKind}, ${version.plateCount}, ${tx.json(version.resinProfile === undefined ? {} : { resinProfile: version.resinProfile })}, '', 'integration', ${version.createdAt})`
     })
     const item = await this.getItem(version.itemId)
     if (!item) throw new Error('library version was not stored')

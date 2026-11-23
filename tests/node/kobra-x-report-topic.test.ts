@@ -133,5 +133,36 @@ test(
       'status and telemetry from the real report topic',
     )
     assert.equal(adapter.snapshot().bedTemperatureCelsius, 47)
+    // This fixture broker forwards the PUBLISH header, including the retain
+    // flag. The later unretained reading proves the cached state was delivered first.
+    observer.publish(
+      `${realPrefix}status/report`,
+      JSON.stringify({
+        type: 'status',
+        action: 'report',
+        msgid: 'retained-idle',
+        state: 'done',
+        code: 200,
+        data: { state: 'free' },
+      }),
+      { retain: true },
+    )
+    observer.publish(
+      `${realPrefix}tempature/report`,
+      JSON.stringify({
+        type: 'tempature',
+        action: 'report',
+        msgid: 'fresh-temp',
+        state: 'done',
+        code: 200,
+        data: { curr_nozzle_temp: 188 },
+      }),
+    )
+    await until(
+      () => adapter.snapshot().toolTemperatureCelsius === 188,
+      'unretained temperature after cached state',
+    )
+    assert.equal(adapter.snapshot().state, 'printing')
+    assert.equal(adapter.facts().infoState, 'busy')
   },
 )

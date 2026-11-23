@@ -230,8 +230,10 @@ export async function connectKobraX(options: {
       })
     })
   })
-  client.on('message', (topic, payload) => {
-    if (!topic.startsWith(reports) || payload.length > 65536) return
+  client.on('message', (topic, payload, packet) => {
+    // A broker replay at subscribe time does not establish current state.
+    if (packet.retain || !topic.startsWith(reports) || payload.length > 65536)
+      return
     const [type, suffix, extra] = topic.slice(reports.length).split('/')
     if (type === 'response' && suffix === undefined) {
       try {

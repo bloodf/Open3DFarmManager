@@ -5,9 +5,10 @@ License of this document: MIT, same as OpenFarm.
 
 ## Purpose and clean-room rules
 
-OpenFarm reaches the Kobra X today only through the KobraLink container, which is GPL-3.0. This
-document describes the Kobra X's LAN protocol in facts and message shapes so that an MIT-licensed
-native adapter can be implemented without copying GPL or AGPL code.
+OpenFarm connects directly to the Kobra X over its native LAN endpoints.
+This document records the protocol facts and message shapes used by the
+MIT-licensed adapter. KobraLink and other third-party sources contribute only
+reported protocol observations.
 
 Rules for anyone editing this document or implementing from it:
 
@@ -180,12 +181,12 @@ assignments and pending bridge operations are untouched.
    stored pin intact. An HTTP `/info` response can identify a model and serial
    but cannot prove that a replacement public key belongs to that printer.
 
-Limits of this activation: the binding store follows the Bambu pattern, so the
-agent runtime does not yet load it into its assignment mapping; control commands
-for a native assignment are not routed (read-only); camera exposure is not
-enabled; certificate-refusal and LAN-off causes are inferred from adapter errors,
-not from hardware. All of it is proven only against the loopback mock and the
-synthetic vectors above.
+The Connector loads the binding into its local assignment mapping. Adding that
+assignment to `pause.control.assignmentIds` enables the existing signed command
+path for the native actions listed in [Kobra X detail capabilities](../protocols/kobra-x-detail.md).
+The signed path has loopback evidence. The [hardware reports](../hardware-reports/)
+record pinned LAN telemetry separately. Native camera media is unavailable.
+Certificate-refusal and LAN-off diagnostics come from adapter errors.
 
 ### `POST /gcode_upload`
 
@@ -286,6 +287,9 @@ Multiple clients: observed on firmware 2.0.2.8 (S1). Two MQTT sessions coexisted
 (Kobralink) stayed connected the whole time, and each client sees reports caused by the other. The
 adapter must therefore not assume it is the only reader of the report topics. S1 keeps one
 connection per printer on its side.
+
+The Connector ignores MQTT reports carrying the retained flag and requests
+fresh state before permitting a signed command.
 
 ## Status and reports
 

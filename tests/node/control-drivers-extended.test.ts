@@ -8,6 +8,7 @@ import {
   openCommandJournal,
   closeCommandJournal,
   readCommandAction,
+  readCommandOutcome,
 } from '../../packages/connector/src/control/command-journal.ts'
 import {
   createPauseDispatcher,
@@ -15,6 +16,7 @@ import {
 } from '../../packages/connector/src/control/pause-dispatcher.ts'
 import {
   createPrinterBindingRegistry,
+  provisionAnycubicPrinter,
   provisionBambuPrinter,
   provisionReadonlyPrinter,
   type PrinterBinding,
@@ -30,6 +32,7 @@ import {
 import { createPauseDriverRouter } from '../../packages/connector/src/runtime/pause-driver-router.ts'
 import type { ControlLimits } from '../../packages/connector/src/runtime/control-limits.ts'
 import { pauseFixture } from '../../packages/connector/test/moonraker-pause-fixture.ts'
+import { startAnycubicSimulator } from '../../packages/sim-tools/src/anycubic-simulator.ts'
 import { startBambuSimulator } from '../../packages/sim-tools/src/bambu-simulator.ts'
 
 // Loopback fixtures only: the Moonraker fixture and the Bambu simulator. The
@@ -222,6 +225,7 @@ async function authorityFixture(action: Action, args: Args) {
 
 type Backend =
   | { kind: 'moonraker'; mode?: Parameters<typeof pauseFixture>[0] }
+  | { kind: 'anycubic' }
   | {
       kind: 'bambu'
       model?: string
@@ -262,6 +266,7 @@ async function world(
   }
   let printerBinding: PrinterBinding
   let moonraker: Awaited<ReturnType<typeof pauseFixture>> | undefined
+  let anycubic: Awaited<ReturnType<typeof startAnycubicSimulator>> | undefined
   let bambu: Awaited<ReturnType<typeof startBambuSimulator>> | undefined
   if (backend.kind === 'moonraker') {
     const remote = await pauseFixture({
@@ -273,6 +278,27 @@ async function world(
     printerBinding = createPrinterBindingRegistry({
       allowedOrigins: [remote.origin],
     }).provision({ ...scope, moonraker_origin: remote.origin })
+  } else if (backend.kind === 'anycubic') {
+    const remote = await startAnycubicSimulator({
+      serial: '20024/SYNTHETIC',
+      initialState: 'IDLE',
+    })
+    anycubic = remote
+    cleanup.push(() => remote.close())
+    const passwordFile = join(directory, 'password')
+    const caFile = join(directory, 'ca')
+    writeFileSync(passwordFile, JSON.stringify(SECRET), { mode: 0o600 })
+    writeFileSync(caFile, remote.syntheticTrust)
+    printerBinding = provisionAnycubicPrinter(scope, {
+      printerKey: scope.printer_key,
+      modelId: '20024',
+      deviceId: 'SYNTHETIC',
+      host: remote.host,
+      port: remote.port,
+      username: 'synthetic',
+      passwordFile,
+      caFile,
+    })
   } else {
     const remote = await startBambuSimulator({
       initialState:
@@ -390,16 +416,32 @@ async function world(
     journal,
     moonraker,
     bambu,
+    anycubic,
     driver,
     dispatcher: active,
     printerBinding,
     signed,
-    dispatch: () =>
-      active.dispatch({
-        wire: encodeCommandV2(signed),
+    async dispatch(followup?: { action: Action; args: Args }) {
+      const now = Date.now()
+      const next = followup
+        ? await signCommandV2(
+            {
+              ...f.command,
+              ...followup,
+              cmd_id: randomUUID(),
+              nonce: randomBytes(16).toString('base64url'),
+              issued_at: now,
+              expires_at: now + 5000,
+            },
+            f.pair.privateKey,
+          )
+        : signed
+      return active.dispatch({
+        wire: encodeCommandV2(next),
         capability: accepted.handle,
         printerBinding,
-      }),
+      })
+    },
     /**
      * The dispatcher's own driver sequence on the router: prepare, one guarded
      * execute, then the post-send observation. Used for the extended actions,
@@ -443,6 +485,37 @@ async function world(
     },
   }
 }
+
+test('Anycubic refuses a package start before sending and leaves later commands available', async (t) => {
+  const file = 'part.gcode.3mf'
+  const f = await world(t, { kind: 'anycubic' }, 'start_print', { file })
+  assert.ok(f.anycubic)
+  const refusal = await f.dispatch()
+  assert.deepEqual(f.anycubic.calls.all, [])
+  const next = await f.dispatch({ action: 'set_light', args: { on: true } })
+  assert.deepEqual(
+    {
+      refusal,
+      journal: readCommandOutcome(f.journal, f.signed.cmd_id)?.status,
+      next: next.kind,
+      settings: f.anycubic.settings,
+    },
+    {
+      refusal: {
+        kind: 'not-sent',
+        reason: 'invalid-command',
+        cmdId: f.signed.cmd_id,
+      },
+      journal: 'not-sent',
+      next: 'applied',
+      settings: { light: { type: 3, status: 1 } },
+    },
+  )
+  assert.deepEqual(
+    f.anycubic.calls.all.map(({ topic }) => topic),
+    ['anycubic/anycubicCloud/v1/printer/public/20024/SYNTHETIC/light/request'],
+  )
+})
 
 async function assertExecuted(f: Awaited<ReturnType<typeof world>>) {
   const { acknowledgement, observation, after } = await f.execute()

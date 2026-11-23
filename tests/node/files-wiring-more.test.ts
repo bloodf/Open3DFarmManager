@@ -54,7 +54,8 @@ import {
 import { createPauseDriverRouter } from '../../packages/connector/src/runtime/pause-driver-router.ts'
 import { createCrealitySimulator } from '../../packages/sim-tools/src/creality-simulator.ts'
 import { startAnycubicSimulator } from '../fixtures/anycubic-files.ts'
-import { writeFile } from 'node:fs/promises'
+import { startAnycubicSimulator as startAnycubicFileSimulator } from '../../packages/sim-tools/src/anycubic-simulator.ts'
+import { readFile, writeFile } from 'node:fs/promises'
 import type { KobraLinkFetch } from '../../packages/connector/src/kobralink/client.ts'
 
 type Native = typeof import('node-datachannel')
@@ -610,6 +611,103 @@ test(
     assert.equal(upload.ok, false)
     if (!upload.ok) assert.equal(upload.reason, 'unsupported')
     await assert.rejects(readdir(f.staging), { code: 'ENOENT' })
+  },
+)
+
+test(
+  'Anycubic file channel distinguishes a busy upload from a stored-only package',
+  { timeout: 15000 },
+  async (t) => {
+    const dir = await mkdtemp(join(tmpdir(), 'files-anycubic-lan-'))
+    t.after(() => rm(dir, { recursive: true }))
+    const sim = await startAnycubicFileSimulator({
+      serial: '20024/SYNTHETIC',
+      initialState: 'IDLE',
+      lanFiles: { firmware: '2.4.6.7' },
+      credentials: { username: 'synthetic', password: 'synthetic' },
+    })
+    t.after(() => sim.close())
+    const passwordFile = join(dir, 'password')
+    const caFile = join(dir, 'ca')
+    await writeFile(passwordFile, JSON.stringify('synthetic'), { mode: 0o600 })
+    await writeFile(caFile, sim.syntheticTrust)
+    const binding = provisionAnycubicPrinter(
+      {
+        assignment_id: randomUUID(),
+        farm_id: randomUUID(),
+        agent_id: randomUUID(),
+        printer_key: 'printer',
+      },
+      {
+        printerKey: 'printer',
+        host: sim.host,
+        port: sim.port,
+        uploadPort: sim.uploadPort,
+        modelId: '20024',
+        deviceId: 'SYNTHETIC',
+        username: 'synthetic',
+        passwordFile,
+        caFile,
+      },
+    )
+    const target = { backend: 'anycubic', binding } as const
+    const name = 'journey.gcode.3mf'
+    const bytes = await readFile(
+      new URL('../fixtures/anycubic/journey.gcode.3mf', import.meta.url),
+    )
+    const send = async (f: Awaited<ReturnType<typeof connect>>) =>
+      f.browser.sendFile(
+        {
+          ...f.fileOffer,
+          name,
+          size: bytes.length,
+          sha256: createHash('sha256').update(bytes).digest('hex'),
+        },
+        new Blob([Uint8Array.from(bytes)]),
+      )
+
+    await t.test(
+      'reports busy without issuing an HTTP upload',
+      async (step) => {
+        sim.setPrintProgress(25)
+        const f = await connect(step, target, target)
+        assert.deepEqual(await send(f), {
+          type: 'result',
+          transfer_id: f.fileOffer.transfer_id,
+          ok: false,
+          reason: 'busy',
+        })
+        assert.equal(sim.uploadCount, 0)
+      },
+    )
+
+    await t.test('uploads a stored-only package once idle', async (step) => {
+      sim.finishPrint()
+      const f = await connect(step, target, target)
+      assert.deepEqual(await send(f), {
+        type: 'result',
+        transfer_id: f.fileOffer.transfer_id,
+        ok: true,
+        printUnsupported: true,
+      })
+      assert.equal(sim.uploadCount, 1)
+    })
+
+    await t.test(
+      'preserves the restriction through the listing wire',
+      async (step) => {
+        const f = await connect(step, target, target)
+        const listed = await f.browser.listFiles('printer')
+        assert.ok(listed.ok)
+        assert.equal(listed.files.length, 1)
+        assert.deepEqual(listed.files[0], {
+          name,
+          size: bytes.length,
+          modified: listed.files[0]?.modified,
+          printUnsupported: true,
+        })
+      },
+    )
   },
 )
 

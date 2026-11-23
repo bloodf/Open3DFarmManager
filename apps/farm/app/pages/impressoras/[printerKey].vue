@@ -35,6 +35,7 @@ import {
   actionDialogTitle,
   liveControlActionAvailability,
 } from '../../utils/farm-control.ts'
+import { printableFile } from '../../utils/files-view.ts'
 import { extendedLabel } from '../../utils/farm-control-extended.ts'
 import {
   formatPrinterStateLabel,
@@ -74,6 +75,13 @@ const vendorCatalog = computed(() => {
   return vendor ? vendorDetailCatalog[vendor] : undefined
 })
 const printFile = ref('')
+const canStartStoredFile = computed(() =>
+  printableFile(printFile.value, vendorFrame.value?.vendor),
+)
+function startStoredFile(event: Event) {
+  if (canStartStoredFile.value)
+    control('start_print', event, { file: printFile.value })
+}
 const systemFrame = computed(() =>
   detailFrame.value?.capabilities.includes('system')
     ? detailFrame.value
@@ -1020,9 +1028,7 @@ watch(
       <form
         v-if="state?.controls?.includes('start_print')"
         class="print-form"
-        @submit.prevent="
-          (event) => control('start_print', event, { file: printFile })
-        "
+        @submit.prevent="startStoredFile"
       >
         <label for="detail-print-file">Nome do arquivo na impressora</label>
         <input
@@ -1030,10 +1036,25 @@ watch(
           v-model.trim="printFile"
           required
           maxlength="255"
+          :aria-describedby="
+            vendorFrame.vendor === 'anycubic'
+              ? 'detail-print-file-hint'
+              : undefined
+          "
         />
+        <span
+          v-if="vendorFrame.vendor === 'anycubic'"
+          id="detail-print-file-hint"
+        >
+          Informe o nome de um arquivo .gcode já armazenado na impressora.
+        </span>
         <Button
           type="submit"
-          :disabled="!availability('start_print').available || commandInFlight"
+          :disabled="
+            !availability('start_print').available ||
+            commandInFlight ||
+            !canStartStoredFile
+          "
         >
           Iniciar impressão
         </Button>

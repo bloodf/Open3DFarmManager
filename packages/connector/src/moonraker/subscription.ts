@@ -4,6 +4,7 @@ import type { PrinterState } from '@open3dfarmmanager/farm-protocol'
 import {
   parseTemperatureFields,
   isChamberTemperatureObject,
+  chamberTemperatureReading,
   observedTemperatureDetails,
   type TemperatureFields,
 } from './temperature-observation.ts'
@@ -65,6 +66,16 @@ export type MoonrakerEvent =
     }
 
 const webhookState = z.enum(['ready', 'startup', 'shutdown', 'error'])
+/**
+ * A chamber reading this far from the last recorded one is a meaningful
+ * change and earns its own durable telemetry record.
+ */
+const CHAMBER_TEMPERATURE_THRESHOLD_CELSIUS = 1
+/**
+ * Chamber-only changes are also rate limited: at most one durable record per
+ * interval, however often the sensor jitters.
+ */
+const CHAMBER_TEMPERATURE_MIN_INTERVAL_MS = 60_000
 const printState = z.enum([
   'standby',
   'printing',
@@ -248,6 +259,10 @@ export function createMoonrakerSubscription(input: {
       let stale = false
       let baseline: z.infer<typeof Snapshot> | undefined
       let fingerprint: string | undefined
+      // Last chamber reading carried by a durable record, and when it was
+      // recorded. The raw reading jitters; it must not drive a record alone.
+      let lastChamberReading: number | undefined
+      let lastChamberAtMonoMs = 0
       // Reset per connection: an end seen only after a reconnect is unwatched.
       let watchingJob = false
       // U1 only: latest per-tool status, and every tool seen active while the
@@ -312,6 +327,9 @@ export function createMoonrakerSubscription(input: {
           },
         )
         const materials = u1Materials()
+        // The raw chamber reading is live evidence: it is always published,
+        // whatever the durable record rate allows.
+        const chamberReading = chamberTemperatureReading(value.status)
         if (input.onRawObservation && fieldTimes && !invalidated) {
           const observedTimes = fieldTimes
           rawCallback(() =>
@@ -322,6 +340,9 @@ export function createMoonrakerSubscription(input: {
                 printer: Object.freeze({
                   ...parsed.printer,
                   ...(materials ? { materials } : {}),
+                  ...(chamberReading === undefined
+                    ? {}
+                    : { chamberTemperatureCelsius: chamberReading }),
                 }),
                 status: Object.freeze({
                   webhooks: Object.freeze({ ...value.status.webhooks }),
@@ -402,6 +423,18 @@ export function createMoonrakerSubscription(input: {
         const temperatures = input.jobFields
           ? observedTemperatureDetails(value.status)
           : undefined
+        // The raw chamber reading is excluded from the change fingerprint: it
+        // jitters on an idle printer and would enqueue a durable record per
+        // update. Its presence still matters, so the sensor appearing or
+        // disappearing is a real change.
+        const stableTemperatures =
+          temperatures && temperatures.chamberTemperatureCelsius !== undefined
+            ? (({ chamberTemperatureCelsius: _raw, ...rest }) => rest)(
+                temperatures,
+              )
+            : temperatures
+        // The chamber reading this durable record would carry, if any.
+        const durableChamber = temperatures?.chamberTemperatureCelsius
         const nextFingerprint = JSON.stringify([
           parsed.printer.state,
           parsed.printer.progress,
@@ -410,12 +443,34 @@ export function createMoonrakerSubscription(input: {
           parsed.printer.currentLayer,
           parsed.printer.totalLayer,
           parsed.printer.printDuration,
-          temperatures,
+          stableTemperatures,
+          durableChamber !== undefined,
           materials,
           lastJob?.endedAt,
         ])
-        if (nextFingerprint === fingerprint) return
+        const now = performance.now()
+        let changed = nextFingerprint !== fingerprint
+        if (
+          !changed &&
+          durableChamber !== undefined &&
+          durableChamber !== lastChamberReading
+        ) {
+          // Only the chamber reading moved: record it when the change is
+          // meaningful or when the bounded rate allows another record.
+          const significant =
+            lastChamberReading === undefined ||
+            Math.abs(durableChamber - lastChamberReading) >=
+              CHAMBER_TEMPERATURE_THRESHOLD_CELSIUS
+          const due =
+            now - lastChamberAtMonoMs >= CHAMBER_TEMPERATURE_MIN_INTERVAL_MS
+          changed = significant || due
+        }
+        if (!changed) return
         fingerprint = nextFingerprint
+        if (durableChamber !== undefined) {
+          lastChamberReading = durableChamber
+          lastChamberAtMonoMs = now
+        }
         const printer = {
           ...parsed.printer,
           ...temperatures,

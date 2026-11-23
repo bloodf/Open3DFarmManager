@@ -29,9 +29,17 @@ The self-hosted beta REST path uses a pre-issued bearer token. It lists visible 
 
 The [official Connect Local reference](https://github.com/prusa3d/prusa-connect/tree/main/docs/src/content/docs/reference/api) defines these routes. Each installed server and model still needs qualification. Connect Local uploads and commands, hosted Prusa Connect account onboarding and cloud commands, and cloud camera ingestion remain open. The [printer SDK](https://github.com/prusa3d/Prusa-Connect-SDK-Printer) documents device enrollment rather than the operator authorization contract.
 
+## Connector v8 read-only collection
+
+The v8 runtime binds an assigned printer to an allowed PrusaLink origin, an origin-bound API key file, and an expected printer type and serial. Before each status read, it checks the exact strings from `GET /api/version` (`printer`) and `GET /api/v1/info` (`serial`). Missing or mismatched values make the observation unavailable.
+
+The [pinned PrusaLink specification](https://github.com/prusa3d/Prusa-Link-Web/blob/a67f306bc878009be0e27864a01a1837e5c4cf06/spec/openapi.yaml#L714-L731) defines `Version.printer` as a string and gives `"1.3.1"` as an example. The [pinned Buddy handlers](https://github.com/prusa3d/Prusa-Firmware-Buddy/blob/b1043d68be188ad27ea72a14e160140e30e589f0/lib/WUI/link_content/basic_gets.cpp#L213-L251) format that string from the printer model's type, version and subversion, and read the serial from OTP. The shared fixture uses a synthetic serial and a dotted model string.
+
+The collector emits `identity.vendor` as `Prusa` and `identity.model` as the configured printer type string after the exact match. The serial is used for binding verification. This slice exposes authenticated read-only status, with withdrawal and recovery through the direct observation path. The camera and mutation methods described above are adapter methods.
+
 ## Integration follow-up
 
-- Add an explicit Prusa binding and credential provisioning in `packages/connector/src/control/printer-binding.ts` and `packages/connector/src/runtime/configuration.ts`. Pin the owner-approved origin and identity and use a restricted Connect Local token.
+- Add an explicit Prusa Connect Local binding and credential provisioning in `packages/connector/src/control/printer-binding.ts` and `packages/connector/src/runtime/configuration.ts`. Pin the owner-approved origin and identity and use a restricted Connect Local token.
 - Wire commands through `packages/connector/src/control/control-driver.ts` and the existing signed dispatcher. Require fresh identity, state and job checks, verified PUT capability for uploads, and the start interlock. Correlate post-send observations and preserve uncertainty.
 - Register model and firmware evidence in `packages/connector/src/runtime/machine-profile.ts`, `docs/compatibility/adapter-admission.json`, and the FullFarmManager catalogs. Qualify each operation independently.
 - Add pt-BR setup fields under `apps/farm/app/components/printer-setup/` and expose qualifications through `apps/farm/app/components/overview/CompatibilityProduct.vue`. Route live data and camera through the existing WebRTC boundary and keep degraded views read-only.

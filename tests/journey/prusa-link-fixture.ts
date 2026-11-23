@@ -21,7 +21,7 @@ export async function startPrusaLinkJourneyFixture() {
   const simulator = await startPrusaSimulator((req, res) => {
     const authorized = req.headers['x-api-key'] === apiKey
     const routes: Record<string, unknown> = {
-      '/api/version': { ...data.version, printer: '1.4.0' },
+      '/api/version': data.version,
       '/api/v1/info': data.info,
       '/api/v1/status': {
         ...data.status,

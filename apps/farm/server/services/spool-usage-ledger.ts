@@ -152,25 +152,26 @@ export async function adjustSpool(
     after !== null &&
     before > threshold &&
     after <= threshold
-  if (crossed && limit)
-    await enqueueLowStock(tx, farm, printerId, {
-      filamentId,
-      name: limit.name,
-      material: limit.material,
-      remainingGrams: after,
-      thresholdGrams: threshold,
-    })
+  const alerted =
+    crossed && limit
+      ? await enqueueLowStock(tx, farm, printerId, {
+          filamentId,
+          name: limit.name,
+          material: limit.material,
+          remainingGrams: after,
+          thresholdGrams: threshold,
+        })
+      : false
   return {
     filamentId,
     remainingGrams: after,
     thresholdGrams: threshold,
-    alerted: crossed,
+    alerted,
   }
 }
 
 /**
- * Queues `printer.alert.raised` (kind low-slot) on the signed-webhook outbox,
- * for subscriptions allowed on the farm and printer.
+ * Queues a low-stock alert for authorized subscriptions and saved channels.
  */
 async function enqueueLowStock(
   tx: TransactionSql,
@@ -214,9 +215,20 @@ async function enqueueLowStock(
       },
     },
   }
+  const [available] = await tx<{ ready: boolean }[]>`
+    SELECT to_regprocedure('farm.enqueue_integration_alert(uuid,uuid,jsonb)') IS NOT NULL AS ready
+  `
+  if (available?.ready) {
+    const [result] = await tx<{ raised: boolean }[]>`
+      SELECT farm.enqueue_integration_alert(${farm}::uuid, ${printerId}::uuid, ${tx.json(event)}::jsonb) AS raised
+    `
+    return result?.raised === true
+  }
+  // Older migration prefixes only provide the signed-webhook outbox.
   await tx`INSERT INTO farm.integration_webhook_outbox (subscription_id, event_id, farm_id, printer_id, body)
     SELECT w.id, ${eventId}::uuid, ${farm}::uuid, ${printerId}::uuid, ${tx.json(event)}
     FROM farm.integration_webhooks w
     WHERE ${LOW_STOCK_EVENT} = ANY(w.events)
       AND farm.integration_webhook_allowed(w.app_id, ${farm}::uuid, ${printerId}::uuid)`
+  return true
 }

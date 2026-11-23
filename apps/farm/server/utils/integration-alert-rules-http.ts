@@ -7,12 +7,14 @@ import {
 import { alertRulesStore } from '../storage/alert-rules-postgres.ts'
 import {
   deliverNotificationTest,
+  openNotificationChannel,
   parseNotificationChannel,
 } from './alert-rules/delivery.ts'
 import { integrationProblem, readText } from './integration-auth-http.ts'
+import { integrationAuthPool } from './integration-auth-runtime.ts'
 import { uuidPattern, type IntegrationPrincipal } from './integration-auth.ts'
 import { credentialKeyring } from './sealed-credential-key.ts'
-import { openWebhookSecret, sealWebhookSecret } from './webhooks/secret.ts'
+import { sealWebhookSecret } from './webhooks/secret.ts'
 
 type Operation = 'list' | 'update-rule' | 'configure-channel' | 'test-channel'
 
@@ -55,7 +57,7 @@ export function alertSettingsHandler(operation: Operation) {
       return integrationProblem('invalid-request', headers)
 
     try {
-      const store = alertRulesStore()
+      const store = alertRulesStore(integrationAuthPool())
       if (operation === 'list') {
         const overrides = new Map(
           (await store.list(farmId)).map(({ kind, enabled }) => [
@@ -124,8 +126,11 @@ export function alertSettingsHandler(operation: Operation) {
         return result?.value ?? denied()
       }
 
-      if (request.body !== null)
+      try {
+        await readText(request, 0)
+      } catch {
         return integrationProblem('invalid-request', headers)
+      }
       const result = await store.manage(
         principal.appId,
         farmId,
@@ -135,13 +140,10 @@ export function alertSettingsHandler(operation: Operation) {
       if (!result) return denied()
       const sealed = result.value
       if (!sealed) return integrationProblem('not-found', headers)
-      const opened = openWebhookSecret(
+      const configuration = openNotificationChannel(
         sealed,
         credentialKeyring(useRuntimeConfig().auth ?? {}),
       )
-      const configuration = opened.legacy
-        ? null
-        : parseNotificationChannel(JSON.parse(opened.secret))
       if (!configuration)
         return integrationProblem('service-unavailable', headers)
       return await deliverNotificationTest(farmId, configuration)

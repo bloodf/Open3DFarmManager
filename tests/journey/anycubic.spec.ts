@@ -1,3 +1,4 @@
+import { openFarmInspector } from '../helpers/farm-inspector.ts'
 import { fileURLToPath } from 'node:url'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import type { startAnycubicSimulator } from '../../packages/sim-tools/src/anycubic-simulator.ts'
@@ -109,12 +110,19 @@ function suite(title: string) {
       }
     }
     const printerRow = (page: Page) =>
-      page.getByRole('article').filter({
-        has: page.getByRole('heading', {
-          name: started().printerKey,
-          exact: true,
-        }),
-      })
+      page
+        .getByRole('dialog', { name: 'Inspeção da impressora', exact: true })
+        .getByRole('article')
+        .filter({
+          has: page.getByRole('heading', {
+            name: started().printerKey,
+            exact: true,
+          }),
+        })
+    async function openFarm(page: Page = started().ownerPage) {
+      await started().openFarm(page)
+      return openFarmInspector(page, started().printerKey)
+    }
     /**
      * The direct session lasts 30 s and the page reopens it by itself, but it
      * stops after six failed reopens in a row. When the connection does not
@@ -135,7 +143,7 @@ function suite(title: string) {
             )
         )
           return
-        await started().openFarm(page)
+        await openFarm(page)
       }
       throw new Error('The direct connection never came back')
     }
@@ -482,7 +490,7 @@ function suite(title: string) {
       await step(async () => {
         const journey = started()
         const page = journey.ownerPage
-        const row = await journey.openFarm()
+        const row = await openFarm()
         const progress = (fraction: string) =>
           expect(async () => {
             await live(page)
@@ -536,7 +544,7 @@ function suite(title: string) {
 
         try {
           sim.setRemainingMinutes(92)
-          await journey.openFarm(page)
+          await openFarm(page)
           await expectRemaining('1 h 32 min')
           sim.setRemainingMinutes(0)
           await expectRemaining('0 h 0 min')
@@ -682,7 +690,7 @@ function suite(title: string) {
         await expect
           .poll(() => sim.lifecycle.state, { timeout: 60_000 })
           .toBe('finished')
-        const row = await journey.openFarm()
+        const row = await openFarm()
         await expectState(row, 'Ociosa')
         await expect(async () => {
           await live(page)
@@ -739,7 +747,7 @@ function suite(title: string) {
         // A fresh farm page: the camera runs after every control step.
         // The camera track rides the direct connection, so its 15 s budget
         // starts once that connection is up, not while it is being set up.
-        await journey.openFarm()
+        await openFarm()
         await live(journey.ownerPage)
         await expectCameraFrames(journey)
         expect(journey.simulatorObservation()).toMatchObject({ failure: false })

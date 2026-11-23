@@ -1,9 +1,7 @@
 // Explicit test-only runner for tests/e2e/auth-lockout-session.spec.ts.
-// Needs a built app: npm run build -w @open3dfarmmanager/farm.
 import assert from 'node:assert/strict'
 import { execFile, spawn } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
-import { access } from 'node:fs/promises'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { createServer } from 'node:net'
 import { promisify } from 'node:util'
 import {
@@ -21,7 +19,6 @@ if (
   (isDocker && (!image || !POSTGRES_IMAGE_PATTERN.test(image)))
 )
   throw new Error('AUTH_E2E_ADMITTED=yes required')
-await access(new URL('../apps/farm/.output/server/index.mjs', import.meta.url))
 const id = randomUUID()
 const name = 'o3dfm-auth-e2e-' + id
 
@@ -58,9 +55,17 @@ const run = (command: string, args: string[], env: Record<string, string>) =>
     child.once('exit', (code) => resolve(code ?? 1))
   })
 
+const built = await run(
+  'npm',
+  ['run', 'build', '-w', '@open3dfarmmanager/farm'],
+  {},
+)
+assert.equal(built, 0, 'Farm app build failed')
+
 const dbPort = await freePort(process.env.AUTH_E2E_DB_PORT)
 const appPort = await freePort(process.env.AUTH_E2E_APP_PORT)
 const tlsPort = await freePort(process.env.AUTH_E2E_TLS_PORT)
+const authPassword = randomBytes(32).toString('hex')
 
 const database = disposablePostgres({
   isolated: true,
@@ -79,6 +84,7 @@ try {
     process.execPath,
     ['scripts/migrate-disposable-db.ts', 'up'],
     {
+      PGPASSWORD: database.password,
       MIGRATION_SYNTHETIC_TEST_DISPOSABLE: 'yes',
       MIGRATION_SYNTHETIC_TEST_PORT: String(dbPort),
     },
@@ -96,6 +102,8 @@ try {
       'playwright.auth-session.config.ts',
     ],
     {
+      PGPASSWORD: database.password,
+      AUTH_E2E_ROLE_PASSWORD: authPassword,
       AUTH_E2E_DISPOSABLE: 'yes',
       AUTH_E2E_DB_PORT: String(dbPort),
       AUTH_E2E_APP_PORT: String(appPort),

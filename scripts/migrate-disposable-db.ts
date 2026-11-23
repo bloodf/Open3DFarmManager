@@ -29,6 +29,7 @@ const sql = postgres({
   hostname: '127.0.0.1',
   port,
   username: 'fixture',
+  password: process.env.PGPASSWORD,
   database: 'fixture',
   max: 2,
   connect_timeout: 3,

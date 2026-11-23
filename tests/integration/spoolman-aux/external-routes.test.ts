@@ -193,6 +193,9 @@ describe('runtime role', () => {
     const probe = await startHarness(1)
     const role = 'spoolman_aux_plain_' + randomUUID().replaceAll('-', '')
     await probe.admin`CREATE ROLE ${probe.admin(role)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS IN ROLE farm_spool_library`
+    const password = process.env['AUX_PG_PASSWORD']
+    assert.ok(password && /^[0-9a-f]+$/.test(password))
+    await probe.admin.unsafe(`ALTER ROLE "${role}" PASSWORD '${password}'`)
     // Credentials come from the probe's farm; the plain role serves them.
     const plain = await startHarnessFor(probe, role)
     try {
@@ -247,7 +250,7 @@ async function startHarnessFor(probe: Harness, role: string) {
     port: Number(process.env['AUX_PG_PORT']),
     database: 'fixture',
     username: role,
-    password: '',
+    password: process.env['AUX_PG_PASSWORD'],
     ssl: false,
     max: 2,
     onnotice: () => {},

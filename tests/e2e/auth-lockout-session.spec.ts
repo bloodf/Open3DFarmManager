@@ -28,6 +28,7 @@ const sql = postgres({
   port: dbPort,
   database: 'fixture',
   username: 'fixture',
+  password: env.PGPASSWORD,
   ssl: false,
   max: 2,
   connect_timeout: 3,
@@ -66,8 +67,14 @@ test.beforeAll(async () => {
   // The app connects as a least-privilege login role; create it once.
   const [role] =
     await sql`SELECT 1 FROM pg_roles WHERE rolname = 'o3dfm_w05_auth'`
+  const rolePassword = env.AUTH_E2E_ROLE_PASSWORD ?? ''
+  if (!/^[a-f0-9]{64}$/.test(rolePassword))
+    throw new Error('AUTH_E2E_ROLE_PASSWORD required')
   if (!role)
-    await sql`CREATE ROLE o3dfm_w05_auth LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE IN ROLE farm_password_auth`
+    await sql.unsafe(
+      `CREATE ROLE o3dfm_w05_auth LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD '${rolePassword}' IN ROLE farm_password_auth`,
+    )
+  else await sql.unsafe(`ALTER ROLE o3dfm_w05_auth PASSWORD '${rolePassword}'`)
 })
 test.beforeEach(async () => {
   await sql`DELETE FROM farm.auth_rate_limits`

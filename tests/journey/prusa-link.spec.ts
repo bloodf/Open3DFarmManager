@@ -15,6 +15,9 @@ if (journeyEnabled())
         ReturnType<typeof startPrusaLinkJourneyFixture>
       >
       const row = await journey.openFarm()
+      await journey.ownerPage
+        .getByRole('button', { name: /^Inspecionar journey-prusa-link\b/ })
+        .click()
       const readOnly = async () => {
         await expect(
           row.getByRole('button', {

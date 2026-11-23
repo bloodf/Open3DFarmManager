@@ -79,9 +79,15 @@ export async function testAuthenticatedFarmPage(input: {
       .getByRole('button', { name: /^Inspecionar / })
       .filter({ has: page.getByText(assignment.printerKey, { exact: true }) })
       .click()
-    const row = page
-      .getByRole('dialog', { name: 'Inspeção da impressora', exact: true })
-      .getByRole('article', { name: assignment.printerKey, exact: true })
+    await expect(
+      page.getByRole('dialog', { name: 'Inspeção da impressora', exact: true }),
+    ).toBeVisible()
+    const row = page.getByRole('article').filter({
+      has: page.getByRole('heading', {
+        name: assignment.printerKey,
+        exact: true,
+      }),
+    })
     await expect(
       row.getByText('Conexão direta autenticada', { exact: true }),
     ).toBeVisible()
@@ -127,14 +133,17 @@ export async function testAuthenticatedFarmPage(input: {
     )
     await input.note(`farm-page-readonly-after-ms:${Math.round(elapsed)}`)
     await expect(pauseButton).toBeDisabled()
-    await expect(pauseButton).toHaveAccessibleDescription(
-      farmPause
-        ? 'Pausa indisponível. Não há conexão direta ao vivo.'
-        : 'Pausa indisponível. O controle seguro não está habilitado.',
-    )
     if (farmPause) {
+      // Stale: the reason names the lost live connection, and nothing is sent.
+      await expect(pauseButton).toHaveAccessibleDescription(
+        'Pausa indisponível. Não há conexão direta ao vivo.',
+      )
       assert.equal(await input.pauses!(), 0)
       await input.note('farm-page-pause-stale-disabled-with-reason')
+    } else {
+      await expect(pauseButton).toHaveAccessibleDescription(
+        'Pausa indisponível. O controle seguro não está habilitado.',
+      )
     }
     await page.waitForTimeout(250)
     await expect(progress).toHaveAttribute('aria-valuenow', '75')

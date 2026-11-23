@@ -403,6 +403,7 @@ export async function startVendorSimulator(
       const password = 'journey-password'
       const sim = await startAnycubicSimulator({
         serial: `${MODEL_ID}/${deviceId}`,
+        lanFiles: { firmware: '2.4.6.7' },
         credentials: { username, password },
         initialState: 'RUNNING',
         // A started file prints for a few seconds, then completes by itself.
@@ -451,6 +452,7 @@ export async function startVendorSimulator(
                   printerKey: scope.printerKey,
                   host: sim.host,
                   port: sim.port,
+                  uploadPort: sim.uploadPort,
                   modelId: MODEL_ID,
                   deviceId,
                   username,

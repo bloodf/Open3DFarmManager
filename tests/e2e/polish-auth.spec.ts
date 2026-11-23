@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page, type Request } from '@playwright/test'
+import { setPolishTheme } from '../helpers/polish-theme.ts'
 
 // Isolated UI checks for the sign-in (/entrar), password reset
 // (/redefinir-senha) and sign-out (/sair) screens on mocked /api routes. No
@@ -360,7 +361,7 @@ async function open(
   // A reused page must reload, not just change the hash.
   await page.goto('about:blank')
   await page.setViewportSize(viewport)
-  await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+  await setPolishTheme(page, theme)
   const api = await mockApi(page, scenario.mock)
   await page.goto(scenario.path)
   await page

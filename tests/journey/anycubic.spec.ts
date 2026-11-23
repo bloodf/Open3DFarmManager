@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import type { startAnycubicSimulator } from '../../packages/sim-tools/src/anycubic-simulator.ts'
 import { discoverOnPage, expectCameraFrames } from './discovery-page.ts'
@@ -11,11 +12,14 @@ import {
 
 // Opt-in: OPENFARM_JOURNEY=1. The whole Anycubic (LAN) journey in a real
 // browser against the loopback simulator: find, assignment, live telemetry,
-// every advertised command, the unsupported file steps, starting a stored
-// file, the job end card and the history entries. Never a physical printer.
+// every advertised command, file upload and listing, starting a stored
+// G-code file, the job end card and the history entries. Never a physical printer.
 type Simulator = Awaited<ReturnType<typeof startAnycubicSimulator>>
 
 const STORED_FILE = 'journey.gcode'
+const UPLOAD_FILE = fileURLToPath(
+  new URL('../fixtures/anycubic/journey.gcode.3mf', import.meta.url),
+)
 // Pause, resume and cancel are confirmed by the print state they lead to. Any
 // other command is confirmed only when the printer's next report carries the
 // value that was asked for (target, fan speed, light); each step below also
@@ -309,17 +313,14 @@ function suite(title: string) {
       throw new Error('The files page never reached a live printer')
     }
     /**
-     * One file operation. Each one opens its own short control session; when
-     * the page reports that the direct connection did not complete it, the
-     * operation is prepared and asked for again, as the message tells a
-     * person to do after checking the printer.
+     * One file operation per control session. Only listing can be repeated
+     * after a dispatch that did not finish.
      */
     async function filesStep(
       page: Page,
       prepare: () => Promise<Locator>,
       expected: string | RegExp,
-      safeToRepeat: () => boolean = () => true,
-      verified: () => boolean = () => true,
+      readOnly = false,
     ) {
       const done = filesStatus(page, expected)
       // Not completed, or dropped by the page when the live session ended.
@@ -333,8 +334,6 @@ function suite(title: string) {
       })
       let preparing = ''
       for (let attempt = 0; attempt < 15; attempt++) {
-        if (!safeToRepeat())
-          throw new Error('The printer changed state; not repeating')
         // Reloading is the last resort: the page recovers its live session by
         // itself, and each reload starts the device and farm checks again.
         if (
@@ -374,7 +373,8 @@ function suite(title: string) {
           'files status: ' +
             (await page.getByRole('status').allInnerTexts()).join(' | '),
         ).toBeVisible({ timeout: 90_000 })
-        if ((await done.isVisible()) && verified()) return
+        if (await done.isVisible()) return
+        if (!readOnly) break
       }
       throw new Error(
         'File operation never completed: ' + expected + ' ' + preparing,
@@ -609,74 +609,59 @@ function suite(title: string) {
       })
     })
 
-    test('upload and listing are não suportado; a stored file starts printing', async () => {
+    test('uploads and lists a package, then starts a stored G-code file', async () => {
       test.setTimeout(15 * 60_000)
       await step(async () => {
         const journey = started()
         const page = journey.ownerPage
         const sim = simulator()
-        // LAN upload has no documented protocol, so the file is placed on the
-        // simulated printer storage directly, as a slicer or USB stick would.
         sim.upload(STORED_FILE, Buffer.from('G28\nG1 X10 Y10\n'))
         await openFiles(page)
 
-        const unlisted =
-          'Listagem não suportada pela biblioteca desta impressora.'
+        const uploadsBefore = sim.uploadCount
         await filesStep(
           page,
           async () => {
-            await page.locator('#files-upload').setInputFiles({
-              name: 'envio.gcode',
-              mimeType: 'text/plain',
-              buffer: Buffer.from('G28\n'),
-            })
+            await page.locator('#files-upload').setInputFiles(UPLOAD_FILE)
             return page.getByRole('button', {
               name: 'Enviar arquivo',
               exact: true,
             })
           },
-          'Envio não suportado pela biblioteca desta impressora.',
+          /Arquivo enviado\./,
         )
+        expect(sim.uploadCount).toBe(uploadsBefore + 1)
+        expect(sim.lifecycle.state).toBe('idle')
+
         const consult = page.getByRole('button', {
           name: 'Consultar arquivos',
           exact: true,
         })
-        await filesStep(page, async () => consult, unlisted)
-        expect(sim.lifecycle.state).toBe('idle')
-
-        // Start: the exact name of the stored file, then an explicit check.
-        const stored = page.getByLabel('Arquivo armazenado na impressora')
+        await filesStep(
+          page,
+          async () => consult,
+          'Arquivos atualizados.',
+          true,
+        )
+        const stored = page.getByLabel('Arquivo para imprimir')
+        await expect(
+          stored.locator('option[value="journey.gcode.3mf"]'),
+        ).toBeAttached()
         const start = page.getByRole('button', {
           name: 'Iniciar impressão',
           exact: true,
         })
-        await expect(stored).toBeVisible()
-        await stored.fill('../' + STORED_FILE)
-        await expect(
-          page.getByText('Nome inválido para o comando de impressão.'),
-        ).toBeVisible()
-        await expect(start).toBeDisabled()
-        await stored.fill(STORED_FILE)
-        await expect(start).toBeDisabled()
         await filesStep(
           page,
           async () => {
-            // A reloaded page asks for the listing again before the name.
-            if (!(await stored.isVisible())) {
-              await expect(consult).toBeEnabled({ timeout: 40_000 })
-              await consult.click()
-              await expect(stored).toBeVisible({ timeout: 90_000 })
-            }
-            await stored.fill(STORED_FILE)
+            await stored.selectOption(STORED_FILE)
+            await expect(start).toBeDisabled()
             await page
               .getByRole('checkbox', { name: /Quero iniciar esta impressão/ })
               .check()
             return start
           },
           /Impressão iniciada\. O Connector confirmou o comando\./,
-          // Never a second start once the simulated printer left idle.
-          () => sim.lifecycle.state === 'idle',
-          () => sim.lifecycle.state !== 'idle',
         )
         expect(['printing', 'finished']).toContain(sim.lifecycle.state)
         expect(journey.simulatorObservation()).toMatchObject({ failure: false })

@@ -1,11 +1,8 @@
 import { z } from 'zod'
-import { extruderIndex } from './discovery-parse.ts'
+import { moonrakerTemperature, selectActiveTool } from './discovery-parse.ts'
 
 const Sensor = z.object({ temperature: z.unknown().optional() }).passthrough()
 const Status = z.record(z.string(), z.unknown())
-const Toolhead = z.object({
-  extruder: z.string().refine((name) => extruderIndex(name) !== undefined),
-})
 
 type TemperatureField =
   | { kind: 'absent' }
@@ -22,8 +19,9 @@ function field(sensor: unknown): TemperatureField {
   if (!parsed.success) return { kind: 'invalid' }
   if (!Object.hasOwn(parsed.data, 'temperature')) return { kind: 'absent' }
   const temperature = parsed.data.temperature
-  return typeof temperature === 'number' && Number.isFinite(temperature)
-    ? { kind: 'reading', celsius: temperature }
+  const boundedTemperature = moonrakerTemperature.safeParse(temperature)
+  return boundedTemperature.success
+    ? { kind: 'reading', celsius: boundedTemperature.data }
     : { kind: 'invalid' }
 }
 
@@ -36,11 +34,9 @@ export function parseTemperatureFields(
   const bed = field(parsed.data.heater_bed)
   if (!activeToolQuery) return { tool: field(parsed.data.extruder), bed }
 
-  const toolhead = Toolhead.safeParse(parsed.data.toolhead)
+  const activeTool = selectActiveTool(parsed.data)
   return {
-    tool: toolhead.success
-      ? field(parsed.data[toolhead.data.extruder])
-      : { kind: 'invalid' },
+    tool: activeTool ? field(parsed.data[activeTool]) : { kind: 'invalid' },
     bed,
   }
 }

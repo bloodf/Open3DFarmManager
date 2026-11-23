@@ -1,6 +1,7 @@
 import type { Sql } from 'postgres'
 import { SpoolInventory } from '@open3dfarmmanager/farm-protocol'
 import { uuidPattern } from './integration-auth.ts'
+import { spoolIdentity } from './integration-spool-identity.ts'
 
 type Position = { farmId: string; connectorId: string; index: number }
 
@@ -65,13 +66,15 @@ export async function listObservedSpools(
       !parsed.data.spools[row.index]
     )
       throw new Error('Invalid inventory snapshot')
+    const spool = parsed.data.spools[row.index]!
     return {
+      ...spoolIdentity(parsed.data.serviceId, spool.spoolId),
       farmId: row.farmId,
       connectorId: row.connectorId,
       observedAt: row.observedAt,
       stale: parsed.data.stale,
       partial: parsed.data.spools.length < parsed.data.total,
-      spool: parsed.data.spools[row.index]!,
+      spool,
     }
   })
   const last = rows[Math.min(rows.length, input.limit) - 1]

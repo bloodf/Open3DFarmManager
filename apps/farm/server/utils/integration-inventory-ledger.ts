@@ -1,5 +1,6 @@
 import type { Sql } from 'postgres'
 import { uuidPattern } from './integration-auth.ts'
+import { publishSpoolBinding } from './integration-spool-identity.ts'
 
 export function spoolLedgerQuery(query: URLSearchParams, fields: string[]) {
   const allowed = ['farmId', 'limit', ...fields]
@@ -59,7 +60,7 @@ export async function searchIntegrationSpools(
   const blue = color === null ? null : channel(color, 4)
   const rows = await sql`
     WITH stock AS (
-      SELECT s.farm_id, s.id, f.name, f.material, f.color_hex, NULLIF(btrim(s.location), '') AS location,
+      SELECT s.farm_id, s.id, s.spoolman_service_id, s.spoolman_spool_id, f.name, f.material, f.color_hex, NULLIF(btrim(s.location), '') AS location,
         CASE WHEN COALESCE(s.initial_weight, f.weight) IS NOT NULL
           THEN greatest(COALESCE(s.initial_weight, f.weight) - s.used_weight, 0) END AS remaining,
         CASE WHEN ${red}::int IS NOT NULL AND f.color_hex IS NOT NULL THEN sqrt(
@@ -87,13 +88,14 @@ export async function searchIntegrationSpools(
     SELECT farm_id::text AS "farmId", id::float8 AS "spoolId", name, material,
       color_hex AS "colorHex", location, remaining AS "remainingGrams",
       distance::float8 AS "colorDistance", loaded_at IS NOT NULL AS loaded,
-      COALESCE(loaded_at, '[]'::jsonb) AS "loadedAt"
+      COALESCE(loaded_at, '[]'::jsonb) AS "loadedAt",
+      spoolman_service_id AS "serviceId", spoolman_spool_id::float8 AS "serviceSpoolId"
     FROM stock
     WHERE (${minRemainingGrams}::float8 IS NULL OR remaining >= ${minRemainingGrams}::float8)
       AND (${availability} = 'any' OR (loaded_at IS NOT NULL) = (${availability} = 'loaded'))
     ORDER BY distance NULLS LAST, farm_id, id
     LIMIT ${limit}`
-  return { data: rows, assessedAt: Date.now() }
+  return { data: rows.map(publishSpoolBinding), assessedAt: Date.now() }
 }
 
 export function spoolUsageQuery(query: URLSearchParams) {
@@ -116,15 +118,17 @@ export async function listIntegrationSpoolUsage(
   farmIds: string[],
   { jobId, cursor, limit }: NonNullable<ReturnType<typeof spoolUsageQuery>>,
 ) {
-  const rows = await sql<{ usageId: string }[]>`
+  const rows = await sql<(Record<string, unknown> & { usageId: string })[]>`
     SELECT u.id::text AS "usageId", u.farm_id::text AS "farmId",
       u.job_id::text AS "jobId", u.spool_id::float8 AS "spoolId",
       u.printer_id::text AS "printerId", u.grams, u.source,
-      u.created_at::float8 AS "observedAt", u.corrected_by IS NOT NULL AS corrected
+      u.created_at::float8 AS "observedAt", u.corrected_by IS NOT NULL AS corrected,
+      s.spoolman_service_id AS "serviceId", s.spoolman_spool_id::float8 AS "serviceSpoolId"
     FROM farm.spool_usage_records u
+    JOIN farm.spools s ON s.farm_id = u.farm_id AND s.id = u.spool_id
     WHERE u.farm_id = ANY(${farmIds}::uuid[]) AND u.job_id = ${jobId}::bigint
       AND (${cursor}::uuid IS NULL OR u.id > ${cursor}::uuid)
     ORDER BY u.id LIMIT ${limit + 1}`
-  const data = rows.slice(0, limit)
+  const data = rows.slice(0, limit).map(publishSpoolBinding)
   return { data, nextCursor: rows.length > limit ? data.at(-1)!.usageId : null }
 }

@@ -17,6 +17,15 @@ export const registration = z.strictObject({
     .refine((value) => value.trim().length > 0 && !/\p{Cc}/u.test(value))
     .transform((value) => value.trim()),
   initialWeightGrams: z.number().nonnegative().optional(),
+  spoolman: z
+    .strictObject({
+      serviceId: z
+        .string()
+        .uuid()
+        .transform((id) => id.toLowerCase()),
+      spoolId: recordId,
+    })
+    .optional(),
 })
 export const withdrawal = z.strictObject({
   expectedLocation: location,
@@ -97,6 +106,9 @@ export function registerPhysicalSpool(
           input.filamentId,
           input.location,
           input.initialWeightGrams ?? null,
+          ...(input.spoolman
+            ? [input.spoolman.serviceId, input.spoolman.spoolId]
+            : []),
         ]),
       )
       .digest('hex')
@@ -124,12 +136,14 @@ export function registerPhysicalSpool(
         DO UPDATE SET last_id = farm.spool_library_counters.last_id + 1
         RETURNING last_id
       )
-      INSERT INTO farm.spools (farm_id, id, filament_id, location, initial_weight, registered_at)
+      INSERT INTO farm.spools (farm_id, id, filament_id, location, initial_weight, registered_at, spoolman_service_id, spoolman_spool_id)
       SELECT ${access.farmId}::uuid, last_id, ${input.filamentId}::bigint,
-        ${input.location}, ${input.initialWeightGrams ?? null}::float8, ${Date.now()}::bigint
+        ${input.location}, ${input.initialWeightGrams ?? null}::float8, ${Date.now()}::bigint,
+        ${input.spoolman?.serviceId ?? null}::uuid, ${input.spoolman?.spoolId ?? null}::bigint
       FROM allocated
+      ON CONFLICT ON CONSTRAINT spools_spoolman_identity DO NOTHING
       RETURNING id::float8 AS id, location, xmin::text || ':' || ctid::text AS revision`
-    if (!row) throw new Error('Spool allocation returned no row')
+    if (!row) return { outcome: 'already-bound' as const }
     const spool = physicalSpool(access.farmId, row)
     await tx`INSERT INTO farm.integration_physical_spool_registrations
       (app_id, idempotency_key, request_hash, response)

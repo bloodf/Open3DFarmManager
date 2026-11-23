@@ -20,6 +20,7 @@ export const SpoolInventory = z.strictObject({
   observedAt: z.number().int().nonnegative(),
   stale: z.boolean(),
   total: z.number().int().min(0).max(10_000),
+  serviceId: z.string().uuid().optional(),
   spools: z.array(SpoolSummary).max(MAX_INVENTORY_SPOOLS),
 })
 export type SpoolSummary = z.infer<typeof SpoolSummary>

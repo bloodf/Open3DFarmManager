@@ -1,4 +1,5 @@
 import { SpoolmanConfigurationTarget as SpoolmanTargetSchema } from '../../../../packages/farm-protocol/src/configuration-target.ts'
+import { z } from 'zod'
 import { CONFIGURATION_PROTOCOL } from '../../../../packages/farm-protocol/src/configuration-common.ts'
 
 export type SpoolmanStatus = 'reachable' | 'unreachable' | 'unauthorized'
@@ -16,16 +17,24 @@ const VALIDATION_ERROR =
 /** Pure form validation. Errors never include the submitted URL or secret. */
 export function validateSpoolmanTargetInput(input: {
   origin: string
+  serviceId?: string
   token?: string
   username?: string
   password?: string
 }) {
+  const serviceId = input.serviceId?.trim()
+  if (serviceId && !z.string().uuid().safeParse(serviceId).success)
+    return {
+      ok: false,
+      error: 'Informe um UUID válido para o serviço Spoolman.',
+    } as const
   const parsed = SpoolmanTargetSchema.safeParse({
     v: 1,
     protocol: CONFIGURATION_PROTOCOL,
     backend: 'spoolman',
     model: { family: 'spoolman', provisional: true },
     origin: input.origin.trim(),
+    ...(serviceId ? { service_id: serviceId.toLowerCase() } : {}),
     ...(input.token ? { token: input.token } : {}),
     ...(input.username ? { username: input.username } : {}),
     ...(input.password ? { password: input.password } : {}),

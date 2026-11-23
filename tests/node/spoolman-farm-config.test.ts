@@ -389,6 +389,16 @@ test('credential rotation preserves the service id, while a changed origin rotat
     third.collection.spoolman.serviceId,
     second.collection.spoolman.serviceId,
   )
+  const replacement = randomUUID()
+  await apply(
+    target({ origin: 'http://192.168.1.61:7912', service_id: replacement }),
+    3,
+  )
+  const fourth = JSON.parse(readFileSync(w.runtimeConfigPath, 'utf8'))
+  assert.equal(fourth.collection.spoolman.serviceId, replacement)
+  await apply(target({ service_id: replacement }), 4)
+  const fifth = JSON.parse(readFileSync(w.runtimeConfigPath, 'utf8'))
+  assert.equal(fifth.collection.spoolman.serviceId, replacement)
   readAgentRuntimeConfig(w.runtimeConfigPath, w.scope)
 })
 

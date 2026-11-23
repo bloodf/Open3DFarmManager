@@ -1,5 +1,6 @@
 <script setup lang="ts">
 const origin = defineModel<string>('origin', { required: true })
+const serviceId = defineModel<string>('serviceId', { required: true })
 const token = defineModel<string>('token', { required: true })
 const username = defineModel<string>('username', { required: true })
 const password = defineModel<string>('password', { required: true })
@@ -23,6 +24,21 @@ const emit = defineEmits<{ submit: [] }>()
     />
     <p id="spoolman-origin-help">
       Ex.: http://192.168.1.60:7912. Sem credenciais, caminho ou consulta.
+    </p>
+
+    <label for="spoolman-service-id">UUID do serviço (opcional)</label>
+    <input
+      id="spoolman-service-id"
+      v-model="serviceId"
+      maxlength="36"
+      autocomplete="off"
+      spellcheck="false"
+      aria-describedby="spoolman-service-id-help"
+    />
+    <p id="spoolman-service-id-help">
+      Use o mesmo UUID nos Connectors que consultam a mesma instalação. Ao
+      substituir a instalação por outra, informe um novo UUID, mesmo que o
+      endereço seja mantido.
     </p>
 
     <label for="spoolman-username">Usuário (opcional)</label>

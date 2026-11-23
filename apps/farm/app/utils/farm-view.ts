@@ -319,12 +319,16 @@ export const printerStateLabel: Record<
 
 type PrinterOperationalState = Pick<
   PrinterState,
-  'state' | 'statusReason' | 'preformStatus'
+  'state' | 'statusReason' | 'preformStatus' | 'statusMessage'
 >
 
 export function formatPrinterOperationalStateLabel(
   printer: PrinterOperationalState,
 ): string {
+  if (printer.state === 'error' && printer.statusReason === 'firmware-shutdown')
+    return printer.statusMessage
+      ? `Firmware desligado — ${printer.statusMessage}`
+      : 'Firmware desligado'
   if (printer.preformStatus) return `PreForm informou: ${printer.preformStatus}`
   if (
     printer.state === 'offline' &&

@@ -58,14 +58,12 @@ const LocalWebUiOrigin = z
 export { firmwareUpdateAvailable } from './firmware.ts'
 
 function printerStateSchema(legacy: boolean) {
-  const text = (max: number, min = 0) => {
+  const text = (max: number, min = 0, wireMax = PRINTER_STRING_MAX_UNITS) => {
     const schema = z.string().min(min).max(max)
     return legacy
       ? schema
       : schema.refine(
-          (value) =>
-            value.length <= PRINTER_STRING_MAX_UNITS &&
-            isWellFormedJsonString(value),
+          (value) => value.length <= wireMax && isWellFormedJsonString(value),
           'Expected well-formed Unicode within the telemetry string limit',
         )
   }
@@ -164,8 +162,13 @@ function printerStateSchema(legacy: boolean) {
         'unknown',
       ]),
       preformStatus: text(256, 1).optional(),
+      statusMessage: text(256, 1, 256).optional(),
       statusReason: z
-        .enum(['client-certificate-missing', 'prusa-link-unqualified'])
+        .enum([
+          'client-certificate-missing',
+          'prusa-link-unqualified',
+          'firmware-shutdown',
+        ])
         .optional(),
       alarms: z
         .strictObject({
@@ -267,6 +270,8 @@ function printerStateSchema(legacy: boolean) {
     .refine(
       (value) =>
         value.state === 'offline' ||
+        (value.state === 'error' &&
+          value.statusReason === 'firmware-shutdown') ||
         (value.state === 'unknown' && value.preformStatus !== undefined) ||
         (value.statusReason === 'prusa-link-unqualified' &&
           value.identity?.vendor === 'Prusa' &&

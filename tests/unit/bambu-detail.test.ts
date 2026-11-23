@@ -156,6 +156,47 @@ describe('Bambu detail stream frames', () => {
     for (const absent of ['toolhead', 'bedMesh', 'updates', 'host', 'firmware'])
       expect(frame.detail[absent]).toBeUndefined()
   })
+
+  it('keeps print errors and HMS codes independently until explicitly cleared', () => {
+    const state = createBambuDetailState('printer-1')
+    const update = (print: object) => state.ingest(report(print)) as Frame
+    const hms = { attr: 0x07002100, code: 0x00020004 }
+    const both =
+      'Erro de impressão: 0300-8005. Códigos HMS informados: 0700-2100-0002-0004.'
+    expect(
+      update({
+        command: 'push_status',
+        gcode_state: 'PAUSE',
+        print_error: 0x03008005,
+        hms: [hms, hms],
+      }).detail.print,
+    ).toMatchObject({ state: 'paused', message: both })
+    expect(update({ layer_num: 14 }).detail.print.message).toBe(both)
+    expect(
+      update({ print_error: -1, hms: [{ attr: 0, code: '0' }] }).detail.print
+        .message,
+    ).toBe(both)
+    expect(
+      update({
+        command: 'gcode_line',
+        mc_percent: 25,
+        print_error: 0,
+        hms: [],
+      }).detail.print.message,
+    ).toBe(both)
+    expect(update({ print_error: 0 }).detail.print.message).toBe(
+      'Códigos HMS informados: 0700-2100-0002-0004.',
+    )
+    expect(update({ hms: [] }).detail.print).toMatchObject({
+      state: 'paused',
+      message: '',
+    })
+    expect(update({ print_error: 0x0500c011 }).detail.print.message).toBe(
+      'Erro de impressão: 0500-C011.',
+    )
+    state.reset()
+    expect(update({ gcode_state: 'RUNNING' }).detail.print.message).toBe('')
+  })
 })
 
 describe('Bambu SD card over FTPS', () => {

@@ -92,9 +92,35 @@ function mergeAms(previous: unknown, next: unknown): Raw {
   return merged
 }
 
+function alarmWord(value: unknown): string | undefined {
+  return typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= 0 &&
+    value <= 0xffffffff
+    ? value.toString(16).toUpperCase().padStart(8, '0')
+    : undefined
+}
+
+function hmsCodes(value: unknown): string[] | undefined {
+  // Keep the whole list within the detail stream's message limit.
+  if (!Array.isArray(value) || value.length > 64) return undefined
+  const codes = new Set<string>()
+  for (const entry of value) {
+    const { attr, code } = object(entry)
+    const prefix = alarmWord(attr)
+    const suffix = alarmWord(code)
+    if (prefix === undefined || suffix === undefined) return undefined
+    const fullCode = prefix + suffix
+    codes.add(fullCode.replace(/(.{4})(?=.)/g, '$1-'))
+  }
+  return [...codes]
+}
+
 /** Pure accumulator: raw MQTT reports in, validated `detail.update` frames out. */
 export function createBambuDetailState(printerKey: string) {
   let print: Raw = {}
+  let printError = ''
+  let hms: string[] = []
   let seq = 0
   return {
     /** Undefined for reports that carry no print telemetry (version, upgrade). */
@@ -103,6 +129,21 @@ export function createBambuDetailState(printerKey: string) {
       const decoded = decodeBambuReport(text)
       if (decoded.kind !== 'observation') return undefined
       const delta = object(object(JSON.parse(text)).print)
+      const command =
+        typeof delta.command === 'string'
+          ? delta.command.toLowerCase()
+          : undefined
+      if (
+        command === undefined ||
+        command === 'push_status' ||
+        command === 'pushall'
+      ) {
+        const error = alarmWord(delta.print_error)
+        if (error !== undefined)
+          printError =
+            error === '00000000' ? '' : `${error.slice(0, 4)}-${error.slice(4)}`
+        hms = hmsCodes(delta.hms) ?? hms
+      }
       print = {
         ...print,
         ...delta,
@@ -114,6 +155,8 @@ export function createBambuDetailState(printerKey: string) {
     },
     reset() {
       print = {}
+      printError = ''
+      hms = []
     },
     /** Latest raw `print` object, for Connector-side refusals. */
     get print(): Readonly<Raw> {
@@ -173,7 +216,12 @@ export function createBambuDetailState(printerKey: string) {
           ...(speedFactor === undefined ? {} : { speedFactor }),
           print: {
             state: observed.state ?? 'unknown',
-            message: '',
+            message: [
+              printError && `Erro de impressão: ${printError}.`,
+              hms.length && `Códigos HMS informados: ${hms.join(', ')}.`,
+            ]
+              .filter(Boolean)
+              .join(' '),
             // The report carries remaining time, not elapsed time.
             elapsedSeconds: 0,
             ...(observed.filename ? { file: observed.filename } : {}),

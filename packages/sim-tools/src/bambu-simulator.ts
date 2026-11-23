@@ -437,6 +437,13 @@ export async function startBambuSimulator({
       scenario,
       publish: broker.control.publish,
       publishReport,
+      setAlarmReport(delta: {
+        print_error?: number
+        hms?: { attr: number; code: number }[]
+      }) {
+        Object.assign(extended, delta)
+        publishReport({ print: { ...delta, command: 'push_status' } })
+      },
       disconnectClients,
       subscriptions: broker.control.subscriptions,
       sockets: broker.control.sockets,

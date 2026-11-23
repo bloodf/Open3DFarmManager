@@ -79,3 +79,43 @@ test(
     }
   },
 )
+
+test(
+  'acknowledges a stock heartbeat without publishing it as telemetry',
+  { timeout: 5000 },
+  async () => {
+    const simulator = await createCrealitySimulator({
+      state: 1,
+      printProgress: 42,
+    })
+    const reports: Array<number | undefined> = []
+    const initial = Promise.withResolvers<void>()
+    const next = Promise.withResolvers<void>()
+    let disconnects = 0
+    const client = createCrealityTelemetryClient({
+      host: '127.0.0.1',
+      port: simulator.port,
+      onTelemetry(report) {
+        reports.push(report.progress)
+        if (report.progress === 42) initial.resolve()
+        if (report.progress === 43) next.resolve()
+      },
+      onDisconnect() {
+        disconnects++
+      },
+    })
+    try {
+      await initial.promise
+      assert.equal(await simulator.challengeHeartbeat(), 1)
+      simulator.setFrame({ msg: 'heart_beat', printProgress: 43 })
+      await next.promise
+      assert.deepEqual(reports, [42, 43])
+      assert.deepEqual(simulator.received, ['ok'])
+      assert.deepEqual(simulator.requests, [])
+      assert.equal(disconnects, 0)
+    } finally {
+      await client.close()
+      await simulator.close()
+    }
+  },
+)

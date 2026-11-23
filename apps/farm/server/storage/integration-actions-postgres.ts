@@ -25,7 +25,7 @@ export class PostgresIntegrationActions implements IntegrationActionsStore {
     if (!uuid.test(printerAssignmentId)) return null
     const rows = await this.sql<ActionTarget[]>`
       SELECT p.farm_id::text AS "farmId", p.agent_id::text AS "agentId",
-        COALESCE(s.state->'controls', '[]'::jsonb) AS controls
+        s.state->'controls' AS controls
       FROM farm.printer_assignments p
       LEFT JOIN farm.printer_latest_state s
         ON s.farm_id = p.farm_id AND s.agent_id = p.agent_id AND s.printer_key = p.printer_key
@@ -34,7 +34,7 @@ export class PostgresIntegrationActions implements IntegrationActionsStore {
     if (!row) return null
     const controls = Array.isArray(row.controls)
       ? row.controls.filter((item): item is string => typeof item === 'string')
-      : []
+      : null
     return { farmId: row.farmId, agentId: row.agentId, controls }
   }
 

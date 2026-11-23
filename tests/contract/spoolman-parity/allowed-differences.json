@@ -1,0 +1,163 @@
+[
+  {
+    "id": "info-deployment",
+    "corpus": "auxiliary-api",
+    "case": "info",
+    "reason": "GET /info describes the deployment: the built-in server runs on PostgreSQL with no data, log or backup directory, no automatic backups and no update check or build metadata.",
+    "matrix": "GET /api/v1/info describes the built-in server",
+    "ignorePaths": [
+      "automatic_backups",
+      "data_dir",
+      "logs_dir",
+      "backups_dir",
+      "db_type",
+      "build_date",
+      "git_commit",
+      "latest_version"
+    ],
+    "expect": {
+      "status": 200,
+      "body": {
+        "version": "0.27.1",
+        "db_type": "postgresql",
+        "update_available": false
+      }
+    }
+  },
+  {
+    "id": "backup-inline-export",
+    "corpus": "auxiliary-api",
+    "case": "backup",
+    "reason": "No SQLite file exists to copy; the farm-scoped export is returned in the body.",
+    "matrix": "POST /api/v1/backup returns a farm-scoped JSON export",
+    "ignorePaths": ["path", "export"],
+    "expect": {
+      "status": 200,
+      "body": {
+        "created": true,
+        "path": "inline:export"
+      }
+    }
+  },
+  {
+    "id": "tag-scan-unserved",
+    "corpus": "auxiliary-api",
+    "case": "tag-scan",
+    "reason": "The built-in server has no tag storage (migration 0089 has none), so the endpoint is not served; Spoolman links or scans the tag.",
+    "matrix": "Tag endpoints (POST/DELETE on /spool/{id}/tag and /filament/{id}/tag, POST /tag/scan) are not served",
+    "status": true,
+    "ignoreBody": true,
+    "ignoreHeaders": ["content-type"],
+    "expect": {
+      "status": 404
+    }
+  },
+  {
+    "id": "tag-link-spool-unserved",
+    "corpus": "auxiliary-api",
+    "case": "tag-link-spool",
+    "reason": "The built-in server has no tag storage (migration 0089 has none), so the endpoint is not served; Spoolman links or scans the tag.",
+    "matrix": "Tag endpoints (POST/DELETE on /spool/{id}/tag and /filament/{id}/tag, POST /tag/scan) are not served",
+    "status": true,
+    "ignoreBody": true,
+    "ignoreHeaders": ["content-type"],
+    "expect": {
+      "status": 404
+    }
+  },
+  {
+    "id": "tag-unlink-spool-unserved",
+    "corpus": "auxiliary-api",
+    "case": "tag-unlink-spool",
+    "reason": "The built-in server has no tag storage (migration 0089 has none), so the endpoint is not served; Spoolman links or scans the tag.",
+    "matrix": "Tag endpoints (POST/DELETE on /spool/{id}/tag and /filament/{id}/tag, POST /tag/scan) are not served",
+    "status": true,
+    "ignoreBody": true,
+    "ignoreHeaders": ["content-type"],
+    "expect": {
+      "status": 404
+    }
+  },
+  {
+    "id": "tag-link-filament-unserved",
+    "corpus": "auxiliary-api",
+    "case": "tag-link-filament",
+    "reason": "The built-in server has no tag storage (migration 0089 has none), so the endpoint is not served; Spoolman links or scans the tag.",
+    "matrix": "Tag endpoints (POST/DELETE on /spool/{id}/tag and /filament/{id}/tag, POST /tag/scan) are not served",
+    "status": true,
+    "ignoreBody": true,
+    "ignoreHeaders": ["content-type"],
+    "expect": {
+      "status": 404
+    }
+  },
+  {
+    "id": "tag-unlink-filament-unserved",
+    "corpus": "auxiliary-api",
+    "case": "tag-unlink-filament",
+    "reason": "The built-in server has no tag storage (migration 0089 has none), so the endpoint is not served; Spoolman links or scans the tag.",
+    "matrix": "Tag endpoints (POST/DELETE on /spool/{id}/tag and /filament/{id}/tag, POST /tag/scan) are not served",
+    "status": true,
+    "ignoreBody": true,
+    "ignoreHeaders": ["content-type"],
+    "expect": {
+      "status": 404
+    }
+  },
+  {
+    "id": "ws-vendor-delete-updates-filaments",
+    "corpus": "websocket",
+    "case": "vendor-delete-cascade",
+    "reason": "Deleting a vendor also announces an update for each filament that lost its vendor; Spoolman clears the link silently.",
+    "matrix": "a vendor delete also sends filament updates for filaments that lost their vendor",
+    "builtinExtraEvents": [
+      {
+        "type": "updated",
+        "resource": "filament"
+      }
+    ]
+  },
+  {
+    "id": "ws-rename-updates-spools",
+    "corpus": "websocket",
+    "case": "renames",
+    "reason": "A location or field-value rename announces one update per changed spool; Spoolman's bulk UPDATE announces nothing.",
+    "matrix": "a location or field rename sends one spool update per changed spool",
+    "builtinExtraEvents": [
+      {
+        "type": "updated",
+        "resource": "spool"
+      }
+    ]
+  },
+  {
+    "id": "ws-handshake-refusal",
+    "corpus": "websocket",
+    "case": "handshake-origin-and-host",
+    "reason": "A handshake from another origin is accepted and then closed with code 4403 (Spoolman rejects the handshake itself with HTTP 403).",
+    "matrix": "A handshake whose Origin differs from the Host is accepted and closed with code 4403",
+    "refusalsEquivalent": true
+  },
+  {
+    "id": "ws-handshake-unknown-paths",
+    "corpus": "websocket",
+    "case": "handshake-unknown-paths",
+    "reason": "A path that is no feed is refused with HTTP 404 (Spoolman: 403).",
+    "matrix": "a path that is no feed with HTTP 404 (Spoolman: 403)",
+    "refusalsEquivalent": true
+  },
+  {
+    "id": "ws-handshake-path-spellings",
+    "corpus": "websocket",
+    "case": "handshake-path-spellings",
+    "reason": "The feeds also answer on the spellings with or without a trailing slash; Spoolman serves only its exact route paths.",
+    "matrix": "The feeds also answer on the trailing-slash spellings",
+    "ignoreListeners": [
+      "/api/v1",
+      "/api/v1/setting/",
+      "/api/v1/vendor/",
+      "/api/v1/filament/",
+      "/api/v1/spool/"
+    ]
+  }
+]

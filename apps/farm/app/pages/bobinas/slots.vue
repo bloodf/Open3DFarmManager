@@ -67,11 +67,11 @@ const {
 
 const active = computed(() => activeAssignments(assignments.value))
 const spoolById = computed(
-  () => new Map(spools.value.map((spool) => [spool.id, spool])),
+  () => new Map(spools.value.map((spool) => [Number(spool.id), spool])),
 )
 
 function spoolText(id: number): string {
-  const spool = spoolById.value.get(id)
+  const spool = spoolById.value.get(Number(id))
   return spool ? `#${id} · ${spoolDisplayTitle(spool)}` : `#${id}`
 }
 
@@ -197,10 +197,12 @@ async function unassign(item: SlotAssignment, printer: PrinterRef) {
               <span class="muted"> · {{ spoolText(item.spoolId) }}</span>
               <span class="muted">
                 · desde {{ formatStamp(item.assignedAt) }}
-                <template v-if="spoolById.get(item.spoolId)">
+                <template v-if="spoolById.get(Number(item.spoolId))">
                   · restante
                   {{
-                    formatGrams(spoolById.get(item.spoolId)?.remaining_weight)
+                    formatGrams(
+                      spoolById.get(Number(item.spoolId))?.remaining_weight,
+                    )
                   }}
                 </template>
               </span>

@@ -1,6 +1,9 @@
 import type { Sql } from 'postgres'
+import { useRuntimeConfig } from 'nuxt/server'
 import { SpoolInventory } from '@open3dfarmmanager/farm-protocol'
 import { uuidPattern, type IntegrationPrincipal } from './integration-auth.ts'
+
+import { integrationHistoryJobIds } from '../storage/integration-jobs-history.ts'
 
 const cursorPattern = /^[A-Za-z0-9_-]{1,512}$/
 
@@ -51,13 +54,14 @@ export function validJobCursor(cursor: string | null) {
 export function inventoryGrantFarms(
   principal: IntegrationPrincipal,
   farmId?: string,
+  scope: 'inventory:read' | 'inventory:write' = 'inventory:read',
 ) {
   return [
     ...new Set(
       principal.grants
         .filter(
           (grant) =>
-            grant.scopes.includes('inventory:read') &&
+            grant.scopes.includes(scope) &&
             grant.printerAssignmentId === null &&
             (farmId === undefined || grant.farmId === farmId),
         )
@@ -144,12 +148,14 @@ export async function listIntegrationJobs(
   input: {
     farmWideFarmIds: string[]
     assignmentIds: string[]
+    appId?: string
     printerId: string | null
     since: number | null
     until: number | null
     limit: number
     cursor: string | null
   },
+  linkSql?: Sql | null,
 ) {
   const position = decodeCursor(input.cursor, jobPosition)
   if (position === null) throw new Error('Invalid job cursor')
@@ -158,6 +164,7 @@ export async function listIntegrationJobs(
       id: string
       farmId: string
       printerId: string
+      agentId: string
       outcome: 'completed' | 'cancelled' | 'failed'
       filename: string | null
       printDurationSeconds: number | null
@@ -166,7 +173,7 @@ export async function listIntegrationJobs(
         import('@open3dfarmmanager/farm-protocol').FilamentUsage[] | null
       endedAt: number
     }[]
-  >`SELECT h.id::text AS id, h.farm_id::text AS "farmId", p.id::text AS "printerId", h.outcome,
+  >`SELECT h.id::text AS id, h.farm_id::text AS "farmId", p.id::text AS "printerId", h.agent_id::text AS "agentId", h.outcome,
       h.filename, h.print_duration_seconds AS "printDurationSeconds",
       h.total_duration_seconds AS "totalDurationSeconds", h.filament_usage AS "filamentUsage", h.ended_at::float8 AS "endedAt"
       FROM farm.job_history h
@@ -179,7 +186,27 @@ export async function listIntegrationJobs(
         AND (${position?.endedAt ?? null}::bigint IS NULL OR (h.ended_at, h.id) < (${position?.endedAt ?? null}::bigint, ${position?.id ?? null}::bigint))
       ORDER BY h.ended_at DESC, h.id DESC
       LIMIT ${input.limit + 1}`
-  const data = rows.slice(0, input.limit).map((row) => ({
+  const page = rows.slice(0, input.limit)
+  // This path can also run with only the read API enabled. The integration
+  // jobs runtime owns the separate role allowed to read envelope receipts.
+  if (linkSql === undefined && page.length) {
+    const config = useRuntimeConfig().integrationJobs
+    if (
+      typeof config === 'object' &&
+      config !== null &&
+      'enabled' in config &&
+      config.enabled === true
+    ) {
+      const { integrationJobsRuntime } =
+        await import('./integration-jobs-runtime.ts')
+      linkSql = (await integrationJobsRuntime()).pool
+    }
+  }
+  const jobIds = linkSql
+    ? await integrationHistoryJobIds(linkSql, page, input.appId)
+    : new Map()
+  const data = page.map((row) => ({
+    ...(jobIds.has(row.id) ? { jobId: jobIds.get(row.id)! } : {}),
     id: row.id,
     farmId: row.farmId,
     printerId: row.printerId,

@@ -32,6 +32,7 @@ import {
   excludeObjectWire,
 } from './control-print-status.ts'
 import { buildMoonrakerCommand } from './commands.ts'
+import { SnapmakerU1CommandRefused, isDeclaredSnapmakerU1 } from './u1-tools.ts'
 import {
   parseQueueOp,
   parseQueueStatus,
@@ -127,6 +128,8 @@ const Snapshot = z.strictObject({
     }),
     print_stats: z.strictObject({
       filename: z.string().optional(),
+      total_duration: z.number().finite().nonnegative().optional(),
+      info: z.unknown().optional(),
       state: z.enum([
         'standby',
         'printing',
@@ -172,6 +175,11 @@ export function openFixedMoonrakerPause(input: {
   connectionGeneration: number
   clock: { monotonicNow(): number }
   publish(observation: ControlObservation | null): void
+  observeRun?:
+    | ((
+        evidence: import('../runtime/api-job-lifecycle.ts').ApiRunEvidence,
+      ) => void)
+    | undefined
   /** Permanent owner/context cancellation, including readonly result auditing. */
   signal: AbortSignal
   /**
@@ -350,19 +358,17 @@ export function openFixedMoonrakerPause(input: {
     if (terminal) return
     try {
       current()
-      if (
-        binary ||
-        !Buffer.isBuffer(data) ||
-        ++receivedFrames > 16 ||
-        (receivedBytes += data.byteLength) > 32768
-      )
-        throw failure()
+      if (binary || !Buffer.isBuffer(data)) throw failure()
       const frame = decodeMoonrakerFrame(
         data,
         binary,
         Math.min(4096, selected.limits.maxMessageBytes),
       )
+      // Side notifications cannot acknowledge a request; do not count them
+      // toward the reply-frame or byte caps while waiting for a result.
       if (SideNotification.safeParse(frame).success) return
+      if (++receivedFrames > 16 || (receivedBytes += data.byteLength) > 32768)
+        throw failure()
       const result = Reply.parse(frame)
       if (
         !pending ||
@@ -422,10 +428,11 @@ export function openFixedMoonrakerPause(input: {
     try {
       const started = now()
       const id = index === 0 ? 1 : index + 2
+      const readRun = index === 0 && input.observeRun !== undefined
       const wire =
         excludedName !== undefined
           ? excludeObjectProbe(id)
-          : withFilename
+          : withFilename || readRun
             ? JSON.stringify({
                 jsonrpc: '2.0',
                 id,
@@ -433,7 +440,9 @@ export function openFixedMoonrakerPause(input: {
                 params: {
                   objects: {
                     webhooks: ['state'],
-                    print_stats: ['state', 'filename'],
+                    print_stats: readRun
+                      ? ['state', 'filename', 'total_duration', 'info']
+                      : ['state', 'filename'],
                   },
                 },
               })
@@ -482,6 +491,13 @@ export function openFixedMoonrakerPause(input: {
             }
           : {}),
       })
+      if (readRun)
+        input.observeRun?.({
+          filename: snapshot.status.print_stats.filename,
+          duration: snapshot.status.print_stats.total_duration,
+          info: snapshot.status.print_stats.info,
+          sourceTime: snapshot.eventtime,
+        })
       publish(observation)
       current()
       return observation
@@ -911,6 +927,10 @@ export function openFixedMoonrakerPause(input: {
       args: Record<string, unknown>,
       request: Parameters<NonNullable<PauseDriver['execute']>>[2],
     ) {
+      // A declared Snapmaker U1 has no qualified command; refuse before any
+      // write, also before its object list has been detected.
+      if (isDeclaredSnapmakerU1(mapping.printer_key))
+        return Promise.reject(new SnapmakerU1CommandRefused(action))
       if (action === 'pause' || action === 'resume' || action === 'cancel')
         return send(commandWire(action), request)
       if (isMotionAction(action)) {
@@ -966,6 +986,10 @@ export function openFixedMoonrakerPause(input: {
       return send(extendedWire(action, args), request, 5000)
     },
     pauseOnce(request: Parameters<PauseDriver['pauseOnce']>[0]) {
+      if (isDeclaredSnapmakerU1(mapping.printer_key))
+        return Promise.reject(
+          new SnapmakerU1CommandRefused(request.action ?? 'pause'),
+        )
       return send(commandWire(request.action ?? 'pause'), request)
     },
     async waitForPaused({

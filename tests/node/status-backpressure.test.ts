@@ -15,7 +15,7 @@ import {
   type VerifiedRtcAdmission,
 } from '../../packages/connector/src/webrtc/readonly-session.ts'
 
-test('a permanently buffered status channel stops sending and closes on timeout', async () => {
+test('a permanently buffered status channel stops sending and closes on timeout', async (t) => {
   const identity = new ConnectorIdentity(
     generateKeyPairSync('ed25519').privateKey,
   )
@@ -72,6 +72,7 @@ test('a permanently buffered status channel stops sending and closes on timeout'
   let onComplete: ((value: CompleteFarmSnapshot) => void) | undefined
   let sent = 0
   let closed = 0
+  let closeReason = ''
   const sender = new FarmStatusSender({
     assignmentRefs: refs,
     signal: new AbortController().signal,
@@ -89,8 +90,9 @@ test('a permanently buffered status channel stops sending and closes on timeout'
         sent++
         return true
       },
-      close() {
+      close(reason = '') {
         closed++
+        closeReason = reason
       },
     },
     openSnapshots(input) {
@@ -107,15 +109,28 @@ test('a permanently buffered status channel stops sending and closes on timeout'
       onComplete!({
         assignmentRefs: refs,
         complete: true,
-        printers: [],
+        printers: [
+          {
+            printerKey: 'printer-a',
+            state: 'printing',
+            progress: 0.5,
+            observedAt: Date.now(),
+          },
+        ],
         capturedAtMonoMs: performance.now(),
         validUntilMonoMs: performance.now() + 10_000,
       })
     complete()
     complete()
     assert.equal(sent, 0, 'buffered channel must not queue snapshots')
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    assert.equal(
+      closed,
+      0,
+      `peer must remain open before the congestion grace deadline (${closeReason})`,
+    )
     await new Promise((resolve) =>
-      setTimeout(resolve, FARM_STATUS_BACKPRESSURE_TIMEOUT_MS + 100),
+      setTimeout(resolve, FARM_STATUS_BACKPRESSURE_TIMEOUT_MS),
     )
     assert.equal(closed, 1, 'sender must close after sustained congestion')
   } finally {

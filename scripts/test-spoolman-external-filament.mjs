@@ -3,7 +3,8 @@
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { createServer } from 'node:http'
-import { appendFileSync } from 'node:fs'
+import { dirname, basename } from 'node:path'
+import { createWorkerLedger } from './worker-ledger.mjs'
 import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 
@@ -21,12 +22,10 @@ if (process.argv[2] !== '--inside') {
   )
   const name = `tou562-external-${randomUUID()}`
   const root = fileURLToPath(new URL('../', import.meta.url))
-  const ledger = process.env.TOU562_LEDGER ?? '/tmp/tou562-worker-ledger.jsonl'
-  const log = (data) =>
-    appendFileSync(
-      ledger,
-      JSON.stringify({ at: new Date().toISOString(), ...data }) + '\n',
-    )
+  const ledger = process.env.TOU562_LEDGER
+  const log = ledger
+    ? createWorkerLedger(dirname(ledger), basename(ledger))
+    : createWorkerLedger()
   const inspectOwned = () => {
     try {
       const owner = docker(

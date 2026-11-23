@@ -68,6 +68,7 @@ function fixture(keys = ['a', 'b']) {
     epoch = 1,
     times = { webhooks: now, printState: now, progress: now },
     temperatureObservation?: RawMoonrakerObservation['temperatureObservation'],
+    chamberTemperatureCelsius?: number,
   ) {
     source.observe({
       printerKey: key,
@@ -77,6 +78,9 @@ function fixture(keys = ['a', 'b']) {
         state: 'printing',
         progress: 0.2,
         observedAt: 10,
+        ...(chamberTemperatureCelsius === undefined
+          ? {}
+          : { chamberTemperatureCelsius }),
       },
       status: {
         webhooks: { state: 'ready' },
@@ -303,6 +307,19 @@ test('complete temperature evidence projects zero and negative values and core d
   }
 })
 
+test('the live frame carries the current chamber temperature', () => {
+  const f = fixture(['a'])
+  try {
+    f.observe('a', 1, undefined, undefined, 21.5)
+    f.open()
+    assert.equal(f.received[0]?.printers[0]?.chamberTemperatureCelsius, 21.5)
+    f.observe('a', 1, undefined, undefined, 22)
+    assert.equal(f.received.at(-1)?.printers[0]?.chamberTemperatureCelsius, 22)
+  } finally {
+    f.source.close()
+  }
+})
+
 test('complete invalid/absent evidence clears readings; new epoch cannot borrow a retired reading', () => {
   const f = fixture(['a'])
   try {
@@ -526,4 +543,39 @@ test('inventory is omitted when even zero spools cannot fit, printers still flow
   const full = [...crowded()].find((c) => c.size >= 1990 && c.size <= 2048)
   assert.ok(full)
   assert.equal(emitWithSpools(full.keys), undefined)
+})
+
+test('PreForm host readings expire and cannot return from a withdrawn epoch', () => {
+  const f = fixture(['a'])
+  const observe = (epoch: number, preformStatus: string, mono: number) =>
+    f.source.observe({
+      printerKey: 'a',
+      epoch,
+      printer: {
+        printerKey: 'a',
+        state: 'unknown',
+        preformStatus,
+        observedAt: 10,
+      },
+      receivedAtMonoMs: mono,
+      fieldObservedAtMonoMs: { formlabs: { state: mono, preformStatus: mono } },
+    })
+  try {
+    observe(1, 'Printing', 100)
+    f.open()
+    assert.equal(f.received.at(-1)?.printers[0]?.preformStatus, 'Printing')
+    assert.equal(f.received.at(-1)?.validUntilMonoMs, 5100)
+    f.source.invalidate({ printerKey: 'a', epoch: 1 })
+    assert.equal(f.unavailable(), 1)
+    observe(1, 'Printing', 100)
+    assert.equal(f.received.length, 1)
+    f.setNow(200)
+    observe(2, 'Idle', 200)
+    f.open()
+    assert.equal(f.received.at(-1)?.printers[0]?.preformStatus, 'Idle')
+    assert.equal(f.received.at(-1)?.validUntilMonoMs, 5200)
+  } finally {
+    f.controller.abort()
+    f.source.close()
+  }
 })

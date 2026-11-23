@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
+import { setPolishTheme } from '../helpers/polish-theme.ts'
+import { mockShellApi } from '../helpers/shell-api.ts'
 
 // Isolated UI checks for /arquivos and /biblioteca on mocked /api routes. No
 // real printer, database, auth service or external network is involved: every
@@ -391,6 +393,8 @@ async function mockApi(page: Page, scenario: Scenario, control: Control) {
       return route.fulfill({ status: 200, body: png, contentType: 'image/png' })
     return json({}, 404)
   })
+  await mockShellApi(page, farm)
+  await mockShellApi(page, otherFarm)
 }
 
 const consoleErrors = (page: Page, ignoredStatus?: number) => {
@@ -419,7 +423,7 @@ async function open(
   // A state that never shows up fails fast instead of hanging the run.
   page.setDefaultTimeout(15_000)
   await page.setViewportSize(viewport)
-  await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+  await setPolishTheme(page, theme)
   await mockApi(page, scenario, control)
   await page.goto(scenario.path)
   await page

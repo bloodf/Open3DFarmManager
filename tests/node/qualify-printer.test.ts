@@ -73,6 +73,7 @@ test('CLI arguments: help displays usage and missing required options fail with 
   const helpResult = await runCli(['--help'])
   assert.equal(helpResult.code, 0)
   assert.ok(helpResult.out.includes('Usage: node scripts/qualify-printer.ts'))
+  assert.ok(helpResult.out.includes('anycubic=9883'))
 
   const noArgs = await runCli([])
   assert.equal(noArgs.code, 2)
@@ -263,27 +264,25 @@ test('qualify Bambu printer against simulator with MQTT reports', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'bambu-qualify-'))
 
   // 1. Start Bambu simulator
-  const sim = await startBambuSimulator({
-    serial: 'QUALIFY_BAMBU',
-    initialState: 'RUNNING',
-  })
-
-  // 2. Write credentials file
-  const credPath = join(dir, 'bambu-creds.json')
-  await writeFile(
-    credPath,
-    JSON.stringify({
-      accessCode: 'synthetic-code',
-      serial: 'QUALIFY_BAMBU',
-      pinSha256: createHash('sha256')
-        .update(new X509Certificate(sim.syntheticTrust).raw)
-        .digest('hex'),
-      caPem: sim.syntheticTrust,
-    }),
-    { mode: 0o600 },
-  )
-
+  let sim: Awaited<ReturnType<typeof startBambuSimulator>> | undefined
   try {
+    sim = await startBambuSimulator({
+      serial: 'QUALIFY_BAMBU',
+      initialState: 'RUNNING',
+    })
+    const credPath = join(dir, 'bambu-creds.json')
+    await writeFile(
+      credPath,
+      JSON.stringify({
+        accessCode: 'synthetic-code',
+        serial: 'QUALIFY_BAMBU',
+        pinSha256: createHash('sha256')
+          .update(new X509Certificate(sim.syntheticTrust).raw)
+          .digest('hex'),
+        caPem: sim.syntheticTrust,
+      }),
+      { mode: 0o600 },
+    )
     const res = await runCli([
       '--vendor',
       'bambu',
@@ -312,7 +311,7 @@ test('qualify Bambu printer against simulator with MQTT reports', async () => {
         report.qualification.status === 'partially_qualified',
     )
   } finally {
-    await sim.close()
+    await sim?.close()
     await rm(dir, { recursive: true, force: true })
   }
 })
@@ -392,27 +391,26 @@ test('qualify Creality printer against simulator with telemetry and camera', asy
 test('qualify Anycubic printer against LAN simulator with telemetry', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'anycubic-qualify-'))
 
-  const sim = await startAnycubicSimulator({
-    serial: 'SYNTHETIC_ANYCUBIC',
-    initialState: 'RUNNING',
-  })
-
-  const credPath = join(dir, 'anycubic-creds.json')
-  await writeFile(
-    credPath,
-    JSON.stringify({
-      username: 'bblp',
-      password: 'synthetic-password',
-      serial: 'SYNTHETIC_ANYCUBIC',
-      caPem: sim.syntheticTrust,
-      pinSha256: createHash('sha256')
-        .update(new X509Certificate(sim.syntheticTrust).raw)
-        .digest('hex'),
-    }),
-    { mode: 0o600 },
-  )
-
+  let sim: Awaited<ReturnType<typeof startAnycubicSimulator>> | undefined
   try {
+    sim = await startAnycubicSimulator({
+      serial: 'SYNTHETIC_ANYCUBIC',
+      initialState: 'RUNNING',
+    })
+    const credPath = join(dir, 'anycubic-creds.json')
+    await writeFile(
+      credPath,
+      JSON.stringify({
+        username: 'bblp',
+        password: 'synthetic-password',
+        serial: 'SYNTHETIC_ANYCUBIC',
+        caPem: sim.syntheticTrust,
+        pinSha256: createHash('sha256')
+          .update(new X509Certificate(sim.syntheticTrust).raw)
+          .digest('hex'),
+      }),
+      { mode: 0o600 },
+    )
     const res = await runCli([
       '--vendor',
       'anycubic',
@@ -440,7 +438,7 @@ test('qualify Anycubic printer against LAN simulator with telemetry', async () =
         report.qualification.status === 'partially_qualified',
     )
   } finally {
-    await sim.close()
+    await sim?.close()
     await rm(dir, { recursive: true, force: true })
   }
 })
@@ -449,5 +447,9 @@ test('CLI exit code: an unreachable report is printed and exits 1', async () => 
   // Without bridge credentials the KobraLink client refuses before any request.
   const result = await runCli(['--vendor', 'kobralink', '--host', '127.0.0.1'])
   assert.equal(result.code, 1)
-  assert.equal(JSON.parse(result.out).qualification.status, 'unreachable')
+  const report = JSON.parse(result.out)
+  assert.equal(report.qualification.status, 'unreachable')
+  assert.match(report.qualification.summary, /no credential file/)
+  assert.deepEqual(report.identity, {})
+  assert.equal(report.catalog.matchedCatalogId, null)
 })

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { once } from 'node:events'
 import test from 'node:test'
 
 type Value = string | Value[] | { [key: string]: Value }
@@ -163,6 +164,10 @@ test('sandbox bambu has no state mount; app and connector get only needed files'
     'bambu still needs the workspace',
   )
 
+  assert.deepEqual(mapping(bambu.environment), {
+    SANDBOX_BAMBU_ACCESS_CODE: '${SANDBOX_BAMBU_ACCESS_CODE:-}',
+  })
+
   const app = mapping(services.app)
   assert.deepEqual(
     volumeList(app).toSorted(),
@@ -187,4 +192,118 @@ test('sandbox bambu has no state mount; app and connector get only needed files'
       sandboxFileMount('tls.crt'),
     ].toSorted(),
   )
+})
+
+test('sandbox postgres data is a bind volume under the private state dir', () => {
+  const compose = parseCompose(composeSource)
+  const database = mapping(mapping(compose.volumes).database)
+  assert.deepEqual(mapping(database.driver_opts), {
+    type: 'none',
+    o: 'bind',
+    device: '${SANDBOX_STATE:?}/database',
+  })
+  const script = readFileSync(
+    new URL('../../scripts/sandbox.ts', import.meta.url),
+    'utf8',
+  )
+  assert.match(script, /join\(state, 'database'\)/)
+  assert.match(script, /rmdirSync\(databaseDir/)
+})
+
+test('sandbox state survives a change of temporary directory', async () => {
+  const { sandboxState } = await import('../../scripts/sandbox-support.ts')
+  const { mkdtemp, rm } = await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const root = await mkdtemp(join(tmpdir(), 'sandbox-state-test-'))
+  try {
+    const first = sandboxState('project', 42, {
+      XDG_STATE_HOME: root,
+      TMPDIR: join(root, 'old-temp'),
+    })
+    const second = sandboxState('project', 42, {
+      XDG_STATE_HOME: root,
+      TMPDIR: join(root, 'new-temp'),
+    })
+    assert.equal(first, join(root, 'open3dfarmmanager', 'project-42'))
+    assert.equal(second, first)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('sandbox down clears the previous connector queue', async () => {
+  const { mkdtemp, mkdir, writeFile, rm, access } =
+    await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const { createHash } = await import('node:crypto')
+  const { execFileSync } = await import('node:child_process')
+  const { sandboxState } = await import('../../scripts/sandbox-support.ts')
+  const root = await mkdtemp(join(tmpdir(), 'sandbox-down-test-'))
+  try {
+    const bin = join(root, 'bin')
+    await mkdir(bin)
+    await writeFile(join(bin, 'docker'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+    const project =
+      'o3dfm-sandbox-' +
+      createHash('sha256').update(process.cwd()).digest('hex').slice(0, 12)
+    const state = sandboxState(project, process.getuid!(), {
+      XDG_STATE_HOME: root,
+    })
+    await mkdir(join(state, 'connector-data', 'telemetry'), {
+      recursive: true,
+      mode: 0o700,
+    })
+    await writeFile(
+      join(state, 'connector-data', 'telemetry', 'scope.json'),
+      'old farm',
+    )
+    execFileSync(process.execPath, ['scripts/sandbox.ts', 'down'], {
+      env: {
+        ...process.env,
+        XDG_STATE_HOME: root,
+        DOCKER_HOST: 'unix:///fixture',
+        PATH: `${bin}:${process.env.PATH}`,
+      },
+    })
+    await assert.rejects(access(join(state, 'connector-data')))
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('sandbox lock is removed on termination', async () => {
+  const { mkdtemp, rm, access } = await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const { join, resolve } = await import('node:path')
+  const { spawn } = await import('node:child_process')
+  const root = await mkdtemp(join(tmpdir(), 'sandbox-lock-test-'))
+  const lock = join(root, 'lock')
+  const modulePath = resolve('scripts/sandbox-support.ts')
+  const child = spawn(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `import { acquireSandboxLock } from ${JSON.stringify(modulePath)}; acquireSandboxLock(${JSON.stringify(lock)}); console.log('ready'); setInterval(() => {}, 1000)`,
+    ],
+    { stdio: ['ignore', 'pipe', 'pipe'] },
+  )
+  try {
+    await once(child.stdout!, 'data', { signal: AbortSignal.timeout(5000) })
+    await access(lock)
+    child.kill('SIGTERM')
+    const [, signal] = await once(child, 'exit', {
+      signal: AbortSignal.timeout(5000),
+    })
+    assert.equal(signal, 'SIGTERM')
+    await assert.rejects(access(lock))
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGKILL')
+      await once(child, 'exit').catch(() => {})
+    }
+    await rm(root, { recursive: true, force: true })
+  }
 })

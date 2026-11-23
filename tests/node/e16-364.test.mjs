@@ -452,7 +452,7 @@ test('documented job phases keep the last progress and map job endings', () => {
     assert.equal(status.snapshot().state, state, String(code))
   }
   status.report('print', phaseReport('printing', { filename: 'f'.repeat(900) }))
-  assert.equal(status.snapshot().filename.length, 255)
+  assert.equal(status.snapshot().filename.length, 128)
 })
 
 test('camera URL is handed off only for an unauthenticated HTTP URL on the printer address', () => {

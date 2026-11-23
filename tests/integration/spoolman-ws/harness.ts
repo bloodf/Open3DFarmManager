@@ -95,7 +95,7 @@ export async function startHarness(farmCount = 2): Promise<Harness> {
       port,
       database: 'fixture',
       username,
-      password: '',
+      password: env('WS_PG_PASSWORD'),
       ssl: false,
       max: 4,
       connect_timeout: 3,
@@ -241,16 +241,25 @@ export async function startHarness(farmCount = 2): Promise<Harness> {
     refused(token, path) {
       return new Promise<number>((resolve, reject) => {
         const socket = new WebSocket(`ws://${address}/spoolman/${token}${path}`)
+        const timeout = setTimeout(() => {
+          socket.terminate()
+          reject(new Error('websocket handshake timed out'))
+        }, 5000)
         socket.once('unexpected-response', (_req, res) => {
+          clearTimeout(timeout)
           resolve(res.statusCode ?? 0)
           res.resume()
           socket.terminate()
         })
         socket.once('open', () => {
+          clearTimeout(timeout)
           socket.terminate()
           reject(new Error('handshake was accepted'))
         })
-        socket.once('error', () => {})
+        socket.once('error', (error) => {
+          clearTimeout(timeout)
+          reject(error)
+        })
       })
     },
     settle: (ms = 250) => new Promise((done) => setTimeout(done, ms)),

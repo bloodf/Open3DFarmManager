@@ -254,7 +254,8 @@ if (mode === '--prepare-layer') {
     join(layer, 'node_modules'),
     'dir',
   )
-  const config = `export default defineNuxtConfig({ extends: ${JSON.stringify(app)}, srcDir: ${JSON.stringify(join(app, 'app'))}, runtimeConfig: { connectorSignalling: { enabled: true } }, nitro: { preset: 'node-server', output: { dir: ${JSON.stringify(output)} } } })\n`
+  // Keep the fixture entry deferred so it runs after Nuxt's inline runtime config.
+  const config = `export default defineNuxtConfig({ extends: ${JSON.stringify(app)}, srcDir: ${JSON.stringify(join(app, 'app'))}, runtimeConfig: { connectorSignalling: { enabled: true } }, nitro: { preset: 'node-server', ignore: ['plugins/pre-hydration.ts'], output: { dir: ${JSON.stringify(output)} } } })\n`
   await writeFile(join(layer, 'nuxt.config.ts'), config, {
     mode: 0o600,
     flag: 'wx',
@@ -973,7 +974,9 @@ if (mode === '--prepare-layer') {
     if (!failed && !failures.length)
       await note(
         farmPause
-          ? 'PASS real generated Nitro HTTPS/WSS farm page signed pause over WebRTC to synthetic Moonraker'
+          ? process.env.SIGNALLING_HTTPS_SIM_PRINTING_PAUSE === 'sv06'
+            ? 'PASS real generated Nitro HTTPS/WSS farm page signed pause over WebRTC to the printing simulator'
+            : 'PASS real generated Nitro HTTPS/WSS farm page signed pause over WebRTC to synthetic Moonraker'
           : pauseRtcFixture
             ? 'PASS real generated Nitro HTTPS pause issuer and authenticated pause RTC fixture'
             : pauseFixture

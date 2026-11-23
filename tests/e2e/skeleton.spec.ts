@@ -26,7 +26,7 @@ for (const mode of modes) {
       await expect(
         page
           .getByRole('navigation', { name: 'Navegação principal' })
-          .getByRole('link', { name: 'Minha farm' }),
+          .getByRole('link', { name: 'Farm', exact: true }),
       ).toHaveAttribute('href', '/farm')
       expect((await request.get('/farm')).status()).toBe(200)
       expect(await (await request.get('/healthz')).json()).toEqual({

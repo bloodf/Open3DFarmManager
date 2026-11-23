@@ -1,3 +1,5 @@
+import { boundPrinterString } from '@open3dfarmmanager/farm-protocol'
+
 export type MoonrakerFirmware = {
   current?: string
   latest?: string
@@ -13,7 +15,7 @@ function record(value: unknown): Record<string, unknown> | undefined {
 
 function version(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0
-    ? value.slice(0, 64)
+    ? boundPrinterString(value, 64)
     : undefined
 }
 

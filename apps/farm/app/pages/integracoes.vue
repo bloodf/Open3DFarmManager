@@ -1,4 +1,11 @@
 <script setup lang="ts">
+import { useFarmRoute } from '../composables/useFarmRoute.ts'
+import { resolveFarmScope } from '../utils/farm-scope.ts'
+import { fetchFarmMemberships } from '../composables/useFarmMemberships.ts'
+import {
+  INTEGRATION_SCOPES,
+  type IntegrationScope,
+} from '../utils/integration-scopes.ts'
 import Button from '../components/ui/Button.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import ErrorState from '../components/ui/ErrorState.vue'
@@ -22,8 +29,22 @@ type Grant = {
   requiresApproval: boolean
 }
 type Directory = { apps: App[]; printers: Printer[] }
+const { route, setFarmScope } = useFarmRoute()
 const farms = ref<Farm[]>([])
 const farmId = ref('')
+let generation = 0
+let controller = new AbortController()
+function currentScope() {
+  const id = farmId.value,
+    mine = generation,
+    signal = controller.signal
+  return {
+    id,
+    signal,
+    current: () =>
+      id === farmId.value && mine === generation && !signal.aborted,
+  }
+}
 const apps = ref<App[]>([])
 const printers = ref<Printer[]>([])
 const grants = ref<Record<string, Grant[]>>({})
@@ -41,40 +62,57 @@ const secretPanel = ref<HTMLElement | null>(null)
 const grantDrafts = ref<
   Record<string, { scopes: string[]; printer: string; approval: boolean }>
 >({})
-const scopeOptions = [
-  ['printers:read', 'Consultar impressoras'],
-  ['files:read', 'Consultar arquivos'],
-  ['inventory:read', 'Consultar inventário'],
-  ['jobs:read', 'Consultar trabalhos'],
-  ['jobs:start', 'Iniciar trabalhos'],
-  ['control:basic', 'Controles básicos'],
-  ['control:extended', 'Controles avançados'],
-  ['events:subscribe', 'Receber eventos'],
-] as const
+const scopeLabels: Record<IntegrationScope, string> = {
+  'printers:read': 'Consultar impressoras',
+  'files:read': 'Consultar arquivos',
+  'inventory:read': 'Consultar inventário',
+  'jobs:read': 'Consultar trabalhos',
+  'jobs:start': 'Iniciar trabalhos',
+  'jobs:write': 'Repetir trabalhos',
+  'library:read': 'Consultar biblioteca',
+  'library:write': 'Gerenciar biblioteca',
+  'control:basic': 'Controles básicos',
+  'control:extended': 'Controles avançados',
+  'events:subscribe': 'Receber eventos',
+  'environment:read': 'Consultar ambiente',
+  'plates:confirm': 'Confirmar placa livre',
+  'alerts:write': 'Enviar alertas',
+  'camera:view': 'Ver câmera',
+  'inventory:write': 'Registrar e retirar carretéis',
+  'environment:control': 'Controlar ambiente',
+  'alerts:manage': 'Gerenciar regras de alerta e testar notificações',
+}
+const scopeOptions = INTEGRATION_SCOPES.map(
+  (scope) => [scope, scopeLabels[scope]] as const,
+)
 
 async function load() {
   if (!farmId.value) return
+  const request = currentScope()
   loading.value = true
   error.value = ''
   loadError.value = ''
   try {
     const directory = await $fetch<Directory>(
-      `/api/farms/${farmId.value}/integrations/apps`,
-      { retry: 0 },
+      `/api/farms/${request.id}/integrations/apps`,
+      { retry: 0, signal: request.signal },
     )
+    if (!request.current()) return
     apps.value = directory.apps
     printers.value = directory.printers
     const pages = await Promise.all(
       directory.apps.map(async (app) => {
         const result = await $fetch<{ grants: Grant[] }>(
-          `/api/farms/${farmId.value}/integrations/apps/${app.id}/grants`,
-          { retry: 0 },
+          `/api/farms/${request.id}/integrations/apps/${app.id}/grants`,
+          { retry: 0, signal: request.signal },
         )
         return [app.id, result.grants] as const
       }),
     )
+    if (!request.current()) return
     grants.value = Object.fromEntries(pages)
   } catch (cause) {
+    if (!request.current()) return
     apps.value = []
     grants.value = {}
     const code =
@@ -86,7 +124,7 @@ async function load() {
         ? 'Entre como proprietária da farm para gerenciar integrações.'
         : 'Não foi possível carregar os aplicativos. Tente novamente.'
   } finally {
-    loading.value = false
+    if (request.current()) loading.value = false
   }
 }
 
@@ -94,13 +132,11 @@ async function start() {
   loading.value = true
   loadError.value = ''
   try {
-    const page = await $fetch<{ farms: Farm[] }>('/api/farms', {
-      query: { limit: 50 },
-      retry: 0,
-    })
-    farms.value = page.farms
-    farmId.value = farms.value[0]?.farmId ?? ''
-    if (farmId.value) await load()
+    farms.value = await fetchFarmMemberships<Farm>({ timeout: 15_000 })
+    const selected =
+      resolveFarmScope(farms.value, route.query.farm)?.farmId ?? ''
+    if (selected === farmId.value && selected) await load()
+    else if (selected) farmId.value = selected
     else loading.value = false
   } catch {
     loading.value = false
@@ -108,12 +144,42 @@ async function start() {
   }
 }
 onMounted(start)
-watch(farmId, () => {
-  if (!loading.value) void load()
-})
+watch(
+  farmId,
+  (id, old) => {
+    if (id === old) return
+    generation++
+    controller.abort()
+    controller = new AbortController()
+    apps.value = []
+    printers.value = []
+    grants.value = {}
+    grantDrafts.value = {}
+    newSecret.value = ''
+    clientId.value = ''
+    credentialId.value = ''
+    error.value = ''
+    status.value = ''
+    pending.value = false
+    if (id) void load()
+    else loading.value = false
+  },
+  { flush: 'sync' },
+)
+watch(
+  () => route.query.farm,
+  (id) => {
+    farmId.value = resolveFarmScope(farms.value, id)?.farmId ?? ''
+  },
+)
+function selectFarm(event: Event) {
+  const id = (event.target as HTMLSelectElement).value
+  void setFarmScope(id)
+}
 
 async function registerApp() {
   if (pending.value || !farmId.value) return
+  const request = currentScope()
   pending.value = true
   error.value = ''
   status.value = ''
@@ -122,11 +188,13 @@ async function registerApp() {
       app: App
       credential: { id: string; clientId: string }
       secret: string
-    }>(`/api/farms/${farmId.value}/integrations/apps`, {
+    }>(`/api/farms/${request.id}/integrations/apps`, {
       method: 'POST',
       body: { name: appName.value, sandbox: false },
       retry: 0,
+      signal: request.signal,
     })
+    if (!request.current()) return
     newSecret.value = result.secret
     clientId.value = result.credential.clientId
     credentialId.value = result.credential.id
@@ -135,22 +203,24 @@ async function registerApp() {
       'Aplicativo cadastrado. Copie o segredo agora; ele não será exibido novamente.'
     await load()
   } catch {
+    if (!request.current()) return
     error.value =
       'Não foi possível cadastrar o aplicativo. Confirme se você é proprietária da farm.'
   } finally {
-    pending.value = false
+    if (request.current()) pending.value = false
   }
 }
 
 async function addGrant(app: App) {
   const draft = grantDraft(app.id)
   if (pending.value || draft.scopes.length === 0) return
+  const request = currentScope()
   pending.value = true
   error.value = ''
   status.value = ''
   try {
     await $fetch(
-      `/api/farms/${farmId.value}/integrations/apps/${app.id}/grants`,
+      `/api/farms/${request.id}/integrations/apps/${app.id}/grants`,
       {
         method: 'POST',
         body: {
@@ -159,8 +229,10 @@ async function addGrant(app: App) {
           requiresApproval: draft.approval,
         },
         retry: 0,
+        signal: request.signal,
       },
     )
+    if (!request.current()) return
     status.value = `Acesso concedido ao aplicativo ${app.name}.`
     grantDrafts.value[app.id] = {
       scopes: ['printers:read'],
@@ -169,29 +241,34 @@ async function addGrant(app: App) {
     }
     await load()
   } catch {
+    if (!request.current()) return
     error.value = 'Não foi possível conceder os escopos selecionados.'
   } finally {
-    pending.value = false
+    if (request.current()) pending.value = false
   }
 }
 
 async function removeGrant(grant: Grant) {
   if (pending.value || !window.confirm('Remover este acesso do aplicativo?'))
     return
+  const request = currentScope()
   pending.value = true
   error.value = ''
   status.value = ''
   try {
-    await $fetch(`/api/farms/${farmId.value}/integrations/grants/${grant.id}`, {
+    await $fetch(`/api/farms/${request.id}/integrations/grants/${grant.id}`, {
       method: 'DELETE',
       retry: 0,
+      signal: request.signal,
     })
+    if (!request.current()) return
     status.value = 'Acesso removido.'
     await load()
   } catch {
+    if (!request.current()) return
     error.value = 'Não foi possível remover o acesso.'
   } finally {
-    pending.value = false
+    if (request.current()) pending.value = false
   }
 }
 
@@ -204,20 +281,24 @@ async function revokeApp(app: App) {
     )
   )
     return
+  const request = currentScope()
   pending.value = true
   error.value = ''
   status.value = ''
   try {
-    await $fetch(`/api/farms/${farmId.value}/integrations/apps/${app.id}`, {
+    await $fetch(`/api/farms/${request.id}/integrations/apps/${app.id}`, {
       method: 'DELETE',
       retry: 0,
+      signal: request.signal,
     })
+    if (!request.current()) return
     status.value = `Aplicativo ${app.name} revogado.`
     await load()
   } catch {
+    if (!request.current()) return
     error.value = 'Não foi possível revogar o aplicativo.'
   } finally {
-    pending.value = false
+    if (request.current()) pending.value = false
   }
 }
 
@@ -230,28 +311,39 @@ async function revokeCredential() {
     )
   )
     return
+  const request = currentScope()
   pending.value = true
   error.value = ''
   status.value = ''
   try {
     await $fetch(
-      `/api/farms/${farmId.value}/integrations/credentials/${credentialId.value}`,
-      { method: 'DELETE', retry: 0 },
+      `/api/farms/${request.id}/integrations/credentials/${credentialId.value}`,
+      { method: 'DELETE', retry: 0, signal: request.signal },
     )
+    if (!request.current()) return
     status.value = 'Credencial revogada.'
     dismissSecret()
   } catch {
+    if (!request.current()) return
     error.value = 'Não foi possível revogar a credencial.'
   } finally {
-    pending.value = false
+    if (request.current()) pending.value = false
   }
 }
 
+onBeforeUnmount(() => {
+  generation++
+  controller.abort()
+})
+
 async function copySecret() {
+  const request = currentScope()
   try {
     await navigator.clipboard.writeText(newSecret.value)
+    if (!request.current()) return
     status.value = 'Segredo copiado.'
   } catch {
+    if (!request.current()) return
     status.value = 'Selecione e copie o segredo manualmente.'
   }
 }
@@ -345,9 +437,11 @@ function grantDraft(appId: string) {
         <label for="integration-farm">Farm</label>
         <select
           id="integration-farm"
-          v-model="farmId"
+          :value="farmId"
           :disabled="loading || pending || farms.length === 0"
+          @change="selectFarm"
         >
+          <option value="" disabled>Selecione</option>
           <option v-for="farm in farms" :key="farm.farmId" :value="farm.farmId">
             {{ farm.farmId }}
           </option>

@@ -85,7 +85,9 @@ export async function qualifyPrinter(
     summary = `Telemetry observed with ${telemetry.fields.length} field(s), but camera and files could not be verified.`
   } else {
     status = 'unreachable'
-    summary = 'No telemetry or status response received from printer.'
+    summary =
+      telemetry.reason ??
+      'No telemetry or status response received from printer.'
   }
 
   return {
@@ -116,7 +118,7 @@ function defaultPortForVendor(vendor: string): number {
     case 'creality':
       return 9999
     case 'anycubic':
-      return 8883
+      return 9883
     case 'kobralink':
       return 18910
     case 'kobra-x':

@@ -13,7 +13,7 @@ import { probeKobraXLan } from '../../packages/connector/src/provisioning/kobra-
 import { runConfigurationConnector } from '../../packages/connector/src/runtime/configuration-command.ts'
 
 type Probes = Readonly<{
-  creality?: number
+  creality?: number | Readonly<{ https: number; http: number; caFile: string }>
   anycubic?: number
   bambuPort?: number
   kobraX?: Readonly<{ httpPort: number; mqttPort: number }>
@@ -55,7 +55,12 @@ async function main() {
         Promise.all([
           probes.creality === undefined
             ? undefined
-            : probeCreality('127.0.0.1', { https: 1, http: probes.creality }),
+            : probeCreality(
+                '127.0.0.1',
+                typeof probes.creality === 'number'
+                  ? { https: 1, http: probes.creality }
+                  : probes.creality,
+              ),
           probes.anycubic === undefined
             ? undefined
             : probeAnycubic('127.0.0.1', probes.anycubic),

@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page, type Route } from '@playwright/test'
+import { setPolishTheme } from '../helpers/polish-theme.ts'
+import { mockShellApi } from '../helpers/shell-api.ts'
 
 // Isolated UI checks of /integracoes, /bambu-cloud and /connectors on mocked
 // /api routes. No real printer, database, auth service, Bambu Cloud or
@@ -191,6 +193,8 @@ async function mockApi(page: Page, screen: Screen, state: State) {
     (route) => route.abort(),
   )
   await page.route('**/api/**', (route) => reply(route, 404))
+  await mockShellApi(page, farm)
+  await mockShellApi(page, otherFarm)
   await page.route('**/api/auth/me', (route) =>
     reply(route, 200, { accountId: 'conta-sintetica' }),
   )
@@ -364,7 +368,7 @@ async function open(
 ) {
   await page.setViewportSize(viewport)
   page.setDefaultTimeout(capturing ? 3000 : 10_000)
-  await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+  await setPolishTheme(page, theme)
   await mockApi(page, screen, state)
   await page.goto(screens[screen].path)
   await page
@@ -885,15 +889,16 @@ test('connectors: the heading takes focus and keyboard order is heading, account
   await expect(
     page.getByRole('heading', { name: 'Connectors da farm' }),
   ).toBeFocused()
+  const farmSelect = page.getByLabel('Selecione uma farm', { exact: true })
+  await expect(farmSelect).toBeVisible()
+  await expect(farmSelect).toBeEnabled()
   const account = page.getByRole('navigation', { name: 'Conta' })
   for (const name of ['Início', 'Aprovar Connector', 'Sair da conta']) {
     await page.keyboard.press('Tab')
     await expect(account.getByRole('link', { name })).toBeFocused()
   }
   await page.keyboard.press('Tab')
-  await expect(
-    page.getByLabel('Selecione uma farm', { exact: true }),
-  ).toBeFocused()
+  await expect(farmSelect).toBeFocused()
 })
 
 test('connectors: revocation needs the checkbox, sends the fingerprint and can be cancelled', async ({

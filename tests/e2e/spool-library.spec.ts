@@ -695,16 +695,19 @@ test('operator browses, searches, filters, sorts, creates, edits, archives, uses
   await page.goto('/bobinas')
   await waitHydrated(page)
 
-  // Main navigation exposes both /bobinas and /spoolman
-  const mainNav = page
-    .getByRole('complementary')
-    .getByRole('navigation', { name: 'Navegação principal' })
+  const inventory = page.getByRole('navigation', {
+    name: 'Navegação principal',
+  })
   await expect(
-    mainNav.getByRole('link', { name: 'Bobinas', exact: true }),
-  ).toHaveAttribute('href', '/bobinas')
+    inventory.getByRole('link', { name: 'Estoque', exact: true }),
+  ).toHaveAttribute('href', `/bobinas?farm=${FARM_ID}`)
+  const section = page.getByRole('navigation', { name: 'Navegação da seção' })
   await expect(
-    mainNav.getByRole('link', { name: 'Spoolman', exact: true }),
-  ).toHaveAttribute('href', '/spoolman')
+    section.getByRole('link', { name: 'Bobinas', exact: true }),
+  ).toHaveAttribute('href', `/bobinas?farm=${FARM_ID}`)
+  await expect(
+    section.getByRole('link', { name: 'Spoolman', exact: true }),
+  ).toHaveAttribute('href', `/spoolman?farm=${FARM_ID}`)
 
   // Initial list hides archived spool #3
   await expect(page.getByText('2 bobina(s) encontrada(s).')).toBeVisible()
@@ -950,27 +953,25 @@ test('owner runs Spoolman API, JSON (with 422 feedback) and CSV import with prog
   ])
 })
 
-test('all /bobinas routes are axe-clean and have no horizontal overflow at phone and desktop widths in light and dark themes', async ({
-  page,
-}) => {
-  await installMockLibrary(page, { role: 'owner' })
-  const paths = [
-    '/bobinas',
-    '/bobinas/filamentos',
-    '/bobinas/fornecedores',
-    '/bobinas/importar',
-  ]
-
-  for (const width of [360, 1280]) {
-    for (const theme of ['light', 'dark'] as const) {
-      await page.setViewportSize({ width, height: 900 })
+for (const path of [
+  '/bobinas',
+  '/bobinas/filamentos',
+  '/bobinas/fornecedores',
+  '/bobinas/importar',
+]) {
+  for (const theme of ['light', 'dark'] as const) {
+    test(`${path} is axe-clean and has no horizontal overflow at phone and desktop widths in ${theme} theme`, async ({
+      page,
+    }) => {
+      await installMockLibrary(page, { role: 'owner' })
       await page.emulateMedia({ colorScheme: theme })
-      await page.goto('/bobinas')
-      await page.evaluate(
+      await page.addInitScript(
         (value) => localStorage.setItem('farm-theme', value),
         theme,
       )
-      for (const path of paths) {
+
+      for (const width of [360, 1280]) {
+        await page.setViewportSize({ width, height: 900 })
         await page.goto(path)
         await waitHydrated(page)
         await expect(page.locator('main')).toBeVisible()
@@ -981,6 +982,6 @@ test('all /bobinas routes are axe-clean and have no horizontal overflow at phone
         )
         expect(fits, `${path} horizontal overflow at ${width}px`).toBe(true)
       }
-    }
+    })
   }
-})
+}

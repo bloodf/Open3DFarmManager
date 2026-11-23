@@ -43,7 +43,7 @@ export async function recordJobs(
 ): Promise<void> {
   for (const job of jobs)
     await tx`INSERT INTO farm.job_history (farm_id, agent_id, printer_key, outcome, filename, print_duration_seconds, total_duration_seconds, filament_usage, library_sha256, plate, ended_at)
-      VALUES (${scope.farmId}::uuid, ${scope.agentId}::uuid, ${job.printerKey}, ${job.outcome}, ${job.filename ?? null}, ${job.printDurationSeconds ?? null}, ${job.totalDurationSeconds ?? null}, ${job.filamentUsage ? JSON.stringify(job.filamentUsage) : null}::jsonb, ${job.librarySha256 ?? null}, ${job.plate ?? null}, ${job.endedAt})
+      VALUES (${scope.farmId}::uuid, ${scope.agentId}::uuid, ${job.printerKey}, ${job.outcome}, ${job.filename ?? null}, ${job.printDurationSeconds ?? null}, ${job.totalDurationSeconds ?? null}, ${job.filamentUsage ? tx.json(job.filamentUsage) : null}::jsonb, ${job.librarySha256 ?? null}, ${job.plate ?? null}, ${job.endedAt})
       ON CONFLICT DO NOTHING`
 }
 

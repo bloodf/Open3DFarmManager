@@ -91,7 +91,7 @@ function envelope(action: ActionRecord): EnvelopeRecord {
 }
 
 function fixture(
-  controls: readonly string[] = [
+  controls: readonly string[] | null = [
     'pause',
     'resume',
     'cancel',
@@ -198,6 +198,31 @@ test('unsupported advertised controls do not create a resource or issue an envel
   assert.deepEqual(result, { ok: false, problem: 'unsupported' })
   assert.equal(f.saved.length, 0)
   assert.equal(f.issued.length, 0)
+})
+
+test('unknown capabilities defer basic actions to the Connector but reject extended actions', async () => {
+  const basic = fixture(null)
+  assert.equal(
+    (
+      await basic.service.submit(
+        principal(['control:basic']),
+        printerId,
+        'cancel',
+        { action: 'cancel', args: {} },
+      )
+    ).ok,
+    true,
+  )
+  const extended = fixture(null)
+  assert.deepEqual(
+    await extended.service.submit(
+      principal(['control:extended']),
+      printerId,
+      'home',
+      { action: 'home', args: { axes: ['x'] } },
+    ),
+    { ok: false, problem: 'unsupported' },
+  )
 })
 
 test('scope is checked per action and supported basic actions use a signed envelope', async () => {

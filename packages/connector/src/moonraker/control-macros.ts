@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { isWellFormedJsonString } from '../../../farm-protocol/src/string-bounds.ts'
 import {
   MACRO_PARAM_MAX_KEYS,
   MacroName,
@@ -39,7 +40,9 @@ export function parseMacroParams(gcode: string): MacroParamSpec[] {
     const literal = match[4] === undefined ? undefined : LITERAL.exec(match[4])
     const value = literal?.[1] ?? literal?.[2] ?? literal?.[3]
     const usable =
-      value !== undefined && MacroParamValue.safeParse(value).success
+      value !== undefined &&
+      MacroParamValue.safeParse(value).success &&
+      isWellFormedJsonString(value)
         ? value
         : undefined
     if (!found.has(name) || (found.get(name) === undefined && usable))

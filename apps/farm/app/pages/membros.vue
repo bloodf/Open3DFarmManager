@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useFarmSelection } from '../composables/useFarmRoute.ts'
+import { fetchFarmMemberships } from '../composables/useFarmMemberships.ts'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import Button from '../components/ui/Button.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -23,7 +25,7 @@ import {
 type Farm = { farmId: string }
 
 const farms = ref<Farm[]>([])
-const farmId = ref('')
+const farmId = useFarmSelection(farms)
 const members = ref<FarmMember[]>([])
 const invites = ref<FarmInvite[]>([])
 const loading = ref(true)
@@ -37,6 +39,8 @@ const confirmTarget = ref<ConfirmTarget | null>(null)
 const confirmChecked = ref(false)
 const confirmStatus = ref('')
 const farmSelect = ref<HTMLSelectElement | null>(null)
+let loadingMemberships = true
+let scopeGeneration = 0
 
 const visibleInvites = computed(() => pendingInvites(invites.value))
 // A failed action keeps the confirmation open, so its message belongs there;
@@ -48,7 +52,7 @@ const pageError = computed(() =>
   confirmTarget.value && !loadFailed.value ? '' : errorMessage.value,
 )
 
-async function loadDirectory(selected: string) {
+async function loadDirectory(selected: string, generation = scopeGeneration) {
   const [memberPage, invitePage] = await Promise.all([
     $fetch<{ members: FarmMember[] }>(`/api/farms/${selected}/members`, {
       retry: 0,
@@ -59,14 +63,18 @@ async function loadDirectory(selected: string) {
       timeout: 15_000,
     }),
   ])
+  if (generation !== scopeGeneration) return
   members.value = memberPage.members
   invites.value = invitePage.invites
 }
 
 async function refresh() {
-  if (!farmId.value) {
+  const selected = farmId.value
+  const generation = scopeGeneration
+  if (!selected) {
     members.value = []
     invites.value = []
+    loading.value = false
     return
   }
   loading.value = true
@@ -75,9 +83,10 @@ async function refresh() {
   stale.value = false
   statusMessage.value = pendingStatus('load')
   try {
-    await loadDirectory(farmId.value)
-    statusMessage.value = ''
+    await loadDirectory(selected, generation)
+    if (generation === scopeGeneration) statusMessage.value = ''
   } catch (error: unknown) {
+    if (generation !== scopeGeneration) return
     members.value = []
     invites.value = []
     loadFailed.value = true
@@ -92,25 +101,22 @@ async function refresh() {
     await nextTick()
     errorSummary.value?.focus()
   } finally {
-    loading.value = false
+    if (generation === scopeGeneration) loading.value = false
   }
 }
 
 async function start() {
+  loadingMemberships = true
   loading.value = true
   errorMessage.value = ''
   loadFailed.value = false
   try {
-    const page = await $fetch<{ farms: Farm[] }>('/api/farms', {
-      query: { limit: 50 },
-      retry: 0,
-      timeout: 15_000,
-    })
-    farms.value = page.farms
-    farmId.value = page.farms[0]?.farmId ?? ''
+    farms.value = await fetchFarmMemberships<Farm>({ timeout: 15_000 })
+    loadingMemberships = false
     if (farmId.value) await refresh()
     else loading.value = false
   } catch (error: unknown) {
+    loadingMemberships = false
     loading.value = false
     loadFailed.value = true
     const status =
@@ -128,16 +134,26 @@ onMounted(async () => {
   await start()
 })
 
-watch(farmId, async () => {
-  if (loading.value) return
-  // The field is disabled while the lists load, which drops keyboard focus.
-  const hadFocus = document.activeElement === farmSelect.value
-  await refresh()
-  if (hadFocus && !loadFailed.value) {
-    await nextTick()
-    farmSelect.value?.focus()
-  }
-})
+watch(
+  farmId,
+  async () => {
+    const generation = ++scopeGeneration
+    confirmTarget.value = null
+    confirmChecked.value = false
+    confirmStatus.value = ''
+    members.value = []
+    invites.value = []
+    if (loadingMemberships) return
+    // The field is disabled while the lists load, which drops keyboard focus.
+    const hadFocus = document.activeElement === farmSelect.value
+    await refresh()
+    if (hadFocus && generation === scopeGeneration && !loadFailed.value) {
+      await nextTick()
+      farmSelect.value?.focus()
+    }
+  },
+  { flush: 'sync' },
+)
 
 function openConfirm(target: ConfirmTarget) {
   if (pending.value) return
@@ -156,7 +172,9 @@ function closeConfirm() {
 
 async function runConfirmed() {
   const target = confirmTarget.value
-  if (!target || !confirmChecked.value || pending.value || !farmId.value) return
+  const selected = farmId.value
+  if (!target || !confirmChecked.value || pending.value || !selected) return
+  const generation = scopeGeneration
   pending.value = true
   errorMessage.value = ''
   statusMessage.value = pendingStatus(target.kind)
@@ -202,18 +220,20 @@ async function runConfirmed() {
         throw new Error(String(_exhaustive))
       }
     }
+    if (generation !== scopeGeneration) return
     statusMessage.value = successMessage(target.kind)
     confirmTarget.value = null
     confirmChecked.value = false
     confirmStatus.value = ''
     try {
-      await loadDirectory(farmId.value)
-      stale.value = false
+      await loadDirectory(selected, generation)
+      if (generation === scopeGeneration) stale.value = false
     } catch {
-      stale.value = true
+      if (generation === scopeGeneration) stale.value = true
     }
-    restoreFocus = true
+    restoreFocus = generation === scopeGeneration
   } catch (error: unknown) {
+    if (generation !== scopeGeneration) return
     const status =
       error && typeof error === 'object' && 'statusCode' in error
         ? error.statusCode
@@ -308,6 +328,7 @@ function onRevoke(invite: FarmInvite) {
           v-model="farmId"
           :disabled="pending || loading || farms.length === 0"
         >
+          <option disabled value="">Selecione uma farm</option>
           <option
             v-for="(farm, index) in farms"
             :key="farm.farmId"
@@ -321,7 +342,7 @@ function onRevoke(invite: FarmInvite) {
         <p role="status">{{ pendingStatus('load') }}</p>
         <Skeleton /><Skeleton /><Skeleton />
       </div>
-      <template v-else-if="!loadFailed">
+      <template v-else-if="farmId && !loadFailed">
         <MembersList
           :members="members"
           :pending="pending"

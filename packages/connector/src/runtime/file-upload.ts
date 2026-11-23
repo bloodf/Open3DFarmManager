@@ -16,11 +16,16 @@ import type {
   createKobraLinkClient,
   PrinterBinding,
 } from '../kobralink/client.ts'
+import {
+  supportsAnycubicUpload,
+  uploadAnycubicFile,
+} from '../anycubic/files.ts'
+import type { PrinterBinding as LocalPrinterBinding } from '../control/printer-binding.ts'
 import { uploadBambuFile } from '../bambu/ftps.ts'
 
 export type FileUploadTarget =
   | { backend: 'creality'; origin: string }
-  | { backend: 'anycubic' }
+  | { backend: 'anycubic'; binding?: LocalPrinterBinding }
   | {
       backend: 'kobralink'
       client(
@@ -43,6 +48,7 @@ export type FileUploadResult =
       transfer_id: string
       ok: true
       library?: true | undefined
+      printUnsupported?: true | undefined
     }
   | {
       type: 'result'
@@ -55,16 +61,19 @@ export type FileUploadResult =
         | 'timeout'
         | 'aborted'
         | 'offline'
+        | 'busy'
         | 'invalid-transfer'
     }
 export function supportsFileUpload(
   target: FileUploadTarget,
   name: string,
+  standalone = false,
 ): boolean {
+  if (target.backend === 'anycubic')
+    return standalone && !!target.binding && supportsAnycubicUpload(name)
   return (
-    target.backend !== 'anycubic' &&
-    (!(target.backend === 'creality' || target.backend === 'kobralink') ||
-      /\.gcode$/i.test(name))
+    !(target.backend === 'creality' || target.backend === 'kobralink') ||
+    /\.gcode$/i.test(name)
   )
 }
 
@@ -74,9 +83,11 @@ export async function uploadFile(input: {
   name: string
   signal: AbortSignal
   authorize(): boolean
+  standalone?: boolean
 }): Promise<void> {
   const { target, filePath, name, signal } = input
-  if (!supportsFileUpload(target, name)) throw Error('unsupported')
+  if (!supportsFileUpload(target, name, input.standalone))
+    throw Error('unsupported')
   if (!input.authorize()) throw Error('unauthorized')
   const common = { filePath, name, signal }
   if (target.backend === 'moonraker')
@@ -85,6 +96,12 @@ export async function uploadFile(input: {
     await uploadBambuFile({ ...target, ...common })
   else if (target.backend === 'creality')
     await uploadCrealityFile({ ...target, ...common })
+  else if (target.backend === 'anycubic' && target.binding)
+    await uploadAnycubicFile({
+      ...common,
+      binding: target.binding,
+      authorized: input.authorize,
+    })
   else if (target.backend === 'kobralink') {
     signal.throwIfAborted()
     const client = await target.client(signal)
@@ -150,6 +167,7 @@ export function createFileUpload(
   async function process(raw: unknown) {
     let forwarding = false
     let library = false
+    let printUnsupported = false
     try {
       if (!offer) {
         if (used || typeof raw !== 'string' || raw.length > 2048)
@@ -173,7 +191,7 @@ export function createFileUpload(
         if (
           offer.config
             ? target.backend !== 'moonraker'
-            : !supportsFileUpload(target, offer.name)
+            : !supportsFileUpload(target, offer.name, true)
         )
           throw Error('unsupported')
         transfer = await receiver.offer(offer)
@@ -218,12 +236,14 @@ export function createFileUpload(
         }
         forwarding = true
         library = target.backend === 'kobralink'
+        printUnsupported = target.backend === 'anycubic'
         await uploadFile({
           target,
           filePath,
           name: staged.offer.name,
           signal: controller.signal,
           authorize: () => !closed && authorized(),
+          standalone: true,
         })
       })
       send({
@@ -231,6 +251,7 @@ export function createFileUpload(
         transfer_id: offer.transfer_id,
         ok: true,
         ...(library ? { library: true as const } : {}),
+        ...(printUnsupported ? { printUnsupported: true as const } : {}),
       } satisfies FileUploadResult)
     } catch (error) {
       await transfer?.abort()
@@ -240,9 +261,13 @@ export function createFileUpload(
         : error instanceof MoonrakerUploadError
           ? error.reason
           : error instanceof Error &&
-              ['unauthorized', 'offline', 'aborted', 'unsupported'].includes(
-                error.message,
-              )
+              [
+                'unauthorized',
+                'offline',
+                'aborted',
+                'unsupported',
+                'busy',
+              ].includes(error.message)
             ? error.message
             : forwarding
               ? 'offline'

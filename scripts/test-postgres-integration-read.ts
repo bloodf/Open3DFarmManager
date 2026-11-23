@@ -3,7 +3,13 @@ import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { promisify } from 'node:util'
-import postgres from 'postgres'
+import postgres, { type Sql } from 'postgres'
+import {
+  listIntegrationSpoolUsage,
+  searchIntegrationSpools,
+} from '../apps/farm/server/utils/integration-inventory-ledger.ts'
+import { postgresResinReader } from '../apps/farm/server/utils/integration-resin-postgres.ts'
+import { recordJobs } from '../apps/farm/server/storage/job-history-store.ts'
 import {
   POSTGRES_IMAGE_PATTERN,
   disposablePostgres,
@@ -116,6 +122,78 @@ try {
         connect_timeout: 3,
       })
   const checks = await testPostgresIntegrationRead(sql)
+  const resinFarm = randomUUID()
+  const resinAgent = randomUUID()
+  const resinPrinter = randomUUID()
+  const owner = `resin_${randomUUID().replaceAll('-', '')}`
+  await sql`INSERT INTO farm.session_accounts (id) VALUES (${owner})`
+  await sql`INSERT INTO farm.farms (id, sandbox) VALUES (${resinFarm}::uuid, true)`
+  await sql`INSERT INTO farm.connector_enrollments (agent_id, farm_id, public_key_spki, fingerprint) VALUES (${resinAgent}::uuid, ${resinFarm}::uuid, ${'k'.repeat(59)}, ${randomUUID().padEnd(50, 'f')})`
+  await sql`UPDATE farm.connector_enrollments SET status = 'approved' WHERE agent_id = ${resinAgent}::uuid`
+  await sql`INSERT INTO farm.printer_assignments (id, farm_id, agent_id, printer_key, created_at, created_by) VALUES (${resinPrinter}::uuid, ${resinFarm}::uuid, ${resinAgent}::uuid, 'resin', 1, ${owner})`
+  await sql`INSERT INTO farm.resin_ledger_entries (farm_id, id, printer_id, kind, name, source, recorded_at) VALUES (${resinFarm}::uuid, ${randomUUID()}::uuid, ${resinPrinter}::uuid, 'vat', 'fixture', 'reported', 123)`
+  await sql.begin(async (tx) => {
+    await tx`SET LOCAL ROLE farm_integration_apps`
+    const ledgers = await postgresResinReader(tx as unknown as Sql).readLedgers(
+      { farmWideFarmIds: [resinFarm], assignmentIds: [], limit: 10 },
+    )
+    assert.equal(ledgers.length, 1)
+    assert.equal(ledgers[0]?.records.length, 1)
+    const privilege =
+      await tx`SELECT has_column_privilege(current_user, 'farm.resin_ledger_entries', 'recorded_by', 'SELECT') AS allowed`
+    assert.equal(privilege[0]?.allowed, false)
+  })
+  checks.push(
+    'integration role reads resin ledger without access to recorded_by',
+  )
+  await sql.begin(async (tx) => {
+    await tx`SET LOCAL ROLE farm_integration_apps`
+    const pool = tx as unknown as Sql
+    const search = await searchIntegrationSpools(pool, [resinFarm], {
+      farmId: resinFarm,
+      limit: 10,
+      color: null,
+      material: null,
+      availability: 'any',
+      minRemainingGrams: null,
+    })
+    assert.equal(search.data.length, 0)
+    const usage = await listIntegrationSpoolUsage(pool, [resinFarm], {
+      farmId: resinFarm,
+      limit: 10,
+      jobId: '1',
+      cursor: null,
+    })
+    assert.equal(usage.data.length, 0)
+    const privileges = await tx`SELECT
+      has_column_privilege(current_user, 'farm.spool_usage_records', 'grams', 'UPDATE') AS can_update,
+      has_column_privilege(current_user, 'farm.spool_usage_records', 'corrected_by', 'SELECT') AS can_read_correction`
+    assert.equal(privileges[0]?.can_update, false)
+    assert.equal(privileges[0]?.can_read_correction, true)
+  })
+  checks.push(
+    'integration role can read spool search and usage without write access',
+  )
+  const farmId = randomUUID()
+  const agentId = randomUUID()
+  const usage = [{ tool: 'extruder', grams: 12.5 }]
+  await sql`INSERT INTO farm.farms (id, sandbox) VALUES (${farmId}::uuid, true)`
+  await sql.begin(async (tx) => {
+    await recordJobs(tx, { farmId, agentId }, [
+      {
+        printerKey: 'synthetic',
+        outcome: 'completed',
+        endedAt: 123,
+        filamentUsage: usage,
+      },
+    ])
+  })
+  const rows =
+    await sql`SELECT filament_usage, jsonb_typeof(filament_usage) AS kind FROM farm.job_history WHERE farm_id=${farmId}::uuid`
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0]?.kind, 'array')
+  assert.deepEqual(rows[0]?.filament_usage, usage)
+  checks.push('job history stores filament usage as a JSON array')
   console.log(JSON.stringify({ result: 'passed', checks }))
 } finally {
   if (owned) await owned.stop()

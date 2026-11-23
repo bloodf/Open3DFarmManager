@@ -1,6 +1,15 @@
 <script setup lang="ts">
 definePageMeta({ layout: false })
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import {
+  computed,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  shallowRef,
+  watch,
+} from 'vue'
+import { resolveFarmScope } from '../utils/farm-scope.ts'
+import { fetchFarmMemberships } from '../composables/useFarmMemberships.ts'
 import PrinterKiosk from '../components/farm/PrinterKiosk.vue'
 import type { LastKnownState } from '../composables/useLastKnownStates-core.ts'
 import {
@@ -31,6 +40,7 @@ const fetchedAt = ref<number | null>(null)
 const failed = ref(false)
 const problem = ref('')
 const noFarm = ref(false)
+const hasMemberships = ref(false)
 const now = ref(0)
 const page = ref(0)
 const size = ref({ width: 1920, height: 1080 })
@@ -55,20 +65,13 @@ async function poll() {
   const run = (controller = new AbortController())
   try {
     if (!farmId) {
-      const body = await $fetch<{ farms?: { farmId: string }[] }>(
-        '/api/farms',
-        {
-          signal: run.signal,
-          retry: 0,
-          timeout: 10_000,
-          cache: 'no-store',
-        },
-      )
-      const farms = body.farms ?? []
-      const wanted =
-        typeof route.query.farm === 'string' ? route.query.farm : ''
-      farmId =
-        (farms.find((f) => f.farmId === wanted) ?? farms[0])?.farmId ?? ''
+      const farms = await fetchFarmMemberships({
+        signal: run.signal,
+        cache: 'no-store',
+      })
+      if (run.signal.aborted) return
+      hasMemberships.value = farms.length > 0
+      farmId = resolveFarmScope(farms, route.query.farm)?.farmId ?? ''
       if (!farmId) {
         noFarm.value = true
         return
@@ -145,6 +148,19 @@ onMounted(() => {
   window.addEventListener('resize', measure)
   document.addEventListener('visibilitychange', onVisible)
 })
+watch(
+  () => route.query.farm,
+  () => {
+    farmId = ''
+    noFarm.value = false
+    failed.value = false
+    problem.value = ''
+    states.value = []
+    fetchedAt.value = null
+    page.value = 0
+    void poll()
+  },
+)
 onBeforeUnmount(() => {
   controller?.abort()
   timers.forEach(clearInterval)
@@ -169,6 +185,7 @@ onBeforeUnmount(() => {
       :fetched-at="fetchedAt"
       :failed="failed"
       :no-farm="noFarm"
+      :requires-farm-selection="hasMemberships"
       :problem="problem"
       :page="page"
       :per-page="perPage"
@@ -177,7 +194,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style>
-/* The wall is a fixed dark display, not themed; PrinterKiosk keeps its own layout rules. */
+/* Keep the full-screen wall layout while following the saved app theme. */
 .kiosk-root {
   position: fixed;
   inset: 0;
@@ -186,9 +203,8 @@ onBeforeUnmount(() => {
   padding: 0;
   display: flex;
   flex-direction: column;
-  background: #0b0d10;
-  color: #f2f4f7;
-  color-scheme: dark;
+  background: var(--color-surface);
+  color: var(--color-text);
 }
 .kiosk-root > .kiosk {
   flex: 1;
@@ -198,8 +214,21 @@ onBeforeUnmount(() => {
   margin: 0;
   max-width: none;
   padding: 0.5rem 1rem;
-  border-block-end: 2px solid #ff8a8a;
-  background: #5c1a1a;
+  border-block-end: 2px solid var(--state-error-color);
+  background: var(--color-surface-raised);
+  color: var(--state-error-color);
   font-weight: 700;
+}
+.kiosk-root .kiosk__warn,
+.kiosk-root .kiosk__warn strong {
+  color: var(--state-paused-color);
+}
+.kiosk-root .kiosk__head .kiosk__warn.stale {
+  background: transparent;
+  border-color: var(--state-paused-color);
+}
+.kiosk-root .kiosk__card,
+.kiosk-root .ui-card {
+  background: var(--color-surface-raised);
 }
 </style>

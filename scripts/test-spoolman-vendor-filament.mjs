@@ -225,12 +225,13 @@ try {
   check('migration-0087-down-up-round-trip')
   const role = 'spool_library_' + randomUUID().replaceAll('-', '')
   await admin`CREATE ROLE ${admin(role)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS IN ROLE farm_spool_library`
+  await admin.unsafe(`ALTER ROLE "${role}" PASSWORD '${fixture.password}'`)
   runtime = postgres({
     host: '127.0.0.1',
     port: fixture.port,
     database: 'fixture',
     username: role,
-    password: '',
+    password: fixture.password,
     ssl: false,
     max: 4,
     connect_timeout: 3,
@@ -528,7 +529,7 @@ try {
   const unclaimed = await call(writeA, 'GET', '/api/v1/unclaimed-endpoint')
   assert.deepEqual(
     [unclaimed.status, unclaimed.body],
-    [404, { message: 'Not Found' }],
+    [404, { detail: 'Not Found' }],
   )
   check('module-interface-extends-dispatcher')
 

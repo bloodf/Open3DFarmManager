@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
+import { setPolishTheme } from '../helpers/polish-theme.ts'
+import { mockShellApi } from '../helpers/shell-api.ts'
 
 // Isolated UI checks for the onboarding screens: /primeiro-acesso, /criar-conta,
 // /parear and /dispositivos. Every /api call is answered by page.route; nothing
@@ -180,6 +182,8 @@ async function mockApi(
         return json({}, 404)
     }
   })
+  await mockShellApi(page, farm)
+  await mockShellApi(page, otherFarm)
   return mock
 }
 
@@ -490,7 +494,7 @@ async function open(
   theme: Theme,
 ) {
   await page.setViewportSize(viewport)
-  await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+  await setPolishTheme(page, theme)
   const mock = await mockApi(page, scenario.options, scenario.role)
   await page.goto(scenario.path)
   await page

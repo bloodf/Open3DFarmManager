@@ -1,14 +1,10 @@
 <script setup lang="ts">
+import type { ReplaySend } from '../../utils/replay-live.ts'
 import { computed, ref } from 'vue'
 import Button from '../ui/Button.vue'
 import ReplayDialog from '../library/ReplayDialog.vue'
-import type { LibraryPrintArgs } from '../../../../../packages/farm-protocol/src/control-actions.ts'
 import type { JobHistoryItem } from '../../utils/job-history-view.ts'
-import type {
-  ReplayPrinter,
-  ReplayResult,
-  ReplaySource,
-} from '../../utils/replay-view.ts'
+import type { ReplayPrinter, ReplaySource } from '../../utils/replay-view.ts'
 
 const props = defineProps<{
   job: JobHistoryItem
@@ -17,7 +13,7 @@ const props = defineProps<{
   /** Looks the version up when the row is opened; used when `source` is not given. */
   loadSource?: () => Promise<ReplaySource>
   printers: readonly ReplayPrinter[]
-  send: (printerKey: string, args: LibraryPrintArgs) => Promise<ReplayResult>
+  send: ReplaySend
 }>()
 const open = ref(false)
 const loaded = ref<ReplaySource>()

@@ -46,24 +46,31 @@ for (const form of [
       if (request.method() !== 'GET') posts.push(request.url())
     })
     const release = await holdScripts(page)
-    await page.goto(form.path, { waitUntil: 'domcontentloaded' })
-    for (const [label, value] of Object.entries(form.fields))
-      await page.getByLabel(label, { exact: true }).fill(value)
-    const submit = form.button
-      ? page.getByRole('button', { name: form.button, exact: true })
-      : page.locator('form button[type="submit"]')
-    await expect(submit).toBeDisabled()
-    await expect(
-      page.getByRole('status').filter({ hasText: 'Preparando o formulário' }),
-    ).toBeVisible()
-    // Implicit submission (Enter) must not submit either.
-    await page.getByLabel('Usuário', { exact: true }).press('Enter')
-    await page.waitForTimeout(500)
-    expect(new URL(page.url()).pathname).toBe(form.path)
-    expect(page.url()).not.toContain('synthetic')
-    expect(posts).toEqual([])
-    release()
+    try {
+      await page.goto(form.path, { waitUntil: 'commit' })
+      const submit = form.button
+        ? page.getByRole('button', { name: form.button, exact: true })
+        : page.locator('form button[type="submit"]')
+      await expect(submit).toBeVisible()
+      for (const [label, value] of Object.entries(form.fields))
+        await page.getByLabel(label, { exact: true }).fill(value)
+      await expect(submit).toBeDisabled()
+      await expect(
+        page.getByRole('status').filter({ hasText: 'Preparando o formulário' }),
+      ).toBeVisible()
+      await page.getByLabel('Usuário', { exact: true }).press('Enter')
+      await page.waitForTimeout(500)
+      expect(new URL(page.url()).pathname).toBe(form.path)
+      expect(page.url()).not.toContain('synthetic')
+      expect(posts).toEqual([])
+    } finally {
+      release()
+    }
     await hydrated(page)
-    await expect(submit).toBeEnabled()
+    await expect(
+      form.button
+        ? page.getByRole('button', { name: form.button, exact: true })
+        : page.locator('form button[type="submit"]'),
+    ).toBeEnabled()
   })
 }

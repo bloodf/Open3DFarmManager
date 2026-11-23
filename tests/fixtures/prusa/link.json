@@ -1,0 +1,16 @@
+{
+  "version": { "api": "1.0.0", "firmware": "6.4.0", "printer": "1.4.0" },
+  "info": { "serial": "SIM-PRUSA" },
+  "status": {
+    "printer": {
+      "state": "PRINTING",
+      "temp_nozzle": 214.9,
+      "target_nozzle": 215,
+      "temp_bed": 59.5,
+      "target_bed": 60,
+      "fan_hotend": 420,
+      "fan_print": 0
+    },
+    "job": { "id": 42, "progress": 12 }
+  }
+}

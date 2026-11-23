@@ -106,6 +106,7 @@ export class PostgresPrinterStateReader {
           states.push({
             ...assignment,
             state: stored.state,
+            ...(stored.alarms !== undefined && { alarms: stored.alarms }),
             progress: stored.progress,
             toolTemperatureCelsius: stored.toolTemperatureCelsius,
             bedTemperatureCelsius: stored.bedTemperatureCelsius,

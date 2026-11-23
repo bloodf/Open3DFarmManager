@@ -1,3 +1,4 @@
+import { resinArtifactFormats } from '../../../../packages/shared/src/print-file/resin-artifacts.ts'
 import { useRuntimeConfig } from 'nuxt/server'
 import type { IntegrationPrincipal } from './integration-auth.ts'
 import { uuidPattern } from './integration-auth.ts'
@@ -95,7 +96,7 @@ export async function listIntegrationLibrary(
     const { service } = await runtimeService()
     const result = await service.list(principal, farmId, cursor, Number(limit))
     if (!result.ok) return problem(result.problem, headers)
-    return result.value
+    return { ...result.value, resinArtifactFormats }
   } catch {
     return integrationProblem('service-unavailable', headers)
   }
@@ -220,11 +221,13 @@ export async function uploadIntegrationLibrary(
   const record = body as Record<string, unknown>
   if (
     Object.keys(record).some(
-      (key) => !['farmId', 'name', 'contentBase64'].includes(key),
+      (key) =>
+        !['farmId', 'name', 'contentBase64', 'resinProfile'].includes(key),
     ) ||
     typeof record.farmId !== 'string' ||
     typeof record.name !== 'string' ||
-    typeof record.contentBase64 !== 'string'
+    typeof record.contentBase64 !== 'string' ||
+    ('resinProfile' in record && typeof record.resinProfile !== 'string')
   )
     return integrationProblem('invalid-request', headers)
   const bytes = decodeBase64(record.contentBase64)
@@ -233,10 +236,32 @@ export async function uploadIntegrationLibrary(
     const { service } = await runtimeService()
     const result = await service.upload(
       principal,
-      { farmId: record.farmId.toLowerCase(), name: record.name, bytes },
+      {
+        farmId: record.farmId.toLowerCase(),
+        name: record.name,
+        bytes,
+        ...(typeof record.resinProfile === 'string'
+          ? { resinProfile: record.resinProfile }
+          : {}),
+      },
       maxBytes,
     )
-    if (!result.ok) return problem(result.problem, headers)
+    if (!result.ok)
+      return integrationProblem(
+        result.problem,
+        headers,
+        result.reason
+          ? [
+              {
+                pointer:
+                  result.reason === 'profile-mismatch'
+                    ? '/resinProfile'
+                    : '/name',
+                detail: result.reason,
+              },
+            ]
+          : undefined,
+      )
     const responseHeaders = new Headers(headers)
     responseHeaders.set('cache-control', 'no-store')
     responseHeaders.set(

@@ -105,7 +105,8 @@ function dateLabel(time: number) {
         :chips="cardAlerts"
         label="Alertas da impressora"
       />
-      <a :href="`/impressoras/${encodeURIComponent(row.assignment.printerKey)}`"
+      <a
+        :href="`/impressoras/${encodeURIComponent(row.assignment.printerKey)}?farm=${encodeURIComponent(farmId)}`"
         >Abrir detalhes da impressora
         <span class="opaque">{{ row.assignment.printerKey }}</span></a
       >
@@ -145,7 +146,11 @@ function dateLabel(time: number) {
           {{ dateLabel(row.observation.received.wall) }}.
         </p>
         <p v-if="observationAge(row.observation, liveNow()).sourceConfirmed">
-          Observado pelo Connector em
+          {{
+            row.observation.state.preformStatus
+              ? 'Consultado no PreForm em'
+              : 'Observado pelo Connector em'
+          }}
           {{ dateLabel(row.observation.state.observedAt) }}. Idade da observação
           estimada a partir do relógio do Connector.
         </p>
@@ -172,11 +177,24 @@ function dateLabel(time: number) {
           </div>
         </dl>
         <FarmMaterials :materials="row.observation.state.materials" />
+        <p
+          v-if="
+            row.connection !== 'authenticated' ||
+            observationAge(row.observation, liveNow()).stale
+          "
+        >
+          A atribuição de bobina está indisponível sem dados atuais e conexão
+          direta.
+        </p>
         <ActiveSpoolAssign
           v-if="farmId"
           :farm-id="farmId"
           :printer-key="row.assignment.printerKey"
           :slots="activeSpoolSlots(row)"
+          :busy="
+            row.connection !== 'authenticated' ||
+            observationAge(row.observation, liveNow()).stale
+          "
           :moonraker-managed="moonrakerActiveSpool(row)"
         />
         <FarmEnvironment
@@ -279,7 +297,7 @@ function dateLabel(time: number) {
         @setup="emit('setup')"
         @save="emit('save')"
         @cancel="emit('cancel')"
-        ><slot name="local-link"
+        ><slot name="local-link" :row="row"
       /></FarmLocalInterface>
       <slot />
     </article>

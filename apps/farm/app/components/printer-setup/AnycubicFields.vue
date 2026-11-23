@@ -29,7 +29,6 @@ const {
     id="anycubic-port"
     v-model="anycubicPort"
     type="number"
-    maxlength="5"
     required
     autocomplete="off"
     spellcheck="false"

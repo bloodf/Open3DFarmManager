@@ -2,7 +2,8 @@
 import { formatTemperature } from '../../utils/ui-format.ts'
 import { computed, onMounted, ref } from 'vue'
 import {
-  formatPrinterStateLabel,
+  formatPrinterAlarmLabel,
+  formatPrinterOperationalStateLabel,
   observationAge,
   type FarmRow,
 } from '../../utils/farm-view.ts'
@@ -10,6 +11,7 @@ import { formatJobTime } from '../../utils/farm-job-view.ts'
 import { printerDetailHref } from '../../utils/farm-wall-card.ts'
 
 const props = defineProps<{
+  farmId?: string
   rows: readonly Row[]
   liveNow: () => { wall: number; mono: number }
 }>()
@@ -66,16 +68,17 @@ const sortedRows = computed(() => {
     .map((row) => {
       const state = row.observation?.state
       const age = row.observation && observationAge(row.observation, now)
+      const printerAlarms = formatPrinterAlarmLabel(state?.alarms)
       const alerts = [
         row.connection !== 'authenticated' && 'Sem conexão direta',
         age?.stale && 'Dados desatualizados',
-        state?.state === 'error' && 'Erro na impressora',
+        printerAlarms || (state?.state === 'error' && 'Erro na impressora'),
       ].filter(Boolean)
       const cells = [
         row.assignment.displayName || row.assignment.printerKey,
         row.assignment.groupName,
         row.assignment.location,
-        state && formatPrinterStateLabel(state),
+        state && formatPrinterOperationalStateLabel(state),
         state?.progress,
         state?.estimatedRemainingSeconds,
         state?.toolTemperatureCelsius,
@@ -177,9 +180,15 @@ function display(value: string | number | null | undefined, index: number) {
       <tbody>
         <tr v-for="row in sortedRows" :key="row.id">
           <th scope="row">
-            <a :href="printerDetailHref(row.printerKey)">{{ row.cells[0] }}</a>
+            <a :href="printerDetailHref(row.printerKey, farmId)">{{
+              row.cells[0]
+            }}</a>
           </th>
-          <td v-for="index in columns.length - 1" :key="index">
+          <td
+            v-for="index in columns.length - 1"
+            :key="index"
+            :class="{ numeric: [4, 5, 6, 7, 11].includes(index) }"
+          >
             {{ display(row.cells[index], index) }}
           </td>
         </tr>
@@ -206,6 +215,12 @@ function display(value: string | number | null | undefined, index: number) {
   border-bottom: 1px solid currentColor;
   text-align: start;
   overflow-wrap: anywhere;
+}
+
+.wall-table .numeric {
+  text-align: end;
+  font-family: var(--ops-font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 .wall-table thead th {

@@ -85,7 +85,7 @@ Stage everything while the network is still up, then run offline:
    module cache first with `go mod download` in `tools/rtsp-ingest`.
 3. Check out the candidate as a real git checkout. Several tests run
    `git status`, so an exported tree without `.git` fails them.
-4. Warm the npm cache and remove `node_modules`. `npm run desktop:bundle`
+4. Warm the npm cache and remove `node_modules`. `npm run desktop:check`
    builds the documented bundle for `linux-x64` only; on an ARM64 machine it
    stops in `nuxt prepare`, so the reproduction used a native cache instead:
    `npm ci --ignore-scripts --cache "$HOME/openfarm-npm-cache"`, then

@@ -381,7 +381,7 @@ export function checkBody(
       loc: ['body', 0],
       msg: 'JSON decode error',
       input: {},
-      ctx: { error: 'Expecting value' },
+      ctx: { error: body.error ?? 'Expecting value' },
     })
   if (body.kind === 'none')
     return fatal({

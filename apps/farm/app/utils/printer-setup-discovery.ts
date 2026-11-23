@@ -81,6 +81,11 @@ export function createPrinterDiscovery(
 
   function selectDiscovery(printer: DiscoveredPrinter) {
     const prefill = discoveryPrefill(printer)
+    if (!prefill) {
+      discoveryMessage.value =
+        'Impressora Elegoo encontrada. A configuração local do Connector é necessária para acompanhar o status.'
+      return
+    }
     closeKobraSession()
     onboardingFamily.value = prefill.family
     kobraLabel.value = prefill.label

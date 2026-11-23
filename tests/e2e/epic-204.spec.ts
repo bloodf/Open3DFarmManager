@@ -99,7 +99,19 @@ test('reference client starts, pauses and cancels a simulated print', async ({
         `/api/farms/${journey.farmId}/integrations/apps/${app.app.id}/grants`,
         {
           printerAssignmentId: journey.assignmentId,
-          scopes: ['jobs:start', 'control:basic'],
+          scopes: ['jobs:read', 'control:basic', 'plates:confirm'],
+        },
+      ),
+    )
+
+    registeredGrant.parse(
+      await ownerPost(
+        journey.ownerPage,
+        `/api/farms/${journey.farmId}/integrations/apps/${app.app.id}/grants`,
+        {
+          printerAssignmentId: journey.assignmentId,
+          scopes: ['jobs:start'],
+          requiresApproval: true,
         },
       ),
     )
@@ -115,7 +127,12 @@ test('reference client starts, pauses and cancels a simulated print', async ({
       app.secret,
       loopbackFetcher(journey.origin, certificate),
     )
-    await client.authenticate(['jobs:start', 'control:basic'])
+    await client.authenticate([
+      'jobs:read',
+      'jobs:start',
+      'control:basic',
+      'plates:confirm',
+    ])
 
     const job = await client.startPrint(
       journey.assignmentId,
@@ -127,10 +144,49 @@ test('reference client starts, pauses and cancels a simulated print', async ({
       },
       'journey-start',
     )
+    expect(job.status).toBe('held')
+    const eligibility = await client.request<{ plate: { attemptId?: string } }>(
+      `jobs/${job.id}/eligibility?printerId=${journey.assignmentId}`,
+    )
+    const attempt = eligibility.plate.attemptId
+    expect(attempt).toBeDefined()
+    const clearance = await client.request<{ id: string }>(
+      `jobs/${job.id}/actions`,
+      {
+        method: 'POST',
+        headers: { 'Idempotency-Key': 'journey-initial-clearance' },
+        body: JSON.stringify({
+          action: 'confirm_collection',
+          args: { attempt },
+        }),
+      },
+    )
     await expect
-      .poll(async () => (await client.getJob(job.id)).status, {
+      .poll(async () => (await client.getAction(clearance.id)).status, {
         timeout: 60_000,
       })
+      .toBe('completed')
+    await ownerPost(
+      journey.ownerPage,
+      `/api/farms/${journey.farmId}/integrations/approvals/${job.id}/decision`,
+      { decision: 'approve' },
+    )
+    await expect
+      .poll(
+        async () => {
+          const current = await client.getJob(job.id)
+          if (current.status === 'refused') {
+            const { refusal } = current as typeof current & {
+              refusal?: { code: string; detail?: string }
+            }
+            throw new Error(
+              `Simulator start refused: ${refusal?.code ?? 'unknown'} (${refusal?.detail ?? 'no detail'})`,
+            )
+          }
+          return current.status
+        },
+        { timeout: 60_000 },
+      )
       .toBe('started')
     await expect
       .poll(() => journey.printer.model().state, { timeout: 15_000 })
@@ -180,6 +236,187 @@ test('reference client starts, pauses and cancels a simulated print', async ({
       ),
       contentType: 'application/json',
     })
+  } catch (error) {
+    if (startedJourney)
+      console.error(
+        JSON.stringify(startedJourney.simulatorObservation()),
+        startedJourney.appLog(),
+      )
+    throw error
+  } finally {
+    await files?.close()
+    await startedJourney?.close()
+    delete process.env.OPENFARM_JOURNEY
+    delete process.env.OPENFARM_JOURNEY_INTEGRATION_API
+    delete process.env.OPENFARM_JOURNEY_STATE_URL
+    delete process.env.OPENFARM_JOURNEY_CERT
+    delete process.env.OPENFARM_JOURNEY_CERT_KEY
+    delete process.env.SIGNALLING_HTTPS_API_ENVELOPE_PUBLIC_KEY
+    delete process.env.SIGNALLING_HTTPS_API_ENVELOPE_KID
+  }
+})
+
+test('a jobs:start grant without approval directly starts on a cleared simulator', async ({
+  browser,
+}) => {
+  test.setTimeout(10 * 60_000)
+  process.env.OPENFARM_JOURNEY = '1'
+  process.env.OPENFARM_JOURNEY_INTEGRATION_API = '1'
+  let startedJourney:
+    Awaited<ReturnType<typeof startJourneyHarness>> | undefined
+  let files: Awaited<ReturnType<typeof startPrintFileServer>> | undefined
+  try {
+    const journey = await startJourneyHarness({
+      browser,
+      simulator: 'moonraker-fixture',
+      signedControl: true,
+      moonraker: { initial: { state: 'standby', progress: 0 } },
+    })
+    startedJourney = journey
+    await expect
+      .poll(() => journey.simulatorObservation().pauseInboxReady, {
+        timeout: 60_000,
+      })
+      .toBe(true)
+
+    const stateUrl = process.env.OPENFARM_JOURNEY_STATE_URL
+    const certificatePath = process.env.OPENFARM_JOURNEY_CERT
+    const certificateKeyPath = process.env.OPENFARM_JOURNEY_CERT_KEY
+    if (!stateUrl || !certificatePath || !certificateKeyPath)
+      throw new Error('Integration journey did not publish its sandbox')
+    await publishControls({
+      url: stateUrl,
+      farmId: journey.farmId,
+      agentId: journey.agentId,
+      printerKey: journey.printerKey,
+      controls: ['pause', 'resume', 'cancel', 'start_print'],
+    })
+
+    const heldApp = registeredApp.parse(
+      await ownerPost(
+        journey.ownerPage,
+        `/api/farms/${journey.farmId}/integrations/apps`,
+        { name: 'Journey clearance setup', sandbox: true },
+      ),
+    )
+    await ownerPost(
+      journey.ownerPage,
+      `/api/farms/${journey.farmId}/integrations/apps/${heldApp.app.id}/grants`,
+      {
+        printerAssignmentId: journey.assignmentId,
+        scopes: ['jobs:read', 'jobs:start'],
+        requiresApproval: true,
+      },
+    )
+    await ownerPost(
+      journey.ownerPage,
+      `/api/farms/${journey.farmId}/integrations/apps/${heldApp.app.id}/grants`,
+      {
+        printerAssignmentId: journey.assignmentId,
+        scopes: ['control:basic', 'plates:confirm'],
+        requiresApproval: false,
+      },
+    )
+
+    const certificate = await readFile(certificatePath)
+    files = await startPrintFileServer(
+      certificate,
+      await readFile(certificateKeyPath),
+    )
+    const heldClient = new IntegrationClient(
+      journey.origin,
+      heldApp.credential.clientId,
+      heldApp.secret,
+      loopbackFetcher(journey.origin, certificate),
+    )
+    await heldClient.authenticate([
+      'jobs:read',
+      'jobs:start',
+      'control:basic',
+      'plates:confirm',
+    ])
+    const clearanceJob = await heldClient.startPrint(
+      journey.assignmentId,
+      {
+        fileUrl: files.url,
+        sha256: files.sha256,
+        sizeBytes: files.sizeBytes,
+        displayName: 'clearance.gcode',
+      },
+      'journey-clearance-seed',
+    )
+    expect(clearanceJob.status).toBe('held')
+    const eligibility = await heldClient.request<{
+      plate: { attemptId?: string }
+    }>(`jobs/${clearanceJob.id}/eligibility?printerId=${journey.assignmentId}`)
+    expect(eligibility.plate.attemptId).toBeDefined()
+    const clearance = await heldClient.request<{ id: string }>(
+      `jobs/${clearanceJob.id}/actions`,
+      {
+        method: 'POST',
+        headers: { 'Idempotency-Key': 'journey-direct-start-clearance' },
+        body: JSON.stringify({
+          action: 'confirm_collection',
+          args: { attempt: eligibility.plate.attemptId },
+        }),
+      },
+    )
+    await expect
+      .poll(async () => (await heldClient.getAction(clearance.id)).status, {
+        timeout: 60_000,
+      })
+      .toBe('completed')
+
+    const directApp = registeredApp.parse(
+      await ownerPost(
+        journey.ownerPage,
+        `/api/farms/${journey.farmId}/integrations/apps`,
+        { name: 'Journey direct start', sandbox: true },
+      ),
+    )
+    await ownerPost(
+      journey.ownerPage,
+      `/api/farms/${journey.farmId}/integrations/apps/${directApp.app.id}/grants`,
+      {
+        printerAssignmentId: journey.assignmentId,
+        scopes: ['jobs:read', 'jobs:start'],
+        requiresApproval: false,
+      },
+    )
+    const directClient = new IntegrationClient(
+      journey.origin,
+      directApp.credential.clientId,
+      directApp.secret,
+      loopbackFetcher(journey.origin, certificate),
+    )
+    await directClient.authenticate(['jobs:read', 'jobs:start'])
+    const job = await directClient.startPrint(
+      journey.assignmentId,
+      {
+        fileUrl: files.url,
+        sha256: files.sha256,
+        sizeBytes: files.sizeBytes,
+        displayName: 'direct-start.gcode',
+      },
+      'journey-direct-start',
+    )
+    expect(job.status).not.toBe('held')
+    await expect
+      .poll(
+        async () => {
+          const current = await directClient.getJob(job.id)
+          if (current.status === 'refused')
+            throw new Error('Simulator refused the direct job start')
+          return current.status
+        },
+        { timeout: 60_000 },
+      )
+      .toBe('started')
+    await expect
+      .poll(() => journey.printer.model().state, { timeout: 15_000 })
+      .toBe('printing')
+    expect(journey.printer.calls()).toMatchObject({ 'printer.print.start': 1 })
+    expect(journey.simulatorObservation().failure).toBe(false)
   } catch (error) {
     if (startedJourney)
       console.error(

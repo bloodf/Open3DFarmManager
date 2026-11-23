@@ -127,12 +127,15 @@ export async function createRuntimeMoonrakerFixture() {
         agentId: string
         printerKey: string
       }[]
+      /** Locally declared Moonraker model for the journey printer. */
+      model?: string
+      camera?: Record<string, unknown>
       /**
        * Journey harness only: another vendor's collection and assignment
        * replace the Moonraker ones (the packaged Connector is unchanged).
        */
       runtime?: {
-        version: 1 | 2 | 3 | 4 | 5
+        version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
         collection: Record<string, unknown>
         assignment?: Record<string, unknown>
         assignments?: readonly Record<string, unknown>[]
@@ -156,28 +159,35 @@ export async function createRuntimeMoonrakerFixture() {
         )
       )
         throw Error('Runtime fixture agent')
-      const moonraker = input.runtime?.assignments
+      // Opt-in simulator sources (rtc-farm-acceptance-sim-scenarios.ts).
+      const sim = input.runtime?.assignments
         ? undefined
-        : await startMoonrakerMock({
-            initial: {
-              state: 'printing',
-              progress: 0.25,
-              extruder: 210,
-              bed: 60,
-            },
-            objects: [
-              'webhooks',
-              'print_stats',
-              'virtual_sdcard',
-              'extruder',
-              'heater_bed',
-            ],
-            maxWsConnections: farmPause ? 2 : 1,
-            maxRpcRequests: 64,
-            onClientError: () => {
-              failure = true
-            },
-          })
+        : await (
+            await import('./rtc-farm-acceptance-sim-scenarios.ts')
+          ).readSimulatorSources(process.env)
+      const moonraker =
+        input.runtime?.assignments || sim
+          ? undefined
+          : await startMoonrakerMock({
+              initial: {
+                state: 'printing',
+                progress: 0.25,
+                extruder: 210,
+                bed: 60,
+              },
+              objects: [
+                'webhooks',
+                'print_stats',
+                'virtual_sdcard',
+                'extruder',
+                'heater_bed',
+              ],
+              maxWsConnections: farmPause ? 2 : 1,
+              maxRpcRequests: 64,
+              onClientError: () => {
+                failure = true
+              },
+            })
       if (moonraker) {
         mockInstance = moonraker
         port = moonraker.ports.http
@@ -191,16 +201,13 @@ export async function createRuntimeMoonrakerFixture() {
           moonraker.control.update({ progress: next })
         }
       }
-      // Opt-in genuine simulator sources (rtc-farm-acceptance-sim-scenarios.ts).
-      const sim = input.runtime?.assignments
-        ? undefined
-        : await (
-            await import('./rtc-farm-acceptance-sim-scenarios.ts')
-          ).readSimulatorSources(process.env)
       // The ready check above is the simulator's first request; the runtime
       // readiness wait expects requests > 0, which the synthetic server would
       // otherwise provide.
-      if (sim) simRequests++
+      if (sim) {
+        simRequests++
+        port = Number(new URL(sim.moonraker).port)
+      }
       const moon = sim?.moonraker ?? moonraker?.origin ?? ''
       const camera = cameraFixtureFromEnv()
       const configPath = join(directory, 'runtime.json'),
@@ -212,7 +219,13 @@ export async function createRuntimeMoonrakerFixture() {
           collection: input.runtime?.collection ?? {
             version: 1,
             allowedOrigins: [moon],
-            printers: [{ printerKey: ref.printerKey, origin: moon }],
+            printers: [
+              {
+                printerKey: ref.printerKey,
+                origin: moon,
+                ...(input.model ? { model: input.model } : {}),
+              },
+            ],
             limits: { staleAfterMs: 5000 },
             ...(sim && {
               spoolman: {
@@ -239,6 +252,7 @@ export async function createRuntimeMoonrakerFixture() {
           ...(input.runtime?.camera
             ? { camera: input.runtime.camera(ref.assignmentId) }
             : {}),
+          ...(input.camera ? { camera: input.camera } : {}),
           telemetry: {
             endpoint: input.origin + '/api/connector/telemetry',
             audience: input.audience,

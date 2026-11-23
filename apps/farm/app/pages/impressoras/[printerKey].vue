@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BambuAlarmStatus from '../../components/printer-detail/BambuAlarmStatus.vue'
 import {
   computed,
   nextTick,
@@ -12,6 +13,7 @@ import { useRoute } from 'vue-router'
 import ConfigEditorPanel from '../../components/printer-detail/ConfigEditorPanel.vue'
 import { vendorDetailCatalog } from '../../utils/compatibility/detail-panels.ts'
 import FileManagerPanel from '../../components/printer-detail/FileManagerPanel.vue'
+import ResinLedgerPanel from '../../components/resin/ResinLedgerPanel.vue'
 import PowerPanel from '../../components/printer-detail/PowerPanel.vue'
 import SystemServicesPanel from '../../components/printer-detail/SystemServicesPanel.vue'
 import WebcamsPanel from '../../components/printer-detail/WebcamsPanel.vue'
@@ -33,6 +35,7 @@ import {
   actionDialogTitle,
   liveControlActionAvailability,
 } from '../../utils/farm-control.ts'
+import { printableFile } from '../../utils/files-view.ts'
 import { extendedLabel } from '../../utils/farm-control-extended.ts'
 import {
   formatPrinterStateLabel,
@@ -72,6 +75,13 @@ const vendorCatalog = computed(() => {
   return vendor ? vendorDetailCatalog[vendor] : undefined
 })
 const printFile = ref('')
+const canStartStoredFile = computed(() =>
+  printableFile(printFile.value, vendorFrame.value?.vendor),
+)
+function startStoredFile(event: Event) {
+  if (canStartStoredFile.value)
+    control('start_print', event, { file: printFile.value })
+}
 const systemFrame = computed(() =>
   detailFrame.value?.capabilities.includes('system')
     ? detailFrame.value
@@ -84,55 +94,46 @@ const consoleResponses = shallowRef<
 >([])
 let consoleSequence = 0
 const view = useFarmView({
-  onGcodeHelp(commands) {
-    consoleCommands.value = commands
-  },
-  onGcodeResponse(frame) {
-    consoleResponses.value = [
-      ...consoleResponses.value.slice(-999),
-      { seq: consoleSequence++, lines: frame.lines },
-    ]
-  },
-  onDetail(frame) {
-    detailFrame.value = frame
-  },
-  onQuery(frame) {
-    detailQueries.value = applyDetailQuery(detailQueries.value, frame)
-    if (frame.kind === 'temperature-store')
-      history.value = backfillHistory(
-        history.value,
-        frame,
-        Date.now(),
-        Date.now(),
-      )
-  },
-  // The queue and timelapse areas are advertised by the printer's controls.
-  advertised: () => capabilities.value ?? [],
-  printerKey: initialPrinterKey,
-  onUpdate(value) {
-    webcams.value = value
-  },
-  onClose() {
-    webcams.value = null
-    detailFrame.value = undefined
-    consoleCommands.value = []
-    detailQueries.value = emptyDetailQueries
+  requestedFarm: () => route.query.farm,
+  webcamDetail: {
+    onGcodeHelp(commands) {
+      consoleCommands.value = commands
+    },
+    onGcodeResponse(frame) {
+      consoleResponses.value = [
+        ...consoleResponses.value.slice(-999),
+        { seq: consoleSequence++, lines: frame.lines },
+      ]
+    },
+    onDetail(frame) {
+      detailFrame.value = frame
+    },
+    onQuery(frame) {
+      detailQueries.value = applyDetailQuery(detailQueries.value, frame)
+      if (frame.kind === 'temperature-store')
+        history.value = backfillHistory(
+          history.value,
+          frame,
+          Date.now(),
+          Date.now(),
+        )
+    },
+    // The queue and timelapse areas are advertised by the printer's controls.
+    advertised: () => capabilities.value ?? [],
+    printerKey: initialPrinterKey,
+    onUpdate(value) {
+      webcams.value = value
+    },
+    onClose() {
+      webcams.value = null
+      detailFrame.value = undefined
+      consoleCommands.value = []
+      detailQueries.value = emptyDetailQueries
+    },
   },
 })
 definePageMeta({ key: (route) => route.path })
 const { state: viewState, ready, now, discover } = view
-watch(
-  () =>
-    [route.query.farm, ready.value?.farms, ready.value?.scope?.farmId] as const,
-  ([farm, farms, current]) => {
-    if (
-      typeof farm === 'string' &&
-      farm !== current &&
-      farms?.some((item) => item.farmId === farm)
-    )
-      void view.selectFarm(farm)
-  },
-)
 const heading = ref<HTMLElement | null>(null)
 const page = ref<HTMLElement | null>(null)
 const pauseDialog = ref<HTMLDialogElement | null>(null)
@@ -834,7 +835,9 @@ watch(
       v-else
       :name="row.assignment.displayName || row.assignment.printerKey"
       :state-label="state ? formatPrinterStateLabel(state) : 'Sem dados'"
-      :state-tone="state?.state ?? 'offline'"
+      :state-tone="
+        state?.state === 'unknown' ? 'stale' : (state?.state ?? 'offline')
+      "
       :connector-label="
         row.connection === 'authenticated'
           ? 'conexão direta ativa'
@@ -908,6 +911,16 @@ watch(
       @set-pin="setPin"
       @emergency-stop="emergencyStop"
     >
+      <template #status>
+        <BambuAlarmStatus
+          v-if="
+            live &&
+            detailFrame?.vendor === 'bambu' &&
+            detailFrame.printerKey === printerKey
+          "
+          :message="detailFrame.detail.print?.message ?? ''"
+        />
+      </template>
       <template #configuracao>
         <ConfigEditorPanel
           v-if="configAdvertised"
@@ -1006,9 +1019,7 @@ watch(
       <form
         v-if="state?.controls?.includes('start_print')"
         class="print-form"
-        @submit.prevent="
-          (event) => control('start_print', event, { file: printFile })
-        "
+        @submit.prevent="startStoredFile"
       >
         <label for="detail-print-file">Nome do arquivo na impressora</label>
         <input
@@ -1016,10 +1027,25 @@ watch(
           v-model.trim="printFile"
           required
           maxlength="255"
+          :aria-describedby="
+            vendorFrame.vendor === 'anycubic'
+              ? 'detail-print-file-hint'
+              : undefined
+          "
         />
+        <span
+          v-if="vendorFrame.vendor === 'anycubic'"
+          id="detail-print-file-hint"
+        >
+          Informe o nome de um arquivo .gcode já armazenado na impressora.
+        </span>
         <Button
           type="submit"
-          :disabled="!availability('start_print').available || commandInFlight"
+          :disabled="
+            !availability('start_print').available ||
+            commandInFlight ||
+            !canStartStoredFile
+          "
         >
           Iniciar impressão
         </Button>
@@ -1082,6 +1108,13 @@ watch(
         </ul>
       </template>
     </section>
+
+    <ResinLedgerPanel
+      v-if="row && ready?.scope?.farmId"
+      :key="row.assignment.assignmentId"
+      :farm-id="ready.scope.farmId"
+      :printer-key="row.assignment.printerKey"
+    />
 
     <section
       v-if="row && (playback || transfer.kind !== 'idle')"

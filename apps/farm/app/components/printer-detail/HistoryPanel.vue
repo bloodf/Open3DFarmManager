@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import Button from '../ui/Button.vue'
 import type { JobHistoryItem } from '../../utils/job-history-view.ts'
 import {
@@ -35,10 +35,6 @@ const rows = computed(() =>
   props.error ? [] : mergeHistory(props.jobs, props.openfarmJobs),
 )
 const view = computed(() => historyPage(rows.value, requested.value))
-watch(
-  () => rows.value.length,
-  () => (requested.value = 1),
-)
 const totalRows = computed(() => [
   ['Trabalhos', String(props.totals?.jobs ?? 'Indisponível')],
   [

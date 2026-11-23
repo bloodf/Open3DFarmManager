@@ -43,6 +43,7 @@ export interface ObservedTelemetry {
   observed: boolean
   fields: string[]
   sample?: Record<string, unknown> | undefined
+  reason?: string | undefined
 }
 
 export interface ObservedCamera {

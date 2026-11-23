@@ -201,19 +201,8 @@ async function qualifyKobraLink(
   const origin = options.host.startsWith('http')
     ? options.host
     : `http://${options.host}:${options.port ?? 18910}`
-  const client = createKobraLinkClient({
-    origin,
-    allowedOrigins: [origin],
-    ...(options.timeoutMs !== undefined
-      ? { timeoutMs: options.timeoutMs }
-      : {}),
-  })
-
-  const identity: ObservedIdentity = {
-    vendor: 'Anycubic',
-    model: 'Kobra X',
-    firmware: null,
-  }
+  const identity: ObservedIdentity = {}
+  let transportFailure: string | undefined
 
   let telemetry: ObservedTelemetry = {
     observed: false,
@@ -234,17 +223,49 @@ async function qualifyKobraLink(
   }
 
   try {
-    if (credentials.email && credentials.password) {
-      await client.authenticate({
-        ownership: 'fresh_owned',
-        mode: 'signin',
-        name: credentials.name ?? 'Operator',
-        email: credentials.email,
-        password: credentials.password,
-      })
+    if (!credentials.email || !credentials.password) {
+      throw new Error(
+        options.credentialFile
+          ? 'KobraLink: credential file must contain email and password'
+          : 'KobraLink: no credential file; provide email and password',
+      )
     }
+    const client = createKobraLinkClient({
+      origin,
+      allowedOrigins: [origin],
+      ...(options.timeoutMs !== undefined
+        ? { timeoutMs: options.timeoutMs }
+        : {}),
+      async fetch(input, init) {
+        try {
+          const response = await fetch(input, init)
+          if (!response.ok) transportFailure = `HTTP ${response.status}`
+          return response
+        } catch (error) {
+          // Keep network codes, never URLs, response bodies or credentials.
+          const cause = error instanceof Error ? error.cause : undefined
+          if (
+            cause &&
+            typeof cause === 'object' &&
+            'code' in cause &&
+            typeof cause.code === 'string' &&
+            /^[A-Z_]+$/.test(cause.code)
+          ) {
+            transportFailure = cause.code
+          }
+          throw error
+        }
+      },
+    })
+    await client.authenticate({
+      ownership: 'fresh_owned',
+      mode: 'signin',
+      name: credentials.name ?? 'Operator',
+      email: credentials.email,
+      password: credentials.password,
+    })
 
-    const printers = await client.listPrinters()
+    const printers = await client.listPrinterIdentities()
     if (printers.length > 0) {
       const printer = printers[0]!
       identity.model = printer.model
@@ -278,7 +299,13 @@ async function qualifyKobraLink(
         sample: Object.keys(sample).length ? sample : undefined,
       }
     }
-  } catch {}
+  } catch (error) {
+    telemetry.reason = transportFailure
+      ? `KobraLink: ${transportFailure}`
+      : error instanceof Error
+        ? error.message
+        : 'KobraLink: unknown failure'
+  }
 
   return { identity, telemetry, camera, files }
 }

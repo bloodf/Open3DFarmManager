@@ -49,6 +49,43 @@ const stateText = (id: string) => livePrinterStateText(setup, id)
     >
       <NuxtLink to="/connectors">Ver Connectors</NuxtLink>
     </EmptyState>
+    <div
+      v-if="printers.length"
+      class="configuration-scroll"
+      role="region"
+      aria-label="Tabela de configuração das impressoras"
+      tabindex="0"
+    >
+      <table class="configuration-table">
+        <caption>
+          Configuração das impressoras
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">Impressora</th>
+            <th scope="col">Grupo</th>
+            <th scope="col">Local</th>
+            <th scope="col">Connector</th>
+            <th scope="col">Atribuição</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="printer in printers" :key="printer.assignmentId">
+            <th scope="row">
+              <a
+                :href="`/impressoras/${encodeURIComponent(printer.printerKey)}`"
+                >{{ printer.displayName || printer.printerKey }}</a
+              >
+            </th>
+            <td>{{ printer.groupName || 'Não informado' }}</td>
+            <td>{{ printer.location || 'Não informado' }}</td>
+            <td>{{ printer.agentId }}</td>
+            <td>{{ printer.status === 'active' ? 'Ativa' : 'Revogada' }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <h3 v-if="printers.length">Gerenciar atribuições</h3>
     <ul>
       <li v-for="printer in printers" :key="printer.assignmentId">
         <PrinterIdentity
@@ -186,3 +223,29 @@ const stateText = (id: string) => livePrinterStateText(setup, id)
 </template>
 
 <style scoped src="./printer-setup.css"></style>
+
+<style scoped>
+.configuration-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.configuration-table {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--ops-text);
+  background: var(--ops-panel);
+  text-align: start;
+}
+.configuration-table caption {
+  text-align: start;
+  font-weight: 600;
+  padding: var(--ops-space-2);
+}
+.configuration-table th,
+.configuration-table td {
+  border-bottom: 1px solid var(--ops-border);
+  padding: var(--ops-space-2);
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+</style>

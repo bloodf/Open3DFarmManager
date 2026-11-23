@@ -201,13 +201,10 @@ export async function createCameraMediaFactory(input: {
   )
   // Vendor MJPEG cameras from the runtime file reuse the same local encoder.
   const configured = config.cameras.flatMap((camera, index) =>
-    'kind' in camera.source &&
-    (camera.source.kind === 'creality-mjpeg' ||
-      camera.source.kind === 'anycubic-rinkhals')
+    'kind' in camera.source && camera.source.kind === 'creality-mjpeg'
       ? [
           {
             handle: 'camera-' + index,
-            kind: camera.source.kind,
             host: camera.source.address,
             port: camera.source.port,
           },
@@ -215,21 +212,27 @@ export async function createCameraMediaFactory(input: {
       : [],
   )
   const configuredCreality = new Map(
-    configured
-      .filter((camera) => camera.kind === 'creality-mjpeg')
-      .map(({ handle, host, port }) => {
-        selectCrealityCamera({ host, port })
-        return [handle, Object.freeze({ host, port })] as const
-      }),
+    configured.map(({ handle, host, port }) => {
+      selectCrealityCamera({ host, port })
+      return [handle, Object.freeze({ host, port })] as const
+    }),
   )
   const configuredAnycubic = new Map(
-    configured
-      .filter((camera) => camera.kind === 'anycubic-rinkhals')
-      .map(({ handle, host, port }) => {
-        const source = { kind: 'rinkhals', host, port } as const
-        selectAnycubicCamera(source)
-        return [handle, Object.freeze(source)] as const
-      }),
+    config.cameras.flatMap((camera, index) => {
+      const entry = camera.source
+      if (!('kind' in entry)) return []
+      const { address: host, port } = entry
+      let source: AnycubicCameraSource
+      if (entry.kind === 'anycubic-rinkhals') {
+        source = { kind: 'rinkhals', host, port }
+      } else if (entry.kind === 'kobra-x-flv') {
+        source = { kind: entry.kind, host, port, path: entry.path }
+      } else {
+        return []
+      }
+      selectAnycubicCamera(source)
+      return [['camera-' + index, Object.freeze(source)] as const]
+    }),
   )
   const snapshots = new Map(
     config.cameras.flatMap((camera, index) => {
@@ -472,6 +475,7 @@ export async function createCameraMediaFactory(input: {
       onViolation,
     })
   return Object.assign(factory, {
+    assignmentIds: [...new Set(cameras.map(({ scope }) => scope.printerId))],
     getCameraStatus: () => getRtspCameraStatus(config),
   })
 }

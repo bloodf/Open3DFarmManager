@@ -1,5 +1,9 @@
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { expect, test, vi } from 'vitest'
+import { createCameraMediaFactory } from '../../packages/connector/src/camera/camera-runtime.ts'
+import { loadOrCreateIdentity } from '../../packages/connector/src/identity/store.ts'
 
 const source = (path: string) =>
   readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8')
@@ -31,11 +35,49 @@ test('rollback refuses to discard retained lifecycle history', () => {
   )
 })
 
-test('connector advertises every configured camera assignment', () => {
-  const agent = source('packages/connector/src/runtime/agent.ts')
-  expect(agent).toMatch(
-    /cameraAssignments: config\.camera\.cameras\.map\(\s*\(camera\) => camera\.assignmentId,?\s*\)/,
-  )
+test('connector advertises every configured camera assignment', async () => {
+  const first = '11111111-1111-4111-8111-111111111111'
+  const second = '22222222-2222-4222-8222-222222222222'
+  const agentId = '33333333-3333-4333-8333-333333333333'
+  const directory = mkdtempSync(join(tmpdir(), 'camera-assignments-'))
+  try {
+    const media = await createCameraMediaFactory({
+      config: {
+        helper: { path: '/unused/helper', sha256: 'a'.repeat(64) },
+        maxSessions: 1,
+        cameras: [
+          {
+            cameraId: 'rtsp-camera',
+            assignmentId: first,
+            source: { address: '127.0.0.1', port: 8554, path: '/stream' },
+          },
+          {
+            cameraId: 'anycubic-camera',
+            assignmentId: second,
+            source: {
+              kind: 'anycubic-rinkhals',
+              address: '127.0.0.1',
+              port: 8080,
+              path: '/?action=stream',
+            },
+          },
+        ],
+      },
+      identity: loadOrCreateIdentity(directory),
+      farmId: '44444444-4444-4444-8444-444444444444',
+      agentId,
+      assignmentRefs: [
+        { assignmentId: first, agentId, printerKey: 'first-printer' },
+        { assignmentId: second, agentId, printerKey: 'second-printer' },
+      ],
+    })
+    expect(media.assignmentIds).toEqual([first, second])
+    expect(source('packages/connector/src/runtime/agent.ts')).toContain(
+      'cameraAssignments: cameraMedia.assignmentIds',
+    )
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
 })
 
 vi.mock('nuxt/server', async () =>

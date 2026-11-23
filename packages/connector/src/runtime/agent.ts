@@ -481,6 +481,21 @@ async function runConnectorAgentOnce(
       })
     }
     if (signal.aborted) return false
+    const cameraMedia =
+      config.camera &&
+      config.signalling &&
+      lookupId &&
+      rtcBackend.mode === 'direct'
+        ? await (
+            await import('../camera/camera-runtime.ts')
+          ).createCameraMediaFactory({
+            config: config.camera,
+            identity,
+            agentId: credential.agent_id,
+            farmId: credential.farm_id,
+            assignmentRefs: refs,
+          })
+        : undefined
     const links = new Map(
       config.collection.printers.map(({ printerKey }) => [
         printerKey,
@@ -501,12 +516,8 @@ async function runConnectorAgentOnce(
                 ? 'loopback'
                 : 'lan',
         },
-        ...(config.camera && lookupId && rtcBackend.mode === 'direct'
-          ? {
-              cameraAssignments: config.camera.cameras.map(
-                (camera) => camera.assignmentId,
-              ),
-            }
+        ...(cameraMedia
+          ? { cameraAssignments: cameraMedia.assignmentIds }
           : {}),
         printers: Array.from(links.values(), (link) => link.read()),
       }) satisfies import('../../../farm-protocol/src/telemetry.ts').HeartbeatHealth
@@ -664,17 +675,6 @@ async function runConnectorAgentOnce(
         collection,
       )
       const source = snapshots
-      const cameraMedia = config.camera
-        ? await (
-            await import('../camera/camera-runtime.ts')
-          ).createCameraMediaFactory({
-            config: config.camera,
-            identity,
-            agentId: credential.agent_id,
-            farmId: credential.farm_id,
-            assignmentRefs: refs,
-          })
-        : undefined
       const detailSourceFor = detailSources.sourceFor
       tasks.push(
         runSignallingLifecycle({

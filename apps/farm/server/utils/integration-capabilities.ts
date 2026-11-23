@@ -36,7 +36,11 @@ export type PrinterOperation =
   | 'unqualified'
 
 export type PrinterDegradedReason =
-  'offline' | 'reconnecting' | 'error' | 'client-certificate-missing'
+  | 'offline'
+  | 'reconnecting'
+  | 'error'
+  | 'unknown-state'
+  | 'client-certificate-missing'
 
 export interface PrinterQualification {
   operation: PrinterOperation
@@ -111,6 +115,8 @@ export function printerDegradedReason(
       return 'offline'
     case 'error':
       return 'error'
+    case 'unknown':
+      return 'unknown-state'
     case 'idle':
     case 'printing':
     case 'paused':

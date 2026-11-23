@@ -30,3 +30,7 @@ CodeGraph can install MCP configuration for Codex, Cursor and Antigravity throug
 - Antigravity routes use Google models only. Argon remains parked while quota-exhausted. The central coordinator owns routing and capacity reservations; use only actual exposed authorized provider/model IDs, skip unavailable or exhausted routes, and do not invent quota or retry blindly. MiniMax M3.1 Flash requires the exact runtime-validated ID `m:minimax:MiniMax-M3.1-Flash:v:thinking`. The empty variant advertised by T3 fails with `Invalid model reasoning` because the runtime requires `FORCED_ON`; do not select a nonthinking variant. Keep mechanical tasks bounded and reserve frontier models for judgment and independent risky review. Unknown quota remains unknown.
 
 No local token or cost savings have been measured. Limit graph output rather than assuming it reduces context.
+
+## TypeScript compatibility
+
+The root typecheck uses the TypeScript 7 native compiler through `typescript7`. The farm workspace pins TypeScript 5.9.3 for `vue-tsc`, which requires the JavaScript compiler API. The root `vue-tsc` version intentionally differs from the farm version so npm installs the farm checker next to its compatible TypeScript; keep these versions distinct until the Vue checker supports TypeScript 7. The route authorization test uses the `typescript-ast` alias for the same compiler API.

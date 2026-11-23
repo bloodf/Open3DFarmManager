@@ -90,3 +90,41 @@ Supplementary official sources for the same date:
 | Creality LAN client (WS 9999 / `/info`) | K3, K2 Plus, K2 Pro, K2, K2 SE 4C, SPARKX i7, Creality Hi, K1C 2025                                    | OpenFarm discovery probes `/info` on HTTPS 443 first, then HTTP 80. It reads and validates `wssPort` and `videoPort` on the HTTPS path and returns printer identity only. The adapter uses plain WebSocket on port 9999 by default. Secure WebSocket transport (C1) and both vendor camera paths (C2) are unimplemented. Experimental, no hardware qualification. See [Creality coverage](../compatibility/creality.md), [discovery notes](../protocols/creality-discovery.md), and the [probe](../../packages/connector/src/discovery/creality.ts) and [its caller](../../packages/connector/src/discovery/index.ts). |
 | Klipper / Moonraker (7125)              | Snapmaker U1 (S1); possibly SPARKX i7, K2 SE 4C and Creality Hi via root or Fluidd (no port published) | Generic Moonraker support in `packages/connector/src/moonraker`, with discovery probing 7125. U1 read-only telemetry is qualified by OpenFarm's own reports, not command support. See [Moonraker coverage](../compatibility/klipper.md).                                                                                                                                                                                                                                                                                                                                                                               |
 | Anycubic LAN Mode (ports unpublished)   | Kobra X, Kobra 4, Kobra 3 Max V2, Kobra S1 Max                                                         | Kobra X: native adapter in `packages/connector/src/kobra-x` (HTTP 18910, MQTTS 9883 as observed) plus KobraLink. Others: experimental read-only subscriber in `packages/connector/src/anycubic`. See [Anycubic coverage](../compatibility/anycubic.md) and [Kobra X LAN](../compatibility/kobra-x-lan.md).                                                                                                                                                                                                                                                                                                             |
+
+## Additional FDM inventory for future catalog integration
+
+These records are **unqualified**. The keys below are proposed exact future catalog keys, not existing schema entries. They do not establish hardware support, firmware compatibility, commands, camera availability, or a model profile. Existing fleet entries above are unchanged. The [registration proposal](DRIVER-REGISTRATION.md) describes integration gaps.
+
+| Future key | Model | Evidence and limits |
+| --- | --- | --- |
+| `prusa-core-one` | Prusa CORE One | Built-in Buddy PrusaLink, model availability evidence; installed firmware and operations unqualified. |
+| `prusa-core-one-plus` | Prusa CORE One+ | Same family-level protocol evidence; installed firmware and operations unqualified. |
+| `prusa-core-one-l` | Prusa CORE One L | Same family-level protocol evidence; installed firmware and operations unqualified. |
+| `prusa-xl` | Prusa XL | Built-in Buddy PrusaLink; tool telemetry and installed firmware unqualified. |
+| `prusa-mk4` | Prusa MK4 | Buddy PrusaLink family evidence; firmware and operations unqualified. |
+| `prusa-mk4s` | Prusa MK4S | Buddy PrusaLink family evidence; firmware and operations unqualified. |
+| `prusa-mk3-9` | Prusa MK3.9 | Buddy PrusaLink family evidence; firmware and operations unqualified. |
+| `prusa-mk3-9s` | Prusa MK3.9S | Buddy PrusaLink family evidence; firmware and operations unqualified. |
+| `prusa-mk3-5` | Prusa MK3.5 | Buddy PrusaLink family evidence; firmware and operations unqualified. |
+| `prusa-mk3-5s` | Prusa MK3.5S | Buddy PrusaLink family evidence; firmware and operations unqualified. |
+| `prusa-mini` | Prusa MINI | Current firmware has PrusaLink; earlier Connect Local differs. Minimum version and operations unqualified. |
+| `prusa-mini-plus` | Prusa MINI+ | Current firmware has PrusaLink; earlier Connect Local differs. Minimum version and operations unqualified. |
+| `prusa-mk2-5` | Prusa MK2.5 | Raspberry Pi PrusaLink; host and printer firmware combination unqualified. |
+| `prusa-mk2-5s` | Prusa MK2.5S | Raspberry Pi PrusaLink; host and printer firmware combination unqualified. |
+| `prusa-mk3` | Prusa MK3 | Raspberry Pi PrusaLink; host and printer firmware combination unqualified. |
+| `prusa-mk3s` | Prusa MK3S | Raspberry Pi PrusaLink; host and printer firmware combination unqualified. |
+| `prusa-mk3s-plus` | Prusa MK3S+ | Raspberry Pi PrusaLink; host and printer firmware combination unqualified. |
+| `qidi-q1-pro` | Qidi Q1 Pro | Vendor 4.4.24 release evidence. Endpoint and features unqualified. |
+| `qidi-plus4` | Qidi Plus4 | Vendor 1.7.1 release evidence. Endpoint and features unqualified. |
+| `qidi-q2` | Qidi Q2 | Vendor 1.1.1 release evidence. Endpoint and features unqualified. |
+| `qidi-max4` | Qidi Max4 | Vendor repository; 01.01.07.01 version identified by a third-party mirror. Installed firmware and features unqualified. |
+| `qidi-x-max-3` | Qidi X-Max 3 | Vendor 4.3.15 release evidence; Fluidd 10088 is not a Moonraker port claim. |
+| `qidi-x-plus-3` | Qidi X-Plus 3 | Vendor repository, no exact firmware version established here; Fluidd 10088 is not a Moonraker port claim. |
+| `qidi-x-smart-3` | Qidi X-Smart 3 | Vendor 4.1.13 documentation; Fluidd 10088 is not a Moonraker port claim. |
+| `flashforge-adventurer-5m` | Flashforge Adventurer 5M | PID 0x0023; adapter allowlist 3.2.7 and 5.1.8 based on third-party firmware analysis, not hardware qualification. |
+| `flashforge-adventurer-5m-pro` | Flashforge Adventurer 5M Pro | PID 0x0024; adapter allowlist 3.2.7 and 5.1.8 based on third-party firmware analysis, not hardware qualification. |
+| `flashforge-ad5x` | Flashforge AD5X | PID 0x0026; adapter allowlist 1.1.7, 1.2.1 and 3.1.0 based on third-party firmware analysis; writes unqualified. |
+
+Prusa model availability and family descriptions cite [Prusa's availability table](https://help.prusa3d.com/article/prusa-connect-and-prusalink-explained_302608) and [Prusa protocol notes](../protocols/prusa.md). They do not establish minimum firmware versions or complete operation sets. Qidi model and firmware references are linked individually in [Qidi protocol notes](../protocols/qidi.md); Moonraker reachability does not identify a model or firmware. Flashforge's [official 5M specifications](https://en.fss.flashforge.com/10000/software/2a9ce576d4dc68efa85e202d82bff905.pdf) do not establish the protocol or firmware allowlist; those claims are attributed to third-party observations in [Flashforge protocol notes](../protocols/flashforge.md).
+
+Unsupported claims include production registration, model-specific command safety, verified camera or accessory behavior, automatic firmware detection for Qidi, and compatibility of unlisted firmware. Synthetic adapter tests do not qualify hardware. No volume, temperature, network interface, or port is assigned to a new record without model-specific evidence.

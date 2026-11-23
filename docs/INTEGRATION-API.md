@@ -44,9 +44,9 @@ Owners can grant one or more scopes across a farm or limit them to a printer ass
 | `alerts:manage`       | Change alert rules and test notification channels.                           |
 
 Owners can grant `inventory:write`, `environment:control` and `alerts:manage`,
-and tokens can carry them, but no endpoint uses them yet. Any command a future
-endpoint accepts under these scopes still travels as an issuer-signed envelope
-that the Connector enforces and may refuse with a reason.
+and tokens can carry them. `environment:control` is used by the environment
+control endpoints below; any command they accept travels as an issuer-signed
+envelope that the Connector enforces and may refuse with a reason.
 
 Revocations are audited and take effect on the next API request. Revoking an app
 also makes its webhook subscriptions ineligible for delivery, including events
@@ -314,6 +314,48 @@ farm; `temperature`, `humidity` and `power` are `unsupported` until it observes
 chamber/enclosure sensors and Moonraker sensors or power devices. Each printer
 carries its `printerId`, `farmId`, `printerKey`, `displayName` and `location`,
 so a storage warning can link to the responsible farm device.
+
+### Environment controls
+
+`GET /environment/controls` (`environment:read` or `environment:control`, same
+grant scoping and pagination as measurements) lists, per printer, the
+`drying`, `plug` and `extraction` controls. Each control has:
+
+- `readiness`: `ready`, `not-ready` (`offline`, `never-observed` or
+  `printer-error`), `stale` (no observation in the last 60 seconds) or
+  `unsupported` (`no-qualified-capability`).
+- `observed`: the Connector's last observation as an environment measurement
+  (extraction is the chamber fan, `air`; plugs report `power`).
+- `actions`: what this app may request now; empty without
+  `environment:control` on the printer or without a qualified capability.
+- `managementUrl`: the OpenFarm printer page. Safety interlocks, plug setup and
+  credential enrollment stay in OpenFarm.
+
+Extraction is qualified when the Connector advertises `set_fan` and reports a
+chamber fan. Smart plugs and drying programs have no qualified Connector
+capability yet and always report `unsupported`.
+
+`POST /environment/controls/{printerId}/actions` (`environment:control`, with
+`Idempotency-Key`) takes `{"control":"extraction","action":"set","args":{"percent":60}}`,
+`{"control":"plug","action":"on"|"off","args":{"device":"…"}}` or
+`{"control":"drying","action":"start","args":{"targetCelsius":55,"durationMinutes":240}}`
+/ `"stop"`. A printer outside the grants is 404. An unsupported control, or a
+grant that requires owner approval, is 422 `unsupported` with `managementUrl`;
+a stale observation is 409 `device-stale` and an offline, never-observed or
+failed printer 409 `device-not-ready`. None of these sends anything. Otherwise
+the server issues one `environment:control` envelope and delivers it once.
+The Connector checks the signed scope and grant, refuses smart plugs and drying
+as `unsupported`, refuses on an unknown state (`not-ready`), never turns
+extraction off during a print (`printer-busy`,
+`extraction-interlock-print-active`) and never switches a plug during one.
+
+`GET /environment/controls/{printerId}/actions/{actionId}` returns the action
+with `status` (from Connector results only) and `outcome`: `pending`,
+`accepted`, `refused` or `unsupported` (with `refusal.code` and `detail`),
+`failed`, `not-delivered` or `unknown`. Nothing is retried automatically; an
+uncertain delivery stays `queued` or becomes `outcome-unknown`. Until the
+environment-control action storage is configured on a server, a qualified
+request answers 503 `service-unavailable` and sends nothing.
 
 ## Start and track a job
 

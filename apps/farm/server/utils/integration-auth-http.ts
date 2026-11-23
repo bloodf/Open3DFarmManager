@@ -172,6 +172,8 @@ const problems = {
   'webhook-limit-reached': [409, 'Limite de assinaturas de webhook atingido.'],
   'validation-failed': [422, 'Solicitação não aceita.'],
   unsupported: [422, 'Ação não suportada por esta impressora.'],
+  'device-stale': [409, 'Leitura do dispositivo desatualizada.'],
+  'device-not-ready': [409, 'Dispositivo não está pronto.'],
   'idempotency-key-reused': [
     409,
     'Chave de idempotência já usada com outra solicitação.',
@@ -187,6 +189,7 @@ export function integrationProblem(
   code: keyof typeof problems,
   headers?: HeadersInit,
   errors?: readonly { pointer: string; detail: string }[],
+  extensions?: { managementUrl?: string },
 ) {
   const [status, title] = problems[code]
   const responseHeaders = new Headers(headers)
@@ -199,6 +202,9 @@ export function integrationProblem(
       status,
       code,
       ...(errors ? { errors } : {}),
+      ...(extensions?.managementUrl
+        ? { managementUrl: extensions.managementUrl }
+        : {}),
     },
     {
       status,
@@ -263,6 +269,21 @@ const policies: RoutePolicy[] = [
     method: 'GET',
     path: /^\/environment\/measurements$/,
     scopes: ['environment:read'],
+  },
+  {
+    method: 'GET',
+    path: /^\/environment\/controls$/,
+    scopes: ['environment:read', 'environment:control'],
+  },
+  {
+    method: 'POST',
+    path: /^\/environment\/controls\/[^/]+\/actions$/,
+    scopes: ['environment:control'],
+  },
+  {
+    method: 'GET',
+    path: /^\/environment\/controls\/[^/]+\/actions\/[^/]+$/,
+    scopes: ['environment:control'],
   },
   { method: 'GET', path: /^\/library$/, scopes: ['library:read'] },
   { method: 'POST', path: /^\/library$/, scopes: ['library:write'] },

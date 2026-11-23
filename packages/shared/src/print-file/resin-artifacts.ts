@@ -77,12 +77,7 @@ export function validateResinArtifactContract(
   profile: string,
   plate: number = 1,
 ): ResinArtifactContractResult {
-  const extensionOffset = filename.lastIndexOf('.')
-  const extension =
-    extensionOffset > 0 ? filename.slice(extensionOffset).toLowerCase() : ''
-  const format = resinArtifactFormats.find(
-    (entry) => entry.extension === extension,
-  )
+  const format = resinArtifactFormatFor(filename)
   if (!format) return { ok: false, reason: 'unsupported-format' }
   const compatibleProfile = format.profiles.find(
     (candidate) => candidate === profile,
@@ -90,4 +85,11 @@ export function validateResinArtifactContract(
   if (!compatibleProfile) return { ok: false, reason: 'profile-mismatch' }
   if (plate !== 1) return { ok: false, reason: 'plate-mismatch' }
   return { ok: true, format, profile: compatibleProfile, plate }
+}
+
+export function resinArtifactFormatFor(filename: string) {
+  const extensionOffset = filename.lastIndexOf('.')
+  const extension =
+    extensionOffset > 0 ? filename.slice(extensionOffset).toLowerCase() : ''
+  return resinArtifactFormats.find((entry) => entry.extension === extension)
 }

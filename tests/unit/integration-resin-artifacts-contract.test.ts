@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { preflightResinArtifactReplay } from '../../apps/farm/server/utils/integration-resin-artifacts-preflight.ts'
+import { preflightResinArtifactReplay } from '../../packages/shared/src/print-file/resin-replay.ts'
 import { validateResinArtifactContract } from '../../packages/shared/src/print-file/resin-artifacts.ts'
 import {
   acceptedArtifact,

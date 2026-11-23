@@ -186,13 +186,20 @@ const problems = {
 export function integrationProblem(
   code: keyof typeof problems,
   headers?: HeadersInit,
+  errors?: readonly { pointer: string; detail: string }[],
 ) {
   const [status, title] = problems[code]
   const responseHeaders = new Headers(headers)
   responseHeaders.set('content-type', 'application/problem+json')
   responseHeaders.set('cache-control', 'no-store')
   return Response.json(
-    { type: 'https://openfarm.dev/problems/' + code, title, status, code },
+    {
+      type: 'https://openfarm.dev/problems/' + code,
+      title,
+      status,
+      code,
+      ...(errors ? { errors } : {}),
+    },
     {
       status,
       headers: responseHeaders,

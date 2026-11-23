@@ -2,7 +2,7 @@ import {
   validateResinArtifactContract,
   type ResinArtifactExtension,
   type ResinPrinterProfile,
-} from '../../../../packages/shared/src/print-file/resin-artifacts.ts'
+} from './resin-artifacts.ts'
 
 export interface ResinArtifactVersion {
   id: string

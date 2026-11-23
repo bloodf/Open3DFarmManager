@@ -59,9 +59,9 @@ export interface LibraryVersion {
   storageLocation: StorageMode
   agentId: string | null
   originalName: string
-  kind: 'gcode' | '3mf'
+  kind: 'gcode' | '3mf' | 'resin'
   plateCount: number
-  metadata: PrintFileMetadata
+  metadata: PrintFileMetadata & { resinProfile?: string }
   hasThumbnail: boolean
   notes: string
   uploadedBy: string

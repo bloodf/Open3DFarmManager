@@ -70,7 +70,22 @@ export const ApiPlateAction = z.strictObject({
   action: z.literal('confirm_collection'),
   args: CollectionArguments,
 })
+export const ApiResinReplay = z.strictObject({
+  action: z.literal('start_library_print'),
+  args: z.strictObject({
+    sha256,
+    versionId: uuid,
+    filename: z
+      .string()
+      .min(1)
+      .max(255)
+      .regex(/^[^\/\\\x00-\x1f\x7f]+$/),
+    profile: z.string().min(1).max(100),
+    plate: z.literal(1),
+  }),
+})
 export const ApiEnvelopeAction = z.union([
+  ApiResinReplay,
   ApiRunAction,
   ApiPlateAction,
   ControlArguments.refine((value) =>

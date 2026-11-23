@@ -306,6 +306,42 @@ return the farm's storage mode. `POST /library` stores the file in that mode,
 and `PATCH /library/settings` (`library:write`) changes it. The Connector
 prints the stored file and refuses a printer the file does not fit.
 
+### Resin artifacts
+
+`GET /library?farmId=…` publishes `resinArtifactFormats`. Each entry
+contains an extension, a printer family, exact compatible profile IDs,
+and the vendor source for the `spec-derived` declaration. Profile IDs
+refer to models in the [resin catalog](fullfarmmanager/catalog-resin.md).
+
+| Family           | Extensions     | Compatible profiles                                                         |
+| ---------------- | -------------- | --------------------------------------------------------------------------- |
+| Elegoo SDCP      | `.ctb`, `.goo` | `elegoo:saturn-4-ultra`, `elegoo:saturn-4-ultra-16k`, `elegoo:mars-5-ultra` |
+| Anycubic Photon  | `.pm7m`        | `anycubic:photon-mono-m7-max`                                               |
+| Anycubic Photon  | `.pp1m`        | `anycubic:photon-p1-max`                                                    |
+| Anycubic Photon  | `.pwsz`        | `anycubic:photon-mono-m7-pro`                                               |
+| Formlabs PreForm | `.form`        | `formlabs:form-4`, `formlabs:form-4l`                                       |
+
+Upload with `name`, `contentBase64`, `farmId` and the exact
+`resinProfile` from the catalog. The upload checks the extension and
+declared profile and stores a `resin` version with one plate and a SHA-256.
+A mismatched declaration returns 422 with a reason in `errors`. Catalog
+compatibility is model-specific. The qualified Connector driver validates
+the actual vendor file and firmware compatibility before starting it.
+
+Replay by `libraryVersionId` with plate 1 or omit `plate` to select it.
+Another plate returns 422 with `plate-mismatch`. The signed command carries
+the immutable version ID, digest, filename, profile and plate. Operator
+approval uses that same command. The Connector checks for an explicit
+artifact-dispatch capability for the assigned printer before any file
+transfer to the printer. When the Connector receives the command and
+lacks that capability, the receipt shows `status: refused`,
+`refusal.code: unsupported` and
+`refusal.detail: resin-artifact-dispatch-unavailable`. The receipt retains
+the version ID, digest, profile and plate alongside the result. Connector
+mode requires the target Connector to have the retained bytes. A successful resin dispatch reports `completed` once the driver confirms
+the start. This is the dispatch result. An uncertain start is never retried
+automatically.
+
 ### Plate checks at dispatch
 
 Read `GET /jobs/{jobId}/eligibility?printerId={printerId}` for an advisory

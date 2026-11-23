@@ -1126,6 +1126,7 @@ paths:
         `library:read` grant. `storageMode` is the farm's current mode
         (`server` keeps the file, `connector` keeps it on the Connector).
         A version's `storageLocation` is where that file actually is.
+        Returns supported resin extensions and compatible printer profiles.
       security:
         - clientCredentials: ['library:read']
       parameters:
@@ -1168,7 +1169,10 @@ paths:
         Stores the file according to the farm's current storage mode. Server
         mode keeps the bytes. Connector mode keeps the hash and metadata and
         leaves the bytes on the farm's Connector. Requires a farm-wide
-        `library:write` grant. A new version emits `library.version.created`.
+        `library:write` grant. Resin files require a compatible `resinProfile`.
+        Use `GET /library` to discover extension/profile pairs. A mismatched
+        declaration returns 422 with a reason in `errors`.
+        A new version emits `library.version.created`.
       security:
         - clientCredentials: ['library:write']
       requestBody:
@@ -3465,7 +3469,9 @@ components:
           maxLength: 255
         kind:
           type: string
-          enum: [gcode, 3mf]
+          enum: [gcode, 3mf, resin]
+        resinProfile:
+          $ref: '#/components/schemas/ResinPrinterProfile'
         plateCount:
           type: integer
           minimum: 0
@@ -3493,7 +3499,7 @@ components:
       allOf:
         - $ref: '#/components/schemas/PageInfo'
         - type: object
-          required: [data, storageMode]
+          required: [data, storageMode, resinArtifactFormats]
           properties:
             data:
               type: array
@@ -3502,6 +3508,37 @@ components:
                 $ref: '#/components/schemas/LibraryItem'
             storageMode:
               $ref: '#/components/schemas/StorageMode'
+            resinArtifactFormats:
+              type: array
+              items:
+                $ref: '#/components/schemas/ResinArtifactFormat'
+    ResinPrinterProfile:
+      type: string
+      description: Exact printer profile ID from the published resin catalog.
+      pattern: '^[a-z0-9-]+:[a-z0-9-]+$'
+      maxLength: 100
+    ResinArtifactFormat:
+      type: object
+      additionalProperties: false
+      required: [extension, family, profiles, source, evidence]
+      properties:
+        extension:
+          type: string
+          pattern: '^\.[a-z0-9]+$'
+        family:
+          type: string
+          enum: [elegoo-sdcp, anycubic-photon, formlabs-preform]
+        profiles:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/ResinPrinterProfile'
+        source:
+          type: string
+          format: uri
+        evidence:
+          type: string
+          const: spec-derived
     LibrarySettings:
       type: object
       additionalProperties: false
@@ -3531,6 +3568,8 @@ components:
           type: string
           minLength: 1
           maxLength: 255
+        resinProfile:
+          $ref: '#/components/schemas/ResinPrinterProfile'
         contentBase64:
           type: string
           minLength: 4
@@ -3618,7 +3657,7 @@ components:
               type: integer
               minimum: 1
               maximum: 1000
-              description: Plate of a 3MF project. Omitted for G-code and for the first plate.
+              description: Plate index. For resin, only plate 1 is supported and omission defaults to 1. Omit for G-code and for the first plate of a 3MF project.
     RefusalCode:
       type: string
       description: |
@@ -3712,6 +3751,8 @@ components:
         storageMode:
           $ref: '#/components/schemas/StorageMode'
           description: Where the replayed file is stored.
+        resinProfile:
+          $ref: '#/components/schemas/ResinPrinterProfile'
         historyEntryId:
           type: string
           pattern: '^[0-9]{1,19}$'

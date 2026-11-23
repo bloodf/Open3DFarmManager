@@ -2,7 +2,8 @@
 import { formatTemperature } from '../../utils/ui-format.ts'
 import { computed, onMounted, ref } from 'vue'
 import {
-  formatPrinterStateLabel,
+  formatPrinterAlarmLabel,
+  formatPrinterOperationalStateLabel,
   observationAge,
   type FarmRow,
 } from '../../utils/farm-view.ts'
@@ -66,16 +67,17 @@ const sortedRows = computed(() => {
     .map((row) => {
       const state = row.observation?.state
       const age = row.observation && observationAge(row.observation, now)
+      const printerAlarms = formatPrinterAlarmLabel(state?.alarms)
       const alerts = [
         row.connection !== 'authenticated' && 'Sem conexão direta',
         age?.stale && 'Dados desatualizados',
-        state?.state === 'error' && 'Erro na impressora',
+        printerAlarms || (state?.state === 'error' && 'Erro na impressora'),
       ].filter(Boolean)
       const cells = [
         row.assignment.displayName || row.assignment.printerKey,
         row.assignment.groupName,
         row.assignment.location,
-        state && formatPrinterStateLabel(state),
+        state && formatPrinterOperationalStateLabel(state),
         state?.progress,
         state?.estimatedRemainingSeconds,
         state?.toolTemperatureCelsius,

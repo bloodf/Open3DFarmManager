@@ -201,9 +201,23 @@ export function createBambuRuntimeSubscription(input: {
             unavailable('invalid-response')
             return
           }
-          const { kind: _, filamentUsage: usage, ...decoded } = result
+          const {
+            kind: _,
+            filamentUsage: usage,
+            alarmDelta,
+            ...decoded
+          } = result
           if (usage?.length) filamentUsage = usage
           const observed: Partial<Fields> = decoded
+          if (alarmDelta) {
+            observed.alarms = { ...fields.alarms }
+            if (alarmDelta.printError !== undefined)
+              observed.alarms.printError = alarmDelta.printError || null
+            if ('hms' in alarmDelta) {
+              observed.alarms.hmsCount = alarmDelta.hms?.length ?? null
+              observed.alarms.hmsCode = alarmDelta.hms?.[0] ?? null
+            }
+          }
           // Unknown explicit states must not retain a previously recognized state.
           const raw: unknown = JSON.parse(payload.toString('utf8'))
           if (

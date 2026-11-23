@@ -76,6 +76,7 @@ test(
       clientIdentity: { cert: mock.tls.clientCert, key: mock.tls.clientKey },
       httpPort: mock.httpPort,
       mqttPort: mock.mqttPort,
+      pinSha256: mock.tls.serverFingerprintSha256!,
       reconnectMs: 100,
     })
     t.after(() => adapter.close())

@@ -65,6 +65,7 @@ test.describe('Kobra X on the farm page', () => {
       clientIdentity: { cert: mock.tls.clientCert, key: mock.tls.clientKey },
       httpPort: mock.httpPort,
       mqttPort: mock.mqttPort,
+      pinSha256: mock.tls.serverFingerprintSha256!,
       resultTimeoutMs: 1000,
       motionResultTimeoutMs: 1000,
     })

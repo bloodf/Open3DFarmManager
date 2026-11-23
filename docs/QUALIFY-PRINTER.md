@@ -57,6 +57,11 @@ node scripts/qualify-printer.ts --vendor <vendor> --host <host> [credential file
 
 ### Native Anycubic Kobra X (`kobra-x`)
 
+Use `--pin-sha256` with a trusted SPKI or leaf-certificate SHA-256 digest for
+a self-signed broker. Obtain the digest through authorized onboarding or a
+trusted source. An exact pinned match can connect after the certificate expires.
+Without a pin, the CLI uses normal TLS verification.
+
 The `kobra-x` vendor talks to a Kobra X directly on the LAN, with no KobraLink bridge. It reads `GET /info` (HTTP `18910`) for identity, recovers the MQTT credentials in memory through `POST /ctrl`, and subscribes to the printer's public report topic over mutual TLS (MQTTS `9883`) with the resolved Anycubic Slicer client identity. To make an idle printer report, it publishes only read requests (`query`, `getInfo`, `listLocal`) and never a start, pause, resume, cancel, gcode, temperature, motion or upload command. The recovered credentials and the client private key stay in memory and are never written or logged. Client identity precedence: `--cert-file`/`--key-file`, then a local Anycubic Slicer Next installation, then the bundled Anycubic Slicer default (see `THIRD_PARTY.md`).
 
 - `--help`: Display help and usage information.

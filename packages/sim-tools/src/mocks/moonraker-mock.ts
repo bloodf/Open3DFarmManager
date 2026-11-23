@@ -152,6 +152,8 @@ export interface MoonrakerTimelapseOptions {
 
 export interface MoonrakerMockOptions {
   profile?: MoonrakerProfile | undefined
+  /** Advance active print duration on the same simulated clock as eventtime. */
+  clockedPrintDuration?: boolean | undefined
   initial?: Partial<MoonrakerModel> | undefined
   scenario?: ScenarioStep<MoonrakerModel>[] | undefined
   objects?: readonly string[] | undefined
@@ -930,6 +932,7 @@ export async function startMoonrakerMock(
   }
 
   let eventtime = 1
+  let printSourceStartedAt = eventtime
   let nextConnectionId = 0
   const maxUploadBytes = options.maxUploadBytes ?? 16 * 1024 * 1024
   const restartDelayMs = options.restartDelayMs ?? 30
@@ -963,7 +966,11 @@ export async function startMoonrakerMock(
         state: m.state,
         filename: m.filename,
         print_duration: m.printDuration,
-        total_duration: m.totalDuration,
+        total_duration:
+          options.clockedPrintDuration &&
+          (m.state === 'printing' || m.state === 'paused')
+            ? eventtime - printSourceStartedAt
+            : m.totalDuration,
         message: m.errorMessage,
       },
       virtual_sdcard: {
@@ -1716,6 +1723,7 @@ export async function startMoonrakerMock(
     const active = model.state === 'printing' || model.state === 'paused'
     if (patch.state === 'printing' && !active) {
       printStartedAt = Date.now() / 1000
+      printSourceStartedAt = eventtime
       return
     }
     if (

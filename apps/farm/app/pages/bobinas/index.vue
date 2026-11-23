@@ -56,7 +56,11 @@ const loadingList = ref(false)
 const listError = ref('')
 const statusMessage = ref('')
 
-const filters = reactive<SpoolFilters>({ ...EMPTY_SPOOL_FILTERS })
+const route = useRoute()
+const filters = reactive<SpoolFilters>({
+  ...EMPTY_SPOOL_FILTERS,
+  q: typeof route.query.q === 'string' ? route.query.q : '',
+})
 
 const formOpen = ref(false)
 const editingSpool = ref<SpoolItem | null>(null)
@@ -543,6 +547,14 @@ onBeforeUnmount(() => {
           </header>
 
           <div class="stock-block">
+            <StatusBadge
+              v-if="
+                spoolRemainingPercent(spool) !== null &&
+                spoolRemainingPercent(spool)! <= 20
+              "
+              tone="attention"
+              label="Bobina com pouco material"
+            />
             <div class="stock-numbers">
               <strong>
                 Restante: {{ formatSpoolWeight(spool.remaining_weight) }}

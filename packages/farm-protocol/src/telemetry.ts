@@ -37,6 +37,7 @@ export const HeartbeatHealth = z
       storage: z.enum(['healthy', 'degraded']),
       rtcScope: z.enum(['loopback', 'lan', 'disabled']),
     }),
+    cameraAssignments: z.array(z.uuid()).min(1).max(16).optional(),
     printers: z
       .array(
         z.strictObject({
@@ -69,6 +70,7 @@ export const PrinterTransition = z
     printerKey: PrinterState.shape.printerKey,
     from: PrinterState.shape.state,
     to: PrinterState.shape.state,
+    reason: PrinterState.shape.statusReason,
     observedAt: PrinterState.shape.observedAt,
   })
   .refine((value) => value.from !== value.to, 'No-op transition')

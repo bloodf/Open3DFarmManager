@@ -26,7 +26,11 @@ import { createBambuRuntimeSubscription } from '../bambu/runtime.ts'
 import type { createBambuTransport } from '../bambu/transport.ts'
 import type { RawPrinterObservation } from './farm-snapshot-provider.ts'
 import { createKobraLinkRuntimeSubscription } from '../kobralink/runtime.ts'
-import { parseCollectorConfig } from '../formlabs/config.ts'
+import { createPrusaLinkCollection } from './prusa-link-collection.ts'
+import {
+  parseCollectorConfig,
+  type PrusaCollectorConfig,
+} from '../prusa/config.ts'
 import { readKobraClientCertMaterial } from '../config/kobra-x-cert.ts'
 import { createCrealityCollection } from './creality-collection.ts'
 import type { MoonrakerEvent } from '../moonraker/subscription.ts'
@@ -140,6 +144,7 @@ export async function collectIntoQueue(input: {
     | CrealityCollectorConfig
     | AnycubicCollectorConfig
     | FormlabsCollectorConfig
+    | PrusaCollectorConfig
     | import('../config/sdcp.ts').SdcpCollectorConfig
   onInventory?: (snapshot: SpoolmanSnapshot) => void
   onRawObservation?: (observation: RawPrinterObservation) => void
@@ -223,6 +228,9 @@ export async function collectIntoQueue(input: {
               from: previous,
               to: event.printer.state,
               observedAt: event.printer.observedAt,
+              ...(event.printer.statusReason
+                ? { reason: event.printer.statusReason }
+                : {}),
             },
             now,
           )
@@ -801,6 +809,22 @@ export async function collectIntoQueue(input: {
               printerKey: binding.printerKey,
               reason: 'stale',
             })
+          },
+        })
+        subscriptions.push({ done: sub.done.catch(fail) })
+      }
+    }
+    if (config.version === 8) {
+      for (const binding of config.drivers) {
+        const sub = createPrusaLinkCollection({
+          binding,
+          signal,
+          timeoutMs: Math.min(30000, config.limits.requestTimeoutMs),
+          onObservation(value) {
+            input.onRawObservation?.(value)
+          },
+          onUnavailable(epoch) {
+            input.onRawUnavailable?.({ printerKey: binding.printerKey, epoch })
           },
         })
         subscriptions.push({ done: sub.done.catch(fail) })

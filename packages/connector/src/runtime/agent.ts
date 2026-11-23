@@ -501,6 +501,13 @@ async function runConnectorAgentOnce(
                 ? 'loopback'
                 : 'lan',
         },
+        ...(config.camera && lookupId && rtcBackend.mode === 'direct'
+          ? {
+              cameraAssignments: config.camera.cameras.map(
+                (camera) => camera.assignmentId,
+              ),
+            }
+          : {}),
         printers: Array.from(links.values(), (link) => link.read()),
       }) satisfies import('../../../farm-protocol/src/telemetry.ts').HeartbeatHealth
     const enqueueHeartbeat = (health: ReturnType<typeof readHeartbeat>) => {
@@ -542,6 +549,15 @@ async function runConnectorAgentOnce(
             return status
           },
           controlsFor: (id) => {
+            const assignment = config.assignments.find(
+              (item) => item.assignment_id === id,
+            )
+            if (
+              assignment &&
+              'backend' in assignment &&
+              assignment.backend === 'prusa-link'
+            )
+              return []
             const ref = refs.find((item) => item.assignmentId === id)
             if (
               config.collection.version === 7 &&
@@ -642,7 +658,11 @@ async function runConnectorAgentOnce(
       const { answerApiQuery, createApiQueryReader } =
         await import('./api-query.ts')
       const signalling = config.signalling
-      const readApiQuery = createApiQueryReader(config, input.dataDirectory)
+      const readApiQuery = createApiQueryReader(
+        config,
+        input.dataDirectory,
+        collection,
+      )
       const source = snapshots
       const cameraMedia = config.camera
         ? await (

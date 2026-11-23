@@ -33,6 +33,8 @@ export type MoonrakerSimulator = Readonly<{
   update(patch: Partial<PrinterModel>): void
   /** JSON-RPC calls received, by method. */
   calls(): Readonly<Record<string, number>>
+  /** Object selections sent with every subscribe request. */
+  subscriptionObjects(): readonly unknown[]
   control: MoonrakerMockInstance['control']
   close(): Promise<void>
 }>
@@ -96,6 +98,12 @@ export async function startMoonrakerSimulator(
       moonraker.control.update(patch)
     },
     calls: () => moonraker.calls(),
+    subscriptionObjects: () =>
+      moonraker.calls.all
+        .filter((call) => call.method === 'printer.objects.subscribe')
+        .map(
+          (call) => (call.params as { objects?: unknown } | undefined)?.objects,
+        ),
     control: moonraker.control,
     async close() {
       await Promise.all([moonraker.close(), spoolman.close()])

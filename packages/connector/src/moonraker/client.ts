@@ -1,3 +1,4 @@
+import { isChamberTemperatureObject } from './temperature-observation.ts'
 import { moonrakerSession, moonrakerAuthHeaders } from '../config/moonraker.ts'
 import { z } from 'zod'
 import { createMoonrakerSocket } from './socket.ts'
@@ -393,11 +394,18 @@ export function openMoonrakerClient(input: {
                 (name) =>
                   name === 'fan' ||
                   name.startsWith('fan_generic ') ||
-                  name === 'output_pin caselight',
+                  name === 'output_pin caselight' ||
+                  (input.jobFields &&
+                    (/^extruder(?:[1-9][0-9]{0,2})?$/.test(name) ||
+                      isChamberTemperatureObject(name))),
               )
               .map((name) => [
                 name,
-                [name === 'output_pin caselight' ? 'value' : 'speed'],
+                /^extruder/.test(name) || name === 'heater_generic chamber'
+                  ? ['temperature', 'target']
+                  : isChamberTemperatureObject(name)
+                    ? ['temperature']
+                    : [name === 'output_pin caselight' ? 'value' : 'speed'],
               ]),
           )
           objects = { ...baseObjects, ...optional }
@@ -406,8 +414,8 @@ export function openMoonrakerClient(input: {
             const tools = selectToolObjects(listed)
             if (tools.some((name) => name !== 'extruder')) {
               delete queryObjects.extruder
-              // Fields a caller already selected (the Snapmaker U1 tool
-              // projection reads `target` and the active tool) must survive.
+              // Fields a caller already selected for the tool projection,
+              // including `target` and the active tool, must survive.
               for (const name of tools)
                 queryObjects[name] = extraObjects[name] ?? ['temperature']
               queryObjects.toolhead = extraObjects.toolhead ?? ['extruder']

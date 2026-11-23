@@ -9,6 +9,7 @@ export interface PrinterStateRow {
   location?: string | null
   sortOrder?: number | null
   state: PrinterState['state']
+  alarms?: PrinterState['alarms']
   progress: number | undefined
   toolTemperatureCelsius: number | undefined
   bedTemperatureCelsius: number | undefined
@@ -24,6 +25,7 @@ export interface PrinterStateProjection {
   location?: string | null
   sortOrder?: number | null
   state: PrinterState['state']
+  alarms?: PrinterState['alarms']
   progress: number | undefined
   temperatures: {
     toolCelsius: number | undefined
@@ -54,6 +56,7 @@ export function projectPrinterState(
     assignmentId: row.assignmentId,
     printerKey: row.printerKey,
     state: row.state,
+    ...(row.alarms !== undefined && { alarms: row.alarms }),
     progress: row.progress,
     temperatures: {
       toolCelsius: row.toolTemperatureCelsius,

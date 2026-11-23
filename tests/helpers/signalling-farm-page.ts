@@ -75,7 +75,16 @@ export async function testAuthenticatedFarmPage(input: {
     await expect(
       page.getByLabel('Dispositivo aprovado deste navegador', { exact: true }),
     ).toHaveValue(fixture.browserKeyId)
-    const row = page.getByRole('article').filter({
+    await page
+      .getByRole('button', { name: /^Inspecionar / })
+      .filter({ has: page.getByText(assignment.printerKey, { exact: true }) })
+      .click()
+    const inspector = page.getByRole('dialog', {
+      name: 'Inspeção da impressora',
+      exact: true,
+    })
+    await expect(inspector).toBeVisible()
+    const row = inspector.getByRole('article').filter({
       has: page.getByRole('heading', {
         name: assignment.printerKey,
         exact: true,
@@ -133,6 +142,10 @@ export async function testAuthenticatedFarmPage(input: {
       )
       assert.equal(await input.pauses!(), 0)
       await input.note('farm-page-pause-stale-disabled-with-reason')
+    } else {
+      await expect(pauseButton).toHaveAccessibleDescription(
+        'Pausa indisponível. O controle seguro não está habilitado.',
+      )
     }
     await page.waitForTimeout(250)
     await expect(progress).toHaveAttribute('aria-valuenow', '75')
@@ -169,6 +182,7 @@ export async function testAuthenticatedFarmPage(input: {
       // view's maximum reopen backoff, and live status never returns.
       await page.waitForTimeout(REOPEN_BACKOFF_CAP_MS + 1000)
       assert.deepEqual(sockets, [], 'No signalling reopen after revocation')
+      await expect(pauseButton).toBeDisabled()
       await expect(
         row.getByText('Conexão direta autenticada', { exact: true }),
       ).toHaveCount(0)

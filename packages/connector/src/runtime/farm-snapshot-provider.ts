@@ -49,6 +49,9 @@ export type RawPrinterObservation = Omit<
           creality: Readonly<Partial<Record<keyof PrinterState, number>>>
         }>
       | Readonly<{
+          prusaLink: Readonly<Partial<Record<keyof PrinterState, number>>>
+        }>
+      | Readonly<{
           formlabs: Readonly<Partial<Record<keyof PrinterState, number>>>
         }>
       | Readonly<{
@@ -60,6 +63,7 @@ export type RawPrinterObservation = Omit<
   }
 
 function fieldTimes(timing: RawPrinterObservation['fieldObservedAtMonoMs']) {
+  if ('prusaLink' in timing) return timing.prusaLink
   if ('formlabs' in timing) return timing.formlabs
   return 'sdcp' in timing
     ? timing.sdcp
@@ -151,6 +155,7 @@ export function createFarmSnapshotSource(input: {
             ] as const)
           : []
       const independent: readonly string[] = [
+        'alarms',
         'fans',
         'light',
         'materials',
@@ -199,6 +204,7 @@ export function createFarmSnapshotSource(input: {
       const lastJob = lastJobs.get(ref.printerKey)
       if (lastJob) printer.lastJob = lastJob
       for (const field of [
+        'alarms',
         'fans',
         'light',
         'materials',
@@ -209,7 +215,10 @@ export function createFarmSnapshotSource(input: {
             ([key]) => key === field,
           )![1]
           if (stamp + 5000 <= now) delete printer[field]
-          else if ('anycubic' in entry.fieldObservedAtMonoMs)
+          else if (
+            field === 'alarms' ||
+            'anycubic' in entry.fieldObservedAtMonoMs
+          )
             wakeAt = Math.min(wakeAt, stamp + 5000)
           else until = Math.min(until, stamp + 5000)
         }
@@ -331,6 +340,7 @@ export function createFarmSnapshotSource(input: {
     }
     const timing = value.fieldObservedAtMonoMs
     const fieldStamped =
+      'prusaLink' in timing ||
       'formlabs' in timing ||
       'sdcp' in timing ||
       'anycubic' in timing ||
@@ -350,6 +360,7 @@ export function createFarmSnapshotSource(input: {
               'identity',
               'statusReason',
               'preformStatus',
+              'alarms',
               'progress',
               'filename',
               'materials',
@@ -383,7 +394,8 @@ export function createFarmSnapshotSource(input: {
           previousTimes &&
           ('connection' in previousTimes !== connectionOnly ||
             (!!previousTiming &&
-              ('formlabs' in previousTiming ||
+              ('prusaLink' in previousTiming ||
+                'formlabs' in previousTiming ||
                 'sdcp' in previousTiming ||
                 'anycubic' in previousTiming ||
                 'bambu' in previousTiming ||

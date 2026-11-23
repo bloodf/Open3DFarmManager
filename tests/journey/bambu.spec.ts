@@ -306,7 +306,12 @@ if (journeyEnabled())
       )
       const alerts = page.getByRole('status', { name: 'Alertas Bambu Lab' })
       await expect(alerts).toBeAttached({ timeout: 60_000 })
-      await expect(alerts).toBeEmpty()
+      await expect(
+        page.getByRole('heading', { name: 'Alertas da impressora' }),
+      ).toBeVisible()
+      await expect(alerts).toHaveText('Nenhum alerta informado.')
+      await page.getByRole('tab', { name: 'Arquivos' }).click()
+      await expect(alerts).toBeVisible()
       const commandCount = simulator().requests.length
       const running = page.getByText('Imprimindo', { exact: true }).first()
       await expect(running).toBeVisible()
@@ -325,7 +330,7 @@ if (journeyEnabled())
         'Códigos HMS informados: 0700-2100-0002-0004.',
       )
       simulator().control.setAlarmReport({ hms: [] })
-      await expect(alerts).toBeEmpty()
+      await expect(alerts).toHaveText('Nenhum alerta informado.')
       await expect(running).toBeVisible()
       expect(simulator().requests).toHaveLength(commandCount)
     })

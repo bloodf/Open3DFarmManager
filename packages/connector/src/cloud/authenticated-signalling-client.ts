@@ -1,4 +1,5 @@
 import {
+  API_DISPATCH_QUERY_SUPPORT_HEADER,
   API_QUERY_SUPPORT_HEADER,
   type ApiQueryReply,
   type ApiQueryRequest,
@@ -129,7 +130,12 @@ async function fixedConnectorSocket(
     maxBufferedChunks: 16,
     autoPong: false,
     ...(supportsApiQueries
-      ? { headers: { [API_QUERY_SUPPORT_HEADER]: '1' } }
+      ? {
+          headers: {
+            [API_QUERY_SUPPORT_HEADER]: '1',
+            [API_DISPATCH_QUERY_SUPPORT_HEADER]: '1',
+          },
+        }
       : {}),
   })
   const socket = new module.WebSocket(target, protocol, options)

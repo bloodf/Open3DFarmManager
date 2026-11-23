@@ -20,6 +20,33 @@ Owners can grant one or more scopes across a farm or limit them to a printer ass
 - `GET` and `POST /api/farms/{farmId}/integrations/apps/{appId}/grants` list or grant scopes.
 - `DELETE /api/farms/{farmId}/integrations/grants/{grantId}` removes a grant.
 
+### Scopes
+
+| Scope              | Grants                                                                       |
+| ------------------ | ---------------------------------------------------------------------------- |
+| `printers:read`    | Read printers, their status, readiness and qualified capabilities.           |
+| `files:read`       | List files stored on printers.                                               |
+| `inventory:read`   | Read Spoolman inventory snapshots and the resin ledger (lots, vats, usage).  |
+| `jobs:read`        | Read job history and API-submitted jobs.                                     |
+| `jobs:start`       | Submit print jobs.                                                           |
+| `control:basic`    | Pause, resume and cancel.                                                    |
+| `control:extended` | Temperatures, fans, lights, speed, homing, filament and macros; list macros. |
+| `events:subscribe` | Manage webhook subscriptions and receive events.                             |
+| `jobs:write`       | Start a library replay on a granted printer.                                 |
+| `library:read`     | Read library files and the storage mode.                                     |
+| `library:write`    | Upload library files and set the storage mode.                               |
+| `environment:read` | Read enclosure and room environment and power measurements.                  |
+| `plates:confirm`   | Confirm that a printer's build plate is clear.                               |
+| `alerts:write`     | Acknowledge or silence alerts on granted printers.                           |
+| `camera:view`      | Open the camera view for a granted printer.                                  |
+
+Owners can grant the reserved scopes and tokens can carry them, but they
+authorize nothing until an endpoint that requires them ships (`environment:read`
+is already used by `GET /environment/measurements` and `plates:confirm` by
+`POST /jobs/{id}/actions`). Any command an
+endpoint later accepts under these scopes still travels as an issuer-signed
+envelope that the Connector enforces and may refuse with a reason.
+
 Revocations are audited and take effect on the next API request. Revoking an app
 also makes its webhook subscriptions ineligible for delivery, including events
 already waiting in the outbox.
@@ -47,6 +74,58 @@ curl -u "$CLIENT_ID:$CLIENT_SECRET" \
   "$OPENFARM_URL/api/integrations/v1/oauth/token"
 ```
 
+## Observed telemetry and health
+
+`GET /telemetry/{printerId}` requires `printers:read` on the assignment. It returns
+at most 500 observed samples over a window of at most seven days (`since` is
+inclusive and `until` exclusive, in Unix milliseconds). The default window is
+one day and default limit is 100. `truncated` signals that more observations
+exist; `until` is the end of the returned window. When timestamps tie at
+the limit, reduce the window and do not treat truncation as a complete export. State intervals use `gap` for
+offline or observations older than two minutes. Metrics include explicit units;
+missing values remain unknown. Moonraker can report layers, elapsed time,
+tool targets and chamber readings when the configured objects provide them.
+A Connector-reported run energy reading is expressed in Wh, including a
+reported zero. No current Moonraker collector reports run energy. Raw payloads and local
+camera URLs are never returned. The `events` array contains up to 500 observed
+state transitions with timestamps and states; `eventsTruncated` signals that
+additional transitions were omitted.
+
+`GET /health/{printerId}` requires the same grant and reports heartbeat freshness,
+assignment connection state and degraded reasons. `assignmentObservedAt` is
+the last successful printer observation. After two minutes, an expired
+heartbeat or a connected assignment without a successful observation is
+reported as unknown.
+Both endpoints are read-only.
+
+### Camera view
+
+`GET /camera/{printerId}` requires `camera:view` on the assignment and a
+fresh Connector heartbeat advertising its camera. The result's relative
+`url` opens on the OpenFarm origin and expires after two minutes. The
+viewer needs an authenticated OpenFarm account in that farm and a browser
+approved for direct WebRTC. Revoking the grant prevents link redemption.
+The Connector offers one camera per WebRTC session, so it advertises its
+first configured camera for this link. The stream and its credentials
+stay on the existing Connector camera path.
+
+### Alert lifecycle
+
+`GET /alerts/{printerId}` requires `printers:read`. It lists up to 500
+occurrences for the assignment, with open alerts first. Each occurrence has
+its own ID and an observed `openedAt`. An observed recovery sets
+`resolvedAt`. The latest 500 resolved occurrences per assignment are
+retained. Tracking begins with observations accepted after this update.
+Use `needsAttention` to filter the inbox. Resolution, acknowledgement or
+an active silence removes the occurrence from that inbox.
+
+`POST /alerts/{printerId}/{alertId}` requires `alerts:write` on the
+assignment. Send `{"action":"acknowledge"}` or
+`{"action":"silence","until":<Unix milliseconds>}`. Acknowledgement keeps
+the first acknowledgement timestamp. A silence can last up to seven days
+and can be extended. These actions affect the inbox and issue no printer
+commands. An occurrence that has resolved returns `404` on update.
+
 ## Read printers, state and inventory
 
 Use `GET /printers` with `printers:read`; follow the opaque `nextCursor` as
@@ -59,6 +138,55 @@ be a bounded subset of `total`. The Connector's Spoolman setup, active spool
 sources, usage calculation and read-only behaviour are described in
 [SPOOLMAN-INTEGRATION.md](SPOOLMAN-INTEGRATION.md).
 
+### Observed spool page
+
+`GET /inventory/spools` requires a farm-wide `inventory:read` grant. It
+accepts `farmId`, `limit` (1–100), and an opaque `cursor`, returning `data`
+and `nextCursor`. Each item includes the Connector, observation time, stale
+and partial flags, and one spool summary. This pages the latest bounded
+Connector observations; a partial snapshot omits spools, and a changing
+snapshot can change page membership between requests. IDs are scoped to the
+Connector's Spoolman service and may be absent in older observations.
+
+### Spool snapshot identity
+
+New Connector observations include `spoolId` for each spool. The ID belongs
+to that Connector's configured Spoolman service, not to the display name;
+older observations may omit it. The existing snapshot response retains its
+original contract; compare the number of entries with `total` to identify a
+bounded snapshot. The spool page labels each observation with `partial`.
+
+### Spool finder and run usage
+
+`GET /inventory/spools/search` and `GET /inventory/spools/usage` require a
+farm-wide `inventory:read` grant and the spool usage database runtime.
+Both accept `farmId` and `limit` (1–100, default 50).
+
+Search reads the full OpenFarm spool library. Optional filters are `color`
+(six hex digits, with an optional URL-encoded `#`), `material` (case
+insensitive), `availability` (`any`, `stored`, or `loaded`), and
+`minRemainingGrams`. Archived spools are excluded. Matches are ordered
+by Euclidean RGB distance, then farm and spool ID. Colour filtering
+excludes unknown colours and a weight threshold excludes unknown weights.
+A missing location is `null`. The response includes `assessedAt` (Unix
+milliseconds) and each active slot's `assignedAt` timestamp. Loaded
+state reflects the library's assignment ledger at query time. Physical
+find actions, label changes and bin LEDs remain in OpenFarm.
+
+Usage accepts the numeric `id` from the history endpoint `GET /jobs`
+as `jobId`, plus the optional `cursor` returned in `nextCursor`. Each
+record includes the library spool ID, the source, grams and `observedAt`
+(Unix milliseconds, the run end for telemetry and entry time otherwise).
+Corrections retain the original `usageId` and observation time, replace
+the grams and set `corrected`. Re-fetch the run to reconcile corrections
+and upsert by `(farmId, usageId)` to avoid replaying stock movements.
+Unattributed consumption has no spool ledger record.
+
+Join finder results and usage records by `(farmId, spoolId)`. Connector
+observations share that ID space when the Connector reads the farm's
+OpenFarm Spoolman-compatible library. External Spoolman IDs belong to
+their own service and can overlap with library IDs.
+
 A `GET /printers` item may carry a read-only `specs` object with what the
 Connector or printer profile reported: `buildVolumeMm` (`x`, `y`, `z` in mm),
 `nozzles` (`[{ diameterMm }]`, one per tool), `spoolSlots` (integer) and
@@ -67,10 +195,97 @@ reported, `false` only for exactly one of each). Unknown members are omitted,
 and `specs` is absent when nothing is known; values are never defaulted per
 model.
 
+## Printer readiness and qualified capabilities
+
+`GET /printers/readiness` with `printers:read` returns one page of readiness
+summaries for granted printers. Each item reports `paired` (OpenFarm has an
+assignment), `eligible` (Shop may treat the printer as ready to observe or, when
+the operation allows it, control), `observedAt` (the last observation, or null),
+`degradedReason` and `setupPath`. `setupPath` is an owner-facing path on this
+OpenFarm server, such as `/impressoras/{printerKey}?farm={farmId}`. Open it in
+OpenFarm to finish pairing or repair the printer. It is not a printer address
+and it accepts no commands.
+
+`eligible` is true only when the printer is paired, the latest observation is
+present and not degraded, and the qualified operation is `supported-control` or
+`monitoring-only`.
+
+`GET /printers/{printerId}/capabilities` returns that operation and the catalog
+evidence revision that justified it. Machine specs stay on `GET /printers` and
+are not repeated here. `operation` is one of:
+
+- `supported-control` — pause, resume and cancel are hardware-qualified for the reported firmware.
+- `monitoring-only` — telemetry is hardware-qualified and control is not. Shop can observe the printer and must not start or control a job.
+- `unknown-firmware` — the model matches a hardware-qualified catalog entry, but the reported firmware is absent or is not one of the recorded qualification versions.
+- `temporarily-unavailable` — the catalog entry has hardware evidence, and the latest observation is degraded. Wait for a newer observation. Do not resend an uncertain command.
+- `unqualified` — no hardware evidence covers this printer. Documented, simulated and unverified catalog rows do not enable operations.
+
+Degradation is considered only after hardware evidence exists, so an unqualified
+model stays `unqualified` while it is offline. Firmware is checked after
+degradation. `catalogId` is the compatibility catalog entry, or null when
+nothing matched. `evidenceRevision` is the SHA-256 of that entry's capability
+grades, hardware-report paths, sources and, when the same brand and model are in
+the fleet catalog, its evidence grades. It changes when that evidence changes.
+It does not cover build volume or other machine specs.
+
+`degradedReason` is `offline`, `reconnecting`, `error` or
+`client-certificate-missing`, and null when the latest observation is not
+degraded. A printer outside the grant answers `404 not-found`.
+
+Recorded firmware versions used for `monitoring-only` are the hardware reports
+for the Sovol SV06 (`Moonraker v0.11.0-4-gb559b9a`), the Snapmaker U1
+(`Moonraker 2.0.0`) and the Anycubic Kobra X (`2.0.2.8`). A simulator build is
+not one of those versions.
+
 Other read operations include printer files (`files:read`), macros
 (`control:extended`), job history (`jobs:read`) and individual job/action
 status. File and macro listing are answered live by the Connector and may be
 unavailable even when the printer list and status projection are readable.
+
+## Resin and environment reads
+
+Both are read-only. Switching, pairing and safety controls stay in OpenFarm and
+are never reachable through these routes.
+
+### Resin lots, vats and usage
+
+`GET /resin/lots`, `GET /resin/vats` and `GET /resin/usage` require
+`inventory:read`. They read the farm resin ledger: a farm-wide grant covers
+every printer of the farm, a printer grant only its printer. Printers without
+ledger entries are not listed. Pagination is by printer (`limit` counts printers;
+follow `nextCursor`).
+
+- Every quantity carries `source` and `observedAt`. `manual` is an operator
+  record; `measured` is what the Connector reported. `observedAt` is when that
+  ledger entry was recorded or reported.
+- Unknown stays unknown: a bottle or vat without a recorded amount has
+  `quantity: null` and `quantityState: "unknown"`. It is never `0`.
+- The ledger has no lot register: `lotRef` is the label given to the bottle.
+  The current vat (`current: true`) is the newest vat change; a reading taken
+  before that vat's latest change is not applied to it.
+- `/resin/usage` returns observed `readings` (newest first, at most 50 per
+  printer) and `runs` (the last 20 finished runs). The ledger never ties a
+  reading to a run, so each run has `consumption: { "state": "unknown" }`.
+  Consumption is not estimated and never derived from a filament slot; compare
+  measured readings and their `observedAt` yourself.
+
+### Environment measurements
+
+`GET /environment/measurements` requires `environment:read`, with the same
+grant scoping and pagination as printers. Each printer lists `temperature`,
+`humidity`, `air` and `power` measurements. A measurement is:
+
+- `known`: `value`, `unit` and `lastObservedAt`.
+- `unknown`: `reason` (`never-observed`, `offline` or `stale`) and, when
+  something was seen before, `lastObservedAt`. A reading older than 60 seconds
+  is `stale` and its old value is not returned.
+- `unsupported`: the device does not report this measurement.
+
+Today the Connector reports only the chamber fan speed (`air`, percent) to the
+farm; `temperature`, `humidity` and `power` are `unsupported` until it observes
+chamber/enclosure sensors and Moonraker sensors or power devices. Each printer
+carries its `printerId`, `farmId`, `printerKey`, `displayName` and `location`,
+so a storage warning can link to the responsible farm device.
 
 ## Start and track a job
 
@@ -90,6 +305,52 @@ optional `plate`) instead of a URL. The grant needs `jobs:start` and
 return the farm's storage mode. `POST /library` stores the file in that mode,
 and `PATCH /library/settings` (`library:write`) changes it. The Connector
 prints the stored file and refuses a printer the file does not fit.
+
+### Plate checks at dispatch
+
+Read `GET /jobs/{jobId}/eligibility?printerId={printerId}` for an advisory
+eligibility decision and its reasons. Use
+`GET /jobs/{jobId}/plate?printerId={printerId}` for the plate observation alone.
+Both reads accept `jobs:read` or `jobs:start` and require the job's assigned
+printer. For Moonraker, the Connector combines live printer state with its
+collection journal. The plate state is `awaiting-collection`,
+`operator-confirmed`, or `unknown`. An available attempt ID identifies the
+journal entry. Eligibility requires a pending job, an idle printer and a
+confirmed plate. For a stopped Moonraker printer with no collection history,
+the read reports `unknown` with attempt ID `0`. An operator can inspect and
+clear the bed, then acknowledge that initial attempt before the first API
+start.
+
+For a signed start, the Connector checks its local collection journal before
+staging the file and again at the printer send boundary. A start refused with
+`wrong-state` may include `awaiting-collection` when a completed run still
+requires plate clearance, or `plate-state-uncertain` when the Connector cannot
+establish clearance from its journal. Resolve the plate state locally before
+submitting another start.
+
+### Acknowledge plate clearance or control a job run
+
+Send `POST /jobs/{jobId}/actions` with an `Idempotency-Key` and JSON.
+The job must belong to the calling integration, and the grant must cover its
+assigned printer. A grant that requires operator approval holds the action.
+
+- For plate clearance, use `plates:confirm` and send
+  `{"action":"confirm_collection","args":{"attempt":"<attemptId>"}}` after an
+  operator clears the bed. Take the attempt ID from the plate read for the
+  assigned printer. The Connector records the acknowledgement while the
+  printer is stopped. Confirming the current collected attempt again is safe.
+  An older attempt cannot release a newer hold. The refusal details are
+  `plate-attempt-mismatch` and `plate-state-uncertain`.
+- For job control, use `control:basic` and send `pause`, `resume`, or `cancel`
+  with `"args":{}`. The Farm binds the command to that job's original start
+  envelope. The Moonraker Connector checks the active run immediately before
+  dispatch and reports `already-ended` for a stopped printer or
+  `run-mismatch` when it cannot verify that the active run is the expected one.
+
+Follow the response's `Location` to read the action result. Reuse the same
+idempotency key and request to retrieve the existing action, including after
+a lost response. An `outcome-unknown` requires reconciliation before making
+another request. The service never automatically retries an uncertain write.
 
 ## Request actions
 

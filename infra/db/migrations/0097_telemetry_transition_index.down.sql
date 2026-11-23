@@ -1,0 +1,1 @@
+DROP INDEX farm.integration_telemetry_transition_history;

@@ -21,11 +21,46 @@ const storedJob = z.object({
   running: z.boolean(),
   duration: z.number().nonnegative().optional(),
   firstActiveAt: z.number().int().nonnegative().optional(),
+  sourceStartedAt: z.number().nonnegative().optional(),
   jobId: z.string().optional(),
   end: ending.optional(),
   startedSent: z.boolean(),
 })
 type Job = z.infer<typeof storedJob>
+export type ApiRunEvidence = Readonly<{
+  filename?: string | undefined
+  duration?: number | undefined
+  info?: unknown
+  sourceTime: number
+}>
+
+function moonrakerJobId(info: unknown) {
+  return info &&
+    typeof info === 'object' &&
+    'job_id' in info &&
+    typeof info.job_id === 'string'
+    ? info.job_id
+    : undefined
+}
+
+// Both fields use the printer's monotonic clock, avoiding network and wall clock skew.
+function sourceStart(
+  sourceTime: number | undefined,
+  duration: number | undefined,
+) {
+  if (
+    sourceTime === undefined ||
+    duration === undefined ||
+    duration > sourceTime
+  )
+    return undefined
+  return sourceTime - duration
+}
+
+function sameStart(a: number, b: number) {
+  return Math.abs(a - b) <= 0.000001
+}
+
 type Watch = {
   job: Job
   sentMono: number
@@ -218,14 +253,7 @@ export function openApiJobLifecycle(
       const at = value.printer.observedAt
       if (at < job.sentAt) return
       const stats = value.status.print_stats
-      const info = stats.info
-      const id =
-        info &&
-        typeof info === 'object' &&
-        'job_id' in info &&
-        typeof info.job_id === 'string'
-          ? info.job_id
-          : undefined
+      const id = moonrakerJobId(stats.info)
       const duration =
         typeof stats.total_duration === 'number' &&
         Number.isFinite(stats.total_duration) &&
@@ -233,6 +261,11 @@ export function openApiJobLifecycle(
           ? stats.total_duration
           : undefined
       const sameId = id !== undefined && id === job.jobId
+      const sourceStartedAt = sourceStart(value.durationSourceTime, duration)
+      const sameSource =
+        job.sourceStartedAt !== undefined &&
+        sourceStartedAt !== undefined &&
+        sameStart(job.sourceStartedAt, sourceStartedAt)
       if (stats.state === 'printing' || stats.state === 'paused') {
         if (
           stats.filename !== job.filename ||
@@ -243,6 +276,7 @@ export function openApiJobLifecycle(
           (job.running &&
             !watch.continuous &&
             !sameId &&
+            !sameSource &&
             (duration === undefined ||
               job.firstActiveAt === undefined ||
               at - duration * 1000 > job.firstActiveAt + 2000)) ||
@@ -263,6 +297,9 @@ export function openApiJobLifecycle(
             ...job,
             running: true,
             firstActiveAt: job.firstActiveAt ?? at,
+            sourceStartedAt: job.running
+              ? job.sourceStartedAt
+              : sourceStartedAt,
             jobId: id ?? job.jobId,
             duration,
           })
@@ -282,6 +319,33 @@ export function openApiJobLifecycle(
       ) {
         finish(watch, unknown, at)
       }
+    },
+    matchesActiveRun(
+      printerKey: string,
+      cmdId: string,
+      evidence: ApiRunEvidence,
+    ) {
+      const watch = watches.get(printerKey)
+      if (
+        !watch?.confirmed ||
+        !watch.continuous ||
+        watch.dirty ||
+        !watch.job.running ||
+        watch.job.end ||
+        watch.job.cmdId !== cmdId ||
+        watch.job.filename !== evidence.filename
+      )
+        return false
+      const job = watch.job
+      const id = moonrakerJobId(evidence.info)
+      if (job.jobId !== undefined || id !== undefined)
+        return id !== undefined && job.jobId === id
+      const startedAt = sourceStart(evidence.sourceTime, evidence.duration)
+      return (
+        startedAt !== undefined &&
+        job.sourceStartedAt !== undefined &&
+        sameStart(startedAt, job.sourceStartedAt)
+      )
     },
     hasRunning(printerKey: string) {
       const job = watches.get(printerKey)?.job

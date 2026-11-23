@@ -35,7 +35,7 @@ import { pauseFixture } from '../../packages/connector/test/moonraker-pause-fixt
 import { startAnycubicSimulator } from '../../packages/sim-tools/src/anycubic-simulator.ts'
 import { startBambuSimulator } from '../../packages/sim-tools/src/bambu-simulator.ts'
 
-// Loopback fixtures only: the Moonraker fixture and the Bambu simulator. The
+// Loopback fixtures only: the Moonraker fixture and the Bambu and Anycubic simulators. The
 // authority, capability and command are synthetic, exactly as in
 // control-actions.test.ts; nothing here reaches a physical printer.
 type Action = ExtendedControlAction
@@ -421,21 +421,25 @@ async function world(
     dispatcher: active,
     printerBinding,
     signed,
-    async dispatch(followup?: { action: Action; args: Args }) {
+    dispatch: () =>
+      active.dispatch({
+        wire: encodeCommandV2(signed),
+        capability: accepted.handle,
+        printerBinding,
+      }),
+    async dispatchFollowup(followup: { action: Action; args: Args }) {
       const now = Date.now()
-      const next = followup
-        ? await signCommandV2(
-            {
-              ...f.command,
-              ...followup,
-              cmd_id: randomUUID(),
-              nonce: randomBytes(16).toString('base64url'),
-              issued_at: now,
-              expires_at: now + 5000,
-            },
-            f.pair.privateKey,
-          )
-        : signed
+      const next = await signCommandV2(
+        {
+          ...f.command,
+          ...followup,
+          cmd_id: randomUUID(),
+          nonce: randomBytes(16).toString('base64url'),
+          issued_at: now,
+          expires_at: now + 5000,
+        },
+        f.pair.privateKey,
+      )
       return active.dispatch({
         wire: encodeCommandV2(next),
         capability: accepted.handle,
@@ -492,7 +496,10 @@ test('Anycubic refuses a package start before sending and leaves later commands 
   assert.ok(f.anycubic)
   const refusal = await f.dispatch()
   assert.deepEqual(f.anycubic.calls.all, [])
-  const next = await f.dispatch({ action: 'set_light', args: { on: true } })
+  const next = await f.dispatchFollowup({
+    action: 'set_light',
+    args: { on: true },
+  })
   assert.deepEqual(
     {
       refusal,

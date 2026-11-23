@@ -6,7 +6,7 @@ import {
   randomBytes,
   randomUUID,
 } from 'node:crypto'
-import { mkdtemp, readdir, rm } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:http'
@@ -55,7 +55,7 @@ import { createPauseDriverRouter } from '../../packages/connector/src/runtime/pa
 import { createCrealitySimulator } from '../../packages/sim-tools/src/creality-simulator.ts'
 import { startAnycubicSimulator } from '../fixtures/anycubic-files.ts'
 import { startAnycubicSimulator as startAnycubicFileSimulator } from '../../packages/sim-tools/src/anycubic-simulator.ts'
-import { readFile, writeFile } from 'node:fs/promises'
+import { writeFile } from 'node:fs/promises'
 import type { KobraLinkFetch } from '../../packages/connector/src/kobralink/client.ts'
 
 type Native = typeof import('node-datachannel')

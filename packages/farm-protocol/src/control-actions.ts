@@ -1,5 +1,11 @@
 import { z } from 'zod'
 
+export const ToolIndex = z.literal([0, 1, 2, 3])
+export const ToolTemperatureArgs = z.strictObject({
+  tool: ToolIndex,
+  target_c: z.number().int().nonnegative(),
+})
+
 export const SpeedMode = z.enum(['silent', 'standard', 'sport', 'ludicrous'])
 export type SpeedMode = z.infer<typeof SpeedMode>
 export const SpeedModes = z
@@ -31,6 +37,7 @@ export const ExtendedControlAction = z.enum([
   ...ControlAction.options,
   'emergency_stop',
   'set_temperature',
+  'set_tool_temperature',
   'set_fan',
   'home',
   'set_light',
@@ -74,6 +81,10 @@ export const ControlResultCode = z.enum([
   'cache-full',
   'local-file-missing',
   'awaiting-collection',
+  'tool-state-stale',
+  'tool-printer-not-idle',
+  'tool-heater-not-advertised',
+  'tool-temperature-above-maximum',
 ])
 export type ControlResultCode = z.infer<typeof ControlResultCode>
 export const MOONRAKER_CONTROLS: readonly ControlAction[] = Object.freeze([
@@ -227,6 +238,7 @@ export function controlRoleAllowed(
 /** Motion, filament, macros and job starts never run while a print owns the printer. */
 export const IDLE_ONLY_CONTROL_ACTIONS: ReadonlySet<string> = new Set([
   'home',
+  'set_tool_temperature',
   'load_filament',
   'unload_filament',
   'run_macro',
@@ -248,6 +260,7 @@ export function controlSourceState(
   state: string,
 ): boolean {
   if (controlPrinterBusy(action, state)) return false
+  if (action === 'set_tool_temperature') return state === 'idle'
   if (action === 'exclude_object')
     return state === 'printing' || state === 'paused'
   if (action === 'emergency_stop') return true
@@ -464,6 +477,10 @@ export const ControlArguments = z.discriminatedUnion('action', [
       speed_pct: z.number().int().min(10).max(300),
       flow_pct: z.number().int().min(50).max(150),
     }),
+  }),
+  z.strictObject({
+    action: z.literal('set_tool_temperature'),
+    args: ToolTemperatureArgs,
   }),
   z.strictObject({
     action: z.literal('set_temperature'),

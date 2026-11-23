@@ -5,8 +5,10 @@ import { controlActionAvailability, type Clock } from '../utils/farm-control.ts'
 import {
   advertisedExtended,
   buildExtendedArgs,
+  buildToolTemperatureArgs,
   extendedLabel,
   speedModeOptions,
+  toolHeaterOptions,
   unsupportedExtended,
   type FarmExtendedAction,
 } from '../utils/farm-control-extended.ts'
@@ -27,7 +29,11 @@ const emit = defineEmits<{
   ): void
 }>()
 const actions = computed(() =>
-  advertisedExtended(props.row.observation?.state.controls),
+  advertisedExtended(props.row.observation?.state.controls).filter(
+    (action) =>
+      action !== 'set_tool_temperature' ||
+      (props.row.observation?.state.toolHeaters?.length ?? 0) > 0,
+  ),
 )
 const unsupported = computed(() =>
   unsupportedExtended(props.row.observation?.state.controls),
@@ -38,6 +44,9 @@ const choices = reactive<Record<string, string>>({
   set_light: 'on',
   set_speed: 'standard',
 })
+const toolHeaters = computed(() =>
+  toolHeaterOptions(props.row.observation?.state.toolHeaters),
+)
 const speedOptions = computed(() =>
   speedModeOptions(props.row.observation?.state.speedModes),
 )
@@ -54,6 +63,15 @@ const values = reactive<Record<string, string | number>>({
   set_temperature: '',
   set_fan: '',
 })
+function toolArgs(heater: (typeof toolHeaters.value)[number]) {
+  return buildToolTemperatureArgs(heater, values[`tool-${heater.tool}`] ?? '')
+}
+function submitTool(heater: (typeof toolHeaters.value)[number], event: Event) {
+  const args = toolArgs(heater)
+  const action = 'set_tool_temperature'
+  if (args && available(action) && !props.commandInFlight)
+    emit('action', action, args, event)
+}
 function available(action: FarmExtendedAction) {
   return controlActionAvailability(
     action,
@@ -94,6 +112,30 @@ function submit(action: FarmExtendedAction, event: Event) {
           <option value="chamber">Câmara</option>
         </select></label
       >
+      <template v-if="action === 'set_tool_temperature'">
+        <div v-for="heater in toolHeaters" :key="heater.tool">
+          <label
+            >{{ heater.label }} — Temperatura em °C
+            <input
+              v-model="values[`tool-${heater.tool}`]"
+              type="number"
+              min="0"
+              step="1"
+              :max="heater.maxC"
+              :disabled="!available(action) || commandInFlight"
+            />
+          </label>
+          <button
+            type="button"
+            :disabled="
+              !available(action) || commandInFlight || !toolArgs(heater)
+            "
+            @click="submitTool(heater, $event)"
+          >
+            Definir temperatura
+          </button>
+        </div>
+      </template>
       <label v-if="action === 'set_fan'"
         >Ventilador
         <select
@@ -151,6 +193,7 @@ function submit(action: FarmExtendedAction, event: Event) {
         </select></label
       >
       <button
+        v-if="action !== 'set_tool_temperature'"
         type="button"
         :class="{ emergency: action === 'emergency_stop' }"
         :disabled="

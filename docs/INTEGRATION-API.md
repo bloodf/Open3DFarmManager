@@ -24,7 +24,7 @@ Owners can grant one or more scopes across a farm or limit them to a printer ass
 
 | Scope              | Grants                                                                            |
 | ------------------ | --------------------------------------------------------------------------------- |
-| `printers:read`    | Read printers and their status.                                                   |
+| `printers:read`    | Read printers, their status, readiness and qualified capabilities.                |
 | `files:read`       | List files stored on printers.                                                    |
 | `inventory:read`   | Read Spoolman inventory snapshots and the resin ledger (lots, vats, usage).       |
 | `jobs:read`        | Read job history and API-submitted jobs.                                          |
@@ -92,6 +92,48 @@ Connector or printer profile reported: `buildVolumeMm` (`x`, `y`, `z` in mm),
 reported, `false` only for exactly one of each). Unknown members are omitted,
 and `specs` is absent when nothing is known; values are never defaulted per
 model.
+
+## Printer readiness and qualified capabilities
+
+`GET /printers/readiness` with `printers:read` returns one page of readiness
+summaries for granted printers. Each item reports `paired` (OpenFarm has an
+assignment), `eligible` (Shop may treat the printer as ready to observe or, when
+the operation allows it, control), `observedAt` (the last observation, or null),
+`degradedReason` and `setupPath`. `setupPath` is an owner-facing path on this
+OpenFarm server, such as `/impressoras/{printerKey}?farm={farmId}`. Open it in
+OpenFarm to finish pairing or repair the printer. It is not a printer address
+and it accepts no commands.
+
+`eligible` is true only when the printer is paired, the latest observation is
+present and not degraded, and the qualified operation is `supported-control` or
+`monitoring-only`.
+
+`GET /printers/{printerId}/capabilities` returns that operation and the catalog
+evidence revision that justified it. Machine specs stay on `GET /printers` and
+are not repeated here. `operation` is one of:
+
+- `supported-control` — pause, resume and cancel are hardware-qualified for the reported firmware.
+- `monitoring-only` — telemetry is hardware-qualified and control is not. Shop can observe the printer and must not start or control a job.
+- `unknown-firmware` — the model matches a hardware-qualified catalog entry, but the reported firmware is absent or is not one of the recorded qualification versions.
+- `temporarily-unavailable` — the catalog entry has hardware evidence, and the latest observation is degraded. Wait for a newer observation. Do not resend an uncertain command.
+- `unqualified` — no hardware evidence covers this printer. Documented, simulated and unverified catalog rows do not enable operations.
+
+Degradation is considered only after hardware evidence exists, so an unqualified
+model stays `unqualified` while it is offline. Firmware is checked after
+degradation. `catalogId` is the compatibility catalog entry, or null when
+nothing matched. `evidenceRevision` is the SHA-256 of that entry's capability
+grades, hardware-report paths, sources and, when the same brand and model are in
+the fleet catalog, its evidence grades. It changes when that evidence changes.
+It does not cover build volume or other machine specs.
+
+`degradedReason` is `offline`, `reconnecting`, `error` or
+`client-certificate-missing`, and null when the latest observation is not
+degraded. A printer outside the grant answers `404 not-found`.
+
+Recorded firmware versions used for `monitoring-only` are the hardware reports
+for the Sovol SV06 (`Moonraker v0.11.0-4-gb559b9a`), the Snapmaker U1
+(`Moonraker 2.0.0`) and the Anycubic Kobra X (`2.0.2.8`). A simulator build is
+not one of those versions.
 
 Other read operations include printer files (`files:read`), macros
 (`control:extended`), job history (`jobs:read`) and individual job/action

@@ -4,6 +4,7 @@ import {
   type ControlLimits,
 } from '../runtime/control-limits.ts'
 import {
+  speedModeAllowed,
   controlPrinterBusy,
   controlSourceState,
   controlRoleAllowed,
@@ -11,6 +12,7 @@ import {
   ControlResultCode,
   type ControlAction,
   type ExtendedControlAction,
+  type SpeedMode,
 } from '../../../farm-protocol/src/control-actions.ts'
 import { createHash } from 'node:crypto'
 import {
@@ -173,6 +175,7 @@ export interface PauseDriver {
   macros?(binding: PrinterBinding): readonly string[] | undefined
   macroParams?(binding: PrinterBinding): MacroParamMap | undefined
   controls?(binding: PrinterBinding): readonly ExtendedControlAction[]
+  speedModes?(binding: PrinterBinding): readonly SpeedMode[] | undefined
   pauseOnce(input: {
     args?: Record<string, unknown>
     action?: ControlAction
@@ -255,6 +258,7 @@ export function createPauseDispatcher(config: {
   const driver = Object.freeze({
     execute: config.driver.execute?.bind(config.driver),
     controls: config.driver.controls?.bind(config.driver),
+    speedModes: config.driver.speedModes?.bind(config.driver),
     macros: config.driver.macros?.bind(config.driver),
     macroParams: config.driver.macroParams?.bind(config.driver),
     prepare: config.driver.prepare.bind(config.driver),
@@ -571,6 +575,14 @@ export function createPauseDispatcher(config: {
           !controlRoleAllowed(cap.role, command.action)
         )
           return 'scope'
+        if (
+          command.action === 'set_speed' &&
+          !speedModeAllowed(
+            driver.speedModes?.(printerBinding),
+            command.args.level,
+          )
+        )
+          return 'unsupported-action'
         if (
           command.action === 'run_macro' &&
           (typeof command.args.name !== 'string' ||

@@ -1,5 +1,6 @@
 import {
   ControlArguments,
+  SpeedMode,
   type ExtendedControlAction,
 } from '../../../../packages/farm-protocol/src/control-actions.ts'
 
@@ -110,4 +111,16 @@ export function requiresExtendedConfirmation(
   action: FarmExtendedAction,
 ): boolean {
   return ['home', 'firmware_restart', 'emergency_stop'].includes(action)
+}
+
+export function speedModeOptions(modes: readonly SpeedMode[] | undefined) {
+  const labels: Record<SpeedMode, string> = {
+    silent: 'Silenciosa',
+    standard: 'Padrão',
+    sport: 'Esportiva',
+    ludicrous: 'Máxima',
+  }
+  return SpeedMode.options
+    .filter((mode) => modes === undefined || modes.includes(mode))
+    .map((value) => ({ value, label: labels[value] }))
 }

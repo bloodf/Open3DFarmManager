@@ -103,6 +103,8 @@ describe('integration API v1 OpenAPI spec', () => {
         '/printers/{printerId}/jobs',
         '/printers/{printerId}/actions',
         '/environment/measurements',
+        '/health/{printerId}',
+        '/telemetry/{printerId}',
         '/inventory',
         '/library',
         '/library/settings',

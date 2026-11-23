@@ -2945,6 +2945,7 @@ components:
             - reconnecting
             - error
             - client-certificate-missing
+            - stale
             - null
         setupPath:
           type: string

@@ -165,16 +165,16 @@ describe('Cofre3D integration scopes', () => {
       ).toBeUndefined()
   })
 
-  test('migration 0101 extends the DB scope check with a guarded rollback', async () => {
+  test('migration 0103 extends the DB scope check with a guarded rollback', async () => {
     const catalog = await loadMigrationCatalog()
-    expect(catalog[100]?.id).toBe('0101_integration_cofre3d_scopes_2')
+    expect(catalog[102]?.id).toBe('0103_integration_cofre3d_scopes_2')
     const dir = new URL('../../infra/db/migrations/', import.meta.url)
     const up = await readFile(
-      new URL('0101_integration_cofre3d_scopes_2.up.sql', dir),
+      new URL('0103_integration_cofre3d_scopes_2.up.sql', dir),
       'utf8',
     )
     const down = await readFile(
-      new URL('0101_integration_cofre3d_scopes_2.down.sql', dir),
+      new URL('0103_integration_cofre3d_scopes_2.down.sql', dir),
       'utf8',
     )
     const quoted = INTEGRATION_SCOPES.map((scope) => `'${scope}'`).join(',')

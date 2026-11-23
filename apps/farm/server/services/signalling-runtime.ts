@@ -778,7 +778,12 @@ export class SignallingRuntime {
               )
             : await openReadOnlyNegotiation(
                 this.#coordinator,
-                scope,
+                {
+                  ...scope,
+                  ...(control.camera_printer_id
+                    ? { cameraPrinterId: control.camera_printer_id }
+                    : {}),
+                },
                 this.#endpoint(connection),
               )
         if (!opened || !this.#owned(connection)) {

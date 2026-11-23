@@ -32,7 +32,13 @@ test('bound Anycubic listing and multipart upload use the documented LAN wire', 
       credentials: { username: 'synthetic', password: 'synthetic' },
     })
     try {
-      const bind = (changes: { modelId?: string; uploadPort?: number } = {}) =>
+      const bind = (
+        changes: {
+          modelId?: string
+          uploadPort?: number
+          username?: string
+        } = {},
+      ) =>
         provisionAnycubicPrinter(
           {
             assignment_id: randomUUID(),
@@ -86,8 +92,15 @@ test('bound Anycubic listing and multipart upload use the documented LAN wire', 
         }),
         { message: 'unsupported' },
       )
+      await assert.rejects(
+        uploadAnycubicFile({
+          ...upload,
+          binding: bind({ username: 'invalid' }),
+        }),
+        { message: 'offline' },
+      )
       sim.setPrintProgress(25)
-      await assert.rejects(uploadAnycubicFile(upload), { message: 'offline' })
+      await assert.rejects(uploadAnycubicFile(upload), { message: 'busy' })
       sim.finishPrint()
       assert.equal(sim.uploadCount, 0)
       assert.deepEqual(await listAnycubicFiles(input), [])
@@ -99,6 +112,14 @@ test('bound Anycubic listing and multipart upload use the documented LAN wire', 
         size: (await stat(filePath)).size,
       })
       assert.ok(file && file.modified > 0)
+      assert.equal(file.printUnsupported, true)
+      sim.upload('part.gcode', Buffer.from('G28\n'))
+      const listed = await listAnycubicFiles(input)
+      assert.equal(listed.length, 2)
+      const gcode = listed.find((entry) => entry.name === 'part.gcode')
+      assert.ok(gcode)
+      assert.equal(gcode.size, Buffer.byteLength('G28\n'))
+      assert.equal(gcode.printUnsupported, undefined)
       assert.equal(sim.lifecycle.state, 'finished')
     } finally {
       await sim.close()

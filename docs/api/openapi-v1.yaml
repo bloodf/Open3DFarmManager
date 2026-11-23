@@ -1615,7 +1615,7 @@ paths:
       security:
         - clientCredentials: ['library:read']
       parameters:
-        - $ref: '#/components/parameters/FarmIdFilter'
+        - $ref: '#/components/parameters/RequiredFarmId'
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
       responses:
@@ -1710,7 +1710,7 @@ paths:
       security:
         - clientCredentials: ['library:read']
       parameters:
-        - $ref: '#/components/parameters/FarmIdFilter'
+        - $ref: '#/components/parameters/RequiredFarmId'
       responses:
         '200':
           description: The farm's library settings.
@@ -2561,12 +2561,14 @@ paths:
                         from:
                           {
                             type: string,
-                            enum: [idle, printing, paused, error, offline],
+                            enum:
+                              [idle, printing, paused, error, offline, unknown],
                           }
                         to:
                           {
                             type: string,
-                            enum: [idle, printing, paused, error, offline],
+                            enum:
+                              [idle, printing, paused, error, offline, unknown],
                           }
                   intervals:
                     type: array
@@ -2579,7 +2581,7 @@ paths:
                         state:
                           {
                             type: string,
-                            enum: [idle, printing, paused, error, gap],
+                            enum: [idle, printing, paused, error, gap, unknown],
                           }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
@@ -2966,6 +2968,13 @@ components:
       name: farmId
       in: query
       description: Only results from this farm.
+      schema:
+        $ref: '#/components/schemas/Uuid'
+    RequiredFarmId:
+      name: farmId
+      in: query
+      required: true
+      description: The farm covered by the grant.
       schema:
         $ref: '#/components/schemas/Uuid'
     Cursor:

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import Button from '../../components/ui/Button.vue'
 import EmptyState from '../../components/ui/EmptyState.vue'
 import ErrorState from '../../components/ui/ErrorState.vue'
@@ -33,15 +33,15 @@ const canWrite = ref(false)
 const assignments = ref<SlotAssignment[] | null>(null)
 const filters = ref<FinderFilters>({ ...EMPTY_FINDER_FILTERS })
 
-async function load(id: string, current: () => boolean) {
+async function load(id: string, current: () => boolean, signal: AbortSignal) {
   assignments.value = null
   const [list, slots] = await Promise.all([
-    loadFinderSpools(id, current, fetchSpools),
-    featureFetch<{ assignments: SlotAssignment[] }>(id, 'slots').catch(
-      () => null,
-    ),
+    loadFinderSpools(id, current, (farm) => fetchSpools(farm, signal)),
+    featureFetch<{ assignments: SlotAssignment[] }>(id, 'slots', {
+      signal,
+    }).catch(() => null),
   ])
-  if (!list) return
+  if (!list || !current()) return
   spools.value = list.items
   canWrite.value = list.canWrite
   assignments.value = slots?.assignments ?? null
@@ -116,6 +116,28 @@ const scanLabel = ref('')
 const scanning = ref(false)
 const scanOutcome = ref<{ kind: 'ok' | 'error'; message: string } | null>(null)
 const labelInput = ref<HTMLInputElement | null>(null)
+let generation = 0
+let scanController = new AbortController()
+watch(
+  farmId,
+  () => {
+    generation++
+    scanController.abort()
+    scanController = new AbortController()
+    spools.value = []
+    assignments.value = null
+    canWrite.value = false
+    scanOutcome.value = null
+    scanLabel.value = ''
+    scanLocation.value = ''
+    scanning.value = false
+  },
+  { flush: 'sync' },
+)
+onBeforeUnmount(() => {
+  generation++
+  scanController.abort()
+})
 
 async function scan() {
   if (scanning.value) return
@@ -135,6 +157,11 @@ async function scan() {
     }
     return
   }
+  const id = farmId.value
+  const currentGeneration = generation
+  const signal = scanController.signal
+  const current = () =>
+    id === farmId.value && currentGeneration === generation && !signal.aborted
   scanning.value = true
   scanOutcome.value = null
   try {
@@ -143,18 +170,21 @@ async function scan() {
       spoolId: number
       to: string
       message: string
-    }>(`/api/spool-finder/${farmId.value}/scan`, {
+    }>(`/api/spool-finder/${id}/scan`, {
       method: 'POST',
+      signal,
       body: { label, location },
       retry: 0,
       timeout: 15_000,
     })
+    if (!current()) return
     spools.value = spools.value.map((spool) =>
       spool.id === result.spoolId ? { ...spool, location: result.to } : spool,
     )
     scanOutcome.value = { kind: 'ok', message: result.message }
     scanLabel.value = ''
   } catch (cause) {
+    if (!current()) return
     scanOutcome.value = {
       kind: 'error',
       message: extractApiError(
@@ -163,9 +193,11 @@ async function scan() {
       ).message,
     }
   } finally {
-    scanning.value = false
-    await nextTick()
-    labelInput.value?.focus()
+    if (current()) {
+      scanning.value = false
+      await nextTick()
+      if (current()) labelInput.value?.focus()
+    }
   }
 }
 </script>

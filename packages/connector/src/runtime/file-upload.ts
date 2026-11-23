@@ -48,6 +48,7 @@ export type FileUploadResult =
       transfer_id: string
       ok: true
       library?: true | undefined
+      printUnsupported?: true | undefined
     }
   | {
       type: 'result'
@@ -60,6 +61,7 @@ export type FileUploadResult =
         | 'timeout'
         | 'aborted'
         | 'offline'
+        | 'busy'
         | 'invalid-transfer'
     }
 export function supportsFileUpload(
@@ -165,6 +167,7 @@ export function createFileUpload(
   async function process(raw: unknown) {
     let forwarding = false
     let library = false
+    let printUnsupported = false
     try {
       if (!offer) {
         if (used || typeof raw !== 'string' || raw.length > 2048)
@@ -233,6 +236,7 @@ export function createFileUpload(
         }
         forwarding = true
         library = target.backend === 'kobralink'
+        printUnsupported = target.backend === 'anycubic'
         await uploadFile({
           target,
           filePath,
@@ -247,6 +251,7 @@ export function createFileUpload(
         transfer_id: offer.transfer_id,
         ok: true,
         ...(library ? { library: true as const } : {}),
+        ...(printUnsupported ? { printUnsupported: true as const } : {}),
       } satisfies FileUploadResult)
     } catch (error) {
       await transfer?.abort()
@@ -256,9 +261,13 @@ export function createFileUpload(
         : error instanceof MoonrakerUploadError
           ? error.reason
           : error instanceof Error &&
-              ['unauthorized', 'offline', 'aborted', 'unsupported'].includes(
-                error.message,
-              )
+              [
+                'unauthorized',
+                'offline',
+                'aborted',
+                'unsupported',
+                'busy',
+              ].includes(error.message)
             ? error.message
             : forwarding
               ? 'offline'

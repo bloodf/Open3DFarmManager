@@ -12,7 +12,7 @@ import {
   validateLibraryUpload,
   type StorageMode,
 } from '../../utils/library-view.ts'
-import { printableFile } from '../../utils/files-view.ts'
+import { printableEntry } from '../../utils/files-view.ts'
 
 const props = defineProps<{
   printerKey: string
@@ -280,7 +280,7 @@ onBeforeUnmount(session.cancel)
       /></label>
       <button
         type="button"
-        :disabled="!printableFile(selected)"
+        :disabled="!selectedFile || !printableEntry(selectedFile)"
         @click="emit('print', selected, $event)"
       >
         Iniciar impressão

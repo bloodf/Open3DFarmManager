@@ -92,6 +92,12 @@ export type JourneyOptions = Readonly<{
   moonraker?: Readonly<{
     initial?: Partial<PrinterModel>
     mock?: Omit<MoonrakerMockOptions, 'initial'>
+    /**
+     * The model the Connector's private collector configuration declares for
+     * the printer (`model` in the printer entry). "Snapmaker U1" opts it into
+     * the U1 tool mapping and command capability set.
+     */
+    declaredModel?: string
   }>
   /**
    * Stores Connector telemetry on the server for the whole journey (the
@@ -761,9 +767,11 @@ export async function startJourneyHarness(
       audience: AUDIENCE,
       claim,
       assignmentRefs,
-      ...(options.moonraker?.mock?.profile === 'u1'
-        ? { model: 'Snapmaker U1' }
-        : {}),
+      ...(options.moonraker?.declaredModel
+        ? { model: options.moonraker.declaredModel }
+        : options.moonraker?.mock?.profile === 'u1'
+          ? { model: 'Snapmaker U1' }
+          : {}),
       ...(multiMoonraker ? { runtime: multiMoonraker } : {}),
       ...(vendor
         ? {
@@ -788,6 +796,18 @@ export async function startJourneyHarness(
       expect(response?.status()).toBe(200)
       await expect(
         page.getByRole('heading', { name: 'Minha farm', exact: true }),
+      ).toBeVisible()
+      // The wall lists one tile per printer; its card (the row) lives in the
+      // inspector, so open it before returning the row.
+      const tile = page.getByRole('button', {
+        name: new RegExp(
+          '^Inspecionar ' + printerKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+        ),
+      })
+      await expect(tile).toBeVisible({ timeout: 60_000 })
+      await tile.click()
+      await expect(
+        page.getByRole('dialog', { name: 'Inspeção da impressora' }),
       ).toBeVisible()
       return farmRow(page)
     }

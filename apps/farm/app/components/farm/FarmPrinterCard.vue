@@ -145,7 +145,11 @@ function dateLabel(time: number) {
           {{ dateLabel(row.observation.received.wall) }}.
         </p>
         <p v-if="observationAge(row.observation, liveNow()).sourceConfirmed">
-          Observado pelo Connector em
+          {{
+            row.observation.state.preformStatus
+              ? 'Consultado no PreForm em'
+              : 'Observado pelo Connector em'
+          }}
           {{ dateLabel(row.observation.state.observedAt) }}. Idade da observação
           estimada a partir do relógio do Connector.
         </p>

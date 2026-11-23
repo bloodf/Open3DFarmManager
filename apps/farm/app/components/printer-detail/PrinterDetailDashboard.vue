@@ -43,7 +43,7 @@ const props = defineProps<{
   bedMesh?: { mesh?: BedMeshData; availability: MeshAvailabilityMap }
   name: string
   stateLabel: string
-  stateTone: 'idle' | 'printing' | 'paused' | 'error' | 'offline'
+  stateTone: 'idle' | 'printing' | 'paused' | 'error' | 'offline' | 'stale'
   connectorLabel: string
   /** True only with a current direct connection; otherwise the page is read-only. */
   live: boolean

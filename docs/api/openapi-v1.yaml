@@ -1319,6 +1319,127 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /inventory/spools/physical:
+    post:
+      operationId: registerPhysicalSpool
+      tags: [Inventory]
+      summary: Register a physical spool
+      description: Creates a spool using an existing filament in the farm-wide grant. Identical registrations create distinct physical spools.
+      security:
+        - clientCredentials: ['inventory:write']
+      parameters:
+        - $ref: '#/components/parameters/PhysicalSpoolFarmId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhysicalSpoolRegistration'
+      responses:
+        '201':
+          description: Physical spool and its label link.
+          headers:
+            Location:
+              description: API resource URI. Reading it requires inventory:read.
+              schema: { type: string, format: uri-reference }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhysicalSpool'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /inventory/spools/physical/{spoolId}:
+    get:
+      operationId: readPhysicalSpool
+      tags: [Inventory]
+      summary: Look up a physical spool
+      description: Returns the library location and a version for guarded withdrawal. Archived spools are excluded.
+      security:
+        - clientCredentials: ['inventory:read']
+      parameters:
+        - $ref: '#/components/parameters/PhysicalSpoolFarmId'
+        - $ref: '#/components/parameters/PhysicalSpoolId'
+      responses:
+        '200':
+          description: Physical spool and its label link.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhysicalSpool'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /inventory/spools/physical/{spoolId}/withdraw:
+    post:
+      operationId: withdrawPhysicalSpool
+      tags: [Inventory]
+      summary: Withdraw a spool from its expected bin
+      description: Clears the location only if the supplied location and version still match. A spool with no known location is left untouched.
+      security:
+        - clientCredentials: ['inventory:write']
+      parameters:
+        - $ref: '#/components/parameters/PhysicalSpoolFarmId'
+        - $ref: '#/components/parameters/PhysicalSpoolId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhysicalSpoolWithdrawal'
+      responses:
+        '200':
+          description: Physical spool after withdrawal or with no known location.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhysicalSpoolWithdrawalResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          $ref: '#/components/responses/PhysicalSpoolChanged'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /inventory/spools/search:
     get:
       operationId: searchInventorySpools
@@ -2813,6 +2934,18 @@ components:
             environment:control: Control drying programs, smart plugs and extraction.
             alerts:manage: Change alert rules and configure or test notification channels.
   parameters:
+    PhysicalSpoolFarmId:
+      name: farmId
+      in: query
+      required: true
+      description: Farm that owns the OpenFarm spool library.
+      schema: { type: string, format: uuid }
+    PhysicalSpoolId:
+      name: spoolId
+      in: path
+      required: true
+      description: Farm-local spool ID from the OpenFarm library.
+      schema: { type: integer, minimum: 1, maximum: 9007199254740991 }
     PrinterId:
       name: printerId
       in: path
@@ -3003,6 +3136,19 @@ components:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
+    PhysicalSpoolChanged:
+      description: The stored spool no longer matches the supplied location or version (`spool-location-changed`). Fetch it again before deciding whether to withdraw.
+      headers:
+        RateLimit-Limit:
+          $ref: '#/components/headers/RateLimit-Limit'
+        RateLimit-Remaining:
+          $ref: '#/components/headers/RateLimit-Remaining'
+        RateLimit-Reset:
+          $ref: '#/components/headers/RateLimit-Reset'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
     PayloadTooLarge:
       description: Request body over the limit (`payload-too-large`).
       content:
@@ -3097,6 +3243,76 @@ components:
       format: int64
       minimum: 0
       description: Milliseconds since the Unix epoch.
+    PhysicalSpool:
+      type: object
+      additionalProperties: false
+      required: [farmId, spoolId, location, version, label, binLight]
+      properties:
+        farmId: { type: string, format: uuid }
+        spoolId: { type: integer, minimum: 1, maximum: 9007199254740991 }
+        location:
+          type: [string, 'null']
+          description: Current library location. Null means the location is unknown.
+        version:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{43}$'
+          description: Opaque revision of this spool record.
+        label:
+          type: object
+          additionalProperties: false
+          required: [href]
+          properties:
+            href:
+              type: string
+              format: uri-reference
+              description: Same-origin link to this spool's printable QR label. The browser needs a signed-in OpenFarm account with access to the farm.
+        binLight:
+          type: object
+          additionalProperties: false
+          required: [status]
+          properties:
+            status:
+              type: string
+              const: unsupported
+              description: No qualified bin-light capability is available.
+    PhysicalSpoolRegistration:
+      type: object
+      additionalProperties: false
+      required: [filamentId, location]
+      properties:
+        filamentId: { type: integer, minimum: 1, maximum: 9007199254740991 }
+        location:
+          type: string
+          minLength: 1
+          maxLength: 256
+          pattern: '^[^\u0000-\u001F\u007F-\u009F]*\S[^\u0000-\u001F\u007F-\u009F]*$'
+          description: Initial bin location. Outer whitespace is trimmed.
+        initialWeightGrams: { type: number, minimum: 0 }
+    PhysicalSpoolWithdrawal:
+      type: object
+      additionalProperties: false
+      required: [expectedLocation, version]
+      properties:
+        expectedLocation:
+          type: string
+          minLength: 1
+          maxLength: 256
+          pattern: '^[^\u0000]+$'
+          description: Exact non-null location of the spool from lookup or registration.
+        version:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{43}$'
+          description: Version from the same lookup or registration.
+    PhysicalSpoolWithdrawalResult:
+      type: object
+      additionalProperties: false
+      required: [outcome, spool]
+      properties:
+        outcome:
+          type: string
+          enum: [withdrawn, already-unlocated]
+        spool:
+          $ref: '#/components/schemas/PhysicalSpool'
     ProblemCode:
       type: string
       description: |
@@ -3114,6 +3330,7 @@ components:
         - intent-conflict
         - request-conflict
         - webhook-limit-reached
+        - spool-location-changed
         - payload-too-large
         - unsupported-media-type
         - unsupported

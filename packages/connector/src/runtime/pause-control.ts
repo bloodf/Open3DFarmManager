@@ -515,6 +515,8 @@ async function runAssignmentControl(
             if (
               !observation ||
               observation.receivedMono > now ||
+              observation.readyObservedMono > observation.receivedMono ||
+              observation.printStateObservedMono > observation.receivedMono ||
               now - observation.readyObservedMono > maxAge ||
               now - observation.printStateObservedMono > maxAge
             )

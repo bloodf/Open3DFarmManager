@@ -28,6 +28,7 @@ describe('migration catalog', () => {
     expect(repository[104]?.id).toBe(
       '0105_integration_physical_spool_idempotency',
     )
+    expect(repository[106]?.id).toBe('0107_tool_temperature')
     expect(migrationCatalog(pair)).toEqual(
       migrationCatalog([...pair].reverse()),
     )
@@ -37,6 +38,36 @@ describe('migration catalog', () => {
         pair.map((entry) => ({ ...entry, sql: entry.sql + '\n' })),
       )[0]?.checksum,
     ).not.toBe(original?.checksum)
+  })
+  test('extends both stored control allow-lists and guards capability rollback', async () => {
+    const repository = await loadMigrationCatalog()
+    const migration = repository[106]!
+    const priorCapabilities = repository[92]!.up
+      .split('ALTER TABLE')
+      .slice(1)
+      .join('ALTER TABLE')
+    const priorApiGuard = repository[94]!.up.split(
+      'CREATE OR REPLACE FUNCTION',
+    )[1]!
+    expect(migration.up).toContain(
+      priorCapabilities
+        .replace('BETWEEN 1 AND 32', 'BETWEEN 1 AND 33')
+        .replace(
+          '"set_temperature",',
+          '"set_temperature","set_tool_temperature",',
+        ),
+    )
+    expect(migration.up).toContain(
+      priorApiGuard.replace(
+        "'set_temperature',",
+        "'set_temperature','set_tool_temperature',",
+      ),
+    )
+    expect(migration.down).toContain(priorCapabilities)
+    expect(migration.down).toContain(priorApiGuard)
+    expect(migration.down).toContain(
+      "capability->'actions' ? 'set_tool_temperature'",
+    )
   })
   test('rejects missing pairs, gaps, duplicate numbers, names and empty SQL', () => {
     for (const sources of [

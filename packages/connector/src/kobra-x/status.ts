@@ -26,7 +26,7 @@ function nonnegative(value: unknown) {
 }
 
 export function createKobraXStatus(printerKey: string, address: string) {
-  let status: PrinterState = {
+  let status: PrinterState & { state: KobraXPrinterState } = {
     printerKey,
     state: 'offline',
     observedAt: Date.now(),

@@ -193,6 +193,7 @@ it.each([
         .get()
       if (typeof row?.sql !== 'string') throw new Error('Missing action table')
       const prior = row.sql
+        .replace(",'set_tool_temperature'", '')
         .replace(",'start_library_print'", '')
         .replace(",'config_write'", '')
         .replace("'set_factor','file_op'", "'set_factor'")
@@ -201,7 +202,7 @@ it.each([
           `'service',${actions}`,
         )
       db.exec(
-        `DROP INDEX pause_active_assignment; DROP INDEX pause_active_printer; CREATE UNIQUE INDEX pause_active_assignment ON pause_commands(assignment_id) WHERE status IN ('claimed','write-started','outcome-unknown'); CREATE UNIQUE INDEX pause_active_printer ON pause_commands(farm_id,printer_key) WHERE status IN ('claimed','write-started','outcome-unknown'); DROP TABLE control_command_actions; ${prior}; PRAGMA user_version=${version};`,
+        `DROP INDEX pause_active_assignment; DROP INDEX pause_active_printer; CREATE UNIQUE INDEX pause_active_assignment ON pause_commands(assignment_id) WHERE status IN ('claimed','write-started','outcome-unknown'); CREATE UNIQUE INDEX pause_active_printer ON pause_commands(farm_id,printer_key) WHERE status IN ('claimed','write-started','outcome-unknown'); DROP TABLE control_tool_temperature_args; DROP TABLE control_command_actions; ${prior}; PRAGMA user_version=${version};`,
       )
       db.prepare('INSERT INTO control_command_actions VALUES (?, ?)').run(
         'retained',

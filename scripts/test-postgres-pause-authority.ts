@@ -17,6 +17,7 @@ import {
 import {
   testPauseAuthorityCatalog,
   capturePauseAuthorityRestart,
+  pauseAuthorityAdvertisedControlsMigrations,
   verifyPauseAuthorityRestart,
 } from '../tests/helpers/postgres-pause-authority-catalog.ts'
 import { testPauseConnectorRevocations } from '../tests/helpers/postgres-pause-authority-revocations.ts'
@@ -255,6 +256,14 @@ try {
     ]
   } else {
     const catalogChecks = await testPauseAuthorityCatalog(admin, port)
+    // Keep the 0018 catalog and restart assertions, but exercise the current
+    // issuer against the shipped telemetry table and its restricted view.
+    const controlsMigrations =
+      await pauseAuthorityAdvertisedControlsMigrations()
+    await admin.begin(async (tx) => {
+      for (const migration of controlsMigrations)
+        await tx.unsafe(migration.up).simple()
+    })
     // The catalog check rebuilds 0018, so the shipped constraint comes next.
     const constraintChecks = await applyConfirmCollectionConstraint(admin)
     const revocationChecks = await testPauseConnectorRevocations(admin, port)

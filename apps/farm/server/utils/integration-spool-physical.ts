@@ -77,6 +77,7 @@ async function authorized<T>(
         AND f.id = ${access.farmId}::uuid AND (NOT a.sandbox OR f.sandbox)
         AND a.revoked_at IS NULL AND g.disabled_at IS NULL
         AND g.printer_assignment_id IS NULL AND ${access.scope} = ANY(g.scopes)
+        AND (${access.scope} <> 'inventory:write' OR NOT g.requires_approval)
       FOR SHARE OF a, g`
     return grant ? await work(tx) : null
   })
@@ -86,8 +87,29 @@ export function registerPhysicalSpool(
   sql: Sql,
   access: Access,
   input: z.infer<typeof registration>,
+  key: string,
 ) {
   return authorized(sql, access, async (tx) => {
+    const hash = createHash('sha256')
+      .update(
+        JSON.stringify([
+          access.farmId,
+          input.filamentId,
+          input.location,
+          input.initialWeightGrams ?? null,
+        ]),
+      )
+      .digest('hex')
+    await tx`SELECT pg_advisory_xact_lock(hashtextextended(${access.appId + ':' + key}, 0))`
+    const [existing] = await tx<
+      { request_hash: string; response: ReturnType<typeof physicalSpool> }[]
+    >`
+      SELECT request_hash, response FROM farm.integration_physical_spool_registrations
+      WHERE app_id = ${access.appId}::uuid AND idempotency_key = ${key}`
+    if (existing)
+      return existing.request_hash === hash
+        ? { outcome: 'registered' as const, spool: existing.response }
+        : { outcome: 'key-reused' as const }
     const [filament] = await tx`
       SELECT id FROM farm.spool_filaments
       WHERE farm_id = ${access.farmId}::uuid AND id = ${input.filamentId}
@@ -108,7 +130,11 @@ export function registerPhysicalSpool(
       FROM allocated
       RETURNING id::float8 AS id, location, xmin::text || ':' || ctid::text AS revision`
     if (!row) throw new Error('Spool allocation returned no row')
-    return physicalSpool(access.farmId, row)
+    const spool = physicalSpool(access.farmId, row)
+    await tx`INSERT INTO farm.integration_physical_spool_registrations
+      (app_id, idempotency_key, request_hash, response)
+      VALUES (${access.appId}::uuid, ${key}, ${hash}, ${tx.json(spool)})`
+    return { outcome: 'registered' as const, spool }
   })
 }
 

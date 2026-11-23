@@ -4,7 +4,13 @@
   "packageRules": [
     {
       "description": "Keep the qualified Node.js runtime and types on major 24 while allowing compatible updates.",
-      "matchManagers": ["npm", "nvm", "dockerfile", "github-actions"],
+      "matchManagers": [
+        "npm",
+        "nvm",
+        "dockerfile",
+        "github-actions",
+        "docker-compose"
+      ],
       "matchDepNames": ["node", "@types/node"],
       "allowedVersions": "<25"
     },

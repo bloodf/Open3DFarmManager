@@ -12,6 +12,8 @@ import {
   PRINTER_STRING_MAX_UNITS,
 } from './string-bounds.ts'
 
+export const PRINTER_HMS_MAX_ENTRIES = 64
+
 export const FilamentUsage = z.strictObject({
   tool: z.string().min(1).max(32),
   millimetres: z.number().finite().nonnegative().optional(),
@@ -144,6 +146,29 @@ function printerStateSchema(legacy: boolean) {
       ]),
       preformStatus: text(256, 1).optional(),
       statusReason: z.enum(['client-certificate-missing']).optional(),
+      alarms: z
+        .strictObject({
+          printError: z
+            .string()
+            .length(9)
+            .regex(/^[0-9A-F]{4}-[0-9A-F]{4}$/)
+            .nullable()
+            .optional(),
+          hmsCount: z
+            .number()
+            .int()
+            .min(0)
+            .max(PRINTER_HMS_MAX_ENTRIES)
+            .nullable()
+            .optional(),
+          hmsCode: z
+            .string()
+            .length(19)
+            .regex(/^[0-9A-F]{4}(?:-[0-9A-F]{4}){3}$/)
+            .nullable()
+            .optional(),
+        })
+        .optional(),
       progress: z.number().min(0).max(1).optional(),
       materials: z
         .array(

@@ -151,6 +151,7 @@ export function createFarmSnapshotSource(input: {
             ] as const)
           : []
       const independent: readonly string[] = [
+        'alarms',
         'fans',
         'light',
         'materials',
@@ -199,6 +200,7 @@ export function createFarmSnapshotSource(input: {
       const lastJob = lastJobs.get(ref.printerKey)
       if (lastJob) printer.lastJob = lastJob
       for (const field of [
+        'alarms',
         'fans',
         'light',
         'materials',
@@ -209,7 +211,10 @@ export function createFarmSnapshotSource(input: {
             ([key]) => key === field,
           )![1]
           if (stamp + 5000 <= now) delete printer[field]
-          else if ('anycubic' in entry.fieldObservedAtMonoMs)
+          else if (
+            field === 'alarms' ||
+            'anycubic' in entry.fieldObservedAtMonoMs
+          )
             wakeAt = Math.min(wakeAt, stamp + 5000)
           else until = Math.min(until, stamp + 5000)
         }
@@ -350,6 +355,7 @@ export function createFarmSnapshotSource(input: {
               'identity',
               'statusReason',
               'preformStatus',
+              'alarms',
               'progress',
               'filename',
               'materials',

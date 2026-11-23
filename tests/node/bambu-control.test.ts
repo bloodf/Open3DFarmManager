@@ -33,6 +33,30 @@ async function eventually(condition: () => boolean, what: string) {
     await new Promise((resolve) => setTimeout(resolve, 5))
   }
 }
+function assertTelemetryBootstrap(
+  remote: Awaited<ReturnType<typeof startBambuSimulator>>,
+) {
+  assert.deepEqual(remote.queries, [
+    { command: 'pushall', sequence_id: '' },
+    { command: 'get_version', sequence_id: '0' },
+  ])
+  assert.deepEqual(
+    remote.calls.all.map(({ topic, payload }) => [
+      topic,
+      JSON.parse(payload.toString()),
+    ]),
+    [
+      [
+        'device/SYNTHETIC/request',
+        { pushing: { command: 'pushall', version: 1, push_target: 1 } },
+      ],
+      [
+        'device/SYNTHETIC/request',
+        { info: { command: 'get_version', sequence_id: '0' } },
+      ],
+    ],
+  )
+}
 async function commandFixture(action: 'pause' | 'resume' | 'cancel') {
   const now = Date.now()
   const pair = await crypto.subtle.generateKey(
@@ -502,16 +526,12 @@ for (const control of [undefined, false, true]) {
         )
         assert.equal(JSON.stringify(printer).includes(SECRET), false)
         assert.deepEqual(remote.requests, [])
-        // Regression: the telemetry connection's read-only version query is sent concurrently
-        // with the first report. Once it has provably reached the printer, still no command may
-        // have been sent, and the query must be the only thing the connection asked for.
+        // The read-only startup queries can arrive before or after the first report.
         await eventually(
-          () => remote.queries.length > 0,
+          () => remote.queries.some(({ command }) => command === 'get_version'),
           'the telemetry version query',
         )
-        assert.deepEqual(remote.queries, [
-          { command: 'get_version', sequence_id: '0' },
-        ])
+        assertTelemetryBootstrap(remote)
         assert.deepEqual(remote.requests, [])
       } finally {
         sub.close()
@@ -573,20 +593,22 @@ test('telemetry version query is not logged as a printer command', async (t) => 
     },
   })
   try {
-    // No report has been published yet, so whatever reached the printer came from the connect.
-    // The broker's own counter is used so this also runs against the pre-fix simulator.
+    // The simulator has no initial print state. The bootstrap response alone
+    // cannot produce a snapshot before we publish a report with a state.
     await eventually(
-      () => (remote.calls()['PUBLISH:device/SYNTHETIC/request'] ?? 0) > 0,
-      'the telemetry version query',
+      () =>
+        remote.calls.all.some(
+          ({ payload }) =>
+            JSON.parse(payload.toString()).info?.command === 'get_version',
+        ),
+      'the telemetry version query at the broker',
     )
     assert.deepEqual(snapshots, [])
     remote.publishReport({ print: { gcode_state: 'RUNNING', mc_percent: 25 } })
     await eventually(() => snapshots.length > 0, 'the first snapshot')
     assert.deepEqual(Reflect.get(Object(snapshots[0]), 'controls'), [])
     assert.deepEqual(remote.requests, [])
-    assert.deepEqual(remote.queries, [
-      { command: 'get_version', sequence_id: '0' },
-    ])
+    assertTelemetryBootstrap(remote)
   } finally {
     sub.close()
     await sub.done

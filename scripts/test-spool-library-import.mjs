@@ -370,7 +370,7 @@ try {
       port,
       database: 'fixture',
       username: role,
-      password: '',
+      password: fixture.password,
       ssl: false,
       max: 8,
       connect_timeout: 3,
@@ -380,7 +380,13 @@ try {
   const importRole = 'spool_import_' + randomUUID().replaceAll('-', '')
   const libraryRole = 'spool_lib_' + randomUUID().replaceAll('-', '')
   await admin`CREATE ROLE ${admin(importRole)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS IN ROLE farm_spool_import`
+  await admin.unsafe(
+    `ALTER ROLE "${importRole}" PASSWORD '${fixture.password}'`,
+  )
   await admin`CREATE ROLE ${admin(libraryRole)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS IN ROLE farm_spool_library`
+  await admin.unsafe(
+    `ALTER ROLE "${libraryRole}" PASSWORD '${fixture.password}'`,
+  )
   importSql = login(importRole)
   librarySql = login(libraryRole)
   await validateSpoolImportRole(importSql)

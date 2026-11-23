@@ -1,3 +1,4 @@
+import { openFarmInspector } from './farm-inspector.ts'
 import type { Page } from '@playwright/test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -43,12 +44,7 @@ export async function testSimulatorFarmPage(input: {
     await expect(page.getByLabel('Farm atual', { exact: true })).toHaveValue(
       fixture.farmId,
     )
-    const row = page.getByRole('article').filter({
-      has: page.getByRole('heading', {
-        name: assignment.printerKey,
-        exact: true,
-      }),
-    })
+    const row = await openFarmInspector(page, assignment.printerKey)
     await expect(
       row.getByText('Conexão direta autenticada', { exact: true }),
     ).toBeVisible({ timeout: 15000 })

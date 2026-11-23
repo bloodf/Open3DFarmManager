@@ -458,7 +458,10 @@ function suite(title: string) {
           'section[aria-labelledby="assignment-heading"]',
         )
         await expect(
-          assignments.getByText(journey.printerKey, { exact: true }),
+          assignments.getByRole('rowheader', {
+            name: journey.printerKey,
+            exact: true,
+          }),
         ).toBeVisible({ timeout: 30_000 })
         await expect(
           assignments.getByText('Ativa', { exact: true }),

@@ -273,3 +273,28 @@ physical printer was contacted, and no production service or publication was
 started. Private evidence, resource ledgers and failure diagnostics stay outside
 the repository; this checkpoint contains no credentials, sessions or private
 operational paths.
+
+## PR 751 closure check (2026-11-23)
+
+GitHub job `137540395410` reported an aggregate failure for
+`farm-page-disconnect` and `farm-page-revocation` at `5492d1fb`.
+The local comparison ran those two rows with the production build fixture,
+PostgreSQL 17.12 and Playwright 1.65.0 bundled Chromium 158.0.8127.18
+in a Linux amd64 Docker container on an internal network. Both revisions
+used the same container runtime and dependency lockfile.
+
+| Scenario               | PR head `5492d1fb`            | Merged main baseline `acff4c49` |
+| ---------------------- | ----------------------------- | ------------------------------- |
+| `farm-page-disconnect` | Owner login hydration timeout | Owner login hydration timeout   |
+| `farm-page-revocation` | Owner login hydration timeout | Owner login hydration timeout   |
+
+Each row launched Chromium and timed out after 10,000 ms waiting for Vue
+to mount at `/entrar`. The timeout preceded login submission and the
+authenticated RTC assertions. The failure reproduces on the baseline in
+this environment. The aggregate GitHub log leaves the CI failure stage
+unknown.
+
+Rerun both rows on the GitHub runner with bounded per-row application logs,
+browser page errors and failed asset requests retained. Confirm the failure
+stage there and rerun until both rows emit their required authenticated
+closure receipts.

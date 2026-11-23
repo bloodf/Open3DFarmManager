@@ -88,6 +88,9 @@ describe('integration API v1 OpenAPI spec', () => {
       'plates:confirm',
       'alerts:write',
       'camera:view',
+      'inventory:write',
+      'environment:control',
+      'alerts:manage',
     ])
     expect(Object.keys(committed.paths).sort()).toEqual(
       [

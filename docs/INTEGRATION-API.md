@@ -22,30 +22,31 @@ Owners can grant one or more scopes across a farm or limit them to a printer ass
 
 ### Scopes
 
-| Scope              | Grants                                                                       |
-| ------------------ | ---------------------------------------------------------------------------- |
-| `printers:read`    | Read printers, their status, readiness and qualified capabilities.           |
-| `files:read`       | List files stored on printers.                                               |
-| `inventory:read`   | Read Spoolman inventory snapshots and the resin ledger (lots, vats, usage).  |
-| `jobs:read`        | Read job history and API-submitted jobs.                                     |
-| `jobs:start`       | Submit print jobs.                                                           |
-| `control:basic`    | Pause, resume and cancel.                                                    |
-| `control:extended` | Temperatures, fans, lights, speed, homing, filament and macros; list macros. |
-| `events:subscribe` | Manage webhook subscriptions and receive events.                             |
-| `jobs:write`       | Start a library replay on a granted printer.                                 |
-| `library:read`     | Read library files and the storage mode.                                     |
-| `library:write`    | Upload library files and set the storage mode.                               |
-| `environment:read` | Read enclosure and room environment and power measurements.                  |
-| `plates:confirm`   | Confirm that a printer's build plate is clear.                               |
-| `alerts:write`     | Acknowledge or silence alerts on granted printers.                           |
-| `camera:view`      | Open the camera view for a granted printer.                                  |
+| Scope                 | Grants                                                                       |
+| --------------------- | ---------------------------------------------------------------------------- |
+| `printers:read`       | Read printers, their status, readiness and qualified capabilities.           |
+| `files:read`          | List files stored on printers.                                               |
+| `inventory:read`      | Read Spoolman inventory snapshots and the resin ledger (lots, vats, usage).  |
+| `jobs:read`           | Read job history and API-submitted jobs.                                     |
+| `jobs:start`          | Submit print jobs.                                                           |
+| `control:basic`       | Pause, resume and cancel.                                                    |
+| `control:extended`    | Temperatures, fans, lights, speed, homing, filament and macros; list macros. |
+| `events:subscribe`    | Manage webhook subscriptions and receive events.                             |
+| `jobs:write`          | Start a library replay on a granted printer.                                 |
+| `library:read`        | Read library files and the storage mode.                                     |
+| `library:write`       | Upload library files and set the storage mode.                               |
+| `environment:read`    | Read enclosure and room environment and power measurements.                  |
+| `plates:confirm`      | Confirm that a printer's build plate is clear.                               |
+| `alerts:write`        | Acknowledge or silence alerts on granted printers.                           |
+| `camera:view`         | Open the camera view for a granted printer.                                  |
+| `inventory:write`     | Register and withdraw physical spools.                                       |
+| `environment:control` | Control drying programs, smart plugs and extraction.                         |
+| `alerts:manage`       | Change alert rules and test notification channels.                           |
 
-Owners can grant the reserved scopes and tokens can carry them, but they
-authorize nothing until an endpoint that requires them ships (`environment:read`
-is already used by `GET /environment/measurements` and `plates:confirm` by
-`POST /jobs/{id}/actions`). Any command an
-endpoint later accepts under these scopes still travels as an issuer-signed
-envelope that the Connector enforces and may refuse with a reason.
+Owners can grant `inventory:write`, `environment:control` and `alerts:manage`,
+and tokens can carry them, but no endpoint uses them yet. Any command a future
+endpoint accepts under these scopes still travels as an issuer-signed envelope
+that the Connector enforces and may refuse with a reason.
 
 Revocations are audited and take effect on the next API request. Revoking an app
 also makes its webhook subscriptions ineligible for delivery, including events

@@ -65,6 +65,13 @@ export function spoolUsageRuntime(): Promise<PostgresSpoolUsage> {
   return store
 }
 
+/** Returns the validated pool for physical spool operations. */
+export async function integrationSpoolPool() {
+  await spoolUsageRuntime()
+  if (!pool) throw new Error('Spool database unavailable')
+  return pool
+}
+
 export async function closeSpoolUsageRuntime() {
   const closing = pool
   pool = undefined

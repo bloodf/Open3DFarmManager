@@ -36,7 +36,7 @@ info:
     `RateLimit-Remaining` and `RateLimit-Reset` for the bucket the request
     consumed; a 429 or 503 also carries `Retry-After`.
 
-    **Idempotency.** Creating a job or action requires an `Idempotency-Key`
+    **Idempotency.** Creating a job, action or physical spool requires an `Idempotency-Key`
     header. Retrying with the same key and the same body returns the original
     resource; the same key with a different body answers 409
     (`idempotency-key-reused`). Keys are kept for at least 24 hours.
@@ -67,7 +67,7 @@ tags:
   - name: Inventory
     description: Read-only filament inventory mirrored from Spoolman.
   - name: Environment
-    description: Read-only farm-authorised environment and power measurements.
+    description: Farm-authorised environment and power measurements, and environment controls whose safety interlocks the Connector enforces.
   - name: Resin
     description: Read-only resin lots, vats and run references from the resin ledger.
   - name: Jobs
@@ -205,6 +205,59 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /printers/mode:
+    post:
+      operationId: changeFleetMode
+      tags: [Printers]
+      summary: Change or restore operational availability for selected printers
+      description: |
+        One outcome per target in request order. Missing and out-of-grant
+        targets are indistinguishable. If no target is in grant scope, the
+        whole request returns 404. The batch writes only OpenFarm availability.
+        It does not send commands or change observed print state.
+        Each target must supply the expected version. A restore is available
+        only to the app that created the supplied version and only while it
+        is still current. A successful restore consumes that version.
+      security:
+        - clientCredentials: ['control:extended']
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FleetModeRequest'
+      responses:
+        '200':
+          description: Per-printer outcomes for the requested batch.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FleetModeResults'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /printers/readiness:
     get:
       operationId: listPrinterReadiness
@@ -327,6 +380,42 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PrinterCapabilities'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /printers/{printerId}/mode:
+    get:
+      operationId: getPrinterMode
+      tags: [Printers]
+      summary: Read one printer's operational availability
+      description: An assignment with no stored change defaults to in-service with a null version.
+      security:
+        - clientCredentials: ['printers:read']
+      parameters:
+        - $ref: '#/components/parameters/PrinterId'
+      responses:
+        '200':
+          description: The current availability and version.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FleetModeView'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -607,6 +696,112 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /alert-rules/{farmId}:
+    get:
+      operationId: listFarmAlertRules
+      summary: List farm alert rules
+      description: Requires a farm-wide grant. Rules default to enabled.
+      security:
+        - clientCredentials: ['printers:read']
+      parameters:
+        - in: path
+          name: farmId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Effective farm rule settings
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [farmId, rules]
+                properties:
+                  farmId: { type: string, format: uuid }
+                  rules:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FarmAlertRule'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /alert-rules/{farmId}/{kind}:
+    patch:
+      operationId: updateFarmAlertRule
+      summary: Update a farm alert rule
+      description: Requires a farm-wide grant issued by a current farm owner and usable without interactive approval.
+      security:
+        - clientCredentials: ['alerts:manage']
+      parameters:
+        - in: path
+          name: farmId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: kind
+          required: true
+          schema:
+            {
+              type: string,
+              enum:
+                [
+                  error,
+                  connector-storage-degraded,
+                  offline-or-stale,
+                  paused,
+                  finished-bed-clear,
+                  low-slot,
+                  firmware-update,
+                ],
+            }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        '200':
+          description: Saved rule
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FarmAlertRule'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /alerts/{printerId}:
     get:
       operationId: listPrinterAlerts
@@ -761,6 +956,172 @@ paths:
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /environment/controls:
+    get:
+      operationId: listEnvironmentControls
+      tags: [Environment]
+      summary: Environment controls of granted printers
+      description: |
+        Drying program, smart plug and extraction controls per printer, each
+        with its readiness from the Connector's last observation, the actions
+        this app may request and the OpenFarm management link. Safety
+        interlocks, plug setup and credential enrollment stay in OpenFarm.
+        Extraction (the chamber fan) is the only qualified control today;
+        smart plugs and drying programs report `unsupported` with
+        `no-qualified-capability`. A reading older than 60 seconds is `stale`;
+        an offline or never-observed printer is `not-ready`. Requires
+        `environment:read` or `environment:control`; `actions` stays empty
+        without `environment:control` on the printer. Pagination is by
+        printer.
+      security:
+        - clientCredentials: ['environment:read']
+        - clientCredentials: ['environment:control']
+      parameters:
+        - $ref: '#/components/parameters/FarmIdFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page of printers with their environment controls.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvironmentControlsPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /environment/controls/{printerId}/actions:
+    post:
+      operationId: submitEnvironmentControlAction
+      tags: [Environment]
+      summary: Request an environment control action
+      description: |
+        Requires `environment:control` on the printer; a printer outside the
+        grants answers 404. A control without a qualified Connector capability,
+        or a grant that requires owner approval, answers 422 `unsupported` with
+        the OpenFarm `managementUrl` and sends nothing. A stale observation
+        answers 409 `device-stale` and an offline, never-observed or failed
+        printer 409 `device-not-ready`, also with `managementUrl` and without a
+        command. Otherwise exactly one issuer-signed `environment:control`
+        envelope is delivered once; the Connector enforces its interlocks (it
+        never turns extraction off during a print) and refuses with a reason.
+        A retry with the same `Idempotency-Key` and body returns the same
+        action.
+      security:
+        - clientCredentials: ['environment:control']
+      parameters:
+        - $ref: '#/components/parameters/PrinterId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnvironmentControlRequest'
+      responses:
+        '202':
+          description: Action accepted (new or replayed).
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvironmentControlAction'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /environment/controls/{printerId}/actions/{actionId}:
+    get:
+      operationId: getEnvironmentControlAction
+      tags: [Environment]
+      summary: Outcome of an environment control action
+      description: |
+        The status comes from Connector results only, never assumed, and moves
+        forward only. `outcome` summarizes it: `accepted` when the Connector
+        applied the command, `refused` or `unsupported` with the Connector's
+        reason, `not-delivered` when it expired or lost its authority before
+        delivery and `unknown` when the result could not be confirmed. Nothing
+        is retried. An action of another printer or outside the grants answers
+        404.
+      security:
+        - clientCredentials: ['environment:control']
+      parameters:
+        - $ref: '#/components/parameters/PrinterId'
+        - name: actionId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '200':
+          description: The environment control action.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvironmentControlAction'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /environment/measurements:
     get:
       operationId: listEnvironmentMeasurements
@@ -958,6 +1319,130 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /inventory/spools/physical:
+    post:
+      operationId: registerPhysicalSpool
+      tags: [Inventory]
+      summary: Register a physical spool
+      description: Creates a spool using an existing filament in the farm-wide grant. A retry with the same key, farm and body returns the original response; reuse with different input returns 409.
+      security:
+        - clientCredentials: ['inventory:write']
+      parameters:
+        - $ref: '#/components/parameters/PhysicalSpoolFarmId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhysicalSpoolRegistration'
+      responses:
+        '201':
+          description: Physical spool and its label link.
+          headers:
+            Location:
+              description: API resource URI. Reading it requires inventory:read.
+              schema: { type: string, format: uri-reference }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhysicalSpool'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /inventory/spools/physical/{spoolId}:
+    get:
+      operationId: readPhysicalSpool
+      tags: [Inventory]
+      summary: Look up a physical spool
+      description: Returns the library location and a version for guarded withdrawal. Archived spools are excluded.
+      security:
+        - clientCredentials: ['inventory:read']
+      parameters:
+        - $ref: '#/components/parameters/PhysicalSpoolFarmId'
+        - $ref: '#/components/parameters/PhysicalSpoolId'
+      responses:
+        '200':
+          description: Physical spool and its label link.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhysicalSpool'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /inventory/spools/physical/{spoolId}/withdraw:
+    post:
+      operationId: withdrawPhysicalSpool
+      tags: [Inventory]
+      summary: Withdraw a spool from its expected bin
+      description: Clears the location only if the supplied location and version still match. A spool with no known location is left untouched.
+      security:
+        - clientCredentials: ['inventory:write']
+      parameters:
+        - $ref: '#/components/parameters/PhysicalSpoolFarmId'
+        - $ref: '#/components/parameters/PhysicalSpoolId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhysicalSpoolWithdrawal'
+      responses:
+        '200':
+          description: Physical spool after withdrawal or with no known location.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhysicalSpoolWithdrawalResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          $ref: '#/components/responses/PhysicalSpoolChanged'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /inventory/spools/search:
     get:
       operationId: searchInventorySpools
@@ -1126,6 +1611,7 @@ paths:
         `library:read` grant. `storageMode` is the farm's current mode
         (`server` keeps the file, `connector` keeps it on the Connector).
         A version's `storageLocation` is where that file actually is.
+        Returns supported resin extensions and compatible printer profiles.
       security:
         - clientCredentials: ['library:read']
       parameters:
@@ -1168,7 +1654,10 @@ paths:
         Stores the file according to the farm's current storage mode. Server
         mode keeps the bytes. Connector mode keeps the hash and metadata and
         leaves the bytes on the farm's Connector. Requires a farm-wide
-        `library:write` grant. A new version emits `library.version.created`.
+        `library:write` grant. Resin files require a compatible `resinProfile`.
+        Use `GET /library` to discover extension/profile pairs. A mismatched
+        declaration returns 422 with a reason in `errors`.
+        A new version emits `library.version.created`.
       security:
         - clientCredentials: ['library:write']
       requestBody:
@@ -1682,6 +2171,115 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Action'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /notification-channels/{farmId}:
+    put:
+      operationId: configureFarmNotificationChannel
+      summary: Configure a farm notification webhook
+      description: Requires a farm-wide grant issued by a current farm owner and usable without interactive approval. Each app has one channel per farm.
+      security:
+        - clientCredentials: ['alerts:manage']
+      parameters:
+        - in: path
+          name: farmId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [url, secret]
+              properties:
+                url:
+                  {
+                    type: string,
+                    format: uri,
+                    maxLength: 2048,
+                    writeOnly: true,
+                  }
+                secret:
+                  {
+                    type: string,
+                    minLength: 32,
+                    maxLength: 256,
+                    writeOnly: true,
+                  }
+      responses:
+        '200':
+          description: Saved channel confirmation
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [farmId, configured]
+                properties:
+                  farmId: { type: string, format: uuid }
+                  configured: { type: boolean, const: true }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /notification-channels/{farmId}/test:
+    post:
+      operationId: testFarmNotificationChannel
+      summary: Test the app’s configured farm notification webhook
+      description: Requires a farm-wide grant issued by a current farm owner and usable without interactive approval. Sends at most one signed POST to a public HTTPS destination.
+      security:
+        - clientCredentials: ['alerts:manage']
+      parameters:
+        - in: path
+          name: farmId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Delivery outcome. A 2xx from the receiver means delivered.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    required: [attempted, status]
+                    properties:
+                      attempted: { type: boolean, const: true }
+                      status: { type: string, enum: [delivered, failed] }
+                  - type: object
+                    required: [attempted, status]
+                    properties:
+                      attempted: { type: boolean, const: false }
+                      status: { type: string, const: not-run }
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -2337,7 +2935,22 @@ components:
             plates:confirm: Confirm that a printer's build plate is clear.
             alerts:write: Acknowledge or silence alerts on granted printers.
             camera:view: Open the camera view for a granted printer.
+            inventory:write: Register and withdraw physical spools.
+            environment:control: Control drying programs, smart plugs and extraction.
+            alerts:manage: Change alert rules and configure or test notification channels.
   parameters:
+    PhysicalSpoolFarmId:
+      name: farmId
+      in: query
+      required: true
+      description: Farm that owns the OpenFarm spool library.
+      schema: { type: string, format: uuid }
+    PhysicalSpoolId:
+      name: spoolId
+      in: path
+      required: true
+      description: Farm-local spool ID from the OpenFarm library.
+      schema: { type: integer, minimum: 1, maximum: 9007199254740991 }
     PrinterId:
       name: printerId
       in: path
@@ -2522,8 +3135,21 @@ components:
             $ref: '#/components/schemas/Problem'
     Conflict:
       description: |
-        `idempotency-key-reused`, `intent-conflict`, `request-conflict` or
-        `webhook-limit-reached`.
+        `idempotency-key-reused`, `intent-conflict`, `request-conflict`,
+        `webhook-limit-reached`, `device-stale` or `device-not-ready`.
+      headers:
+        RateLimit-Limit:
+          $ref: '#/components/headers/RateLimit-Limit'
+        RateLimit-Remaining:
+          $ref: '#/components/headers/RateLimit-Remaining'
+        RateLimit-Reset:
+          $ref: '#/components/headers/RateLimit-Reset'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    PhysicalSpoolChanged:
+      description: The stored spool no longer matches the supplied location or version (`spool-location-changed`). Fetch it again before deciding whether to withdraw.
       headers:
         RateLimit-Limit:
           $ref: '#/components/headers/RateLimit-Limit'
@@ -2600,6 +3226,26 @@ components:
         10 seconds, is retried with exponential backoff until the retry window
         ends; the event is then dead and not delivered again.
   schemas:
+    FarmAlertRule:
+      type: object
+      required: [kind, label, enabled]
+      properties:
+        kind:
+          {
+            type: string,
+            enum:
+              [
+                error,
+                connector-storage-degraded,
+                offline-or-stale,
+                paused,
+                finished-bed-clear,
+                low-slot,
+                firmware-update,
+              ],
+          }
+        label: { type: string }
+        enabled: { type: boolean }
     Uuid:
       type: string
       format: uuid
@@ -2609,6 +3255,76 @@ components:
       format: int64
       minimum: 0
       description: Milliseconds since the Unix epoch.
+    PhysicalSpool:
+      type: object
+      additionalProperties: false
+      required: [farmId, spoolId, location, version, label, binLight]
+      properties:
+        farmId: { type: string, format: uuid }
+        spoolId: { type: integer, minimum: 1, maximum: 9007199254740991 }
+        location:
+          type: [string, 'null']
+          description: Current library location. Null means the location is unknown.
+        version:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{43}$'
+          description: Opaque revision of this spool record.
+        label:
+          type: object
+          additionalProperties: false
+          required: [href]
+          properties:
+            href:
+              type: string
+              format: uri-reference
+              description: Same-origin link to this spool's printable QR label. The browser needs a signed-in OpenFarm account with access to the farm.
+        binLight:
+          type: object
+          additionalProperties: false
+          required: [status]
+          properties:
+            status:
+              type: string
+              const: unsupported
+              description: No qualified bin-light capability is available.
+    PhysicalSpoolRegistration:
+      type: object
+      additionalProperties: false
+      required: [filamentId, location]
+      properties:
+        filamentId: { type: integer, minimum: 1, maximum: 9007199254740991 }
+        location:
+          type: string
+          minLength: 1
+          maxLength: 256
+          pattern: '^[^\u0000-\u001F\u007F-\u009F]*\S[^\u0000-\u001F\u007F-\u009F]*$'
+          description: Initial bin location. Outer whitespace is trimmed.
+        initialWeightGrams: { type: number, minimum: 0 }
+    PhysicalSpoolWithdrawal:
+      type: object
+      additionalProperties: false
+      required: [expectedLocation, version]
+      properties:
+        expectedLocation:
+          type: string
+          minLength: 1
+          maxLength: 256
+          pattern: '^[^\u0000]+$'
+          description: Exact non-null location of the spool from lookup or registration.
+        version:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{43}$'
+          description: Version from the same lookup or registration.
+    PhysicalSpoolWithdrawalResult:
+      type: object
+      additionalProperties: false
+      required: [outcome, spool]
+      properties:
+        outcome:
+          type: string
+          enum: [withdrawn, already-unlocated]
+        spool:
+          $ref: '#/components/schemas/PhysicalSpool'
     ProblemCode:
       type: string
       description: |
@@ -2626,6 +3342,7 @@ components:
         - intent-conflict
         - request-conflict
         - webhook-limit-reached
+        - spool-location-changed
         - payload-too-large
         - unsupported-media-type
         - unsupported
@@ -2636,6 +3353,8 @@ components:
         - service-unavailable
         - connector-unavailable
         - connector-timeout
+        - device-stale
+        - device-not-ready
     Problem:
       type: object
       description: RFC 9457 problem details.
@@ -2660,6 +3379,14 @@ components:
           format: uri-reference
         code:
           $ref: '#/components/schemas/ProblemCode'
+        managementUrl:
+          type: string
+          format: uri-reference
+          maxLength: 512
+          description: |
+            OpenFarm page that manages the device, its setup and its safety
+            rules. Present on environment-control `unsupported`,
+            `device-stale` and `device-not-ready` problems.
         errors:
           type: array
           maxItems: 50
@@ -2914,6 +3641,101 @@ components:
             SHA-256 of the catalog evidence used for this classification.
             Null when no catalog entry matched. Does not cover machine specs.
           pattern: '^[a-f0-9]{64}$'
+    FleetMode:
+      type: string
+      enum: [in-service, maintenance]
+    FleetModeRequest:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [action, mode, targets]
+          properties:
+            action: { const: set }
+            mode: { $ref: '#/components/schemas/FleetMode' }
+            targets:
+              type: array
+              minItems: 1
+              maxItems: 50
+              description: Printer IDs must be unique, ignoring case.
+              items:
+                type: object
+                additionalProperties: false
+                required: [printerId, expectedVersion]
+                properties:
+                  printerId: { type: string, format: uuid }
+                  expectedVersion:
+                    type: [string, 'null']
+                    format: uuid
+        - type: object
+          additionalProperties: false
+          required: [action, targets]
+          properties:
+            action: { const: restore }
+            targets:
+              type: array
+              minItems: 1
+              maxItems: 50
+              description: Printer IDs must be unique, ignoring case.
+              items:
+                type: object
+                additionalProperties: false
+                required: [printerId, expectedVersion]
+                properties:
+                  printerId: { type: string, format: uuid }
+                  expectedVersion: { type: string, format: uuid }
+    FleetModeResults:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            oneOf:
+              - type: object
+                additionalProperties: false
+                required: [printerId, outcome, mode, label, version]
+                properties:
+                  printerId: { type: string, format: uuid }
+                  outcome: { const: applied }
+                  mode: { $ref: '#/components/schemas/FleetMode' }
+                  label: { type: string, enum: [Em serviço, Em manutenção] }
+                  version: { type: string, format: uuid }
+              - type: object
+                additionalProperties: false
+                required: [printerId, outcome, reason]
+                properties:
+                  printerId: { type: string, format: uuid }
+                  outcome: { const: denied }
+                  reason:
+                    type: string
+                    enum:
+                      [
+                        not-found,
+                        approval-required,
+                        observation-unavailable,
+                        version-conflict,
+                        not-reversible,
+                        mode-unchanged,
+                      ]
+              - type: object
+                additionalProperties: false
+                required: [printerId, outcome, reason]
+                properties:
+                  printerId: { type: string, format: uuid }
+                  outcome: { const: unsupported }
+                  reason: { const: capability-unqualified }
+    FleetModeView:
+      type: object
+      additionalProperties: false
+      required: [printerId, mode, label, version]
+      properties:
+        printerId: { type: string, format: uuid }
+        mode: { $ref: '#/components/schemas/FleetMode' }
+        label: { type: string, enum: [Em serviço, Em manutenção] }
+        version: { type: [string, 'null'], format: uuid }
     PrinterReadiness:
       type: object
       required:
@@ -3362,6 +4184,198 @@ components:
               maxItems: 100
               items:
                 $ref: '#/components/schemas/EnvironmentPrinter'
+    EnvironmentControl:
+      type: object
+      required: [kind, readiness, actions, managementUrl]
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          enum: [drying, plug, extraction]
+        readiness:
+          type: string
+          enum: [ready, not-ready, stale, unsupported]
+        reason:
+          type: string
+          enum:
+            [
+              never-observed,
+              offline,
+              stale,
+              printer-error,
+              no-qualified-capability,
+            ]
+          description: Present unless `readiness` is `ready`.
+        observed:
+          $ref: '#/components/schemas/EnvironmentMeasurement'
+        actions:
+          type: array
+          description: Actions this app may request now.
+          items:
+            type: string
+            enum: [set, 'on', 'off', start, stop]
+        managementUrl:
+          type: string
+          format: uri-reference
+          maxLength: 512
+          description: OpenFarm page that manages the device, its setup and its safety rules.
+    EnvironmentControlPrinter:
+      type: object
+      required: [printerId, farmId, printerKey, controls]
+      additionalProperties: false
+      properties:
+        printerId:
+          $ref: '#/components/schemas/Uuid'
+        farmId:
+          $ref: '#/components/schemas/Uuid'
+        printerKey:
+          type: string
+        displayName:
+          type: string
+        location:
+          type: string
+        controls:
+          type: array
+          maxItems: 3
+          items:
+            $ref: '#/components/schemas/EnvironmentControl'
+    EnvironmentControlsPage:
+      allOf:
+        - $ref: '#/components/schemas/PageInfo'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              maxItems: 100
+              items:
+                $ref: '#/components/schemas/EnvironmentControlPrinter'
+    EnvironmentControlRequest:
+      description: |
+        `extraction`/`set` sets the chamber fan percent; `plug`/`on`|`off`
+        switches a named smart plug; `drying`/`start`|`stop` runs a drying
+        program.
+      oneOf:
+        - type: object
+          required: [control, action, args]
+          additionalProperties: false
+          properties:
+            control: { type: string, enum: [extraction] }
+            action: { type: string, enum: [set] }
+            args:
+              type: object
+              required: [percent]
+              additionalProperties: false
+              properties:
+                percent: { type: integer, minimum: 0, maximum: 100 }
+        - type: object
+          required: [control, action, args]
+          additionalProperties: false
+          properties:
+            control: { type: string, enum: [plug] }
+            action: { type: string, enum: ['on', 'off'] }
+            args:
+              type: object
+              required: [device]
+              additionalProperties: false
+              properties:
+                device:
+                  type: string
+                  pattern: '^[A-Za-z0-9][A-Za-z0-9 _.-]{0,63}$'
+        - type: object
+          required: [control, action, args]
+          additionalProperties: false
+          properties:
+            control: { type: string, enum: [drying] }
+            action: { type: string, enum: [start] }
+            args:
+              type: object
+              required: [targetCelsius, durationMinutes]
+              additionalProperties: false
+              properties:
+                targetCelsius: { type: integer, minimum: 35, maximum: 90 }
+                durationMinutes: { type: integer, minimum: 1, maximum: 1440 }
+        - type: object
+          required: [control, action, args]
+          additionalProperties: false
+          properties:
+            control: { type: string, enum: [drying] }
+            action: { type: string, enum: [stop] }
+            args:
+              type: object
+              additionalProperties: false
+    EnvironmentControlAction:
+      type: object
+      required:
+        [
+          id,
+          farmId,
+          printerId,
+          control,
+          action,
+          args,
+          status,
+          outcome,
+          managementUrl,
+          createdAt,
+          updatedAt,
+        ]
+      additionalProperties: false
+      properties:
+        id:
+          $ref: '#/components/schemas/Uuid'
+        farmId:
+          $ref: '#/components/schemas/Uuid'
+        printerId:
+          $ref: '#/components/schemas/Uuid'
+        control:
+          type: string
+          enum: [drying, plug, extraction]
+        action:
+          type: string
+          enum: [set, 'on', 'off', start, stop]
+        args:
+          type: object
+          description: The arguments as submitted.
+        status:
+          type: string
+          description: |
+            `queued` until handed to the Connector, `delivered` once it
+            received the command, then `completed`, `refused` or `failed` as
+            the Connector reported; `expired` and `rejected` were never
+            delivered; `outcome-unknown` could not be confirmed and nothing
+            was retried. Final states never change.
+          enum:
+            - queued
+            - delivered
+            - completed
+            - refused
+            - failed
+            - expired
+            - rejected
+            - outcome-unknown
+        outcome:
+          type: string
+          enum:
+            [
+              pending,
+              accepted,
+              refused,
+              unsupported,
+              failed,
+              not-delivered,
+              unknown,
+            ]
+        refusal:
+          $ref: '#/components/schemas/CommandRefusal'
+        managementUrl:
+          type: string
+          format: uri-reference
+          maxLength: 512
+        createdAt:
+          $ref: '#/components/schemas/TimestampMs'
+        updatedAt:
+          $ref: '#/components/schemas/TimestampMs'
     FilamentUsage:
       type: object
       additionalProperties: false
@@ -3474,7 +4488,9 @@ components:
           maxLength: 255
         kind:
           type: string
-          enum: [gcode, 3mf]
+          enum: [gcode, 3mf, resin]
+        resinProfile:
+          $ref: '#/components/schemas/ResinPrinterProfile'
         plateCount:
           type: integer
           minimum: 0
@@ -3502,7 +4518,7 @@ components:
       allOf:
         - $ref: '#/components/schemas/PageInfo'
         - type: object
-          required: [data, storageMode]
+          required: [data, storageMode, resinArtifactFormats]
           properties:
             data:
               type: array
@@ -3511,6 +4527,37 @@ components:
                 $ref: '#/components/schemas/LibraryItem'
             storageMode:
               $ref: '#/components/schemas/StorageMode'
+            resinArtifactFormats:
+              type: array
+              items:
+                $ref: '#/components/schemas/ResinArtifactFormat'
+    ResinPrinterProfile:
+      type: string
+      description: Exact printer profile ID from the published resin catalog.
+      pattern: '^[a-z0-9-]+:[a-z0-9-]+$'
+      maxLength: 100
+    ResinArtifactFormat:
+      type: object
+      additionalProperties: false
+      required: [extension, family, profiles, source, evidence]
+      properties:
+        extension:
+          type: string
+          pattern: '^\.[a-z0-9]+$'
+        family:
+          type: string
+          enum: [elegoo-sdcp, anycubic-photon, formlabs-preform]
+        profiles:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/ResinPrinterProfile'
+        source:
+          type: string
+          format: uri
+        evidence:
+          type: string
+          const: spec-derived
     LibrarySettings:
       type: object
       additionalProperties: false
@@ -3540,6 +4587,8 @@ components:
           type: string
           minLength: 1
           maxLength: 255
+        resinProfile:
+          $ref: '#/components/schemas/ResinPrinterProfile'
         contentBase64:
           type: string
           minLength: 4
@@ -3627,7 +4676,7 @@ components:
               type: integer
               minimum: 1
               maximum: 1000
-              description: Plate of a 3MF project. Omitted for G-code and for the first plate.
+              description: Plate index. For resin, only plate 1 is supported and omission defaults to 1. Omit for G-code and for the first plate of a 3MF project.
     RefusalCode:
       type: string
       description: |
@@ -3721,6 +4770,8 @@ components:
         storageMode:
           $ref: '#/components/schemas/StorageMode'
           description: Where the replayed file is stored.
+        resinProfile:
+          $ref: '#/components/schemas/ResinPrinterProfile'
         historyEntryId:
           type: string
           pattern: '^[0-9]{1,19}$'

@@ -16,5 +16,8 @@ export const INTEGRATION_SCOPES = [
   'plates:confirm',
   'alerts:write',
   'camera:view',
+  'inventory:write',
+  'environment:control',
+  'alerts:manage',
 ] as const
 export type IntegrationScope = (typeof INTEGRATION_SCOPES)[number]

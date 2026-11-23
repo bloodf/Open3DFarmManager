@@ -1,16 +1,24 @@
 import { createHash } from 'node:crypto'
+import { resinArtifactFormatFor } from '../../../shared/src/print-file/resin-artifacts.ts'
+import {
+  preflightResinArtifactReplay,
+  type ResinArtifactDispatchCapability,
+} from '../../../shared/src/print-file/resin-replay.ts'
 import type { z } from 'zod'
 import {
   API_ENVELOPE_ISSUER,
   ApiRunAction,
   ApiPlateAction,
+  ApiResinReplay,
   API_RUN_CONTROLS,
-  scopeForApiAction,
+  isApiEnvironmentAction,
+  scopeForApiCommand,
   decodeApiEnvelopeFrame,
   encodeApiEnvelopeResultFrame,
   verifyApiEnvelope,
   type ApiEnvelopeRefusalCode,
   type ApiEnvelopeV1,
+  type ApiEnvironmentAction,
 } from '../../../farm-protocol/src/api-envelope.ts'
 import {
   controlPrinterBusy,
@@ -70,13 +78,77 @@ export type ApiCommandDriver = Pick<
       },
     ): ReturnType<PreparedPauseDriver['prepare']>
   } & PlateStartGuard
+export interface QualifiedResinDispatch extends ResinArtifactDispatchCapability {
+  /** Check vendor bytes, embedded profile and firmware compatibility locally. */
+  validate(input: {
+    filename: string
+    path: string
+    signal: AbortSignal
+  }): Promise<{ ok: true } | { ok: false; reason: string }>
+  /** Call beforeSend immediately before the sole physical start. Return true only after positive start confirmation. */
+  dispatch(input: {
+    filename: string
+    path: string
+    binding: PrinterBinding
+    signal: AbortSignal
+    beforeSend(): boolean
+  }): Promise<boolean>
+}
+
 type DriverRequest = z.infer<typeof ControlArguments>
+
+/**
+ * The qualified driver request behind an environment control, or undefined
+ * when the Connector has no qualified capability for it. Extraction is the
+ * chamber fan (`set_fan`), journalled like any API action. Smart plugs and
+ * drying programs have no qualified API path yet (no journalled API action
+ * and no qualified drying driver), so they are refused as unsupported.
+ */
+export function environmentDriverRequest(
+  action: ApiEnvironmentAction,
+): DriverRequest | undefined {
+  if (action.action === 'extraction_set')
+    return {
+      action: 'set_fan',
+      args: { fan: 'chamber', percent: action.args.percent },
+    }
+  return undefined
+}
 
 function driverAction(envelope: ApiEnvelopeV1): DriverRequest | undefined {
   const scoped = ApiRunAction.safeParse(envelope.action)
   if (scoped.success)
     return { action: API_RUN_CONTROLS[scoped.data.action], args: {} }
+  if (isApiEnvironmentAction(envelope.action))
+    return environmentDriverRequest(envelope.action)
   return envelope.action as DriverRequest | undefined
+}
+
+const ACTIVE_PRINT_STATES: readonly string[] = ['printing', 'paused']
+
+/**
+ * Safety interlocks for environment controls, decided from the Connector's
+ * own observation; an unknown state refuses, it never allows. A smart plug is
+ * never switched while a print runs or is paused, and extraction is never
+ * turned off during one.
+ */
+export function environmentInterlock(
+  action: ApiEnvironmentAction,
+  observed: ApiPrinterObservation | null,
+): [ApiEnvelopeRefusalCode, string] | null {
+  if (
+    !observed ||
+    !observed.ready ||
+    observed.printState === 'unknown' ||
+    observed.printState === 'error'
+  )
+    return ['not-ready', 'environment-interlock-state-unknown']
+  const active = ACTIVE_PRINT_STATES.includes(observed.printState)
+  if (action.action === 'plug_switch' && active)
+    return ['printer-busy', 'plug-interlock-print-active']
+  if (action.action === 'extraction_set' && action.args.percent === 0 && active)
+    return ['printer-busy', 'extraction-interlock-print-active']
+  return null
 }
 
 export type ApiCommandResult =
@@ -95,7 +167,7 @@ const MAX_EXECUTE_MS = 5000
 /** The scope a grant must hold for this envelope; mirrors the server's issue check. */
 export function apiEnvelopeScope(envelope: ApiEnvelopeV1): string {
   if (envelope.kind === 'job') return 'jobs:start'
-  return scopeForApiAction(envelope.action!.action)
+  return scopeForApiCommand(envelope.action!.action)
 }
 
 /**
@@ -133,7 +205,11 @@ export function createApiCommandRunner(config: {
     ca?: string | Buffer
   }
   /** Library print starts; without it `start_library_print` is refused as unsupported. */
-  libraryPrint?: ReturnType<typeof createLibraryPrintStarter>
+  libraryPrint?: Pick<ReturnType<typeof createLibraryPrintStarter>, 'start'> &
+    Partial<
+      Pick<ReturnType<typeof createLibraryPrintStarter>, 'withVerifiedArtifact'>
+    >
+  resinCapabilities?(binding: PrinterBinding): readonly QualifiedResinDispatch[]
   /** Remembers what a library start printed so the finished job links to it (#385). */
   libraryLinks?: Pick<LibraryJobLinks, 'remember'>
 }) {
@@ -197,7 +273,11 @@ export function createApiCommandRunner(config: {
       return ['grant-revoked', 'grant revoked']
     if (!config.grants.freshness.freshAt(now))
       return ['grant-revoked', 'grant not confirmed recently']
-    if (!grant.scopes.includes(apiEnvelopeScope(envelope)))
+    if (
+      !grant.scopes.includes(apiEnvelopeScope(envelope)) ||
+      (ApiResinReplay.safeParse(envelope.action).success &&
+        !grant.scopes.includes('jobs:start'))
+    )
       return ['grant-revoked', 'action outside the granted scope']
     return null
   }
@@ -216,6 +296,8 @@ export function createApiCommandRunner(config: {
   ): [ApiEnvelopeRefusalCode, string] | null {
     if (envelope.kind === 'job') {
       const target = jobTarget(binding)
+      if (envelope.job && resinArtifactFormatFor(envelope.job.display_name))
+        return ['unsupported', 'resin-artifact-requires-library-version']
       if (
         !target ||
         !envelope.job ||
@@ -232,6 +314,18 @@ export function createApiCommandRunner(config: {
         config.driver.confirmApiCollection
         ? null
         : ['unsupported', 'plate confirmation is not supported by this printer']
+    const resin = ApiResinReplay.safeParse(envelope.action)
+    if (resin.success) {
+      const decision = resinPreflight(envelope, binding, resin.data.args)
+      if (decision.status === 'rejected')
+        return ['unsupported', decision.reason]
+      if (
+        decision.status === 'unsupported' ||
+        !config.libraryPrint?.withVerifiedArtifact
+      )
+        return ['unsupported', 'resin-artifact-dispatch-unavailable']
+      return null
+    }
     // A library start runs the driver's ordinary `start_print` after the file is in place.
     const libraryStart = action === 'start_library_print'
     if (
@@ -254,6 +348,41 @@ export function createApiCommandRunner(config: {
     )
       return ['unsupported', 'action not supported by this printer']
     return null
+  }
+
+  function resinPreflight(
+    envelope: ApiEnvelopeV1,
+    binding: PrinterBinding,
+    args: z.infer<typeof ApiResinReplay>['args'],
+  ) {
+    const capabilities = (config.resinCapabilities?.(binding) ?? []).filter(
+      (entry) => entry.assignmentId === envelope.assignment_id,
+    )
+    const capability = capabilities.find(
+      (entry) => entry.profile === args.profile,
+    )
+    const decision = preflightResinArtifactReplay({
+      version: {
+        id: args.versionId,
+        sha256: args.sha256,
+        filename: args.filename,
+        profile: args.profile,
+      },
+      requestedVersionId: args.versionId,
+      plate: args.plate,
+      assignmentId: envelope.assignment_id,
+      targetProfile: capability?.profile ?? capabilities[0]?.profile ?? null,
+      capabilities,
+    })
+    if (decision.status !== 'eligible') return decision
+    return {
+      ...decision,
+      capability: capabilities.find(
+        (entry) =>
+          entry.profile === args.profile &&
+          entry.extensions.includes(decision.extension),
+      )!,
+    }
   }
 
   function stateRefusal(
@@ -329,8 +458,22 @@ export function createApiCommandRunner(config: {
         config.storageDegraded?.()
       )
         return refuse(envelope, 'not-ready', 'printer or journal unavailable')
+      // An environment control without a qualified capability is refused
+      // before anything is journalled or sent.
+      const environment = isApiEnvironmentAction(envelope.action)
+        ? environmentDriverRequest(envelope.action)
+        : undefined
+      if (isApiEnvironmentAction(envelope.action) && !environment)
+        return refuse(
+          envelope,
+          'unsupported',
+          'no qualified capability for this environment control',
+        )
       const claim = claimApiCommand(config.journal, {
-        envelope,
+        // The journal records the driver action the environment control runs.
+        envelope: environment
+          ? { ...envelope, action: environment as ApiEnvelopeV1['action'] }
+          : envelope,
         printerKey: mapping.printer_key,
         wireSha256: createHash('sha256').update(String(wire)).digest('hex'),
       })
@@ -372,6 +515,7 @@ export function createApiCommandRunner(config: {
     const { action, args } = request
     const run = ApiRunAction.safeParse(envelope.action)
     const plate = ApiPlateAction.safeParse(envelope.action)
+    const resin = ApiResinReplay.safeParse(envelope.action)
     let runEvidence: ApiRunEvidence | undefined
     const commandStateRefusal = (): [ApiEnvelopeRefusalCode, string] | null => {
       if (run.success || plate.success) {
@@ -402,6 +546,26 @@ export function createApiCommandRunner(config: {
         )
           return ['wrong-state', 'run-mismatch']
         return stateRefusal(action, binding, observed)
+      }
+      if (
+        envelope.action?.action === 'set_fan' &&
+        envelope.action.args.fan === 'chamber' &&
+        envelope.action.args.percent === 0
+      ) {
+        const observed = config.observe(binding)
+        return (
+          environmentInterlock(
+            { action: 'extraction_set', args: { percent: 0 } },
+            observed,
+          ) ?? stateRefusal(action, binding, observed ?? undefined)
+        )
+      }
+      if (isApiEnvironmentAction(envelope.action)) {
+        const observed = config.observe(binding)
+        return (
+          environmentInterlock(envelope.action, observed) ??
+          stateRefusal(action, binding, observed ?? undefined)
+        )
       }
       return stateRefusal(action, binding)
     }
@@ -511,6 +675,69 @@ export function createApiCommandRunner(config: {
         if (beforeSend()) {
           config.driver.confirmApiCollection!(binding, plate.data.args.attempt)
           acknowledged = true
+        }
+      } else if (resin.success) {
+        const artifact = resin.data.args
+        const decision = resinPreflight(envelope, binding, artifact)
+        if (
+          decision.status !== 'eligible' ||
+          !config.libraryPrint?.withVerifiedArtifact
+        )
+          throw new JobFileError('unsupported')
+        lastRefusal = commandStateRefusal()
+        if (!lastRefusal) {
+          const result = await config.libraryPrint.withVerifiedArtifact(
+            artifact.sha256,
+            signal,
+            async (path) => {
+              const { capability } = decision
+              const verified = await capability.validate({
+                filename: artifact.filename,
+                path,
+                signal,
+              })
+              if (!verified.ok) {
+                lastRefusal = [
+                  'unsupported',
+                  verified.reason.replace(/[^a-z0-9-]/g, '').slice(0, 100) ||
+                    'invalid-resin-artifact',
+                ]
+                return
+              }
+              lastRefusal =
+                authorityRefusal(envelope, sample()) ??
+                safetyRefusal(envelope, binding) ??
+                commandStateRefusal()
+              if (lastRefusal || signal.aborted) return
+              attempted = true
+              acknowledged = await capability.dispatch({
+                filename: artifact.filename,
+                path,
+                binding,
+                signal,
+                beforeSend() {
+                  const current = resinPreflight(envelope, binding, artifact)
+                  if (
+                    current.status !== 'eligible' ||
+                    current.capability !== capability
+                  ) {
+                    guardCalled = true
+                    lastRefusal = [
+                      'unsupported',
+                      'resin-artifact-dispatch-unavailable',
+                    ]
+                    return false
+                  }
+                  return beforeSend()
+                },
+              })
+            },
+          )
+          if (!result.ok)
+            lastRefusal = [
+              result.code === 'checksum-mismatch' ? result.code : 'not-ready',
+              result.code,
+            ]
         }
       } else if (action === 'start_library_print') {
         const mapping = readPrinterBinding(binding)

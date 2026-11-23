@@ -64,7 +64,7 @@ test(
       assert.deepEqual(
         simulator.queries,
         Array.from({ length: 5 }, () => [
-          { command: 'pushall', sequence_id: '' },
+          { command: 'pushall', sequence_id: '0' },
           { command: 'get_version', sequence_id: '0' },
         ]).flat(),
       )

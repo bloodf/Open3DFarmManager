@@ -116,6 +116,11 @@ export type JourneyOptions = Readonly<{
    */
   discovery?: boolean
   /**
+   * Creality only: the simulated printer advertises a secure endpoint (HTTPS
+   * discovery plus WSS) and the Connector trusts its synthetic certificate.
+   */
+  secure?: boolean
+  /**
    * Starts the loopback Kobra X mock and the configuration-mode Connector with
    * the native connection confirmation pointed at it, so the Impressoras page
    * can set up a Kobra X natively. The page-created assignment is the journey's
@@ -437,6 +442,7 @@ export async function startJourneyHarness(
         printerKey,
         ...(options.bambuCamera ? { bambuCamera: options.bambuCamera } : {}),
         ...(options.control === undefined ? {} : { control: options.control }),
+        ...(options.secure === undefined ? {} : { secure: options.secure }),
       })
       const started = vendor
       undo.push(() => started.close())
@@ -621,10 +627,11 @@ export async function startJourneyHarness(
           throw new Error(
             'Page discovery needs the Creality or Anycubic simulator',
           )
+        const secure = vendor?.discovery?.secure
         probes = {
           ...probes,
           ...(simulator === 'creality'
-            ? { creality: port }
+            ? { creality: secure ? { ...secure, http: port } : port }
             : { anycubic: port }),
         }
       } else if (simulator === 'bambu') {

@@ -472,6 +472,7 @@ try {
             ...(scenario.resources?.includes('rtsp-camera') ? rtsp?.env : {}),
             SIGNALLING_HTTPS_DISPOSABLE: 'yes',
             SIGNALLING_HTTPS_PORT: String(dbPort),
+            PGPASSWORD: dbPassword,
             SIGNALLING_HTTPS_LEDGER: rowLedger,
             SIGNALLING_HTTPS_LAYER: layer,
           },

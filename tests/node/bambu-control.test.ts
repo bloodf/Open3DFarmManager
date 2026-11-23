@@ -37,7 +37,7 @@ function assertTelemetryBootstrap(
   remote: Awaited<ReturnType<typeof startBambuSimulator>>,
 ) {
   assert.deepEqual(remote.queries, [
-    { command: 'pushall', sequence_id: '' },
+    { command: 'pushall', sequence_id: '0' },
     { command: 'get_version', sequence_id: '0' },
   ])
   assert.deepEqual(
@@ -48,7 +48,14 @@ function assertTelemetryBootstrap(
     [
       [
         'device/SYNTHETIC/request',
-        { pushing: { command: 'pushall', version: 1, push_target: 1 } },
+        {
+          pushing: {
+            command: 'pushall',
+            sequence_id: '0',
+            version: 1,
+            push_target: 1,
+          },
+        },
       ],
       [
         'device/SYNTHETIC/request',

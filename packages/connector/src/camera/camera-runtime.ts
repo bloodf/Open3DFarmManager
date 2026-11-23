@@ -385,6 +385,7 @@ export async function createCameraMediaFactory(input: {
       onViolation,
     })
   return Object.assign(factory, {
+    assignmentIds: [...new Set(cameras.map(({ scope }) => scope.printerId))],
     getCameraStatus: () => getRtspCameraStatus(config),
   })
 }

@@ -912,7 +912,7 @@ watch(
       @set-pin="setPin"
       @emergency-stop="emergencyStop"
     >
-      <template #painel>
+      <template #status>
         <BambuAlarmStatus
           v-if="
             live &&

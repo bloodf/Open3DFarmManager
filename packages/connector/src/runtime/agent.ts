@@ -549,6 +549,15 @@ async function runConnectorAgentOnce(
             return status
           },
           controlsFor: (id) => {
+            const assignment = config.assignments.find(
+              (item) => item.assignment_id === id,
+            )
+            if (
+              assignment &&
+              'backend' in assignment &&
+              assignment.backend === 'prusa-link'
+            )
+              return []
             const ref = refs.find((item) => item.assignmentId === id)
             if (
               config.collection.version === 7 &&

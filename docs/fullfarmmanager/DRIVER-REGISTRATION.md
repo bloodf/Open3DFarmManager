@@ -1,6 +1,6 @@
 # Driver registration contract (candidate)
 
-Status: proposal, 2026-11-22. No code implements it yet. It covers Prusa (PrusaLink and Connect Local), Qidi, Flashforge, Phrozen and Anycubic Photon resin. It reuses the registered SDCP and Formlabs read-only collection as the pattern. Stage 1 acceptance uses simulator evidence. Hardware qualification is required for the hardware grade and for stage 2 commands.
+Status: proposal, 2026-11-22. The Connector v8 runtime implements the [PrusaLink read-only status slice](../protocols/prusa.md#connector-v8-read-only-collection). It covers Prusa (PrusaLink and Connect Local), Qidi, Flashforge, Phrozen and Anycubic Photon resin. It reuses the registered SDCP and Formlabs read-only collection as the pattern. Stage 1 acceptance uses simulator evidence. Hardware qualification is required for the hardware grade and for stage 2 commands.
 
 ## What the code does today
 
@@ -141,18 +141,18 @@ Every new family provisions through `provisionReadonlyPrinter`. That handle has 
 
 ### 5. Model and firmware identity
 
-Every observation carries `identity: { vendor, model, firmware }` plus an `identitySource`:
+The table records identity fields and their sources. The PrusaLink row describes the implemented v8 observation.
 
-| Family              | `model` from                                            | `firmware` from                           | `identitySource`    | Mismatch behaviour                                  |
-| ------------------- | ------------------------------------------------------- | ----------------------------------------- | ------------------- | --------------------------------------------------- |
-| sdcp                | discovery `MachineName`, checked against binding        | discovery `FirmwareVersion`               | `wire`              | withdraw epoch, reason `identity`                   |
-| formlabs            | PreForm `product_name`                                  | PreForm `firmware_version` (optional)     | `host`              | withdraw; unsupported model is never published      |
-| prusa-link          | `/api/v1/info`, checked against `expect`                | `/api/version` firmware field, if present | `wire`              | withdraw, reason `identity`                         |
-| prusa-connect-local | device detail                                           | device detail                             | `host`              | withdraw on `id` mismatch (already enforced)        |
-| qidi                | `declared.model`                                        | `declared.firmware`                       | `declared`          | the UI must show "declarado pelo operador"          |
-| flashforge          | UDP PID, and `/detail` PID on every read                | `/detail` `firmwareVersion` allowlist     | `wire`              | withdraw; model change versus binding is a mismatch |
-| phrozen             | UDP identity, exact model                               | `V138`/`V153` allowlist                   | `wire`              | adapter refuses; withdraw                           |
-| anycubic-resin      | `/info` `modelId`/`modelName`, checked against `serial` | unknown (the capture has no firmware)     | `wire` (model only) | `firmware: null`, never guessed                     |
+| Family              | `model` from                                                    | `firmware` from                       | `identitySource`    | Mismatch behaviour                                  |
+| ------------------- | --------------------------------------------------------------- | ------------------------------------- | ------------------- | --------------------------------------------------- |
+| sdcp                | discovery `MachineName`, checked against binding                | discovery `FirmwareVersion`           | `wire`              | withdraw epoch, reason `identity`                   |
+| formlabs            | PreForm `product_name`                                          | PreForm `firmware_version` (optional) | `host`              | withdraw; unsupported model is never published      |
+| prusa-link          | Configured printer type after wire identity matches the binding | Omitted                               | Omitted             | Withdraw observation                                |
+| prusa-connect-local | device detail                                                   | device detail                         | `host`              | withdraw on `id` mismatch (already enforced)        |
+| qidi                | `declared.model`                                                | `declared.firmware`                   | `declared`          | the UI must show "declarado pelo operador"          |
+| flashforge          | UDP PID, and `/detail` PID on every read                        | `/detail` `firmwareVersion` allowlist | `wire`              | withdraw; model change versus binding is a mismatch |
+| phrozen             | UDP identity, exact model                                       | `V138`/`V153` allowlist               | `wire`              | adapter refuses; withdraw                           |
+| anycubic-resin      | `/info` `modelId`/`modelName`, checked against `serial`         | unknown (the capture has no firmware) | `wire` (model only) | `firmware: null`, never guessed                     |
 
 Identity is re-proven at the start of every collection session, following `sdcp-collection.ts`, not only at registration.
 

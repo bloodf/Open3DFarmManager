@@ -147,6 +147,7 @@ export async function listIntegrationJobs(
   input: {
     farmWideFarmIds: string[]
     assignmentIds: string[]
+    appId?: string
     printerId: string | null
     since: number | null
     until: number | null
@@ -201,7 +202,7 @@ export async function listIntegrationJobs(
     }
   }
   const jobIds = linkSql
-    ? await integrationHistoryJobIds(linkSql, page)
+    ? await integrationHistoryJobIds(linkSql, page, input.appId)
     : new Map()
   const data = page.map((row) => ({
     ...(jobIds.has(row.id) ? { jobId: jobIds.get(row.id)! } : {}),

@@ -19,10 +19,25 @@ if (journeyEnabled())
       await expect(
         row.getByRole('button', { name: /^(Pausar|Retomar|Cancelar)$/ }),
       ).toHaveCount(0)
+      await expect(
+        row.getByRole('button', { name: 'Pausar impressão' }),
+      ).toHaveCount(0)
       sim.setOnline(false)
-      await expect(row).not.toContainText('Imprimindo', { timeout: 90_000 })
+      await expect(
+        row.getByText(
+          'Conexão direta indisponível. Exibindo a última observação.',
+          { exact: true },
+        ),
+      ).toBeVisible({ timeout: 90_000 })
+      await expect(row.getByText(/Dados desatualizados/).first()).toBeVisible()
+      await expect(
+        row.getByRole('button', { name: 'Pausar impressão' }),
+      ).toHaveCount(0)
       sim.setProgress(40)
       sim.setOnline(true)
+      await expect(
+        row.getByText('Conexão direta autenticada', { exact: true }),
+      ).toBeVisible({ timeout: 90_000 })
       await journey.expectProgress(0.4)
       await expect(row).toContainText('Imprimindo')
     } finally {

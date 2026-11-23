@@ -293,7 +293,10 @@ export function createFarmSnapshotSource(input: {
     }
     const timing = value.fieldObservedAtMonoMs
     const fieldStamped =
-      'anycubic' in timing || 'bambu' in timing || 'creality' in timing
+      'sdcp' in timing ||
+      'anycubic' in timing ||
+      'bambu' in timing ||
+      'creality' in timing
     const times = fieldTimes(timing)
     const connectionOnly = 'connection' in times
     const previousTiming = previous?.fieldObservedAtMonoMs
@@ -340,7 +343,8 @@ export function createFarmSnapshotSource(input: {
           previousTimes &&
           ('connection' in previousTimes !== connectionOnly ||
             (!!previousTiming &&
-              ('anycubic' in previousTiming ||
+              ('sdcp' in previousTiming ||
+                'anycubic' in previousTiming ||
                 'bambu' in previousTiming ||
                 'creality' in previousTiming)) !== fieldStamped)
             ? Math.max(...Object.values(previousTimes))

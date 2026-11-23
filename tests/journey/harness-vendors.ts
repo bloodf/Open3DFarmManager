@@ -18,10 +18,12 @@ import { startAnycubicSimulator } from '../../packages/sim-tools/src/anycubic-si
 import { createAnycubicDiscoverySimulator } from '../../packages/sim-tools/src/anycubic-discovery-sim.ts'
 import { startBambuSimulator } from '../../packages/sim-tools/src/bambu-simulator.ts'
 import { createCrealitySimulator } from '../../packages/sim-tools/src/creality-simulator.ts'
+import { startSdcpFixture } from './sdcp-fixture.ts'
 import { createJourneyCameraEncoder } from './camera-encoder.ts'
 import { startKobraBridgeSimulator } from './harness-kobralink-bridge.ts'
 
-export type VendorName = 'bambu' | 'creality' | 'anycubic' | 'kobralink'
+export type VendorName =
+  'bambu' | 'creality' | 'anycubic' | 'kobralink' | 'sdcp'
 
 /** What a spec can do to the running simulated print. */
 export type VendorControls = Readonly<{
@@ -54,7 +56,7 @@ export type RuntimeScope = Readonly<{
 
 /** The Connector runtime file sections this vendor needs. */
 export type VendorRuntime = Readonly<{
-  version: 2 | 3 | 4 | 5
+  version: 2 | 3 | 4 | 5 | 6
   collection: Readonly<Record<string, unknown>>
   assignment: Readonly<Record<string, unknown>>
   /**
@@ -103,6 +105,7 @@ export type VendorSimulator = Readonly<{
 
 /** Moonraker is the harness default; everything else is a VendorName. */
 export const VENDOR_DESCRIPTIONS: Readonly<Record<VendorName, string>> = {
+  sdcp: 'Loopback SDCP status simulator',
   bambu:
     'Loopback Bambu LAN MQTT/TLS simulator (packages/sim-tools), pinned TLS, printing at 25 %; control commands opt-in',
   creality:
@@ -260,7 +263,36 @@ export async function startVendorSimulator(
     let controls: VendorControls
     let runtime: VendorSimulator['runtime']
 
-    if (name === 'bambu') {
+    if (name === 'sdcp') {
+      const sim = await startSdcpFixture()
+      undo.push(() => sim.close())
+      raw = sim
+      controls = {
+        setProgress: sim.setProgress,
+        finishPrint: () => sim.setProgress(100),
+        failPrint: () => sim.setOnline(false),
+      }
+      runtime = async (scope) => ({
+        version: 6,
+        collection: {
+          version: 6,
+          allowedOrigins: [],
+          printers: [],
+          sdcp: {
+            printers: [
+              {
+                printerKey: scope.printerKey,
+                host: '127.0.0.1',
+                mainboardId: 'journey01',
+                model: 'Saturn 4 Ultra',
+              },
+            ],
+          },
+          limits: { staleAfterMs: 5000 },
+        },
+        assignment: { ...localAssignment(scope), backend: 'sdcp' },
+      })
+    } else if (name === 'bambu') {
       const serial = options.deviceId
         ? `JOURNEYBAMBU_${options.deviceId}`
         : 'JOURNEYBAMBU'

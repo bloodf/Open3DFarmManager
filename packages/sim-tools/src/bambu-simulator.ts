@@ -212,6 +212,11 @@ export async function startBambuSimulator({
     onPublish: async (msg) => {
       if (msg.topic !== requestTopic) throw new Error('Invalid request topic')
       const value = JSON.parse(msg.payload.toString('utf8'))
+      if (value?.pushing?.command === 'pushall') {
+        queries.push({ command: 'pushall', sequence_id: '' })
+        emitCurrentReport()
+        return
+      }
       if (value?.info?.command === 'get_version') {
         queries.push({
           command: 'get_version',

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BambuAlarmStatus from '../../components/printer-detail/BambuAlarmStatus.vue'
 import {
   computed,
   nextTick,
@@ -910,19 +911,14 @@ watch(
       @emergency-stop="emergencyStop"
     >
       <template #painel>
-        <div
+        <BambuAlarmStatus
           v-if="
             live &&
             detailFrame?.vendor === 'bambu' &&
             detailFrame.printerKey === printerKey
           "
-          role="status"
-          aria-label="Alertas Bambu Lab"
-        >
-          <p v-if="detailFrame.detail.print?.message">
-            {{ detailFrame.detail.print.message }}
-          </p>
-        </div>
+          :message="detailFrame.detail.print?.message ?? ''"
+        />
       </template>
       <template #configuracao>
         <ConfigEditorPanel

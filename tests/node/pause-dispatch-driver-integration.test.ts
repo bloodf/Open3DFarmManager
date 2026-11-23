@@ -1,7 +1,7 @@
 import test, { afterEach, beforeEach, mock } from 'node:test'
 import assert from 'node:assert/strict'
 import { randomBytes, randomUUID } from 'node:crypto'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -11,13 +11,29 @@ import {
   claimCommand,
 } from '../../packages/connector/src/control/command-journal.ts'
 import { createPauseDispatcher } from '../../packages/connector/src/control/pause-dispatcher.ts'
-import { createPrinterBindingRegistry } from '../../packages/connector/src/control/printer-binding.ts'
+import {
+  createPrinterBindingRegistry,
+  type PrinterBinding,
+} from '../../packages/connector/src/control/printer-binding.ts'
+import {
+  importKobraClientCertFromInput,
+  writeKobraClientCertFile,
+} from '../../packages/connector/src/config/kobra-x-cert.ts'
+import { kobraXBindingsPath } from '../../packages/connector/src/config/kobra-x.ts'
+import { readAgentRuntimeConfig } from '../../packages/connector/src/config/runtime.ts'
 import {
   signCommandV2,
   encodeCommandV2,
 } from '../../packages/farm-protocol/src/command-v2.ts'
 import { createPauseDriverRouter } from '../../packages/connector/src/runtime/pause-driver-router.ts'
 import { pauseFixture } from '../../packages/connector/test/moonraker-pause-fixture.ts'
+import { connectKobraX } from '../../packages/connector/src/kobra-x/index.ts'
+import { startKobraXMock } from '../../packages/sim-tools/src/mocks/kobra-x-mock.ts'
+import {
+  installNetworkGuard,
+  uninstallNetworkGuard,
+} from '../../packages/sim-tools/src/mocks/network-guard.ts'
+import type { ExtendedControlAction } from '../../packages/farm-protocol/src/control-actions.ts'
 import { createHash } from 'node:crypto'
 
 // Dispatch, driver and command deadlines run on clocks the tests control: wall
@@ -26,7 +42,8 @@ import { createHash } from 'node:crypto'
 // process therefore cannot turn a slow loopback round trip into a deadline.
 let monotonic = 0
 const monotonicNow = () => (monotonic += 0.001)
-beforeEach(() => {
+beforeEach((t) => {
+  if (t.name.startsWith('native Kobra X')) return
   monotonic = performance.now()
   mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.now() })
 })
@@ -67,7 +84,7 @@ async function commandFixture() {
   return { pair, publicKey, command }
 }
 
-async function authorityFixture() {
+async function authorityFixture(actions: ExtendedControlAction[] = ['pause']) {
   const { pair, publicKey, command } = await commandFixture()
   const now = command.issued_at
   const { validateBrowserDevicePublicKey } =
@@ -140,7 +157,7 @@ async function authorityFixture() {
     printer_key: 'é"\\'.repeat(32),
     control_binding_sha256: bindingHash,
     admission_nonce: admissionNonce,
-    actions: ['pause'] as ['pause'],
+    actions,
   }
   const challenge = {
     v: 1 as const,
@@ -170,6 +187,63 @@ async function authorityFixture() {
     capability,
     challenge,
   }
+}
+
+async function admitFixture(
+  active: ReturnType<typeof createPauseDispatcher>,
+  f: Awaited<ReturnType<typeof authorityFixture>>,
+  printerBinding: PrinterBinding,
+) {
+  const controls =
+    await import('../../packages/farm-protocol/src/control-session-binding.ts')
+  const caps =
+    await import('../../packages/farm-protocol/src/pause-capability.ts')
+  const admission = active.beginAdmission({
+    binding: f.binding,
+    printerBinding,
+    peer: active.createPeer(1).peer,
+  })
+  const nonce = admission.challenge.admissionNonce
+  const admittedAt = Date.now()
+  const capability = await caps.signPauseCapability(
+    { ...f.capability, issued_at: admittedAt, admission_nonce: nonce },
+    f.issuer.privateKey,
+  )
+  const proof = await caps.signPauseAdmissionProof(
+    {
+      ...f.challenge,
+      issued_at: admittedAt,
+      expires_at: admittedAt + 8000,
+      admission_nonce: nonce,
+    },
+    f.pair.privateKey,
+  )
+  const accepted = await active.admit(admission.token, {
+    capabilityWire: caps.encodePauseCapability(capability),
+    admissionProofWire: caps.encodePauseAdmissionProof(proof),
+    browserProofWire: controls.encodeControlProof({
+      v: 1,
+      role: 'browser',
+      binding: f.binding,
+      signature: await controls.signControlSessionProof(
+        f.binding,
+        'browser',
+        f.pair.privateKey,
+      ),
+    }),
+    connectorProofWire: controls.encodeControlProof({
+      v: 1,
+      role: 'connector',
+      binding: f.binding,
+      signature: await controls.signControlSessionProof(
+        f.binding,
+        'connector',
+        f.connector.privateKey,
+      ),
+    }),
+  })
+  assert.ok(accepted.ok, accepted.ok ? 'admitted' : accepted.reason)
+  return accepted.handle
 }
 
 async function fixture(
@@ -243,55 +317,7 @@ async function fixture(
   })
   const active = dispatcher
   cleanup.push(() => active.close())
-  const controls =
-    await import('../../packages/farm-protocol/src/control-session-binding.ts')
-  const caps =
-    await import('../../packages/farm-protocol/src/pause-capability.ts')
-  const admission = active.beginAdmission({
-    binding: f.binding,
-    printerBinding,
-    peer: active.createPeer(1).peer,
-  })
-  const nonce = admission.challenge.admissionNonce
-  const admittedAt = Date.now()
-  const capability = await caps.signPauseCapability(
-    { ...f.capability, issued_at: admittedAt, admission_nonce: nonce },
-    f.issuer.privateKey,
-  )
-  const proof = await caps.signPauseAdmissionProof(
-    {
-      ...f.challenge,
-      issued_at: admittedAt,
-      expires_at: admittedAt + 8000,
-      admission_nonce: nonce,
-    },
-    f.pair.privateKey,
-  )
-  const accepted = await active.admit(admission.token, {
-    capabilityWire: caps.encodePauseCapability(capability),
-    admissionProofWire: caps.encodePauseAdmissionProof(proof),
-    browserProofWire: controls.encodeControlProof({
-      v: 1,
-      role: 'browser',
-      binding: f.binding,
-      signature: await controls.signControlSessionProof(
-        f.binding,
-        'browser',
-        f.pair.privateKey,
-      ),
-    }),
-    connectorProofWire: controls.encodeControlProof({
-      v: 1,
-      role: 'connector',
-      binding: f.binding,
-      signature: await controls.signControlSessionProof(
-        f.binding,
-        'connector',
-        f.connector.privateKey,
-      ),
-    }),
-  })
-  assert.ok(accepted.ok, accepted.ok ? 'admitted' : accepted.reason)
+  const capability = await admitFixture(active, f, printerBinding)
   const commandAt = Date.now()
   const signed = await signCommandV2(
     { ...f.command, issued_at: commandAt, expires_at: commandAt + 5000 },
@@ -299,7 +325,7 @@ async function fixture(
   )
   const input = {
     wire: encodeCommandV2(signed),
-    capability: accepted.handle,
+    capability,
     printerBinding,
   }
   return {
@@ -430,3 +456,350 @@ for (const fault of ['lost-ack', 'disconnect'] as const) {
     },
   )
 }
+
+async function nativeSignedFixture(t: test.TestContext) {
+  installNetworkGuard()
+  t.after(uninstallNetworkGuard)
+  const printer = await startKobraXMock({
+    ssdp: false,
+    camera: false,
+    spoolHolder: true,
+    preparationPhases: [],
+    requireMqttAuth: true,
+    requireExactClientCert: true,
+  })
+  t.after(() => printer.close())
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'native-kx-signed-')))
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+  const f = await authorityFixture([
+    'pause',
+    'resume',
+    'cancel',
+    'set_temperature',
+    'set_fan',
+    'set_light',
+    'start_print',
+    'load_filament',
+    'unload_filament',
+  ])
+  const scope = { agent_id: f.binding.agent_id, farm_id: f.binding.farm_id }
+  const clientCertFile = join(dir, 'client-cert.json')
+  const imported = await importKobraClientCertFromInput({
+    kind: 'inline',
+    format: 'pem',
+    certificate_pem: printer.tls.clientCert.toString(),
+    key_pem: printer.tls.clientKey.toString(),
+  })
+  assert.ok(imported.ok)
+  writeKobraClientCertFile(clientCertFile, imported.cert)
+  const pinSha256 = printer.tls.serverFingerprintSha256
+  assert.ok(pinSha256)
+  const configPath = join(dir, 'runtime.json')
+  const writeJson = (path: string, value: unknown) =>
+    writeFileSync(path, JSON.stringify(value), { mode: 0o600 })
+  writeJson(configPath, {
+    version: 1,
+    collection: { version: 1, allowedOrigins: [], printers: [] },
+    assignments: [],
+    telemetry: {
+      endpoint: 'https://farm.example/telemetry',
+      audience: 'test-telemetry',
+    },
+    pause: {
+      version: 1,
+      issuers: [
+        {
+          issuer: f.capability.issuer,
+          kid: f.capability.kid,
+          publicKeySpki: Buffer.from(
+            await crypto.subtle.exportKey('spki', f.issuer.publicKey),
+          ).toString('base64url'),
+        },
+      ],
+      control: { assignmentIds: [f.binding.assignment_id] },
+      signalling: {
+        endpoint: 'wss://farm.example/api/signalling/pause-connector',
+        origin: 'https://farm.example',
+        audience: f.binding.audience,
+        credentialAudience: 'test-credential',
+      },
+    },
+  })
+  writeJson(kobraXBindingsPath(configPath), {
+    version: 1,
+    printers: [
+      {
+        printerKey: f.capability.printer_key,
+        host: '127.0.0.1',
+        modelId: printer.credentials.modeId,
+        deviceId: printer.credentials.deviceId,
+        clientCertFile,
+        pinSha256,
+      },
+    ],
+    assignments: [
+      {
+        ...scope,
+        assignment_id: f.binding.assignment_id,
+        printer_key: f.capability.printer_key,
+      },
+    ],
+  })
+  const config = readAgentRuntimeConfig(configPath, scope)
+  const printerBinding = config.bindingFor(f.binding.assignment_id)
+  assert.ok(printerBinding)
+  assert.deepEqual(config.assignments, [
+    {
+      ...scope,
+      assignment_id: f.binding.assignment_id,
+      printer_key: f.capability.printer_key,
+      backend: 'kobra-x',
+    },
+  ])
+  assert.equal(config.kobraX?.length, 1)
+  assert.deepEqual(config.pause?.control?.assignmentIds, [
+    f.binding.assignment_id,
+  ])
+  const journal = openCommandJournal({
+    directory: join(dir, 'journal'),
+    clock: Date.now,
+  })
+  t.after(() => closeCommandJournal(journal))
+  const clock = { wallNow: Date.now, monotonicNow: () => performance.now() }
+  let dispatcher: ReturnType<typeof createPauseDispatcher>
+  const driver = createPauseDriverRouter({
+    clock,
+    allowedOrigins: config.collection.allowedOrigins,
+    limits: config.collection.limits,
+    connectKobraX: (options) =>
+      connectKobraX({
+        ...options,
+        httpPort: printer.httpPort,
+        mqttPort: printer.mqttPort,
+      }),
+    observe: (binding, observation) => dispatcher.observe(binding, observation),
+  })
+  dispatcher = createPauseDispatcher({
+    clock,
+    journal,
+    driver,
+    authority: {
+      issuers: [
+        {
+          issuer: f.capability.issuer,
+          kid: f.capability.kid,
+          publicKey: f.issuer.publicKey,
+        },
+      ],
+    },
+  })
+  t.after(async () => {
+    dispatcher.close()
+    await driver.closeAttempt(printerBinding)
+  })
+  assert.deepEqual(await driver.detect(printerBinding), [
+    'pause',
+    'resume',
+    'cancel',
+    'set_temperature',
+    'set_fan',
+    'set_light',
+    'start_print',
+    'load_filament',
+    'unload_filament',
+  ])
+  const capability = await admitFixture(dispatcher, f, printerBinding)
+  async function signed(
+    action: ExtendedControlAction,
+    args: Record<string, unknown>,
+  ) {
+    const now = Date.now()
+    return signCommandV2(
+      {
+        ...f.command,
+        purpose: action === 'pause' ? 'printer-pause' : 'printer-control',
+        action,
+        args,
+        cmd_id: randomUUID(),
+        nonce: randomBytes(16).toString('base64url'),
+        issued_at: now,
+        expires_at: now + 5000,
+      },
+      f.pair.privateKey,
+    )
+  }
+  const dispatch = async (
+    action: ExtendedControlAction,
+    args: Record<string, unknown> = {},
+  ) =>
+    dispatcher.dispatch({
+      wire: encodeCommandV2(await signed(action, args)),
+      capability,
+      printerBinding,
+    })
+  const commands = () =>
+    printer.calls.all
+      .filter(({ topic }) =>
+        /\/slicer\/printer\/[^/]+\/[^/]+\/[^/]+$/.test(topic),
+      )
+      .map(({ payload }) => JSON.parse(payload.toString()))
+      .filter(
+        ({ action }) => !['query', 'getInfo', 'listLocal'].includes(action),
+      )
+      .map(({ type, action, data }) => ({ type, action, data }))
+  return {
+    printer,
+    dispatcher,
+    capability,
+    printerBinding,
+    signed,
+    dispatch,
+    commands,
+    journal,
+  }
+}
+
+test(
+  'native Kobra X refuses forged signatures, invalid state and unsafe values before publishing',
+  { timeout: 20000 },
+  async (t) => {
+    const {
+      dispatcher,
+      capability,
+      printerBinding,
+      signed,
+      dispatch,
+      commands,
+    } = await nativeSignedFixture(t)
+    const forged = await signed('set_light', { on: true })
+    assert.deepEqual(
+      await dispatcher.dispatch({
+        wire: encodeCommandV2({ ...forged, args: { on: false } }),
+        capability,
+        printerBinding,
+      }),
+      { kind: 'rejected', reason: 'signature' },
+    )
+    assert.equal((await dispatch('pause')).kind, 'not-sent')
+    assert.equal(
+      (await dispatch('start_print', { file: 'plate.gcode', ams_mapping: [3] }))
+        .kind,
+      'not-sent',
+    )
+    assert.equal(
+      (await dispatch('set_temperature', { heater: 'bed', target_c: 111 }))
+        .kind,
+      'not-sent',
+    )
+    assert.deepEqual(commands(), [])
+  },
+)
+
+test(
+  'native Kobra X accepts signed controls through the pinned runtime driver',
+  { timeout: 20000 },
+  async (t) => {
+    const { printer, dispatch, commands } = await nativeSignedFixture(t)
+    const apply = async (
+      action: ExtendedControlAction,
+      args?: Record<string, unknown>,
+    ) => {
+      const outcome = await dispatch(action, args)
+      assert.equal(
+        outcome.kind,
+        'applied',
+        `${action}: ${JSON.stringify(outcome)}`,
+      )
+    }
+    await apply('set_temperature', { heater: 'extruder', target_c: 190 })
+    await apply('set_light', { on: true })
+    await apply('set_fan', { fan: 'part', percent: 45 })
+    await apply('load_filament', { tray: 4 })
+    await apply('unload_filament')
+    printer.control.seedFile('plate.gcode', '; synthetic fixture\n')
+    await apply('start_print', {
+      file: 'plate.gcode',
+      ams_mapping: [0, 1, 2, 4, 5, 6, 7],
+    })
+    await apply('pause')
+    await apply('resume')
+    await apply('cancel')
+    await apply('set_temperature', { heater: 'bed', target_c: 0 })
+    assert.deepEqual(commands(), [
+      {
+        type: 'tempature',
+        action: 'set',
+        data: { type: 2, target_nozzle_temp: 190 },
+      },
+      {
+        type: 'light',
+        action: 'control',
+        data: { type: 3, status: 1, brightness: 100 },
+      },
+      { type: 'fan', action: 'setSpeed', data: { fan_speed_pct: 45 } },
+      { type: 'multiColorBox', action: 'feed', data: { id: 0, index: 0 } },
+      { type: 'multiColorBox', action: 'retract', data: { id: 0, index: 0 } },
+      {
+        type: 'print',
+        action: 'start',
+        data: {
+          filepath: '/',
+          filename: 'plate.gcode',
+          taskid: '-1',
+          ams_settings: {
+            ams_box_mapping: [
+              { paint_index: 0, ams_index: 0 },
+              { paint_index: 1, ams_index: 1 },
+              { paint_index: 2, ams_index: 2 },
+              { paint_index: 3, ams_index: 4 },
+              { paint_index: 4, ams_index: 5 },
+              { paint_index: 5, ams_index: 6 },
+              { paint_index: 6, ams_index: 7 },
+            ],
+          },
+          task_settings: { auto_leveling: 1 },
+        },
+      },
+      { type: 'print', action: 'pause', data: { taskid: '-1' } },
+      { type: 'print', action: 'resume', data: { taskid: '-1' } },
+      { type: 'print', action: 'stop', data: { taskid: '-1' } },
+      {
+        type: 'tempature',
+        action: 'set',
+        data: { type: 2, target_hotbed_temp: 0 },
+      },
+    ])
+  },
+)
+
+test(
+  'native Kobra X does not retry a command when only its acknowledgement arrives',
+  { timeout: 20000 },
+  async (t) => {
+    const { printer, dispatch, commands, journal } =
+      await nativeSignedFixture(t)
+    printer.control.faults.addFault({
+      fault: { type: 'refuse' },
+      topic: /\/light\/report$/,
+      method: 'REPORT',
+      count: 1,
+    })
+    const result = await dispatch('set_light', { on: true })
+    assert.equal(result.kind, 'outcome-unknown')
+    assert.equal(
+      readCommandOutcome(journal, result.cmdId)?.status,
+      'outcome-unknown',
+    )
+    assert.deepEqual(await dispatch('set_light', { on: true }), {
+      kind: 'rejected',
+      reason: 'busy',
+    })
+    assert.deepEqual(commands(), [
+      {
+        type: 'light',
+        action: 'control',
+        data: { type: 3, status: 1, brightness: 100 },
+      },
+    ])
+  },
+)

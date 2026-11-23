@@ -42,6 +42,7 @@ export async function runGated<T = undefined>(
   gate: {
     action: KobraXGateAction
     slot?: number | undefined
+    boxId?: number | undefined
     filename?: string | undefined
   },
   call: KobraXCall | undefined,

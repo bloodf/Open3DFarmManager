@@ -156,7 +156,10 @@ export async function collectIntoQueue(input: {
   signal: AbortSignal
   onDiagnostic: (diagnostic: Diagnostic) => void
 }): Promise<void> {
-  const config = parseCollectorConfig(input.config)
+  const config = parseCollectorConfig(
+    input.config,
+    !!input.kobraX?.bindings.length,
+  )
   const { queue } = input
   const { createMoonrakerSubscription } =
     await import('../moonraker/subscription.ts')

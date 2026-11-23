@@ -40,6 +40,10 @@ const Driver = z.strictObject({
   expect: z.strictObject({ serial: Key, printerType: Key }),
 })
 export type PrusaLinkBinding = z.infer<typeof Driver>
+const NativeOnlyCollection = LocalCollectorConfigSchema.options[1].extend({
+  allowedOrigins: z.tuple([]),
+  printers: z.tuple([]),
+})
 const Config = LocalCollectorConfigSchema.options[0]
   .omit({ bambu: true })
   .extend({
@@ -49,7 +53,11 @@ const Config = LocalCollectorConfigSchema.options[0]
   })
 export type PrusaCollectorConfig = z.infer<typeof Config>
 
-export function parseCollectorConfig(input: unknown) {
+export function parseCollectorConfig(input: unknown, nativeKobraX = false) {
+  if (nativeKobraX) {
+    const nativeOnly = NativeOnlyCollection.safeParse(input)
+    if (nativeOnly.success) return nativeOnly.data
+  }
   if (
     !input ||
     typeof input !== 'object' ||

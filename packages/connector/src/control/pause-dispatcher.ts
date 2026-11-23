@@ -117,6 +117,11 @@ const Observation = z.strictObject({
         on: z.boolean(),
         observedMono: mono,
       }),
+      z.strictObject({
+        kind: z.literal('filament'),
+        tray: z.number().int().min(0).max(15).nullable(),
+        observedMono: mono,
+      }),
     ])
     .optional(),
 })
@@ -183,6 +188,10 @@ export function controlEffectMatches(
       return effect.kind === 'excluded-object' && effect.name === args.name
     case 'set_light':
       return effect.kind === 'light' && effect.on === args.on
+    case 'load_filament':
+      return effect.kind === 'filament' && effect.tray === args.tray
+    case 'unload_filament':
+      return effect.kind === 'filament' && effect.tray === null
     default:
       return false
   }

@@ -247,6 +247,8 @@ anycubic/anycubicCloud/v1/{slicer|web}/printer/public/<modeId>/<deviceId>/#
 Types in S1 (`<type>` in the topic): `info`, `status`, `print`, `tempature` (the printer's own
 spelling), `multiColorBox`, `light`, `fan`, `file`, `axis`, `skip`, `video`.
 
+- S1 reports no raw G-code console channel. Its console is a log of the
+  client's own requests, responses and printer state changes.
 - These types are named in S1. Per-message status is given in each section below.
 - `properties` is named only in S1's Workbench table. (reported, `not verified`)
 
@@ -350,6 +352,15 @@ Observed on firmware 2.0.2.8 (S1):
 | `ams_settings.ams_box_mapping` | filament-to-slot mapping | Chosen in the slicer's print dialog. |
 | `task_settings` | object of print options | See the table below. |
 <!-- prettier-ignore-end -->
+
+Each mapping entry contains the slicer's `paint_index` and the printer's
+`ams_index`. The reported holder uses box id `-1`, with indices 0–2 when an
+ACE is attached. The first ACE uses box id 0 and indices 4–7. The reported
+formula for multiple ACE units is `4 + unit * 4 + slot` when the holder is
+present. S1 independently read back index 4 for the first ACE's first slot.
+An ACE-only report is ambiguous: the references give indices 0–3 for a
+single unit, while S1 saw the same readback of 4 on a printer that reported
+only box 0. Signed explicit print mapping requires a reported holder.
 
 Important: `filepath` set to `/<name>` makes the printer end the task with code 10111
 ("abnormal end of task") about one second after the start. (observed, S1) A start report alone is

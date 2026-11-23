@@ -8,8 +8,12 @@ import {
 } from '../anycubic/tls-trust.ts'
 import { readKobraXInfo, recoverKobraXCredentials } from './discovery.ts'
 import { createKobraXControl } from './control.ts'
-import { createKobraXFacts } from './facts.ts'
-import { createKobraXRequests, parseKobraXReport } from './requests.ts'
+import { createKobraXFacts, type KobraXFacts } from './facts.ts'
+import {
+  createKobraXRequests,
+  parseKobraXReport,
+  type KobraXReport,
+} from './requests.ts'
 import { createKobraXStatus } from './status.ts'
 import { createKobraXUsage, type KobraXJobUsage } from './usage.ts'
 
@@ -26,7 +30,15 @@ export async function connectKobraX(options: {
   httpPort?: number
   mqttPort?: number
   reconnectMs?: number
+  signal?: AbortSignal
+  expectedIdentity?: { deviceId: string; modelId: string }
   onError?: (error: Error) => void
+  onDisconnect?: () => void
+  onReport?: (
+    report: KobraXReport,
+    snapshot: ReturnType<ReturnType<typeof createKobraXStatus>['snapshot']>,
+    facts: KobraXFacts,
+  ) => void
   /** Called once per finished job with the filament used per ACE slot. */
   onJobUsage?: (usage: KobraXJobUsage) => void
   /** How long a result is awaited after a command. */
@@ -47,9 +59,16 @@ export async function connectKobraX(options: {
     throw new Error('Kobra X client certificate or key is invalid')
   }
   const pin = normalizeAnycubicPin(options.pinSha256)
-  const info = await readKobraXInfo(address, options.httpPort)
+  const info = await readKobraXInfo(address, options.httpPort, options.signal)
   const { modeId, deviceId, username, password } =
-    await recoverKobraXCredentials(info, options.httpPort)
+    await recoverKobraXCredentials(info, options.httpPort, options.signal)
+  if (
+    options.expectedIdentity &&
+    (deviceId !== options.expectedIdentity.deviceId ||
+      modeId !== options.expectedIdentity.modelId)
+  )
+    throw new Error('Kobra X printer identity changed')
+  options.signal?.throwIfAborted()
   const state = createKobraXStatus(options.printerKey, address)
   const facts = createKobraXFacts()
   const usage = createKobraXUsage({
@@ -138,6 +157,19 @@ export async function connectKobraX(options: {
       state.disconnect()
     })
   }
+  function query(type: keyof typeof queries) {
+    if (!client.connected) return
+    client.publish(
+      `${path}/${modeId}/${deviceId}/${type}`,
+      JSON.stringify({
+        type,
+        action: queries[type],
+        msgid: randomUUID(),
+        data: {},
+      }),
+    )
+  }
+  let abort = () => {}
   const started = new Promise<void>((resolve, reject) => {
     const timer = setTimeout(
       () => reject(new Error('Kobra X MQTT connection timed out')),
@@ -148,6 +180,8 @@ export async function connectKobraX(options: {
       if (ready) options.onError?.(error)
       else reject(error)
     }
+    abort = () => failed(new Error('Kobra X connection aborted'))
+    options.signal?.addEventListener('abort', abort, { once: true })
     client.on('error', (error: Error & { code?: string | number }) => {
       const trustError = anycubicTlsTrustError(error)
       if (trustError) {
@@ -163,6 +197,7 @@ export async function connectKobraX(options: {
     client.on('close', () => {
       state.disconnect()
       facts.reset()
+      options.onDisconnect?.()
       if (!ready && !accepted && tlsEstablished) {
         failed(
           new Error(
@@ -181,17 +216,14 @@ export async function connectKobraX(options: {
           failed(new Error('Kobra X status subscription failed'))
           return
         }
-        for (const [type, action] of Object.entries(queries)) {
-          client.publish(
-            `${path}/${modeId}/${deviceId}/${type}`,
-            JSON.stringify({
-              type,
-              action,
-              msgid: randomUUID(),
-              data: {},
-            }),
-          )
-        }
+        for (const type of [
+          'info',
+          'status',
+          'print',
+          'tempature',
+          'multiColorBox',
+        ] as const)
+          query(type)
         clearTimeout(timer)
         ready = true
         resolve()
@@ -218,22 +250,30 @@ export async function connectKobraX(options: {
       if (!report) return
       facts.report(report)
       usage.report(report)
+      options.onReport?.(report, state.snapshot(), facts.get())
       requests.handleReport(report)
     } catch {
       // Invalid telemetry is ignored.
     }
   })
   try {
+    options.signal?.throwIfAborted()
     client.connect()
     await started
   } catch (error) {
     await close()
     throw error
+  } finally {
+    options.signal?.removeEventListener('abort', abort)
   }
   return {
     snapshot: state.snapshot,
     control,
     facts: facts.get,
+    refreshControlState() {
+      query('info')
+      query('print')
+    },
     /** Unscoped telemetry hint. It confers no capture ownership and is never
      * used by the Connector's passive camera source. */
     cameraUrl: state.cameraUrl,

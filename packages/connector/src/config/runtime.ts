@@ -13,6 +13,7 @@ import {
   readPrinterBinding,
   provisionReadonlyPrinter,
   provisionKobraLinkPrinter,
+  provisionKobraXPrinter,
   type PrinterBinding,
 } from '../control/printer-binding.ts'
 import { readVersionedRuntimeConfig } from './version.ts'
@@ -22,6 +23,7 @@ import { parsePauseRuntimeConfig } from './pause.ts'
 import { RuntimeSignalling } from './signalling.ts'
 import { parseCameraRuntimeConfig } from './camera.ts'
 import { parseRtcRuntimeConfig } from './rtc.ts'
+import { readKobraXOnboardedConfig } from './kobra-x.ts'
 
 const LibraryRuntime = z.strictObject({
   /** Absolute directory of the Connector library store. */
@@ -56,7 +58,7 @@ const Runtime = z.strictObject({
     z.literal(8),
   ]),
   collection: z.unknown(),
-  assignments: z.array(z.unknown()).min(1).max(16),
+  assignments: z.array(z.unknown()).max(16),
   signalling: RuntimeSignalling.optional(),
   discovery: z
     .strictObject({
@@ -102,7 +104,11 @@ export function readAgentRuntimeConfig(
   credential: Pick<RuntimeCredential, 'agent_id' | 'farm_id'>,
 ) {
   const input = Runtime.parse(readVersionedRuntimeConfig(path, false))
-  const collection = parseCollectorConfig(input.collection)
+  const kobraX = readKobraXOnboardedConfig(path, credential)
+  const collection = parseCollectorConfig(
+    input.collection,
+    kobraX.printers.length > 0,
+  )
   if (input.version !== collection.version)
     throw Error('Runtime collection version mismatch')
   if (collection.spoolman && collection.spoolman.farmId !== credential.farm_id)
@@ -357,6 +363,27 @@ export function readAgentRuntimeConfig(
       if (matches.length !== 1) throw Error('KobraLink assignment mismatch')
     }
   }
+  if (!assignments.length && !kobraX.assignments.length)
+    throw new Error('Runtime assignment mapping incomplete')
+  if (assignments.length + kobraX.assignments.length > 16)
+    throw new Error('Runtime assignment capacity exceeded')
+  for (const assignment of kobraX.assignments) {
+    const printer = kobraX.printers.find(
+      (printer) => printer.printerKey === assignment.printer_key,
+    )
+    if (
+      !printer ||
+      ids.has(assignment.assignment_id) ||
+      assignments.some(
+        (previous) => previous.printer_key === assignment.printer_key,
+      )
+    )
+      throw new Error('Kobra X assignment conflicts with local runtime')
+    const binding = provisionKobraXPrinter(assignment, printer)
+    provisioned.set(assignment.assignment_id, binding)
+    ids.add(assignment.assignment_id)
+    assignments.push({ ...assignment, backend: 'kobra-x' })
+  }
   for (const assignmentId of pause?.control?.assignmentIds ?? []) {
     if (!provisioned.has(assignmentId))
       throw new Error('Pause control assignment is not provisioned locally')
@@ -389,6 +416,7 @@ export function readAgentRuntimeConfig(
     discovery: input.discovery,
     renewal: input.renewal,
     assignments,
+    ...(kobraX.printers.length ? { kobraX: kobraX.printers } : {}),
     signalling: input.signalling,
     ...(input.library ? { library: input.library } : {}),
     pause,

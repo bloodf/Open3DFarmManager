@@ -1095,6 +1095,7 @@ async function runConnectorAgentOnce(
     tasks.push(
       collectIntoQueue({
         config: config.collection,
+        ...(config.kobraX ? { kobraX: { bindings: config.kobraX } } : {}),
         apiJobs,
         onPrinterState(printer) {
           if (printer.speedModes === undefined)

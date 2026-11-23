@@ -22,6 +22,7 @@ async function request(
   port: number,
   path: string,
   method: string,
+  signal?: AbortSignal,
 ) {
   if (!isLocalAddress(address))
     throw new Error('Kobra X requires a local IPv4 address')
@@ -29,7 +30,9 @@ async function request(
     method,
     headers: method === 'POST' ? { Connection: 'close' } : {},
     redirect: 'error',
-    signal: AbortSignal.timeout(2500),
+    signal: signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(2500)])
+      : AbortSignal.timeout(2500),
   })
   const reader = response.body?.getReader()
   if (!reader) throw new Error('Empty Kobra X response')
@@ -49,8 +52,12 @@ async function request(
   }
 }
 
-export async function readKobraXInfo(address: string, port = 18910) {
-  const info = await request(address, port, '/info', 'GET')
+export async function readKobraXInfo(
+  address: string,
+  port = 18910,
+  signal?: AbortSignal,
+) {
+  const info = await request(address, port, '/info', 'GET', signal)
   if (
     info.ctrlType !== 'lan' ||
     info.modelId !== '20030' ||
@@ -140,6 +147,7 @@ export function kobraXCtrlQuery(token: string, ts: string, nonce: string) {
 export async function recoverKobraXCredentials(
   info: Awaited<ReturnType<typeof readKobraXInfo>>,
   port = 18910,
+  signal?: AbortSignal,
 ) {
   try {
     if (!/^[\x20-\x7e]{32}$/.test(info.token)) throw new Error()
@@ -149,7 +157,13 @@ export async function recoverKobraXCredentials(
       alphabet.charAt(randomInt(alphabet.length)),
     ).join('')
     const query = kobraXCtrlQuery(info.token, String(Date.now()), nonce)
-    const response = await request(info.address, port, '/ctrl?' + query, 'POST')
+    const response = await request(
+      info.address,
+      port,
+      '/ctrl?' + query,
+      'POST',
+      signal,
+    )
     const { token: iv, info: encoded } = record(response.data)
     if (
       response.code !== 200 ||

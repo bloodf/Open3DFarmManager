@@ -37,28 +37,41 @@ function firstBox(report: KobraXReport) {
   const boxes = report.data.multi_color_box
   return Array.isArray(boxes) ? record(boxes[0]) : {}
 }
+function boxReport(report: KobraXReport, id: number) {
+  const boxes = report.data.multi_color_box
+  return Array.isArray(boxes)
+    ? boxes.map(record).find((box) => box.id === id)
+    : undefined
+}
 
 export function createKobraXAce(context: KobraXControlContext) {
   const boxId = () => context.facts.get().boxes[0]?.id ?? 0
   return {
-    feed(slot: number, call: KobraXCall) {
+    feed(slot: number, call: KobraXCall, id = boxId()) {
       if (!Number.isInteger(slot) || slot < 0) return refuse('invalid-value')
-      return runGated(context, { action: 'ace-feed', slot }, call, {
+      return runGated(context, { action: 'ace-feed', slot, boxId: id }, call, {
         type: 'multiColorBox',
         action: 'feed',
-        data: { id: boxId(), index: slot },
-        effect: (report) => firstBox(report).loaded_slot === slot,
+        data: { id, index: slot },
+        effect: (report) => boxReport(report, id)?.loaded_slot === slot,
       })
     },
 
-    retract(call: KobraXCall) {
-      const slot = context.facts.get().boxes[0]?.loadedSlot
-      return runGated(context, { action: 'ace-retract', slot }, call, {
-        type: 'multiColorBox',
-        action: 'retract',
-        data: { id: boxId(), index: slot },
-        effect: (report) => firstBox(report).loaded_slot === -1,
-      })
+    retract(call: KobraXCall, id = boxId()) {
+      const slot = context.facts
+        .get()
+        .boxes.find((box) => box.id === id)?.loadedSlot
+      return runGated(
+        context,
+        { action: 'ace-retract', slot, boxId: id },
+        call,
+        {
+          type: 'multiColorBox',
+          action: 'retract',
+          data: { id, index: slot },
+          effect: (report) => boxReport(report, id)?.loaded_slot === -1,
+        },
+      )
     },
 
     startDrying(

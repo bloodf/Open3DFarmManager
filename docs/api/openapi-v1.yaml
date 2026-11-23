@@ -2944,6 +2944,7 @@ components:
             - offline
             - reconnecting
             - error
+            - unknown-state
             - client-certificate-missing
             - stale
             - null

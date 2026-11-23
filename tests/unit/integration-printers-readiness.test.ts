@@ -288,6 +288,34 @@ describe('printer readiness and qualified capabilities', () => {
     }
   })
 
+  it('reports an unknown printer state as ineligible and temporarily unavailable', async () => {
+    const state = PrinterState.parse({
+      printerKey: 'sv06',
+      observedAt: Date.now(),
+      identity: sv06Report.identity,
+      state: 'unknown',
+      progress: 0,
+    })
+    const rows = [row(printerSv06, 'sv06', state)]
+    const page = await listIntegrationPrinterReadiness(
+      principal(),
+      reader(rows),
+      new URLSearchParams(),
+    )
+    if (!('data' in page)) throw new Error('expected a readiness page')
+    expect(readinessFor(page, printerSv06)).toMatchObject({
+      paired: true,
+      eligible: false,
+      degradedReason: 'unknown-state',
+    })
+    await expect(
+      getIntegrationPrinterCapabilities(principal(), reader(rows), printerSv06),
+    ).resolves.toMatchObject({
+      operation: 'temporarily-unavailable',
+      catalogId: 'klipper-generic-moonraker',
+    })
+  })
+
   it('reports a disconnected SV06 mock as degraded and temporarily unavailable', async () => {
     const sv06 = await startMoonrakerMock({ profile: 'sv06' })
     try {

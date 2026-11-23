@@ -56,6 +56,7 @@ export const PrinterFile = z.strictObject({
         !name.split('/').some((part) => part === '..' || part === '.' || !part),
     ),
   directory: z.literal(true).optional(),
+  printUnsupported: z.literal(true).optional(),
   printRef: z
     .string()
     .regex(/^kobralink-library:[A-Za-z0-9_-]{1,128}$/)
@@ -77,6 +78,7 @@ export const PrinterFile = z.strictObject({
     .optional(),
   estimatedTime: z.number().finite().nonnegative().optional(),
 })
+export type PrinterFile = z.infer<typeof PrinterFile>
 export const FileListResponse = z.discriminatedUnion('ok', [
   z.strictObject({
     type: z.literal('files.list.result'),

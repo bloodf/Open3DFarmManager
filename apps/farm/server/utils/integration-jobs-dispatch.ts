@@ -1,6 +1,10 @@
 import { signallingRuntime } from '../services/signalling-runtime-bootstrap.ts'
 import { integrationProblem } from './integration-auth-http.ts'
-import { integrationAuthRuntime } from './integration-auth-runtime.ts'
+import {
+  integrationAuthPool,
+  integrationAuthRuntime,
+} from './integration-auth-runtime.ts'
+import { PostgresFleetMode } from '../storage/fleet-mode-postgres.ts'
 import { uuidPattern, type IntegrationPrincipal } from './integration-auth.ts'
 import { integrationJobsRuntime } from './integration-jobs-runtime.ts'
 
@@ -51,6 +55,12 @@ export async function readIntegrationDispatch(input: {
       ...(attemptId ? { attemptId } : {}),
     }
     const reasons: string[] = []
+    if (
+      view === 'eligibility' &&
+      (await new PostgresFleetMode(integrationAuthPool()).read(printerId))
+        ?.mode === 'maintenance'
+    )
+      reasons.push('maintenance')
     if (job.status !== 'held' && job.status !== 'queued')
       reasons.push('job-not-pending')
     if (printerState !== 'idle')

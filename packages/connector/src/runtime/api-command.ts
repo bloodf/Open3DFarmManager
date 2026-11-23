@@ -547,6 +547,19 @@ export function createApiCommandRunner(config: {
           return ['wrong-state', 'run-mismatch']
         return stateRefusal(action, binding, observed)
       }
+      if (
+        envelope.action?.action === 'set_fan' &&
+        envelope.action.args.fan === 'chamber' &&
+        envelope.action.args.percent === 0
+      ) {
+        const observed = config.observe(binding)
+        return (
+          environmentInterlock(
+            { action: 'extraction_set', args: { percent: 0 } },
+            observed,
+          ) ?? stateRefusal(action, binding, observed ?? undefined)
+        )
+      }
       if (isApiEnvironmentAction(envelope.action)) {
         const observed = config.observe(binding)
         return (

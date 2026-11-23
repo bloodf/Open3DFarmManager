@@ -129,6 +129,8 @@ function checkRoute(file: string, text: string): string | undefined {
     )
   )
     return
+  // Fleet availability authenticates the session and checks farm membership in its service.
+  if (called(parsed, 'services/fleet-mode-http.ts', 'farmFleetMode')) return
   // These paths combine authentication with a separate owner/role service.
   if (
     called(
@@ -414,4 +416,23 @@ test('recognised guards retain their session and scope checks', () => {
     source(`${server}/services/integration-owner-apps-http.ts`),
     /deps\.isOwner\s*\(/,
   )
+})
+
+test('fleet mode guard authenticates and restricts reads to farm members', () => {
+  const guard = functionBody('services/fleet-mode-http.ts', 'farmFleetMode')
+  assert.match(guard, /authenticatedSession\(event, authRuntime\(\)\)/)
+  assert.match(
+    guard,
+    /readMemberFleetMode\([\s\S]*farmId,[\s\S]*printerId,[\s\S]*accountId/,
+  )
+  const reader = functionBody(
+    'storage/fleet-mode-postgres.ts',
+    'readMemberFleetMode',
+  )
+  assert.match(reader, /JOIN farm\.memberships/)
+  assert.match(
+    reader,
+    /m\.account_id = \$\{accountId\} AND m\.revoked_at IS NULL/,
+  )
+  assert.match(reader, /p\.farm_id = \$\{farmId\}/)
 })

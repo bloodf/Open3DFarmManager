@@ -54,3 +54,22 @@ export class PostgresFleetMode implements FleetModeStore {
     return updated.count === 1
   }
 }
+
+/** Read only a current assignment visible to a current farm member. */
+export async function readMemberFleetMode(
+  sql: Sql | TransactionSql,
+  farmId: string,
+  printerId: string,
+  accountId: string,
+) {
+  const [row] = await sql<{ mode: 'in-service' | 'maintenance' }[]>`
+    SELECT COALESCE(fm.mode, 'in-service') AS mode
+    FROM farm.printer_assignments p
+    JOIN farm.memberships m ON m.farm_id = p.farm_id
+      AND m.account_id = ${accountId} AND m.revoked_at IS NULL
+    LEFT JOIN farm.integration_fleet_mode fm ON fm.printer_id = p.id
+    WHERE p.id = ${printerId}::uuid AND p.farm_id = ${farmId}::uuid
+      AND p.revoked_at IS NULL
+  `
+  return row ?? null
+}

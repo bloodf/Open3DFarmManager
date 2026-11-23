@@ -295,6 +295,25 @@ describe('environment envelopes at the Connector', () => {
     ])
   })
 
+  it('refuses a signed chamber fan shutdown during a print', async () => {
+    const { runner, sent, key } = await harness({
+      scopes: ['control:extended'],
+    })
+    expect(
+      await runner.run(
+        await wire(key, {
+          action: 'set_fan',
+          args: { fan: 'chamber', percent: 0 },
+        }),
+      ),
+    ).toEqual({
+      kind: 'refused',
+      code: 'printer-busy',
+      detail: 'extraction-interlock-print-active',
+    })
+    expect(sent).toEqual([])
+  })
+
   it('refuses on a stale or missing observation', async () => {
     const { runner, sent, key } = await harness({ observation: null })
     expect(

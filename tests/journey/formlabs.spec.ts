@@ -16,50 +16,53 @@ if (journeyEnabled()) {
       >
       const row = await journey.openFarm()
 
-      // PreForm reports a connected device but supplies no printer observation
-      // timestamp. The Connector withholds telemetry both online and offline.
-      const expectReadOnlyWithoutTelemetry = async () => {
+      const expectLiveStatus = async (status: string) => {
         await expect(
-          row.getByText('Conexão direta indisponível', {
-            exact: true,
-          }),
-        ).toBeVisible({ timeout: 60_000 })
-        await expect(row.getByText('Nenhum estado recebido')).toBeVisible()
+          row.getByText('Conexão direta autenticada', { exact: true }),
+        ).toBeVisible({ timeout: 45_000 })
         await expect(
-          row.getByRole('button', { name: 'Pausar impressão' }),
-        ).toBeDisabled()
+          row
+            .getByRole('definition')
+            .filter({ hasText: `PreForm informou: ${status}` }),
+        ).toBeVisible({ timeout: 15_000 })
         await expect(row.getByRole('progressbar')).toHaveCount(0)
-        await expect(row.getByText('Imprimindo')).toHaveCount(0)
         await expect(
           row.getByRole('button', {
-            name: /retomar|cancelar|iniciar impressão/i,
+            name: /pausar|retomar|cancelar|iniciar impressão/i,
           }),
         ).toHaveCount(0)
       }
-      const requests = fixture.simulator.requests
-      const expectPollAfter = async (previousCount: number) => {
-        await expect
-          .poll(() => requests.length, { timeout: 20_000 })
-          .toBeGreaterThan(previousCount)
-        expect(new Set(requests)).toEqual(new Set(['GET /devices/']))
-      }
 
-      await test.step('Connected PreForm host with no observation timestamp', async () => {
-        await expectPollAfter(0)
-        await expectReadOnlyWithoutTelemetry()
+      await test.step('PreForm returns Printing', async () => {
+        await expectLiveStatus('Printing')
       })
-      await test.step('PreForm host returns 503', async () => {
-        const previousCount = requests.length
+      await test.step('PreForm returns 503 and the live reading is withdrawn', async () => {
+        const responses = fixture.simulator.deviceResponseStatuses
+        const previousCount = responses.length
         fixture.loseConnection()
-        await expectPollAfter(previousCount)
-        await expectReadOnlyWithoutTelemetry()
+        await expect
+          .poll(() => responses.slice(previousCount), {
+            message: 'PreForm must serve a 503 to a Connector poll',
+            timeout: 15_000,
+          })
+          .toContain(503)
+        await expect(
+          row.getByText(
+            'Conexão direta indisponível. Exibindo a última observação.',
+            { exact: true },
+          ),
+        ).toBeVisible({ timeout: 30_000 })
+        await expect(
+          row.getByText(/Dados desatualizados/).first(),
+        ).toBeVisible()
       })
-      await test.step('PreForm host responds again without an observation timestamp', async () => {
-        const previousCount = requests.length
+      await test.step('PreForm recovers and returns Idle', async () => {
         fixture.recover()
-        await expectPollAfter(previousCount)
-        await expectReadOnlyWithoutTelemetry()
+        await expectLiveStatus('Idle')
       })
+      expect(new Set(fixture.simulator.requests)).toEqual(
+        new Set(['GET /devices/']),
+      )
     } finally {
       await journey.close()
     }

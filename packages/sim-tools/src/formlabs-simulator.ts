@@ -3,6 +3,7 @@ import { createServer } from 'node:http'
 /** Loopback-only PreForm host test double. */
 export async function startFormlabsSimulator() {
   const requests: string[] = []
+  const deviceResponseStatuses: number[] = []
   let response: unknown = { count: 0, devices: [] }
   let status = 200
   const server = createServer((req, res) => {
@@ -11,6 +12,7 @@ export async function startFormlabsSimulator() {
       res.writeHead(404).end()
       return
     }
+    deviceResponseStatuses.push(status)
     res
       .writeHead(status, { 'content-type': 'application/json' })
       .end(JSON.stringify(response))
@@ -19,6 +21,7 @@ export async function startFormlabsSimulator() {
   return {
     port: (server.address() as { port: number }).port,
     requests,
+    deviceResponseStatuses,
     setResponse(value: unknown, code = 200) {
       response = value
       status = code

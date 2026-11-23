@@ -9,7 +9,15 @@ export async function startFormlabsJourneyFixture() {
     simulator,
     deviceId: 'Form4-Example',
     loseConnection: () => simulator.setResponse({}, 503),
-    recover: () => simulator.setResponse(devices),
+    recover: () =>
+      simulator.setResponse({
+        ...devices,
+        devices: devices.devices.map((device) =>
+          device.id === 'Form4-Example'
+            ? { ...device, status: 'Idle' }
+            : device,
+        ),
+      }),
     close: () => simulator.close(),
   }
 }

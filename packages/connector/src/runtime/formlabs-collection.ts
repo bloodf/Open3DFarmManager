@@ -3,7 +3,7 @@ import { connectFormlabs, isSupportedFormlabsModel } from '../formlabs/index.ts'
 import type { FormlabsBinding } from '../formlabs/config.ts'
 import type { RawPrinterObservation } from './farm-snapshot-provider.ts'
 
-/** Host retrieval time is not printer observation time; unknown status fails closed. */
+/** A successful read establishes only what the PreForm host reported. */
 export function createFormlabsCollection(input: {
   binding: z.infer<typeof FormlabsBinding>
   signal: AbortSignal
@@ -13,6 +13,7 @@ export function createFormlabsCollection(input: {
 }) {
   const adapter = connectFormlabs(input.binding)
   let epoch = 1
+  let unavailable = false
   async function run() {
     while (!input.signal.aborted) {
       try {
@@ -23,18 +24,35 @@ export function createFormlabsCollection(input: {
         if (!device || !device.is_connected) throw Error('offline')
         if (!isSupportedFormlabsModel(device.product_name))
           throw Error('unsupported model')
-        // No documented printer-side observation timestamp exists: do not publish
-        // a cached status as fresh printer telemetry.
-        input.onUnavailable(epoch++, 'printer observation time unknown')
+        if (input.signal.aborted) return
+        const mono = performance.now()
+        input.onObservation({
+          printerKey: input.binding.printerKey,
+          epoch,
+          printer: {
+            printerKey: input.binding.printerKey,
+            state: 'unknown',
+            preformStatus: device.status,
+            identity: { vendor: 'Formlabs', model: device.product_name },
+            observedAt: result.retrievedAt,
+          },
+          receivedAtMonoMs: mono,
+          fieldObservedAtMonoMs: {
+            formlabs: { state: mono, preformStatus: mono, identity: mono },
+          },
+        })
+        unavailable = false
       } catch (error) {
-        if (!input.signal.aborted)
+        if (!input.signal.aborted && !unavailable) {
+          unavailable = true
           input.onUnavailable(
             epoch++,
             error instanceof Error ? error.message : 'host unavailable',
           )
+        }
       }
       await new Promise<void>((resolve) => {
-        const timer = setTimeout(done, input.pollMs ?? 5000)
+        const timer = setTimeout(done, input.pollMs ?? 2000)
         function done() {
           clearTimeout(timer)
           input.signal.removeEventListener('abort', done)

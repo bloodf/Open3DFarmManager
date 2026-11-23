@@ -306,6 +306,19 @@ export class IntegrationJobsService {
     return this.o.maxFileBytes ?? DEFAULT_MAX_JOB_BYTES
   }
 
+  async actionTarget(principal: IntegrationPrincipal, jobId: string) {
+    if (!uuidPattern.test(jobId)) return null
+    const result = await this.o.store.get(jobId, principal.appId)
+    if (!result) return null
+    const { record, envelope } = result
+    return {
+      id: record.id,
+      farmId: record.farmId,
+      printerId: record.printerAssignmentId,
+      runId: envelope?.cmdId,
+    }
+  }
+
   async get(principal: IntegrationPrincipal, jobId: string) {
     if (!uuidPattern.test(jobId)) return { error: 'not-found' as const }
     const result = await this.o.store.get(jobId, principal.appId)

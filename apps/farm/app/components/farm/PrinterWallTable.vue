@@ -181,7 +181,11 @@ function display(value: string | number | null | undefined, index: number) {
           <th scope="row">
             <a :href="printerDetailHref(row.printerKey)">{{ row.cells[0] }}</a>
           </th>
-          <td v-for="index in columns.length - 1" :key="index">
+          <td
+            v-for="index in columns.length - 1"
+            :key="index"
+            :class="{ numeric: [4, 5, 6, 7, 11].includes(index) }"
+          >
             {{ display(row.cells[index], index) }}
           </td>
         </tr>
@@ -208,6 +212,12 @@ function display(value: string | number | null | undefined, index: number) {
   border-bottom: 1px solid currentColor;
   text-align: start;
   overflow-wrap: anywhere;
+}
+
+.wall-table .numeric {
+  text-align: end;
+  font-family: var(--ops-font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 .wall-table thead th {

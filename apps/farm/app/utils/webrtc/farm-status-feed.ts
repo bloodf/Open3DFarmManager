@@ -61,6 +61,7 @@ type Options = {
   /** Opt-in camera. Streams are offered only for this feed's server assignment
    * refs; null is always emitted when an attached stream is revoked. */
   onCamera?: (event: FarmCameraEvent) => void
+  cameraTarget?: () => string | null
   webcamDetail?: WebcamDetailOptions & { onClose: () => void }
 }
 function requireSync(callback: () => void) {
@@ -297,13 +298,18 @@ export function createAuthenticatedFarmStatusFeed(
                   : {}),
               }))
           const onCamera = options.onCamera
+          const target = options.cameraTarget?.()
+          const cameraIds = refs
+            .map((ref) => ref.assignmentId)
+            .filter((id) => !options.cameraTarget || id === target)
           let attached: string | undefined
           const cameraMedia =
             onCamera &&
+            cameraIds.length > 0 &&
             ((onViolation: (reason: string) => void) =>
               new BrowserCameraMedia({
                 privateKey: resolved.privateKey,
-                authorizedPrinterIds: refs.map((ref) => ref.assignmentId),
+                authorizedPrinterIds: cameraIds,
                 onStream(stream, printerId, cameraId) {
                   if (stream && printerId && current() && !attached) {
                     attached = printerId

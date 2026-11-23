@@ -23,11 +23,14 @@ import PrinterWallSummary from '../components/farm/PrinterWallSummary.vue'
 import { useStatusSummary } from '../composables/useStatusSummary.ts'
 import { wallCardProps } from '../utils/farm-wall-card.ts'
 import FarmCardControls from '../components/farm/FarmCardControls.vue'
+import CollectionHold from '../components/farm/CollectionHold.vue'
 import PrinterAlerts from '../components/farm/PrinterAlerts.vue'
 import { useFarmControls } from '../components/farm/useFarmControls.ts'
 import { deriveAlerts } from '../utils/farm-alerts.ts'
 import {
   farmConnectionNotice,
+  formatPrinterStateLabel,
+  observationAge,
   resolvedLocalInterfaceOrigin,
   type FarmRow,
 } from '../utils/farm-view.ts'
@@ -115,12 +118,19 @@ watch([() => route.query.farm, () => ready.value?.farms], ([farmId, farms]) => {
 
 const router = useRouter()
 const wallQuery = computed({
-  get: () => readFarmWallQuery(route.query),
+  get: () => ({
+    ...readFarmWallQuery(route.query),
+    groupBy:
+      route.query.groupBy === undefined
+        ? 'location'
+        : readFarmWallQuery(route.query).groupBy,
+  }),
   set: (value) => {
     void router.replace({
       query: {
         ...router.currentRoute.value.query,
         ...writeFarmWallQuery(value),
+        groupBy: value.groupBy || 'none',
       },
       hash: route.hash,
     })
@@ -196,6 +206,35 @@ function displayLocalOrigin(row: FarmRow) {
     row.observation?.state.localWebUiOrigin,
   )
 }
+const inspector = ref<HTMLDialogElement | null>(null)
+const inspectedId = ref<string | null>(null)
+const inspectedRow = computed(
+  () =>
+    renderedRows.value.find(
+      (row) => row.assignment.assignmentId === inspectedId.value,
+    ) ?? null,
+)
+watch(inspectedRow, (row) => {
+  if (!row && inspector.value?.open) inspector.value.close()
+})
+let inspectorTrigger: HTMLElement | null = null
+async function openInspector(
+  row: (typeof renderedRows.value)[number],
+  event: Event,
+) {
+  inspectorTrigger = event.currentTarget as HTMLElement
+  inspectedId.value = row.assignment.assignmentId
+  await nextTick()
+  inspector.value?.showModal()
+}
+function closeInspector() {
+  inspector.value?.close()
+}
+function inspectorClosed() {
+  inspectedId.value = null
+  inspectorTrigger?.focus()
+  inspectorTrigger = null
+}
 const pauseDialog = ref<HTMLDialogElement | null>(null)
 const pauseCancel = ref<HTMLButtonElement | null>(null)
 const dialog = {
@@ -234,8 +273,8 @@ function cancelPause(event: Event) {
       <p class="eyebrow">Open3DFarmManager</p>
       <h1 ref="heading" tabindex="-1">Minha farm</h1>
       <p class="intro">
-        Os controles desta página são somente leitura, exceto a pausa, que exige
-        confirmação e uma conexão direta segura.
+        Os comandos exigem confirmação e conexão direta segura. Sem conexão
+        direta, a operação é somente leitura.
       </p>
       <nav aria-label="Navegação da farm">
         <ul class="nav-links">
@@ -391,62 +430,51 @@ function cancelPause(event: Event) {
                   }}
                 </h3>
                 <ul class="printers">
-                  <FarmPrinterCard
+                  <li
                     v-for="row in group.rows"
                     :key="row.assignment.assignmentId"
-                    :row="row"
-                    :farm-id="ready.scope.farmId"
-                    :camera-for="cameraFor"
-                    :live-now="liveNow"
-                    :alerts="
-                      alertsSummary.byAssignment[row.assignment.assignmentId] ??
-                      []
+                    class="floor-tile"
+                    :data-state="
+                      row.connection !== 'authenticated'
+                        ? 'offline'
+                        : (row.observation?.state.state ?? 'offline')
                     "
-                    @setup="setupLink(row.assignment.assignmentId)"
-                    @save="saveLink(row.assignment.assignmentId)"
-                    @cancel="delete drafts[row.assignment.assignmentId]"
                   >
-                    <template #summary>
-                      <PrinterWallCard
-                        v-bind="
-                          wallCardProps(
-                            row,
-                            alertsSummary.byAssignment[
-                              row.assignment.assignmentId
-                            ] ?? [],
-                          )
+                    <button
+                      type="button"
+                      class="floor-tile__open"
+                      @click="openInspector(row, $event)"
+                    >
+                      <span>Inspecionar</span>
+                      <strong>{{
+                        row.assignment.displayName || row.assignment.printerKey
+                      }}</strong>
+                      <span>{{
+                        row.connection !== 'authenticated'
+                          ? 'Sem conexão direta'
+                          : row.observation
+                            ? formatPrinterStateLabel(row.observation.state)
+                            : 'Aguardando estado'
+                      }}</span>
+                      <span
+                        v-if="
+                          row.observation &&
+                          observationAge(row.observation, liveNow()).stale
                         "
-                        :now="liveNow()"
-                        :heading-level="wallQuery.groupBy ? 4 : 3"
-                        embedded
-                      />
-                    </template>
-                    <template #local-link>
-                      <a
-                        :href="displayLocalOrigin(row) ?? undefined"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        referrerpolicy="no-referrer"
-                        :aria-describedby="`local-help-${row.assignment.assignmentId}`"
-                        >Abrir interface local de
-                        <span class="opaque">{{
-                          row.assignment.printerKey
-                        }}</span></a
+                        >Dados desatualizados</span
                       >
-                    </template>
-                    <FarmCardControls
+                      <span v-if="row.observation?.state.filename">{{
+                        row.observation.state.filename
+                      }}</span>
+                    </button>
+                    <CollectionHold
                       :row="row"
                       :keys="ready.keys"
                       :control-enabled="pauseEnabled"
                       :command-in-flight="commandInFlight"
-                      :live-now="liveNow"
-                      :last-result="
-                        lastControlResults[row.assignment.assignmentId]
-                      "
-                      :availability="availability"
                       :open-control="openControl"
                     />
-                  </FarmPrinterCard>
+                  </li>
                 </ul>
               </template>
             </PrinterWallTable>
@@ -471,6 +499,78 @@ function cancelPause(event: Event) {
         </section>
       </template>
     </div>
+    <dialog
+      ref="inspector"
+      v-if="ready?.scope"
+      class="floor-inspector"
+      aria-label="Inspeção da impressora"
+      @close="inspectorClosed"
+    >
+      <button
+        type="button"
+        class="floor-inspector__close"
+        @click="closeInspector"
+      >
+        Fechar inspeção
+      </button>
+      <ul class="inspector-list">
+        <FarmPrinterCard
+          v-if="inspectedRow"
+          :key="inspectedRow.assignment.assignmentId"
+          :row="inspectedRow"
+          :farm-id="ready.scope.farmId"
+          :camera-for="cameraFor"
+          :live-now="liveNow"
+          :alerts="
+            alertsSummary.byAssignment[inspectedRow.assignment.assignmentId] ??
+            []
+          "
+          @setup="setupLink(inspectedRow.assignment.assignmentId)"
+          @save="saveLink(inspectedRow.assignment.assignmentId)"
+          @cancel="delete drafts[inspectedRow.assignment.assignmentId]"
+        >
+          <template #summary>
+            <PrinterWallCard
+              v-bind="
+                wallCardProps(
+                  inspectedRow,
+                  alertsSummary.byAssignment[
+                    inspectedRow.assignment.assignmentId
+                  ] ?? [],
+                )
+              "
+              :now="liveNow()"
+              :heading-level="wallQuery.groupBy ? 4 : 3"
+              embedded
+            />
+          </template>
+          <template #local-link="{ row }">
+            <a
+              :href="displayLocalOrigin(row) ?? undefined"
+              target="_blank"
+              rel="noopener noreferrer"
+              referrerpolicy="no-referrer"
+              :aria-describedby="`local-help-${row.assignment.assignmentId}`"
+              >Abrir interface local de
+              <span class="opaque">{{ row.assignment.printerKey }}</span></a
+            >
+          </template>
+          <FarmCardControls
+            :row="inspectedRow"
+            :keys="ready.keys"
+            :control-enabled="pauseEnabled"
+            :command-in-flight="commandInFlight"
+            :live-now="liveNow"
+            :last-result="
+              lastControlResults[inspectedRow.assignment.assignmentId]
+            "
+            :availability="availability"
+            :open-control="openControl"
+            :show-collection="false"
+          />
+        </FarmPrinterCard>
+      </ul>
+    </dialog>
     <dialog
       ref="pauseDialog"
       aria-labelledby="pause-dialog-title"
@@ -742,5 +842,89 @@ dialog .actions button:disabled {
   .cta {
     transition: border-color 120ms ease-out;
   }
+}
+</style>
+
+<style scoped>
+.floor-tile {
+  min-width: 0;
+  border: 1px solid var(--ops-border);
+  border-radius: var(--ops-radius-lg);
+  background: var(--ops-panel);
+  color: var(--ops-text);
+  overflow-wrap: anywhere;
+}
+.floor-tile[data-state='offline'] {
+  background: var(--ops-offline-hatch);
+}
+.floor-tile__open {
+  display: grid;
+  width: 100%;
+  gap: var(--ops-space-2);
+  padding: var(--ops-space-3);
+  border: 0;
+  border-inline-start: 4px solid var(--ops-idle);
+  background: transparent;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.floor-tile[data-state='printing'] .floor-tile__open {
+  border-inline-start-color: var(--ops-printing);
+}
+.floor-tile[data-state='paused'] .floor-tile__open {
+  border-inline-start-color: var(--ops-attention);
+}
+.floor-tile[data-state='error'] .floor-tile__open {
+  border-inline-start-color: var(--ops-fault);
+}
+.floor-tile__open span {
+  font-size: var(--ops-text-small);
+}
+.floor-tile__open span:nth-child(3) {
+  width: fit-content;
+  padding: var(--ops-space-1);
+  color: var(--ops-idle);
+  background: var(--ops-idle-bg);
+}
+.floor-tile[data-state='printing'] .floor-tile__open span:nth-child(3) {
+  color: var(--ops-printing);
+  background: var(--ops-printing-bg);
+}
+.floor-tile[data-state='paused'] .floor-tile__open span:nth-child(3) {
+  color: var(--ops-attention);
+  background: var(--ops-attention-bg);
+}
+.floor-tile[data-state='error'] .floor-tile__open span:nth-child(3) {
+  color: var(--ops-fault);
+  background: var(--ops-fault-bg);
+}
+.floor-tile[data-state='offline'] .floor-tile__open span:nth-child(3) {
+  color: var(--ops-offline);
+  background: var(--ops-offline-bg);
+}
+.floor-tile :deep(.collection-hold) {
+  margin: var(--ops-space-2);
+}
+.floor-inspector {
+  position: fixed;
+  inset: 0 0 0 auto;
+  margin: 0;
+  width: min(36rem, 100vw);
+  max-width: 100vw;
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: auto;
+  border: 0;
+  border-inline-start: 1px solid var(--ops-border);
+  background: var(--ops-panel);
+  color: var(--ops-text);
+}
+.floor-inspector::backdrop {
+  background: color-mix(in srgb, var(--ops-text) 50%, transparent);
+}
+.inspector-list {
+  list-style: none;
+  padding: 0;
 }
 </style>

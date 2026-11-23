@@ -3,6 +3,8 @@ import { z } from 'zod'
 import type { PrinterState } from '@open3dfarmmanager/farm-protocol'
 import {
   parseTemperatureFields,
+  isChamberTemperatureObject,
+  observedTemperatureDetails,
   type TemperatureFields,
 } from './temperature-observation.ts'
 import { moonrakerLastJob } from './normalize.ts'
@@ -42,6 +44,8 @@ export type RawMoonrakerObservation = Readonly<{
     progress: number
   }>
   receivedAtMonoMs: number
+  /** Source time of the duration sample, when it was in this status update. */
+  durationSourceTime?: number
   temperatureObservation?: Readonly<{
     fields: TemperatureFields
     observedAtMonoMs: number
@@ -72,16 +76,22 @@ const printState = z.enum([
 const progress = z.number().finite().min(0).max(1)
 const OptionalTelemetry = z
   .record(z.string(), z.unknown())
-  .transform((status) =>
-    Object.fromEntries(
-      Object.entries(status).filter(
-        ([name]) =>
-          name === 'fan' ||
-          name.startsWith('fan_generic ') ||
-          name === 'output_pin caselight',
-      ),
-    ),
-  )
+  .transform((status) => {
+    const fields: Record<string, unknown> = {}
+    for (const [name, value] of Object.entries(status)) {
+      if (/^extruder(?:[1-9][0-9]{0,2})?$/.test(name)) {
+        if (typeof value === 'object' && value !== null && 'target' in value)
+          fields[name] = { target: value.target }
+      } else if (
+        name === 'fan' ||
+        name.startsWith('fan_generic ') ||
+        name === 'output_pin caselight' ||
+        isChamberTemperatureObject(name)
+      )
+        fields[name] = value
+    }
+    return fields
+  })
 const Status = z
   .object({
     webhooks: z.object({ state: webhookState }),
@@ -267,6 +277,7 @@ export function createMoonrakerSubscription(input: {
       function publish(
         value: z.infer<typeof Snapshot>,
         temperatureObservation?: RawMoonrakerObservation['temperatureObservation'],
+        durationSourceTime?: number,
       ) {
         if (signal.aborted) return
         const firstObservation = !hasObservedStatus
@@ -283,7 +294,15 @@ export function createMoonrakerSubscription(input: {
               ...value,
               status: {
                 ...value.status,
-                print_stats: { state: value.status.print_stats.state },
+                print_stats: {
+                  state: value.status.print_stats.state,
+                  ...(input.jobFields
+                    ? {
+                        info: value.status.print_stats.info,
+                        print_duration: value.status.print_stats.print_duration,
+                      }
+                    : {}),
+                },
               },
             },
           }),
@@ -313,6 +332,9 @@ export function createMoonrakerSubscription(input: {
                 }),
                 fieldObservedAtMonoMs: Object.freeze({ ...observedTimes }),
                 receivedAtMonoMs: performance.now(),
+                ...(durationSourceTime === undefined
+                  ? {}
+                  : { durationSourceTime }),
                 ...(temperatureObservation
                   ? {
                       temperatureObservation: Object.freeze({
@@ -377,19 +399,28 @@ export function createMoonrakerSubscription(input: {
             watchingJob = false
           }
         }
+        const temperatures = input.jobFields
+          ? observedTemperatureDetails(value.status)
+          : undefined
         const nextFingerprint = JSON.stringify([
           parsed.printer.state,
           parsed.printer.progress,
           parsed.printer.fans,
           parsed.printer.light,
+          parsed.printer.currentLayer,
+          parsed.printer.totalLayer,
+          parsed.printer.printDuration,
+          temperatures,
           materials,
           lastJob?.endedAt,
         ])
         if (nextFingerprint === fingerprint) return
         fingerprint = nextFingerprint
-        const printer = materials
-          ? { ...parsed.printer, materials }
-          : parsed.printer
+        const printer = {
+          ...parsed.printer,
+          ...temperatures,
+          ...(materials ? { materials } : {}),
+        }
         emit({
           kind: 'snapshot',
           ...parsed,
@@ -475,7 +506,11 @@ export function createMoonrakerSubscription(input: {
                     printState: stamp,
                     progress: stamp,
                   }
-                  publish(value, { fields, observedAtMonoMs: stamp })
+                  publish(
+                    value,
+                    { fields, observedAtMonoMs: stamp },
+                    value.eventtime,
+                  )
                 },
               }
             : {}),
@@ -484,9 +519,21 @@ export function createMoonrakerSubscription(input: {
             if (!baseline) throw new Error('No baseline')
             if (eventtime >= baseline.eventtime) observeTools(delta)
             const optional = OptionalTelemetry.parse(delta)
+            const optionalStatus = OptionalTelemetry.parse(baseline.status)
+            for (const [name, fields] of Object.entries(optional)) {
+              const previous = optionalStatus[name]
+              optionalStatus[name] =
+                fields &&
+                previous &&
+                typeof fields === 'object' &&
+                typeof previous === 'object' &&
+                !Array.isArray(fields) &&
+                !Array.isArray(previous)
+                  ? { ...previous, ...fields }
+                  : fields
+            }
             const status = {
-              ...OptionalTelemetry.parse(baseline.status),
-              ...optional,
+              ...optionalStatus,
               webhooks: {
                 state: delta.webhooks?.state ?? baseline.status.webhooks.state,
               },
@@ -535,7 +582,13 @@ export function createMoonrakerSubscription(input: {
                     : now,
               }
             }
-            publish({ eventtime, status })
+            publish(
+              { eventtime, status },
+              undefined,
+              delta.print_stats?.total_duration === undefined
+                ? undefined
+                : eventtime,
+            )
           },
         })
         const raw = await client.snapshot

@@ -143,14 +143,18 @@ describe('Cofre3D integration scopes', () => {
     expect(all.scope).toBe(['printers:read', ...NEW_SCOPES].join(' '))
   })
 
-  test('refuses a new scope that the owner did not grant', async () => {
-    const auth = authWith(['printers:read', 'inventory:write'])
-    for (const scope of ['environment:control', 'alerts:manage'])
-      expect(await auth.issue(clientId, secret, [scope])).toBe('invalid_scope')
-    expect(
-      await auth.issue(clientId, secret, ['inventory:write', 'alerts:manage']),
-    ).toBe('invalid_scope')
+  test.each(NEW_SCOPES)(
+    'refuses to issue the ungranted scope %s',
+    async (scope) => {
+      const auth = authWith(['printers:read'])
+      expect(await auth.issue(clientId, secret, ['printers:read', scope])).toBe(
+        'invalid_scope',
+      )
+    },
+  )
 
+  test('refuses new scopes omitted from the token or the owner grant', async () => {
+    const auth = authWith(['printers:read', 'inventory:write'])
     const token = await auth.issue(clientId, secret, ['printers:read'])
     if (typeof token === 'string') throw new Error(token)
     const principal = await auth.verify(token.access_token)

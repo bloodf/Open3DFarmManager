@@ -7,7 +7,10 @@ import {
   type IntegrationPrinterRow,
   uuidPattern,
 } from '../integration-auth.ts'
-import type { IntegrationPrinterReader } from '../integration-printers.ts'
+import {
+  awaitingCollectionPlate,
+  type IntegrationPrinterReader,
+} from '../integration-printers.ts'
 import type { FarmAlertKind } from '../../../app/utils/farm-alerts.ts'
 import { alertsForPrinter, type ApiPrinterAlert } from './printer-alerts.ts'
 
@@ -29,6 +32,7 @@ export interface BulkPrinterStatus {
   model?: string
   activeSpools?: ReturnType<typeof activeSpoolsFromMaterials>
   observedAt?: number
+  plate?: { state: 'awaiting-collection'; attemptId?: string }
   alerts: ApiPrinterAlert[]
 }
 
@@ -120,6 +124,8 @@ function toStatus(
     if (model !== undefined) status.model = model
     const activeSpools = activeSpoolsFromMaterials(parsed.data.materials)
     if (activeSpools?.length) status.activeSpools = activeSpools
+    const plate = awaitingCollectionPlate(parsed.data)
+    if (plate) status.plate = plate
   }
   if (row.observedAt !== null) status.observedAt = row.observedAt
   return status

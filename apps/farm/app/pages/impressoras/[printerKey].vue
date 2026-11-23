@@ -909,6 +909,21 @@ watch(
       @set-pin="setPin"
       @emergency-stop="emergencyStop"
     >
+      <template #painel>
+        <div
+          v-if="
+            live &&
+            detailFrame?.vendor === 'bambu' &&
+            detailFrame.printerKey === printerKey
+          "
+          role="status"
+          aria-label="Alertas Bambu Lab"
+        >
+          <p v-if="detailFrame.detail.print?.message">
+            {{ detailFrame.detail.print.message }}
+          </p>
+        </div>
+      </template>
       <template #configuracao>
         <ConfigEditorPanel
           v-if="configAdvertised"

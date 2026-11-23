@@ -44,40 +44,39 @@ export interface EnvironmentPrinter {
   measurements: EnvironmentMeasurement[]
 }
 
-/**
- * Today the Connector reports one environment value to the farm: the chamber
- * fan (air/extraction) speed. Chamber temperature, humidity and power-device
- * state are not part of the printer state, so they report `unsupported` rather
- * than a guess. Switching and safety controls are never exposed here.
- */
-function airMeasurement(
+/** Chamber fan and temperature observations share the printer state's freshness. */
+function chamberMeasurement(
   row: IntegrationPrinterRow,
   now: number,
+  kind: 'air' | 'temperature',
 ): EnvironmentMeasurement {
   const parsed = PrinterState.safeParse(row.state)
-  if (!parsed.success) return unknown('never-observed')
+  if (!parsed.success) return unknown(kind, 'never-observed')
   const state = parsed.data
   const observedAt = state.observedAt
   if (state.state === 'offline' || state.linkHealth?.state === 'offline')
-    return unknown('offline', observedAt)
-  if (observationIsStale(observedAt, now)) return unknown('stale', observedAt)
-  const chamber = state.fans?.chamber
-  if (chamber === undefined) return { kind: 'air', state: 'unsupported' }
+    return unknown(kind, 'offline', observedAt)
+  if (observationIsStale(observedAt, now))
+    return unknown(kind, 'stale', observedAt)
+  const value =
+    kind === 'air' ? state.fans?.chamber : state.chamberTemperatureCelsius
+  if (value === undefined) return { kind, state: 'unsupported' }
   return {
-    kind: 'air',
+    kind,
     state: 'known',
-    value: chamber,
-    unit: 'percent',
+    value,
+    unit: kind === 'air' ? 'percent' : 'celsius',
     lastObservedAt: observedAt,
   }
 }
 
 function unknown(
+  kind: 'air' | 'temperature',
   reason: 'never-observed' | 'offline' | 'stale',
   lastObservedAt?: number,
 ): EnvironmentMeasurement {
   return {
-    kind: 'air',
+    kind,
     state: 'unknown',
     reason,
     ...(lastObservedAt !== undefined ? { lastObservedAt } : {}),
@@ -95,9 +94,9 @@ export function environmentForPrinter(
     ...(row.displayName ? { displayName: row.displayName } : {}),
     ...(row.location ? { location: row.location } : {}),
     measurements: [
-      { kind: 'temperature', state: 'unsupported' },
+      chamberMeasurement(row, now, 'temperature'),
       { kind: 'humidity', state: 'unsupported' },
-      airMeasurement(row, now),
+      chamberMeasurement(row, now, 'air'),
       { kind: 'power', state: 'unsupported' },
     ],
   }

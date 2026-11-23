@@ -20,6 +20,19 @@ export function useSpoolLibraryFarm() {
     return typeof raw === 'string' ? raw : ''
   }
 
+  function syncFarmFromRoute() {
+    const preferred = requestedFarm()
+    const selected =
+      farms.value.find((farm) => farm.farmId === preferred)?.farmId ??
+      farms.value[0]?.farmId ??
+      ''
+    farmId.value = selected
+    noFarm.value = !selected
+    if (selected && preferred !== selected) {
+      void router.replace({ query: { ...route.query, farm: selected } })
+    }
+  }
+
   async function loadFarms() {
     loadingFarm.value = true
     farmLoadError.value = ''
@@ -32,10 +45,7 @@ export function useSpoolLibraryFarm() {
         timeout: 15_000,
       })
       farms.value = page.farms
-      const preferred = requestedFarm()
-      const matched = page.farms.find((farm) => farm.farmId === preferred)
-      farmId.value = matched?.farmId ?? page.farms[0]?.farmId ?? ''
-      if (!farmId.value) noFarm.value = true
+      syncFarmFromRoute()
     } catch (cause) {
       const code =
         cause && typeof cause === 'object' && 'statusCode' in cause
@@ -52,19 +62,17 @@ export function useSpoolLibraryFarm() {
   }
 
   function selectFarm(nextFarmId: string) {
-    if (!nextFarmId || nextFarmId === farmId.value) return
-    farmId.value = nextFarmId
+    if (!farms.value.some((farm) => farm.farmId === nextFarmId)) return
+    if (nextFarmId === requestedFarm()) return
     void router.replace({ query: { ...route.query, farm: nextFarmId } })
   }
 
   watch(
     () => route.query.farm,
-    (next) => {
-      if (typeof next !== 'string' || !next) return
-      if (farms.value.some((farm) => farm.farmId === next)) {
-        farmId.value = next
-      }
+    () => {
+      if (!loadingFarm.value) syncFarmFromRoute()
     },
+    { flush: 'sync' },
   )
 
   return {

@@ -11,6 +11,7 @@ import { formatJobTime } from '../../utils/farm-job-view.ts'
 import { printerDetailHref } from '../../utils/farm-wall-card.ts'
 
 const props = defineProps<{
+  farmId?: string
   rows: readonly Row[]
   liveNow: () => { wall: number; mono: number }
 }>()
@@ -179,7 +180,9 @@ function display(value: string | number | null | undefined, index: number) {
       <tbody>
         <tr v-for="row in sortedRows" :key="row.id">
           <th scope="row">
-            <a :href="printerDetailHref(row.printerKey)">{{ row.cells[0] }}</a>
+            <a :href="printerDetailHref(row.printerKey, farmId)">{{
+              row.cells[0]
+            }}</a>
           </th>
           <td
             v-for="index in columns.length - 1"

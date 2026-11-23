@@ -105,7 +105,8 @@ function dateLabel(time: number) {
         :chips="cardAlerts"
         label="Alertas da impressora"
       />
-      <a :href="`/impressoras/${encodeURIComponent(row.assignment.printerKey)}`"
+      <a
+        :href="`/impressoras/${encodeURIComponent(row.assignment.printerKey)}?farm=${encodeURIComponent(farmId)}`"
         >Abrir detalhes da impressora
         <span class="opaque">{{ row.assignment.printerKey }}</span></a
       >

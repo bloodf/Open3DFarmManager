@@ -5,9 +5,10 @@ License of this document: MIT, same as OpenFarm.
 
 ## Purpose and clean-room rules
 
-OpenFarm reaches the Kobra X today only through the KobraLink container, which is GPL-3.0. This
-document describes the Kobra X's LAN protocol in facts and message shapes so that an MIT-licensed
-native adapter can be implemented without copying GPL or AGPL code.
+OpenFarm connects directly to the Kobra X over its native LAN endpoints.
+This document records the protocol facts and message shapes used by the
+MIT-licensed adapter. KobraLink and other third-party sources contribute only
+reported protocol observations.
 
 Rules for anyone editing this document or implementing from it:
 
@@ -180,12 +181,12 @@ assignments and pending bridge operations are untouched.
    stored pin intact. An HTTP `/info` response can identify a model and serial
    but cannot prove that a replacement public key belongs to that printer.
 
-Limits of this activation: the binding store follows the Bambu pattern, so the
-agent runtime does not yet load it into its assignment mapping; control commands
-for a native assignment are not routed (read-only); camera exposure is not
-enabled; certificate-refusal and LAN-off causes are inferred from adapter errors,
-not from hardware. All of it is proven only against the loopback mock and the
-synthetic vectors above.
+The Connector loads the binding into its local assignment mapping. Adding that
+assignment to `pause.control.assignmentIds` enables the existing signed command
+path for the native actions listed in [Kobra X detail capabilities](../protocols/kobra-x-detail.md).
+The signed path has loopback evidence. The [hardware reports](../hardware-reports/)
+record pinned LAN telemetry separately. Native camera media is unavailable.
+Certificate-refusal and LAN-off diagnostics come from adapter errors.
 
 ### `POST /gcode_upload`
 
@@ -247,6 +248,8 @@ anycubic/anycubicCloud/v1/{slicer|web}/printer/public/<modeId>/<deviceId>/#
 Types in S1 (`<type>` in the topic): `info`, `status`, `print`, `tempature` (the printer's own
 spelling), `multiColorBox`, `light`, `fan`, `file`, `axis`, `skip`, `video`.
 
+- S1 reports no raw G-code console channel. Its console is a log of the
+  client's own requests, responses and printer state changes.
 - These types are named in S1. Per-message status is given in each section below.
 - `properties` is named only in S1's Workbench table. (reported, `not verified`)
 
@@ -284,6 +287,9 @@ Multiple clients: observed on firmware 2.0.2.8 (S1). Two MQTT sessions coexisted
 (Kobralink) stayed connected the whole time, and each client sees reports caused by the other. The
 adapter must therefore not assume it is the only reader of the report topics. S1 keeps one
 connection per printer on its side.
+
+The Connector ignores MQTT reports carrying the retained flag and requests
+fresh state before permitting a signed command.
 
 ## Status and reports
 
@@ -350,6 +356,15 @@ Observed on firmware 2.0.2.8 (S1):
 | `ams_settings.ams_box_mapping` | filament-to-slot mapping | Chosen in the slicer's print dialog. |
 | `task_settings` | object of print options | See the table below. |
 <!-- prettier-ignore-end -->
+
+Each mapping entry contains the slicer's `paint_index` and the printer's
+`ams_index`. The reported holder uses box id `-1`, with indices 0–2 when an
+ACE is attached. The first ACE uses box id 0 and indices 4–7. The reported
+formula for multiple ACE units is `4 + unit * 4 + slot` when the holder is
+present. S1 independently read back index 4 for the first ACE's first slot.
+An ACE-only report is ambiguous: the references give indices 0–3 for a
+single unit, while S1 saw the same readback of 4 on a printer that reported
+only box 0. Signed explicit print mapping requires a reported holder.
 
 Important: `filepath` set to `/<name>` makes the printer end the task with code 10111
 ("abnormal end of task") about one second after the start. (observed, S1) A start report alone is

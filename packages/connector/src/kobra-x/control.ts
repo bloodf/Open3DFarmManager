@@ -13,7 +13,7 @@ import {
   type KobraXOutcome,
   type KobraXRequests,
 } from './requests.ts'
-import type { KobraXFactsTracker } from './facts.ts'
+import { kobraXPrintSlots, type KobraXFactsTracker } from './facts.ts'
 import type { KobraXPrinterState } from './gate.ts'
 
 /** The signed `printer-control` actions this adapter can carry out. */
@@ -110,13 +110,50 @@ export function createKobraXControl(input: {
               call,
             )
       case 'start_print':
-        return files.start({ filename: command.args.file }, call)
-      case 'load_filament':
-        return command.args.tray === undefined
-          ? refusedLocally('tray-required')
-          : ace.feed(command.args.tray, call)
-      case 'unload_filament':
-        return ace.retract(call)
+        if (
+          command.args.plate !== undefined ||
+          (command.args.ams_mapping &&
+            (!command.args.ams_mapping.length ||
+              command.args.ams_mapping.length > 16 ||
+              command.args.ams_mapping.includes(-1)))
+        )
+          return refusedLocally('invalid-slot-mapping')
+        return files.start(
+          {
+            filename: command.args.file,
+            ...(command.args.ams_mapping
+              ? {
+                  slotMapping: command.args.ams_mapping.map(
+                    (slot, filament) => ({ slot, filament }),
+                  ),
+                  requireReportedHolder: true,
+                }
+              : {}),
+            // The signed dispatcher has a five-second total deadline. Watch
+            // past the documented one-second invalid-start failure before returning.
+            watchMs: 1500,
+          },
+          call,
+        )
+      case 'load_filament': {
+        if (command.args.tray === undefined)
+          return refusedLocally('tray-required')
+        const slots = kobraXPrintSlots(input.facts.get().boxes).filter(
+          ({ amsIndex, slot }) =>
+            amsIndex === command.args.tray && slot.remainingPercent !== 0,
+        )
+        return slots.length === 1
+          ? ace.feed(slots[0]!.slot.index, call, slots[0]!.boxId)
+          : refusedLocally('unknown-slot')
+      }
+      case 'unload_filament': {
+        const loaded = input.facts
+          .get()
+          .boxes.filter((box) => box.loadedSlot >= 0)
+        return loaded.length === 1
+          ? ace.retract(call, loaded[0]!.id)
+          : refusedLocally('loaded-slot-unknown')
+      }
       default:
         return refusedLocally('unsupported-action')
     }

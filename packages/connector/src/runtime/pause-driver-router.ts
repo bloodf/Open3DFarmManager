@@ -4,6 +4,10 @@ import { KOBRALINK_CONTROLS } from '../kobralink/extended-control.ts'
 import type { KobraLinkFetch } from '../kobralink/client.ts'
 import { readKobraLinkPrinterBinding } from '../control/printer-binding.ts'
 import { openFixedAnycubicControl } from '../anycubic/control-driver.ts'
+import {
+  KOBRA_X_SIGNED_ACTIONS,
+  openFixedKobraXControl,
+} from '../kobra-x/control-driver.ts'
 import { anycubicControls } from '../anycubic/control-support.ts'
 import { readAnycubicPrinterBinding } from '../control/printer-binding.ts'
 import { openFixedCrealityControl } from '../creality/control-driver.ts'
@@ -29,6 +33,7 @@ import {
 import {
   readPrinterBinding,
   readBambuPrinterBinding,
+  readKobraXPrinterBinding,
   type PrinterBinding,
 } from '../control/printer-binding.ts'
 import type {
@@ -67,6 +72,9 @@ type PrepareInput = Parameters<PreparedPauseDriver['prepare']>[0] & {
 
 export function createPauseDriverRouter(config: {
   kobraLinkFetch?: KobraLinkFetch
+  connectKobraX?: NonNullable<
+    Parameters<typeof openFixedKobraXControl>[0]['connect']
+  >
   allowedOrigins: readonly string[]
   limits: MoonrakerLimits
   clock: { monotonicNow(): number }
@@ -104,6 +112,7 @@ export function createPauseDriverRouter(config: {
     if (!mapping) return []
     if (readKobraLinkPrinterBinding(binding)) return KOBRALINK_CONTROLS
     if (readCrealityPrinterBinding(binding)) return CREALITY_ACTIONS
+    if (readKobraXPrinterBinding(binding)) return KOBRA_X_SIGNED_ACTIONS
     const anycubic = readAnycubicPrinterBinding(binding)
     if (anycubic) return anycubicControls(anycubic.modelId)
     const bambu = readBambuPrinterBinding(binding)
@@ -145,6 +154,7 @@ export function createPauseDriverRouter(config: {
         !readKobraLinkPrinterBinding(binding) &&
         !readBambuPrinterBinding(binding) &&
         !readCrealityPrinterBinding(binding) &&
+        !readKobraXPrinterBinding(binding) &&
         !readAnycubicPrinterBinding(binding)
       ) {
         const detect = {
@@ -209,16 +219,19 @@ export function createPauseDriverRouter(config: {
         fixed = (
           readKobraLinkPrinterBinding(binding)
             ? openFixedKobraLinkControl
-            : readAnycubicPrinterBinding(binding)
-              ? openFixedAnycubicControl
-              : readCrealityPrinterBinding(binding)
-                ? openFixedCrealityControl
-                : readBambuPrinterBinding(binding)
-                  ? openFixedBambuControl
-                  : openFixedMoonrakerPause
+            : readKobraXPrinterBinding(binding)
+              ? openFixedKobraXControl
+              : readAnycubicPrinterBinding(binding)
+                ? openFixedAnycubicControl
+                : readCrealityPrinterBinding(binding)
+                  ? openFixedCrealityControl
+                  : readBambuPrinterBinding(binding)
+                    ? openFixedBambuControl
+                    : openFixedMoonrakerPause
         )({
           binding,
           fetch: config.kobraLinkFetch,
+          ...(config.connectKobraX ? { connect: config.connectKobraX } : {}),
           allowedOrigins: config.allowedOrigins,
           limits: config.limits,
           connectionGeneration: generation,

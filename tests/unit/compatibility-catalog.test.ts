@@ -92,7 +92,11 @@ describe('áreas de controle do catálogo', () => {
       'printStatus',
       'fileManager',
     ] as const) {
-      expect(kobraX.controlAreas[key]).toBe('documented')
+      expect(kobraX.controlAreas[key]).toBe(
+        ['temperatures', 'fans', 'leds'].includes(key)
+          ? 'simulated'
+          : 'documented',
+      )
       expect(kobra3Lan.controlAreas[key]).toBe('documented')
     }
     expect(kobraX.controlAreas.webcams).toBe('unsupported')

@@ -93,6 +93,12 @@ export function createPrinterDetailSources(config: AgentRuntimeConfig) {
       )
     }
   const vendor = createVendorDetailSources()
+  for (const binding of config.kobraX ?? []) {
+    sources.set(
+      binding.printerKey,
+      vendor.register(binding.printerKey, kobraXPrinterDetail),
+    )
+  }
   if (config.collection.version === 5) {
     for (const binding of config.collection.anycubic.printers) {
       if (!['20024', '20030'].includes(binding.modelId)) continue

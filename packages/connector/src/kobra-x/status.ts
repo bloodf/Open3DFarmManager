@@ -168,7 +168,7 @@ export function createKobraXStatus(printerKey: string, address: string) {
                     .toUpperCase()
                 : undefined
             return {
-              slot: `${boxIndex + 1}-${slotIndex + 1}`,
+              slot: `${Number.isInteger(box.id) ? box.id : boxIndex}:${Number.isInteger(slot.index) ? slot.index : slotIndex}`,
               active: (slot.index ?? slotIndex) === box.loaded_slot,
               ...(typeof slot.type === 'string'
                 ? { materialType: boundPrinterString(slot.type, 64) }

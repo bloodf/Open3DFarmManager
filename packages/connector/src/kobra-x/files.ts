@@ -6,6 +6,7 @@ import {
   type KobraXControlContext,
 } from './context.ts'
 import { kobraXGate } from './gate.ts'
+import { kobraXPrintSlots } from './facts.ts'
 import {
   refusedLocally,
   reportRefusal,
@@ -30,8 +31,10 @@ export interface KobraXFileDetails {
 export interface KobraXStartOptions {
   /** A file that is already on the printer, for example from `upload`. */
   filename: string
-  /** Filament (as numbered by the slicer) to ACE slot. */
+  /** Filament (as numbered by the slicer) to native feeder slot. */
   slotMapping?: readonly { filament: number; slot: number }[]
+  /** Explicit signed mapping is ambiguous when the printer reports only ACE. */
+  requireReportedHolder?: boolean
   settings?: {
     autoLeveling?: boolean
     vibrationCompensation?: boolean
@@ -216,10 +219,19 @@ export function createKobraXFiles(context: KobraXControlContext) {
     if (!validKobraXFilename(options.filename))
       return refuse('invalid-filename')
     const facts = context.facts.get()
-    const slots = new Set(
-      facts.boxes.flatMap((box) => box.slots.map((s) => s.index)),
-    )
     const mapping = options.slotMapping ?? []
+    const slotsAvailable = ({ boxes }: typeof facts) => {
+      if (options.requireReportedHolder && !boxes.some((box) => box.id === -1))
+        return false
+      const slots = kobraXPrintSlots(boxes)
+      return mapping.every(
+        (entry) =>
+          slots.filter(
+            ({ amsIndex, slot }) =>
+              amsIndex === entry.slot && slot.remainingPercent !== 0,
+          ).length === 1,
+      )
+    }
     const filaments = new Set<number>()
     for (const entry of mapping) {
       if (
@@ -230,8 +242,8 @@ export function createKobraXFiles(context: KobraXControlContext) {
       )
         return refuse('invalid-slot-mapping')
       filaments.add(entry.filament)
-      if (!slots.has(entry.slot)) return refuse('unknown-slot')
     }
+    if (!slotsAvailable(facts)) return refuse('unknown-slot')
     const supported = (feature: string) => facts.features[feature] !== false
     const settings = options.settings ?? {}
     const flag = (value: boolean) => (value ? 1 : 0)
@@ -259,13 +271,14 @@ export function createKobraXFiles(context: KobraXControlContext) {
       facts,
     })
     if (reason) return refuse(reason)
-    const present = await list(noGuard)
-    if (present.kind !== 'confirmed')
-      return present.kind === 'refused'
-        ? present
-        : refuse('file-list-unavailable')
+    const present = await list({
+      ...noGuard,
+      ...(call.signal ? { signal: call.signal } : {}),
+    })
+    if (present.kind !== 'confirmed') return refuse('file-list-unavailable')
     if (!present.data.some((file) => file.filename === options.filename))
       return refuse('file-not-on-printer')
+    if (!slotsAvailable(context.facts.get())) return refuse('unknown-slot')
     const watchMs = options.watchMs ?? 5000
     let ended: KobraXReport | undefined
     const stop = context.requests.onReport((report) => {
@@ -303,6 +316,7 @@ export function createKobraXFiles(context: KobraXControlContext) {
       )
       if (started.kind !== 'confirmed') return started
       const outcome = await watchForEnd(() => ended, watchMs, call.signal)
+      if (call.signal?.aborted) return { kind: 'received' }
       if (outcome) {
         const refusal = reportRefusal(outcome)
         return {

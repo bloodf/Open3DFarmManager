@@ -3,6 +3,7 @@
 // Connector runtime and a named simulator; signs in; enrolls the browser;
 // pairs the Connector; assigns the printer. Per-brand journey specs build on
 // the returned handle. Never touches a physical printer.
+import type { HelperExecutable } from '../../tools/rtsp-ingest/supervisor/process.ts'
 import { randomUUID } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
@@ -121,6 +122,8 @@ export type JourneyOptions = Readonly<{
    * on 127.0.0.1 only.
    */
   kobraX?: boolean
+  /** Serve an always-live Kobra X camera for the packaged runtime journey. */
+  kobraXCamera?: HelperExecutable
   /**
    * Performs the printer set-up in the browser instead of the harness calling
    * the assignment API. Receives the signed-in owner page and must return once
@@ -214,6 +217,7 @@ export type JourneyHarness = Readonly<{
   >
   /** Drops the browser↔app WebSocket upgrades, as a network loss would. */
   disconnectSignalling(): Promise<void>
+  revokeConnector(): Promise<void>
   /**
    * Opens or closes the Connector's telemetry upload path (closed at start).
    * The Connector queues its telemetry durably while the path is closed and
@@ -580,8 +584,11 @@ export async function startJourneyHarness(
 
     let configurator: Configurator | undefined
     let kobraX: JourneyHarness['kobraX']
-    if (options.kobraX) {
-      const mock = await startKobraXMock({ reportIntervalMs: 0 })
+    if (options.kobraX || options.kobraXCamera) {
+      const mock = await startKobraXMock({
+        reportIntervalMs: 0,
+        ssdp: options.kobraX === true,
+      })
       undo.push(() => mock.close())
       kobraX = Object.freeze({ mock, lanAddress: KOBRA_X_LAN_ADDRESS })
     }
@@ -594,7 +601,7 @@ export async function startJourneyHarness(
       let probes: Parameters<typeof startConfigurator>[0]['probes'] = {
         ...(options.secondaryConnector?.probes ?? {}),
       }
-      if (kobraX)
+      if (options.kobraX && kobraX)
         probes = {
           ...probes,
           kobraX: {
@@ -763,8 +770,30 @@ export async function startJourneyHarness(
         })),
       }
     }
+    let kobraXCamera: Record<string, unknown> | undefined
+    if (options.kobraXCamera) {
+      const source = kobraX?.mock.flvUrl
+      if (!source) throw new Error('Missing loopback Kobra X FLV source')
+      const url = new URL(source)
+      kobraXCamera = {
+        helper: options.kobraXCamera,
+        cameras: [
+          {
+            cameraId: 'journey-kobra-x-camera',
+            assignmentId,
+            source: {
+              kind: 'kobra-x-flv',
+              address: url.hostname,
+              port: Number(url.port),
+              path: url.pathname,
+            },
+          },
+        ],
+      }
+    }
     await runtime.start({
       origin,
+      ...(kobraXCamera ? { camera: kobraXCamera } : {}),
       audience: AUDIENCE,
       claim,
       assignmentRefs,
@@ -894,6 +923,13 @@ export async function startJourneyHarness(
       },
       simulatorObservation: () => runtime.observe(),
       disconnectSignalling: () => app.disconnectUpgrades(),
+      async revokeConnector() {
+        await pagePost(
+          ownerPage,
+          `/api/farms/${database.farmId}/connectors/${claim.agent_id}/revoke`,
+          { expected_fingerprint: identity.fingerprint },
+        )
+      },
       setTelemetryUpload: (open: boolean) => app.setTelemetryUpload(open),
       libraryDirectory: join(app.directory, 'library'),
       appLog: () => app.log(),

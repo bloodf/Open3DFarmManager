@@ -4,8 +4,7 @@ All models remain unqualified pending owner hardware checks. The adapter targets
 an operator-provisioned local Moonraker origin. A successful probe establishes
 Moonraker reachability and reports the server version and Klippy connection
 state. Identify the model and vendor firmware from the printer's local UI.
-The FullFarmManager review and catalogs provide no Qidi model rows or Qidi
-wire fixtures.
+The FullFarmManager review and FDM catalog list Qidi model references. The Moonraker fixture is synthetic and does not identify a physical model or vendor firmware; the Max4 version below comes from a third-party mirror, not a vendor release.
 
 ## Model evidence
 

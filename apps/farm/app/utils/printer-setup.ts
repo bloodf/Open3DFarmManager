@@ -1,3 +1,4 @@
+import { resolveFarmScope } from './farm-scope.ts'
 import type { Ref } from 'vue'
 import type { NetworkAdoption } from './network-adoption.ts'
 import { listenForAuthInvalidation } from './auth-invalidation.ts'
@@ -19,6 +20,7 @@ import type {
 
 type Hooks = {
   adoption?: Ref<NetworkAdoption | null>
+  requestedFarm?: () => unknown
   handleKobraException(
     cause: unknown,
     opContext: KobraOperationContext | null,
@@ -32,12 +34,22 @@ type Hooks = {
 export function createPrinterSetup(
   state: PrinterSetupRefs,
   epoch: KobraEpoch,
-  { handleKobraException, openPrinterDiscoverySession, adoption }: Hooks,
+  {
+    handleKobraException,
+    openPrinterDiscoverySession,
+    adoption,
+    requestedFarm,
+  }: Hooks,
 ) {
   const live = createLiveStatus(state, epoch)
   const pendingOps = createPendingOperationStore(state)
   const session = createConfigurationSession(state, epoch)
-  const farm = createFarmData(state, epoch, { ...live, ...session })
+  const farm = createFarmData(
+    state,
+    epoch,
+    { ...live, ...session },
+    requestedFarm,
+  )
   const deps = { ...farm, ...live, ...pendingOps, ...session }
   const context = createKobraContext(state, epoch, deps)
   const operation = createKobraOperation(
@@ -78,8 +90,19 @@ export function createPrinterSetup(
     const loaded = farm.loadFarms()
     const generation = farm.currentGeneration()
     await loaded
-    if (!target || state.error.value || generation !== farm.currentGeneration())
+    if (state.error.value || generation !== farm.currentGeneration()) return
+    if (!target) {
+      const selected = resolveFarmScope(
+        state.farms.value,
+        requestedFarm?.(),
+        !!state.nextFarm.value,
+      )
+      if (selected) {
+        state.farmId.value = selected.farmId
+        await context.selectFarm()
+      }
       return
+    }
     state.farmId.value = target.farmId
     await context.selectFarm()
     if (!state.canManage.value || state.farmId.value !== target.farmId) return

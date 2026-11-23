@@ -1,5 +1,6 @@
 import {
   getCurrentInstance,
+  type InjectionKey,
   onBeforeUnmount,
   ref,
   shallowRef,
@@ -13,6 +14,10 @@ import {
 
 /** The wall also has the live feed, so its summary polls less often than the TV. */
 export const WALL_SUMMARY_POLL_MS = 10_000
+
+export const statusSummaryKey: InjectionKey<
+  ReturnType<typeof useStatusSummary>
+> = Symbol('status-summary')
 
 type Read = (path: string, signal: AbortSignal) => Promise<unknown>
 

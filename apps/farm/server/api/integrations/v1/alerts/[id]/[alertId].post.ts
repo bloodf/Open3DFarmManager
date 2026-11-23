@@ -58,17 +58,23 @@ export default defineEventHandler(async (event) => {
     const sql = integrationAuthPool()
     const appId = (event.context.integrationAuth as IntegrationPrincipal).appId
     const actedAt = Date.now()
-    const [updated] = await sql`WITH inserted AS (
+    const [updated] = await sql`
       INSERT INTO farm.integration_alert_actions (alert_id, app_id, action, acted_at, silenced_until)
       SELECT id, ${appId}::uuid, ${action.acknowledgedAt === null ? 'silence' : 'acknowledge'}, ${actedAt}, ${action.silencedUntil}::bigint
       FROM farm.integration_alert_lifecycle
       WHERE printer_id = ${printerId}::uuid AND id = ${alertId}::uuid AND resolved_at IS NULL
-      RETURNING alert_id
-    )
-    SELECT alert_id AS id,
-      LEAST((SELECT MIN(acted_at)::float8 FROM farm.integration_alert_actions WHERE alert_id = ${alertId}::uuid AND app_id = ${appId}::uuid AND action = 'acknowledge'), ${action.acknowledgedAt}::float8) AS "acknowledgedAt",
-      GREATEST((SELECT MAX(silenced_until)::float8 FROM farm.integration_alert_actions WHERE alert_id = ${alertId}::uuid AND app_id = ${appId}::uuid), ${action.silencedUntil}::float8) AS "silencedUntil"
-    FROM inserted`
+      ON CONFLICT (alert_id, app_id) DO UPDATE SET
+        acted_at = CASE
+          WHEN integration_alert_actions.action = 'acknowledge' AND EXCLUDED.action = 'acknowledge'
+            THEN LEAST(integration_alert_actions.acted_at, EXCLUDED.acted_at)
+          WHEN integration_alert_actions.action = 'acknowledge' THEN integration_alert_actions.acted_at
+          ELSE EXCLUDED.acted_at END,
+        action = CASE WHEN integration_alert_actions.action = 'acknowledge' OR EXCLUDED.action = 'acknowledge'
+          THEN 'acknowledge' ELSE 'silence' END,
+        silenced_until = GREATEST(integration_alert_actions.silenced_until, EXCLUDED.silenced_until)
+      RETURNING alert_id AS id,
+        CASE WHEN action = 'acknowledge' THEN acted_at::float8 END AS "acknowledgedAt",
+        silenced_until::float8 AS "silencedUntil"`
     if (!updated) return integrationProblem('not-found', headers)
     return updated
   } catch {

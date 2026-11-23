@@ -456,6 +456,9 @@ export class World {
     actedAt: number
     silencedUntil: number | null
   }[] = []
+  get alertActionCount() {
+    return this.alertActions.length
+  }
   telemetryFixture: { states: unknown[]; transitions: unknown[] } | null = null
   cameraEnabled = false
   readonly faults = new Set<Fault>()
@@ -765,7 +768,22 @@ export class World {
           const [appId, action, actedAt, silencedUntil, printerId, alertId] =
             v as [string, string, number, number | null, string, string]
           if (printerId !== ids.printerA1 || alertId !== ids.alertA) return []
-          this.alertActions.push({ appId, action, actedAt, silencedUntil })
+          const previous = this.alertActions.find(
+            (entry) => entry.appId === appId,
+          )
+          if (previous && text.includes('ON CONFLICT (alert_id, app_id)')) {
+            if (previous.action !== 'acknowledge') {
+              previous.action = action
+              previous.actedAt = actedAt
+            }
+            if (silencedUntil !== null)
+              previous.silencedUntil = Math.max(
+                previous.silencedUntil ?? 0,
+                silencedUntil,
+              )
+          } else {
+            this.alertActions.push({ appId, action, actedAt, silencedUntil })
+          }
           const actions = this.alertActions.filter(
             (entry) => entry.appId === appId,
           )

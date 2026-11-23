@@ -1,5 +1,5 @@
 import { test, expect, vi } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { generateKeyPairSync, randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -10,6 +10,10 @@ import { createFarmSnapshotSource } from '../../packages/connector/src/runtime/f
 import { collectIntoQueue } from '../../packages/connector/src/runtime/collect.ts'
 import { parseCollectorConfig } from '../../packages/connector/src/prusa/config.ts'
 import { startPrusaSimulator } from '../../packages/sim-tools/src/prusa-simulator.ts'
+
+const fixture = JSON.parse(
+  readFileSync(new URL('../fixtures/prusa/link.json', import.meta.url), 'utf8'),
+)
 
 test('legacy collector config still parses without driver registration', () => {
   const origin = 'http://127.0.0.1:7125'
@@ -35,9 +39,12 @@ test('real PrusaLink collection binds identity, withdraws failed reads and recov
     }
     const data =
       req.url === '/api/version'
-        ? { api: '1.0.0', printer: mode === 'model' ? '1.3.0' : '1.4.0' }
+        ? {
+            ...fixture.version,
+            printer: mode === 'model' ? '1.3.0' : fixture.version.printer,
+          }
         : req.url === '/api/v1/info'
-          ? { serial: 'TEST-PRUSA' }
+          ? fixture.info
           : req.url === '/api/v1/status'
             ? {
                 printer: {
@@ -75,7 +82,7 @@ test('real PrusaLink collection binds identity, withdraws failed reads and recov
             printerKey: 'prusa',
             origin: simulator.endpoint,
             apiKeyFile,
-            expect: { serial: 'TEST-PRUSA', printerType: '1.4.0' },
+            expect: { serial: 'SIM-PRUSA', printerType: '1.4.0' },
           },
         ],
       },

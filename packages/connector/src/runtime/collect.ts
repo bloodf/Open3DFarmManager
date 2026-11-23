@@ -151,6 +151,7 @@ export async function collectIntoQueue(input: {
     | PrusaCollectorConfig
     | import('../config/sdcp.ts').SdcpCollectorConfig
   onInventory?: (snapshot: SpoolmanSnapshot) => void
+  onPrinterState?: (printer: PrinterState) => void
   onRawObservation?: (observation: RawPrinterObservation) => void
   onRawUnavailable?: (event: RawMoonrakerUnavailable) => void
   /** Links a finished job to the library version that was started on this printer (#385). */
@@ -220,6 +221,7 @@ export async function collectIntoQueue(input: {
           })
         }
       } else {
+        input.onPrinterState?.(event.printer)
         const now = Date.now()
         // Degraded storage drops records; they count as lost, never as queued.
         const lostBefore = queue.storageLost

@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, reactive } from 'vue'
+import { computed, reactive, watch } from 'vue'
 import type { FarmKeyState, FarmRow } from '../utils/farm-view.ts'
 import { controlActionAvailability, type Clock } from '../utils/farm-control.ts'
 import {
   advertisedExtended,
   buildExtendedArgs,
   extendedLabel,
+  speedModeOptions,
   unsupportedExtended,
   type FarmExtendedAction,
 } from '../utils/farm-control-extended.ts'
@@ -37,6 +38,17 @@ const choices = reactive<Record<string, string>>({
   set_light: 'on',
   set_speed: 'standard',
 })
+const speedOptions = computed(() =>
+  speedModeOptions(props.row.observation?.state.speedModes),
+)
+watch(
+  speedOptions,
+  (options) => {
+    if (!options.some((option) => option.value === choices.set_speed))
+      choices.set_speed = options[0]?.value ?? ''
+  },
+  { immediate: true },
+)
 // A number input's v-model yields a number, so readers convert it to text.
 const values = reactive<Record<string, string | number>>({
   set_temperature: '',
@@ -129,10 +141,13 @@ function submit(action: FarmExtendedAction, event: Event) {
           v-model="choices[action]"
           :disabled="!available(action) || commandInFlight"
         >
-          <option value="silent">Silenciosa</option>
-          <option value="standard">Padrão</option>
-          <option value="sport">Esportiva</option>
-          <option value="ludicrous">Máxima</option>
+          <option
+            v-for="option in speedOptions"
+            :key="option.value"
+            :value="option.value"
+          >
+            {{ option.label }}
+          </option>
         </select></label
       >
       <button

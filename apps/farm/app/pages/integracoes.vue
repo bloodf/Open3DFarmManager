@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import {
+  INTEGRATION_SCOPES,
+  type IntegrationScope,
+} from '../utils/integration-scopes.ts'
 import Button from '../components/ui/Button.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import ErrorState from '../components/ui/ErrorState.vue'
@@ -56,7 +60,7 @@ const secretPanel = ref<HTMLElement | null>(null)
 const grantDrafts = ref<
   Record<string, { scopes: string[]; printer: string; approval: boolean }>
 >({})
-const scopeOptions = [
+const scopeLabels = Object.fromEntries([
   ['printers:read', 'Consultar impressoras'],
   ['files:read', 'Consultar arquivos'],
   ['inventory:read', 'Consultar inventário'],
@@ -65,11 +69,20 @@ const scopeOptions = [
   ['control:basic', 'Controles básicos'],
   ['control:extended', 'Controles avançados'],
   ['events:subscribe', 'Receber eventos'],
+  ['jobs:write', 'Gerenciar trabalhos'],
+  ['library:read', 'Consultar biblioteca'],
+  ['library:write', 'Gerenciar biblioteca'],
   ['environment:read', 'Consultar ambiente'],
   ['plates:confirm', 'Confirmar placa livre'],
   ['alerts:write', 'Enviar alertas'],
   ['camera:view', 'Ver câmera'],
-] as const
+] satisfies readonly (readonly [IntegrationScope, string])[]) as Record<
+  IntegrationScope,
+  string
+>
+const scopeOptions = INTEGRATION_SCOPES.map(
+  (scope) => [scope, scopeLabels[scope]] as const,
+)
 
 async function load() {
   if (!farmId.value) return

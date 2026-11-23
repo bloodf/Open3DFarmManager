@@ -299,6 +299,12 @@ async function runConnectorAgentOnce(
   let controlsFor:
     ((assignmentId: string) => readonly ExtendedControlAction[]) | undefined
   let refreshControls: (() => void) | undefined
+  const printerSpeedModes = new Map<
+    string,
+    NonNullable<
+      import('../../../farm-protocol/src/state.ts').PrinterState['speedModes']
+    >
+  >()
   const detailSources = createPrinterDetailSources(config)
   // Library prints (#384): download from the server or read the local copy,
   // checked against what each printer itself reported. Never stops the agent.
@@ -935,6 +941,9 @@ async function runConnectorAgentOnce(
           apiHandlers,
           libraryLinks,
           collection,
+          speedModesFor(printerKey) {
+            return printerSpeedModes.get(printerKey)
+          },
           libraryPrint(assignmentId) {
             const key = refs.find(
               (ref) => ref.assignmentId === assignmentId,
@@ -1088,6 +1097,12 @@ async function runConnectorAgentOnce(
       collectIntoQueue({
         config: config.collection,
         apiJobs,
+        onPrinterState(printer) {
+          if (printer.speedModes === undefined)
+            printerSpeedModes.delete(printer.printerKey)
+          else
+            printerSpeedModes.set(printer.printerKey, [...printer.speedModes])
+        },
         controlsFor: (printerKey) => {
           const ref = refs.find((entry) => entry.printerKey === printerKey)
           return ref ? controlsFor?.(ref.assignmentId) : undefined

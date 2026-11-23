@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import {
   ExtendedControlAction,
+  SpeedModes,
   MACRO_PARAM_MAX_KEYS,
   MacroName,
   MacroParamName,
@@ -95,6 +96,7 @@ function printerStateSchema(legacy: boolean) {
         .max(ExtendedControlAction.options.length)
         .refine((actions) => new Set(actions).size === actions.length)
         .optional(),
+      speedModes: SpeedModes.optional(),
       identity: z
         .strictObject({
           vendor: text(255, 1).optional(),

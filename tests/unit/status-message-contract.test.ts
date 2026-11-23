@@ -7,8 +7,11 @@ import {
   TelemetryBatch,
   TELEMETRY_BATCH_JSON_LIMITS,
 } from '../../packages/farm-protocol/src/telemetry.ts'
+import { StatusMessage } from '../../packages/farm-protocol/src/channel.ts'
+import { READONLY_PENDING_BYTES } from '../../packages/connector/src/webrtc/readonly-peer.ts'
 import { parseBoundedJson } from '../../packages/farm-protocol/src/json.ts'
 import { formatPrinterStateLabel } from '../../apps/farm/app/utils/farm-view.ts'
+import { parseStoredPrinterState } from '../../apps/farm/server/services/printer-states-core.ts'
 import { printerReadiness } from '../../apps/farm/server/utils/integration-printers-readiness.ts'
 import { getIntegrationPrinterStatus } from '../../apps/farm/server/utils/integration-printers.ts'
 
@@ -43,11 +46,21 @@ describe('firmware shutdown reader contract', () => {
     expect(
       PrinterState.safeParse({ ...state, statusReason: undefined }).success,
     ).toBe(false)
+    for (const otherState of ['idle', 'printing', 'paused', 'unknown'] as const)
+      expect(
+        PrinterState.safeParse({ ...state, state: otherState }).success,
+      ).toBe(false)
     expect(
-      PrinterState.safeParse({ ...state, state: 'printing' }).success,
+      PrinterState.safeParse({ ...state, statusMessage: undefined }).success,
+    ).toBe(true)
+    expect(
+      PrinterState.safeParse({ ...state, statusMessage: '\ud800' }).success,
     ).toBe(false)
   })
   it('exposes the reason and leaves unknown progress absent', async () => {
+    expect(parseStoredPrinterState(JSON.parse(JSON.stringify(state)))).toEqual(
+      state,
+    )
     expect(printerReadiness(row).degradedReason).toBe('firmware-shutdown')
     const principal = {
       appId: 'app',
@@ -77,13 +90,36 @@ describe('firmware shutdown reader contract', () => {
     expect(html).toContain('&lt;script&gt;')
     expect(html).not.toContain('<script>')
   })
-  it('documents the existing telemetry string limit conflict', () => {
+  it('fits the status frame and telemetry bounds with a full message', () => {
+    const populatedState = {
+      ...state,
+      printerKey: 'p'.repeat(128),
+      statusMessage: '\u0001'.repeat(256),
+      filename: 'f'.repeat(128),
+      identity: {
+        vendor: 'v'.repeat(128),
+        model: 'm'.repeat(128),
+        firmware: 'f'.repeat(128),
+      },
+      materials: Array.from({ length: 17 }, () => ({
+        slot: 's'.repeat(32),
+        materialType: 'm'.repeat(64),
+        colorHex: 'FFFFFFFF',
+        remainingPercent: 100,
+        active: true,
+      })),
+      toolTargetsCelsius: Array.from({ length: 32 }, (_, tool) => ({
+        tool,
+        target: 300,
+      })),
+    }
+    expect(PrinterState.safeParse(populatedState).success).toBe(true)
     const batch = [
       {
         eventId: randomUUID(),
         queuedAt: 1,
         kind: 'printer-state' as const,
-        state: { ...state, statusMessage: 'x'.repeat(256) },
+        state: populatedState,
       },
     ]
     expect(TelemetryBatch.safeParse(batch).success).toBe(true)
@@ -92,6 +128,11 @@ describe('firmware shutdown reader contract', () => {
     )
     expect(() =>
       parseBoundedJson(JSON.stringify(batch), TELEMETRY_BATCH_JSON_LIMITS),
-    ).toThrow()
+    ).not.toThrow()
+    const frame = { t: 'snapshot', seq: 1, printers: [batch[0]!.state] }
+    expect(StatusMessage.safeParse(frame).success).toBe(true)
+    expect(Buffer.byteLength(JSON.stringify(frame))).toBeLessThanOrEqual(
+      READONLY_PENDING_BYTES,
+    )
   })
 })

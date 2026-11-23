@@ -66,6 +66,7 @@ export const SIMULATORS: Readonly<Record<SimulatorName, string>> = {
 }
 
 export type JourneyOptions = Readonly<{
+  openFarmInspector?: boolean
   /** Playwright browser (the `browser` fixture). */
   browser: Browser
   simulator?: SimulatorName
@@ -797,18 +798,20 @@ export async function startJourneyHarness(
       await expect(
         page.getByRole('heading', { name: 'Minha farm', exact: true }),
       ).toBeVisible()
-      // The wall lists one tile per printer; its card (the row) lives in the
-      // inspector, so open it before returning the row.
-      const tile = page.getByRole('button', {
-        name: new RegExp(
-          '^Inspecionar ' + printerKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
-        ),
-      })
-      await expect(tile).toBeVisible({ timeout: 60_000 })
-      await tile.click()
-      await expect(
-        page.getByRole('dialog', { name: 'Inspeção da impressora' }),
-      ).toBeVisible()
+      if (options.openFarmInspector) {
+        // The wall lists one tile per printer; its card (the row) lives in the
+        // inspector, so open it before returning the row.
+        const tile = page.getByRole('button', {
+          name: new RegExp(
+            '^Inspecionar ' + printerKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+          ),
+        })
+        await expect(tile).toBeVisible({ timeout: 60_000 })
+        await tile.click()
+        await expect(
+          page.getByRole('dialog', { name: 'Inspeção da impressora' }),
+        ).toBeVisible()
+      }
       return farmRow(page)
     }
     const asRole = async (role: 'admin' | 'viewer') => {

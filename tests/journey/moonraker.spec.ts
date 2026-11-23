@@ -24,6 +24,7 @@ if (journeyEnabled())
       harness = await startJourneyHarness({
         browser,
         simulator: 'moonraker-fixture',
+        openFarmInspector: true,
         history: true,
       })
     })
@@ -103,6 +104,7 @@ if (journeyEnabled())
     const journey = await startJourneyHarness({
       browser,
       simulator: 'moonraker-fixture',
+      openFarmInspector: true,
       moonraker: { mock: { profile: 'u1' } },
     })
     try {
@@ -262,6 +264,7 @@ if (journeyEnabled())
       harness = await startJourneyHarness({
         browser,
         simulator: 'moonraker-fixture',
+        openFarmInspector: true,
         signedControl: true,
       })
     })
@@ -385,6 +388,7 @@ if (journeyEnabled())
     const journey = await startJourneyHarness({
       browser,
       simulator: 'moonraker-fixture',
+      openFarmInspector: true,
       signedControl: true,
       moonraker: { mock: { profile: 'u1' }, declaredModel: 'Snapmaker U1' },
     })

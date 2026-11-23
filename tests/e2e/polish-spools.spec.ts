@@ -4,6 +4,8 @@ import { isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
+import { setPolishTheme } from '../helpers/polish-theme.ts'
+import { mockShellApi } from '../helpers/shell-api.ts'
 
 // UI checks of the Spoolman page (apps/farm/app/pages/spoolman.vue) served by
 // the real Nuxt build. Every /api route is mocked here and any request that
@@ -75,6 +77,7 @@ async function mockApi(page: Page, scenario: Scenario) {
   await page.route('**/api/**', (route) =>
     route.fulfill({ status: 404, json: {} }),
   )
+  await mockShellApi(page, farm)
   await page.route('**/api/auth/me', (route) =>
     scenario === 'sign-in'
       ? route.fulfill({ status: 401, json: {} })
@@ -137,7 +140,7 @@ async function open(
   theme: (typeof themes)[number],
 ) {
   await page.setViewportSize(viewport)
-  await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+  await setPolishTheme(page, theme)
   await mockApi(page, scenario)
   await page.goto('/spoolman')
   await expect(

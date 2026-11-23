@@ -126,6 +126,11 @@ const products = computed(() =>
   border: 1px solid var(--color-border);
   overflow-wrap: anywhere;
 }
+.reviewed-model a {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: 2.75rem;
+}
 .back,
 .count {
   margin: 0;

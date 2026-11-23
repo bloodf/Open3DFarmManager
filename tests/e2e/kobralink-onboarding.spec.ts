@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { mockShellApi } from '../helpers/shell-api.ts'
 import { mkdir } from 'node:fs/promises'
 import AxeBuilder from '@axe-core/playwright'
 import { randomUUID } from 'node:crypto'
@@ -52,6 +53,7 @@ for (const width of [320, 375, 768, 1024, 1280]) {
         json: { message: 'Synthetic fixture: unavailable' },
       })
     })
+    await mockShellApi(page, farmId)
     await page.goto('/impressoras')
     await page.getByLabel('Farm', { exact: true }).selectOption(farmId)
     await expect(

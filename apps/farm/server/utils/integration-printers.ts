@@ -197,6 +197,7 @@ export async function getIntegrationPrinterStatus(
     printerKey: string
     state: string
     progress?: number
+    statusReason?: PrinterState['statusReason']
     filename?: string
     estimatedRemainingSeconds?: number
     temperatures?: { toolCelsius?: number; bedCelsius?: number }
@@ -213,6 +214,8 @@ export async function getIntegrationPrinterStatus(
   const parsed = parsedState(row)
   if (parsed.success) {
     status.state = parsed.data.state
+    if (parsed.data.statusReason !== undefined)
+      status.statusReason = parsed.data.statusReason
     if (parsed.data.progress !== undefined)
       status.progress = parsed.data.progress
     if (parsed.data.filename !== undefined)

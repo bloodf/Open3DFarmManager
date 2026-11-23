@@ -66,7 +66,11 @@ kobraController = new AbortController()
   const compiled = compile(source, join(pages, 'impressoras.vue'))
   const result = await build({
     stdin: {
-      contents: `${compiled.replace('export default', 'const component =')}\nimport { createApp } from 'vue'; window.mountSetupForms = element => createApp(component).mount(element)`,
+      contents: `globalThis.useRoute = () => ({ path: '/impressoras', query: {}, hash: '' })
+globalThis.useRouter = () => ({ replace: async () => {} })
+${compiled.replace('export default', 'const component =')}
+import { createApp } from 'vue'
+window.mountSetupForms = element => createApp(component).mount(element)`,
       loader: 'ts',
       resolveDir: pages,
     },

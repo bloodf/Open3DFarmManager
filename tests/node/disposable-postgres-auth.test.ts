@@ -49,6 +49,39 @@ async function assertPasswordRequired(port: number, password: string) {
   })
   try {
     assert.equal((await authenticated`SELECT 1 AS value`)[0]?.value, 1)
+    const superusers =
+      await authenticated`SELECT rolname FROM pg_roles WHERE rolsuper ORDER BY rolname`
+    assert.deepEqual(
+      superusers.map((role) => role.rolname),
+      ['fixture'],
+    )
+    await authenticated`CREATE ROLE hba_plain LOGIN`
+    await authenticated`CREATE ROLE hba_privileged LOGIN IN ROLE pg_read_server_files`
+    const connect = (username: string, rolePassword: string) =>
+      postgres({
+        host: '127.0.0.1',
+        port,
+        database: 'fixture',
+        username,
+        password: rolePassword,
+        max: 1,
+        connect_timeout: 3,
+        onnotice: () => {},
+      })
+    const plain = connect('hba_plain', '')
+    const privileged = connect('hba_privileged', '')
+    const wrongPassword = connect('fixture', 'wrong-password')
+    try {
+      assert.equal(
+        (await plain`SELECT current_user AS name`)[0]?.name,
+        'hba_plain',
+      )
+      await assert.rejects(privileged`SELECT 1`, /password|authentication/i)
+      await assert.rejects(wrongPassword`SELECT 1`, /password|authentication/i)
+    } finally {
+      await Promise.all([plain.end(), privileged.end(), wrongPassword.end()])
+      await authenticated`DROP ROLE hba_plain, hba_privileged`
+    }
   } finally {
     await authenticated.end({ timeout: 3 })
   }

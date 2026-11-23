@@ -21,6 +21,7 @@ import {
   type ApiEnvironmentAction,
 } from '../../../farm-protocol/src/api-envelope.ts'
 import {
+  speedModeAllowed,
   controlPrinterBusy,
   controlSourceState,
   LibraryPrintArgs,
@@ -69,7 +70,7 @@ export type ApiPrinterObservation = Readonly<{
 }>
 export type ApiCommandDriver = Pick<
   PreparedPauseDriver,
-  'execute' | 'controls' | 'macros' | 'macroParams'
+  'execute' | 'controls' | 'macros' | 'macroParams' | 'speedModes'
 > &
   Partial<Pick<PreparedPauseDriver, 'closeAttempt'>> & {
     prepare?(
@@ -325,6 +326,11 @@ export function createApiCommandRunner(config: {
       )
         return ['unsupported', 'resin-artifact-dispatch-unavailable']
       return null
+    }
+    if (action === 'set_speed') {
+      const modes = config.driver.speedModes?.(binding)
+      if (!speedModeAllowed(modes, args.level))
+        return ['unsupported', 'speed mode not supported by this printer']
     }
     // A library start runs the driver's ordinary `start_print` after the file is in place.
     const libraryStart = action === 'start_library_print'

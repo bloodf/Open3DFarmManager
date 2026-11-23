@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
+import { ToolTemperatureArgs } from '../../../farm-protocol/src/control-actions.ts'
 import { SignedCommandV2 } from '../../../farm-protocol/src/command-v2.ts'
 import { BrowserDeviceUuid } from '../../../farm-protocol/src/browser-device-proof.ts'
 import { canonicalize } from '../../../farm-protocol/src/canonical.ts'
@@ -49,7 +50,7 @@ if (
 const RETENTION_MS = 600_000
 const MAX_CAPACITY = 10_000
 const APPLICATION_ID = 0x4f334450
-const SCHEMA_VERSION = 17
+const SCHEMA_VERSION = 18
 const MAX_CLOCK_STEP_MS = RETENTION_MS + 1_000
 const reasons = [
   'guard-denied',
@@ -119,6 +120,7 @@ type ClaimRow = {
   transport_id: string
   capability_id: string
   action: string
+  toolArgs?: { tool: number; target_c: number }
   /** Earliest local time the command may be claimed. */
   not_before: number
   expires_at: number
@@ -271,10 +273,15 @@ const configWriteActionSchema = bedMeshActionSchema.replace(
   "'bed_mesh'",
   "'bed_mesh','config_write'",
 )
-const actionSchema = configWriteActionSchema.replace(
+const v17ActionSchema = configWriteActionSchema.replace(
   "'config_write'",
   "'config_write','start_library_print'",
 )
+const actionSchema = v17ActionSchema.replace(
+  "'start_library_print'",
+  "'start_library_print','set_tool_temperature'",
+)
+const toolArgsSchema = `CREATE TABLE control_tool_temperature_args (cmd_id TEXT PRIMARY KEY, tool INTEGER NOT NULL CHECK(tool BETWEEN 0 AND 3), target_c INTEGER NOT NULL CHECK(target_c >= 0)) STRICT`
 /**
  * Journals from the power, timelapse and console units were rebuilt from the
  * merged schema, so their historical shapes also carry `bed_mesh` (and, for
@@ -318,6 +325,7 @@ const previousActionSchemas: Record<number, readonly string[]> = {
 }
 const schema = [
   actionSchema,
+  toolArgsSchema,
   `CREATE TABLE pause_meta (id INTEGER PRIMARY KEY CHECK(id=1), high_water INTEGER NOT NULL CHECK(high_water BETWEEN 0 AND 9007199254140991)) STRICT`,
   `CREATE TABLE pause_commands (
     cmd_id TEXT PRIMARY KEY, key_id TEXT NOT NULL, nonce TEXT NOT NULL,
@@ -341,7 +349,10 @@ const schema = [
   `CREATE INDEX pause_recent_printer ON pause_commands(farm_id,printer_key,claimed_at)`,
   `CREATE INDEX pause_terminal_retention ON pause_commands(retain_until) WHERE status IN ('not-sent','applied')`,
 ]
-const previousSchema = schema.map((sql) =>
+const v17Schema = schema
+  .filter((sql) => sql !== toolArgsSchema)
+  .map((sql) => (sql === actionSchema ? v17ActionSchema : sql))
+const previousSchema = v17Schema.map((sql) =>
   sql.replace(
     'CREATE INDEX pause_active_',
     'CREATE UNIQUE INDEX pause_active_',
@@ -492,6 +503,7 @@ export function openCommandJournal(input: {
         14,
         15,
         16,
+        17,
         SCHEMA_VERSION,
       ].includes(Number(initialVersion)) ||
         initialApplication !== APPLICATION_ID)
@@ -521,8 +533,9 @@ export function openCommandJournal(input: {
         )
       } else if (version === 1 && app === APPLICATION_ID) {
         database.exec(actionSchema)
+        database.exec(toolArgsSchema)
         database.exec(
-          "INSERT INTO control_command_actions SELECT cmd_id,'pause' FROM pause_commands",
+          "INSERT INTO control_command_actions(cmd_id,action) SELECT cmd_id,'pause' FROM pause_commands",
         )
         database.exec(
           'DROP INDEX pause_active_assignment; DROP INDEX pause_active_printer',
@@ -538,7 +551,7 @@ export function openCommandJournal(input: {
           )!,
         )
         database.exec(`PRAGMA user_version=${SCHEMA_VERSION}`)
-      } else if (version === 16 && app === APPLICATION_ID) {
+      } else if ((version === 16 || version === 17) && app === APPLICATION_ID) {
         const definitions = database
           .prepare(
             "SELECT sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY sql",
@@ -546,12 +559,23 @@ export function openCommandJournal(input: {
           .all()
           .map((row) => row.sql)
         if (
-          definitions.length !== previousSchema.length ||
+          definitions.length !== v17Schema.length ||
           definitions.some(
-            (sql, index) => sql !== [...previousSchema].sort()[index],
+            (sql, index) =>
+              sql !==
+              [...(version === 16 ? previousSchema : v17Schema)].sort()[index],
           )
         )
           throw new Error('Invalid command journal schema')
+        database.exec(
+          'ALTER TABLE control_command_actions RENAME TO legacy_control_command_actions',
+        )
+        database.exec(actionSchema)
+        database.exec(
+          'INSERT INTO control_command_actions(cmd_id,action) SELECT cmd_id,action FROM legacy_control_command_actions',
+        )
+        database.exec('DROP TABLE legacy_control_command_actions')
+        database.exec(toolArgsSchema)
         database.exec(
           'DROP INDEX pause_active_assignment; DROP INDEX pause_active_printer',
         )
@@ -579,7 +603,7 @@ export function openCommandJournal(input: {
         const matchesLegacy = previousActionSchemas[Number(version)]?.some(
           (previous) => {
             const expected = previousSchema
-              .map((sql) => (sql === actionSchema ? previous : sql))
+              .map((sql) => (sql === v17ActionSchema ? previous : sql))
               .sort()
             return (
               definitions.length === expected.length &&
@@ -593,9 +617,10 @@ export function openCommandJournal(input: {
         )
         database.exec(actionSchema)
         database.exec(
-          'INSERT INTO control_command_actions SELECT * FROM legacy_control_command_actions',
+          'INSERT INTO control_command_actions(cmd_id,action) SELECT cmd_id,action FROM legacy_control_command_actions',
         )
         database.exec('DROP TABLE legacy_control_command_actions')
+        database.exec(toolArgsSchema)
         database.exec(
           'DROP INDEX pause_active_assignment; DROP INDEX pause_active_printer',
         )
@@ -677,6 +702,9 @@ export function claimCommand(
     handle,
     {
       ...command,
+      ...(command.action === 'set_tool_temperature'
+        ? { toolArgs: ToolTemperatureArgs.parse(command.args) }
+        : {}),
       not_before: command.issued_at,
     },
     parsed.data.printerKey,
@@ -715,6 +743,9 @@ export function claimApiCommand(
           : run.success
             ? API_RUN_CONTROLS[run.data.action]
             : envelope.action!.action,
+      ...(envelope.action?.action === 'set_tool_temperature'
+        ? { toolArgs: envelope.action.args }
+        : {}),
       not_before: Math.max(0, envelope.issued_at - API_ENVELOPE_CLOCK_SKEW_MS),
       expires_at: envelope.expires_at,
     },
@@ -826,6 +857,19 @@ function claimRow(
           state.database
             .prepare('INSERT INTO control_command_actions VALUES(?,?)')
             .run(command.cmd_id, command.action)
+        state.database
+          .prepare(
+            'DELETE FROM control_tool_temperature_args WHERE cmd_id NOT IN (SELECT cmd_id FROM pause_commands)',
+          )
+          .run()
+        if (command.toolArgs)
+          state.database
+            .prepare('INSERT INTO control_tool_temperature_args VALUES(?,?,?)')
+            .run(
+              command.cmd_id,
+              command.toolArgs.tool,
+              command.toolArgs.target_c,
+            )
         return { ok: true }
       },
     )

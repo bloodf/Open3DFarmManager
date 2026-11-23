@@ -1,5 +1,6 @@
 import type { ToolHeaters } from '../../packages/farm-protocol/src/state.ts'
 import { randomUUID } from 'node:crypto'
+import { DatabaseSync } from 'node:sqlite'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -125,6 +126,7 @@ async function fixture(
     sent,
     journal,
     cmdId,
+    directory,
     async close() {
       closeCommandJournal(journal)
       await rm(directory, { recursive: true, force: true })
@@ -173,7 +175,19 @@ describe('tool temperature API admission', () => {
         tool: 1,
         target_c: 200,
       })
-      expect(readCommandAction(f.journal, f.cmdId)).toBe('set_temperature')
+      expect(readCommandAction(f.journal, f.cmdId)).toBe('set_tool_temperature')
+      const db = new DatabaseSync(join(f.directory, 'pause-commands.sqlite'))
+      try {
+        expect(
+          db
+            .prepare(
+              'SELECT tool,target_c FROM control_tool_temperature_args WHERE cmd_id=?',
+            )
+            .get(f.cmdId),
+        ).toMatchObject({ tool: 1, target_c: 200 })
+      } finally {
+        db.close()
+      }
       expect(await f.runner.run(f.wire)).toEqual({
         kind: 'dropped',
         reason: 'replay',

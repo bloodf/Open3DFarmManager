@@ -1139,6 +1139,25 @@ describe('the validator rejects undocumented fields', () => {
       validateValue(page, { data: [], nextCursor: null, total: 3 }),
     ).toEqual(['$.total: undocumented field'])
   })
+  it('documents tool temperature arguments and rejects invalid values', () => {
+    const request = resolveRef('#/components/schemas/PrinterActionRequest')
+    expect(
+      validateValue(request, {
+        action: 'set_tool_temperature',
+        args: { tool: 1, target_c: 200 },
+      }),
+    ).toEqual([])
+    for (const args of [
+      { tool: 4, target_c: 200 },
+      { tool: 1, target_c: -1 },
+      { tool: 1 },
+      { tool: 1, target_c: 200, extra: true },
+    ]) {
+      expect(
+        validateValue(request, { action: 'set_tool_temperature', args }),
+      ).not.toEqual([])
+    }
+  })
   it('rejects an extra field inside the free-form-looking Action arguments', () => {
     const request = resolveRef('#/components/schemas/ActionRequest')
     expect(

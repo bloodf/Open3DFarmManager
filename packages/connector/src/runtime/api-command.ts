@@ -1,7 +1,4 @@
-import {
-  temperatureJournalAction,
-  toolTemperatureRefusal,
-} from '../control/control-driver.ts'
+import { toolTemperatureRefusal } from '../control/control-driver.ts'
 import type { ToolHeaters } from '../../../farm-protocol/src/state.ts'
 import { createHash } from 'node:crypto'
 import { resinArtifactFormatFor } from '../../../shared/src/print-file/resin-artifacts.ts'
@@ -486,12 +483,7 @@ export function createApiCommandRunner(config: {
         // The journal records the driver action the environment control runs.
         envelope: environment
           ? { ...envelope, action: environment as ApiEnvelopeV1['action'] }
-          : envelope.action?.action === 'set_tool_temperature'
-            ? {
-                ...envelope,
-                action: temperatureJournalAction(envelope.action.args.target_c),
-              }
-            : envelope,
+          : envelope,
         printerKey: mapping.printer_key,
         wireSha256: createHash('sha256').update(String(wire)).digest('hex'),
       })

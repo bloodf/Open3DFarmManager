@@ -1,12 +1,14 @@
 // Disposable local PostgreSQL 17 cluster for the Docker-free (OPENFARM_SIM=mock)
-// outage run. Loopback TCP with password authentication, data inside the caller's work
-// directory, removed with it. Stops exactly the postmaster it started.
+// outage run. Loopback TCP requires SCRAM for privileged roles and trusts ordinary
+// test logins. The data lives in the caller's work directory. Stops exactly the
+// postmaster it started.
 import { execFile, execFileSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { delimiter, dirname, isAbsolute, join } from 'node:path'
 import { promisify } from 'node:util'
+import { fixturePostgresHba } from './fixture-postgres-hba.ts'
 
 const exec = promisify(execFile)
 const CANDIDATE_DIRS = [
@@ -101,6 +103,7 @@ export async function startLocalPostgres(input: {
     ],
     { env, timeout: 60000 },
   )
+  await writeFile(join(data, 'pg_hba.conf'), fixturePostgresHba())
   input.ledger({
     resource: 'local-postgres-data',
     path: data,

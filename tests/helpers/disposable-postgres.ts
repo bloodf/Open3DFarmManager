@@ -24,6 +24,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import postgres, { type Sql } from 'postgres'
+import { fixturePostgresHba } from './fixture-postgres-hba.ts'
 import {
   catalogThrough,
   loadMigrationCatalog,
@@ -175,6 +176,7 @@ export interface DisposablePostgresInput {
   isolated?: boolean
   docker?: DockerCommand | undefined
   image?: string | undefined
+  additionalScramRoles?: string[]
 }
 
 export interface DisposablePostgresFixture {
@@ -272,6 +274,9 @@ export function disposablePostgres(
           ...['--tmpfs', '/tmp:rw,mode=1777'],
           ...['-p', `127.0.0.1:${input.port || ''}:5432`],
           ...['-e', 'POSTGRES_USER=fixture', '-e', 'POSTGRES_DB=fixture'],
+          // Keep Docker TCP password authentication because bridge peers can
+          // reach PostgreSQL directly. Use the native provider for passwordless
+          // test logins.
           ...['-e', `POSTGRES_PASSWORD=${password}`],
           ...['-e', 'PGDATA=/var/lib/postgresql/data/pgdata'],
           image,
@@ -381,6 +386,11 @@ export function disposablePostgres(
             '-E',
             'UTF-8',
           ])
+
+          await writeFile(
+            join(dataDir, 'pg_hba.conf'),
+            fixturePostgresHba(input.additionalScramRoles),
+          )
 
           // Configure high-performance test settings and logging
           await appendFile(

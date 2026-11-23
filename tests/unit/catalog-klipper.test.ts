@@ -35,8 +35,8 @@ const capabilityKeys = [
 
 describe('catálogo Klipper/Moonraker', () => {
   it('segue o contrato de registro com ids únicos', () => {
-    expect(klipperCatalog).toHaveLength(5)
-    expect(new Set(klipperCatalog.map((p) => p.id)).size).toBe(5)
+    expect(klipperCatalog).toHaveLength(6)
+    expect(new Set(klipperCatalog.map((p) => p.id)).size).toBe(6)
     for (const product of klipperCatalog) {
       // `hardwareReports` is optional: present only where hardware was qualified.
       expect(
@@ -57,9 +57,10 @@ describe('catálogo Klipper/Moonraker', () => {
     }
   })
 
-  it('cobre genérico, K1 com root, kit Voron e Sovol', () => {
+  it('cobre genérico, Snapmaker U1, K1 com root, kit Voron e Sovol', () => {
     expect(klipperCatalog.map((p) => p.id)).toEqual([
       'klipper-generic-moonraker',
+      'snapmaker-u1',
       'creality-k1-series-moonraker-root',
       'voron-2-4-kit',
       'sovol-sv08',
@@ -67,6 +68,7 @@ describe('catálogo Klipper/Moonraker', () => {
     ])
     expect(klipperCatalog.map((p) => p.brand)).toEqual([
       'Klipper',
+      'Snapmaker',
       'Creality',
       'Voron Design',
       'Sovol',

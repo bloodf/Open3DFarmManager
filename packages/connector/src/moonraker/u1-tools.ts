@@ -1,10 +1,6 @@
 import { z } from 'zod'
 import { parseToolStatus } from './discovery-parse.ts'
-import { supportedMoonrakerActions } from './commands.ts'
-import {
-  TOOL_COMMANDS,
-  type SnapmakerU1UnsupportedReason,
-} from './u1-marker.ts'
+import { U1_TOOL_OBJECTS } from './u1-marker.ts'
 
 /**
  * Snapmaker U1 tool mapping (read-only telemetry).
@@ -22,12 +18,6 @@ import {
 export const SNAPMAKER_U1_TOOL_COUNT = 4
 
 const TOOL_NAMES = ['T0', 'T1', 'T2', 'T3'] as const
-const TOOL_OBJECTS = [
-  'extruder',
-  'extruder1',
-  'extruder2',
-  'extruder3',
-] as const
 const SENSOR_KINDS = [
   'filament_switch_sensor',
   'filament_motion_sensor',
@@ -43,7 +33,7 @@ export type SnapmakerU1Tool = Readonly<{
   index: 0 | 1 | 2 | 3
   tool: (typeof TOOL_NAMES)[number]
   /** Klipper object that carries this tool's heater. */
-  object: (typeof TOOL_OBJECTS)[number]
+  object: (typeof U1_TOOL_OBJECTS)[number]
   /** Whether Moonraker listed or reported the tool's heater at all. */
   reported: boolean
   /** null: the printer did not say which tool is active. */
@@ -106,8 +96,8 @@ export function mapSnapmakerU1Tools(
   const filament = filamentByTool(status as Record<string, unknown>)
   const activeKnown =
     parsed.activeObject !== null &&
-    (TOOL_OBJECTS as readonly string[]).includes(parsed.activeObject)
-  const tools = TOOL_OBJECTS.map((object, index): SnapmakerU1Tool => {
+    (U1_TOOL_OBJECTS as readonly string[]).includes(parsed.activeObject)
+  const tools = U1_TOOL_OBJECTS.map((object, index): SnapmakerU1Tool => {
     const seen = byObject.get(object)
     return {
       index: index as SnapmakerU1Tool['index'],
@@ -122,44 +112,6 @@ export function mapSnapmakerU1Tools(
   })
   const active = tools.find((tool) => tool.active === true)
   return { model: 'snapmaker-u1', tools, activeTool: active?.tool ?? null }
-}
-
-export {
-  SNAPMAKER_U1_MARKER,
-  SnapmakerU1CommandRefused,
-  type SnapmakerU1UnsupportedReason,
-} from './u1-marker.ts'
-
-export type SnapmakerU1CommandSupport = Readonly<{
-  /** Always empty: U1 qualification covers read-only telemetry only. */
-  supported: readonly string[]
-  unsupported: readonly Readonly<{
-    command: string
-    reason: SnapmakerU1UnsupportedReason
-  }>[]
-}>
-
-/**
- * Command capability for a U1. Every command is reported unsupported with a
- * reason: tool selection and per-tool heating have no builder, and the generic
- * Klipper commands are only simulator-proven, not qualified on U1 hardware.
- */
-export function snapmakerU1CommandSupport(
-  objects: readonly string[] = [],
-): SnapmakerU1CommandSupport {
-  return {
-    supported: [],
-    unsupported: [
-      ...TOOL_COMMANDS.map((command) => ({
-        command,
-        reason: 'tool-command-not-implemented' as const,
-      })),
-      ...supportedMoonrakerActions(objects).map((command) => ({
-        command,
-        reason: 'not-hardware-qualified' as const,
-      })),
-    ],
-  }
 }
 
 /**
@@ -200,7 +152,7 @@ export function isDeclaredSnapmakerU1(printerKey: string): boolean {
 export const SNAPMAKER_U1_STATUS_OBJECTS: Readonly<Record<string, string[]>> =
   Object.freeze({
     ...Object.fromEntries(
-      TOOL_OBJECTS.map((object) => [object, ['temperature', 'target']]),
+      U1_TOOL_OBJECTS.map((object) => [object, ['temperature', 'target']]),
     ),
     toolhead: ['extruder'],
   })

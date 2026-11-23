@@ -1,4 +1,8 @@
 import { compatibilityPageCatalog, capabilityStatusLabels } from './index.ts'
+import {
+  isSnapmakerU1CatalogIdentity,
+  snapmakerU1CatalogId,
+} from './klipper.ts'
 import type { AnycubicCatalogProduct, CatalogCapability } from './anycubic.ts'
 
 export interface ObservedPrinterIdentity {
@@ -157,6 +161,11 @@ export function matchCatalogProduct(
   }
 
   // 5. Klipper / Moonraker family
+  if (isSnapmakerU1CatalogIdentity(vCompact, mCompact)) {
+    const match = catalog.find((product) => product.id === snapmakerU1CatalogId)
+    if (match) return match
+  }
+
   // 5a. Creality K1 series via root Moonraker
   if (!rawVendor || isCrealityVendor || isKlipperMoonrakerVendor) {
     if (

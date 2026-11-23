@@ -110,9 +110,11 @@ const klipperControlAreas = {
 
 const controlAreasLimitation =
   'As áreas de controle marcadas como Simulado foram exercitadas apenas no simulador Moonraker em loopback, nunca em hardware; extrusão manual direta, configuração e demais áreas sem teste em simulador permanecem Desconhecido.'
+const controlAuthorizationLimitation =
+  'O rótulo Simulado não habilita comandos nem concede autoridade de controle; qualquer comando exige autorização própria do OpenFarm.'
 const sharedLimitations = [
   'Macros anunciadas e comandos de carregar e descarregar filamento foram exercitados em simulador Moonraker; dependem das macros configuradas e não são comprovados em hardware.',
-  'O rótulo Simulado não habilita comandos nem concede autoridade de controle; qualquer comando exige autorização própria do OpenFarm.',
+  controlAuthorizationLimitation,
 ] as const
 const commonLimitations = [
   controlAreasLimitation,
@@ -125,9 +127,11 @@ const commonLimitations = [
  * reais. Os relatórios recentes comprovam telemetria em SV06 e U1, e câmera
  * somente leitura na U1; ver `docs/hardware-reports/README.md`.
  */
+const u1ReadOnlyReport =
+  'docs/hardware-reports/2026-11-21-snapmaker-u1-moonraker.json'
 const genericHardwareReports = [
   'docs/hardware-reports/2026-11-21-sovol-sv06-moonraker.json',
-  'docs/hardware-reports/2026-11-21-snapmaker-u1-moonraker.json',
+  u1ReadOnlyReport,
   'docs/hardware-reports/2026-11-23-sovol-sv06-moonraker.json',
   'docs/hardware-reports/2026-11-23-snapmaker-u1-moonraker.json',
 ] as const
@@ -136,6 +140,41 @@ const genericCameraHardwareReports = [
 ] as const
 const reportUrl = (path: string) =>
   `https://github.com/bloodf/Open3DFarmManager/blob/main/${path}`
+
+export const snapmakerU1CatalogId = 'snapmaker-u1'
+
+// The callers pass compacted identity strings.
+export function isSnapmakerU1CatalogIdentity(vendor: string, model: string) {
+  return (
+    ['', 'snapmaker', 'klipper', 'moonraker', 'klippermoonraker'].includes(
+      vendor,
+    ) &&
+    (model === 'snapmakeru1' || model === 'u1')
+  )
+}
+
+const u1Controls = 'tests/node/moonraker-u1-controls.test.ts'
+const u1ControlAreaEvidence = {
+  temperatures: {
+    file: u1Controls,
+    test: 'declared U1 sets and clears each tool and the bed',
+  },
+  motion: {
+    file: u1Controls,
+    test: 'declared U1 homes, jogs and selects tools',
+  },
+  console: {
+    file: u1Controls,
+    test: 'declared U1 console retains the existing safety policy',
+  },
+  printStatus: {
+    file: u1Controls,
+    test: 'declared U1 starts an uploaded file',
+  },
+} as const satisfies ControlAreaEvidenceMap
+
+const u1FirmwareSource =
+  'https://github.com/paxx12/SnapmakerU1-Extended-Firmware'
 
 export const klipperCatalog: readonly KlipperCatalogProduct[] = [
   {
@@ -183,6 +222,44 @@ export const klipperCatalog: readonly KlipperCatalogProduct[] = [
       'Arquivos permanecem desconhecidos: o OpenFarm lê e envia arquivos por Moonraker no código, mas nenhuma configuração de coleta produz um alvo de arquivos para a coleção Moonraker, então a operação não é alcançável pelo produto.',
       'Materiais dependem do espelho Spoolman configurado; sem ele, a leitura do filamento ativo não é observada.',
       'Configurações personalizadas, macros e plugins do usuário podem alterar o comportamento esperado.',
+    ],
+  },
+  {
+    id: snapmakerU1CatalogId,
+    controlAreas: {
+      ...unknownControlAreas,
+      temperatures: 'simulated',
+      motion: 'simulated',
+      console: 'simulated',
+      printStatus: 'simulated',
+    },
+    controlAreaEvidence: u1ControlAreaEvidence,
+    brand: 'Snapmaker',
+    model: 'U1',
+    releaseStatus: 'Modelo comercial da Snapmaker',
+    releaseDate: null,
+    firmwareStatus:
+      'Klipper/Moonraker com quatro ferramentas. Controle avaliado em simuladores com o perfil U1 para firmware paxx12.',
+    firmwareNotes: [
+      {
+        firmware: 'Firmware paxx12 para Snapmaker U1',
+        note: `O projeto mantém a extensão de firmware da U1. ${u1FirmwareSource}`,
+        sources: [u1FirmwareSource],
+      },
+    ],
+    connection: 'Moonraker via HTTP e WebSocket na rede local',
+    capabilities: simulatedControl,
+    sources: [
+      'https://www.snapmaker.com/snapmaker-u1/specs',
+      u1FirmwareSource,
+      reportUrl(u1ReadOnlyReport),
+    ],
+    limitations: [
+      'Pausar, retomar, cancelar, iniciar um arquivo já enviado à impressora, aquecer ou zerar cada bico e a mesa, referenciar e mover eixos foram exercitados em simuladores, nunca em hardware.',
+      'O console exige autorização do proprietário. A seleção T0–T3 exige eixos referenciados e a impressora fora de um trabalho ativo.',
+      controlAuthorizationLimitation,
+      'A telemetria de leitura da U1 consta no relatório de hardware da entrada genérica Klipper + Moonraker. Materiais dependem do espelho Spoolman configurado.',
+      'Iniciar um arquivo existente é um comando assinado. A capacidade de gerenciar arquivos da U1 ainda é desconhecida.',
     ],
   },
   {

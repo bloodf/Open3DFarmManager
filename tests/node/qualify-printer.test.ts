@@ -12,11 +12,28 @@ import type * as Ws from 'ws'
 import { startBambuSimulator } from '../../packages/sim-tools/src/bambu-simulator.ts'
 import { startAnycubicSimulator } from '../../packages/sim-tools/src/anycubic-simulator.ts'
 import { createCrealitySimulator } from '../../packages/sim-tools/src/creality-simulator.ts'
+import { findMatchingCatalogProduct } from '../../scripts/qualify/catalog.ts'
 
 const require = createRequire(
   new URL('../../packages/connector/package.json', import.meta.url),
 )
 const { WebSocketServer } = require('ws') as typeof Ws
+
+test('qualifier maps explicit Snapmaker U1 observations to the model entry', () => {
+  assert.equal(
+    findMatchingCatalogProduct('Klipper', 'Snapmaker U1')?.id,
+    'snapmaker-u1',
+  )
+  assert.equal(
+    findMatchingCatalogProduct('Snapmaker', 'U1')?.id,
+    'snapmaker-u1',
+  )
+  assert.equal(findMatchingCatalogProduct('other-vendor', 'U1'), null)
+  assert.equal(
+    findMatchingCatalogProduct('Moonraker', 'Moonraker Generic')?.id,
+    'klipper-generic-moonraker',
+  )
+})
 
 function runCli(args: string[]) {
   return new Promise<{ code: number | null; out: string; err: string }>(

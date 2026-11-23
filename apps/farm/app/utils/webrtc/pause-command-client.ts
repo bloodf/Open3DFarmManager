@@ -1,5 +1,7 @@
 import {
   ExtendedControlAction,
+  U1_CONTROL_RESULT_TIMEOUT_MS,
+  isU1PhysicalControl,
   type ControlResultCode,
 } from '../../../../../packages/farm-protocol/src/control-actions.ts'
 import { canonicalize } from '../../../../../packages/farm-protocol/src/canonical.ts'
@@ -275,7 +277,7 @@ export function createPauseCommandClient(
       resolveAdmissionGate?.()
     }, ADMISSION_MS)
   }
-  function armResult(): void {
+  function armResult(waitMs: number): void {
     clearTimer(resultTimer)
     resultTimer = undefined
     resultTimer = setTimeout(() => {
@@ -283,7 +285,7 @@ export function createPauseCommandClient(
       // The command is on the wire and no result arrived. The client cannot
       // know whether the printer paused.
       settleCommand('outcome-unknown')
-    }, COMMAND_MS)
+    }, waitMs)
   }
   function scopeMatches(
     issued: Readonly<{
@@ -435,7 +437,11 @@ export function createPauseCommandClient(
       // never reported as a clean rejection: the frame may have left the
       // transport before the failure.
       commandSent = true
-      armResult()
+      armResult(
+        isU1PhysicalControl(signed.action, signed.args)
+          ? COMMAND_MS + U1_CONTROL_RESULT_TIMEOUT_MS
+          : COMMAND_MS,
+      )
       if (
         attemptSend(() => sendCommand({ t: 'control.command', wire })) !==
         'sent'

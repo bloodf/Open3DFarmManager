@@ -4,6 +4,8 @@ import { moonrakerControls } from '../../packages/connector/src/moonraker/contro
 import {
   SNAPMAKER_U1_MARKER,
   SnapmakerU1CommandRefused,
+} from '../../packages/connector/src/moonraker/u1-marker.ts'
+import {
   declareSnapmakerU1Printers,
   isDeclaredSnapmakerU1,
 } from '../../packages/connector/src/moonraker/u1-tools.ts'
@@ -14,7 +16,14 @@ afterEach(() => {
   for (const withdraw of withdrawals.splice(0)) withdraw()
 })
 
-const objects = ['extruder', 'extruder1', 'heater_bed', 'fan', 'print_stats']
+const objects = [
+  'extruder',
+  'extruder1',
+  'heater_bed',
+  'fan',
+  'print_stats',
+  'webhooks',
+]
 
 test('only a printer configured as Snapmaker U1 is declared, until withdrawn', () => {
   const withdraw = declareSnapmakerU1Printers([
@@ -39,29 +48,31 @@ test('overlapping declarations keep a printer declared until the last withdrawal
   expect(isDeclaredSnapmakerU1('u1')).toBe(false)
 })
 
-test('a detected U1 advertises its own capability set, not the generic one', () => {
+test('a detected U1 advertises its own capability set', () => {
   expect(moonrakerControls(objects)).toContain('set_temperature')
-  expect(moonrakerControls([...objects, SNAPMAKER_U1_MARKER])).toEqual([])
+  expect(moonrakerControls([...objects, SNAPMAKER_U1_MARKER])).toEqual([
+    'pause',
+    'resume',
+    'cancel',
+    'set_temperature',
+    'set_tool_temperature',
+  ])
+  expect(moonrakerControls([SNAPMAKER_U1_MARKER, 'extruder'])).toEqual([])
 })
 
-test('every command built for a U1 is refused with a reason before any write', () => {
-  for (const [action, reason] of [
-    ['set_temperature', 'not-hardware-qualified'],
-    ['pause', 'not-hardware-qualified'],
-    ['set_fan', 'not-hardware-qualified'],
-    ['select_tool', 'tool-command-not-implemented'],
-  ] as const) {
+test('the U1 builder refuses actions outside its capability set', () => {
+  const declared = [...objects, SNAPMAKER_U1_MARKER]
+  for (const action of ['home', 'set_fan', 'select_tool']) {
     let refused: unknown
     try {
-      buildMoonrakerCommand(action, {}, [...objects, SNAPMAKER_U1_MARKER])
+      buildMoonrakerCommand(action, {}, declared)
     } catch (error) {
       refused = error
     }
     expect(refused).toBeInstanceOf(SnapmakerU1CommandRefused)
-    expect(refused).toMatchObject({ refusal: 'unsupported-action', reason })
+    expect(refused).toMatchObject({ refusal: 'unsupported-action' })
   }
-  // Without the marker the generic builder still answers.
-  expect(buildMoonrakerCommand('pause', {}, objects)).toEqual({
+  expect(buildMoonrakerCommand('pause', {}, declared)).toEqual({
     method: 'printer.print.pause',
   })
 })
@@ -130,7 +141,6 @@ test('the Moonraker driver refuses a declared U1 before detection and before any
       fixed.driver.execute!('set_temperature', {}, request as never),
     ).rejects.toMatchObject({
       refusal: 'unsupported-action',
-      reason: 'not-hardware-qualified',
     })
     await expect(
       fixed.driver.pauseOnce({ ...request, action: 'cancel' } as never),

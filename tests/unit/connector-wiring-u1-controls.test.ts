@@ -53,6 +53,7 @@ const objects = [
   'webhooks',
   'print_stats',
   'virtual_sdcard',
+  'toolhead',
   'extruder',
   'extruder1',
   'extruder2',
@@ -143,8 +144,17 @@ async function advertised(model: string | undefined) {
 
 test('a declared Snapmaker U1 advertises the U1 command capability set', async () => {
   const { controls, methods } = await advertised('Snapmaker U1')
-  // U1 qualification covers read-only telemetry only: nothing is offered.
-  expect(controls).toEqual([])
+  expect(controls).toEqual([
+    'pause',
+    'resume',
+    'cancel',
+    'set_temperature',
+    'set_tool_temperature',
+    'home',
+    'jog',
+    'start_print',
+    'start_library_print',
+  ])
   expect(
     methods.some((method) => /gcode|print\.(pause|cancel|resume)/.test(method)),
   ).toBe(false)

@@ -298,6 +298,26 @@ function actionOutcomeBaseText(
   }
 }
 
+export function extendedControlStatusText(
+  state: FarmPauseControlState,
+  remainingSeconds: number,
+): string {
+  if (state.kind === 'sending') return 'Enviando o comando…'
+  if (state.kind === 'settled') {
+    const base = {
+      applied: 'Comando confirmado pelo Connector.',
+      rejected: 'Comando recusado.',
+      'not-sent': 'Comando não enviado.',
+      'outcome-unknown':
+        'Resultado desconhecido. Verifique a impressora antes de tentar novamente.',
+    }[state.outcome]
+    const hint =
+      state.outcome === 'applied' ? undefined : resultCodeHint(state.code)
+    return hint ? `${base} ${hint}` : base
+  }
+  return controlStatusText('pause', state, remainingSeconds)
+}
+
 /**
  * Dialog status copy for any control action.
  */

@@ -88,6 +88,9 @@ export function normalizeMoonrakerSnapshot(
       case 'paused':
         state = 'paused'
         break
+      case 'cancelled':
+        state = 'unknown'
+        break
       case 'error':
         state = 'error'
         break

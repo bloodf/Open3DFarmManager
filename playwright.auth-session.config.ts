@@ -14,6 +14,8 @@ if (![app, tls, db].every(Number.isInteger))
   throw new Error(
     'AUTH_E2E_APP_PORT, AUTH_E2E_TLS_PORT and AUTH_E2E_DB_PORT (disposable PostgreSQL) required',
   )
+if (!/^[a-f0-9]{64}$/.test(env.AUTH_E2E_ROLE_PASSWORD ?? ''))
+  throw new Error('AUTH_E2E_ROLE_PASSWORD required')
 const origin = `https://127.0.0.1:${tls}`
 export default defineConfig({
   testDir: './tests/e2e',
@@ -37,7 +39,7 @@ export default defineConfig({
         NUXT_AUTH_ENABLED: 'true',
         NUXT_AUTH_ORIGIN: origin,
         NUXT_AUTH_SESSION_SECRET: randomBytes(48).toString('base64url'),
-        NUXT_AUTH_DATABASE_URL: `postgres://o3dfm_w05_auth@127.0.0.1:${db}/fixture`,
+        NUXT_AUTH_DATABASE_URL: `postgres://o3dfm_w05_auth:${env.AUTH_E2E_ROLE_PASSWORD}@127.0.0.1:${db}/fixture`,
       },
       reuseExistingServer: false,
     },

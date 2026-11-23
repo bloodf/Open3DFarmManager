@@ -61,7 +61,7 @@ export async function startHarness(
       port,
       database: 'fixture',
       username,
-      password: '',
+      password: env('AUX_PG_PASSWORD'),
       ssl: false,
       max: 4,
       connect_timeout: 3,

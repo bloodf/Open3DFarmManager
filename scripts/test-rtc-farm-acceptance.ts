@@ -121,7 +121,11 @@ const ledger = (value: object) => {
 
 const docker = async (...args: string[]) =>
   (
-    await exec('docker', args, { timeout: 60000, maxBuffer: 1024 * 1024 })
+    await exec('docker', args, {
+      timeout: 60000,
+      maxBuffer: 1024 * 1024,
+      env: { ...process.env, POSTGRES_PASSWORD: dbPassword },
+    })
   ).stdout.trim()
 
 // Children get an allowlisted environment, never the caller's secrets.
@@ -296,7 +300,7 @@ try {
       ...['--tmpfs', '/tmp:rw,mode=1777'],
       ...['-p', `127.0.0.1:${dbPort}:5432`],
       ...['-e', 'POSTGRES_USER=fixture', '-e', 'POSTGRES_DB=fixture'],
-      ...['-e', `POSTGRES_PASSWORD=${dbPassword}`],
+      ...['-e', 'POSTGRES_PASSWORD'],
       ...['-e', 'PGDATA=/var/lib/postgresql/data/pgdata'],
       image,
     )

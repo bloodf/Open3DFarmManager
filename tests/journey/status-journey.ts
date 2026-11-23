@@ -18,6 +18,20 @@ export function statusJourney(name: StatusVendor) {
             name: new RegExp(`^Inspecionar journey-${name}\\b`),
           })
           .click()
+        const inspector = journey.ownerPage.getByRole('dialog', {
+          name: 'Inspeção da impressora',
+        })
+        await expect(inspector).toBeVisible()
+        const detail = await journey.ownerPage.context().newPage()
+        await detail.goto(
+          new URL(
+            (await inspector
+              .getByRole('link', { name: 'Abrir detalhes da impressora' })
+              .getAttribute('href')) ?? '',
+            journey.ownerPage.url(),
+          ).href,
+        )
+        await expect(detail.getByText(`journey-${name}`).first()).toBeVisible()
         const readOnly = async () => {
           await expect
             .soft(
@@ -26,6 +40,15 @@ export function statusJourney(name: StatusVendor) {
               }),
             )
             .toHaveCount(0, { timeout: 2000 })
+          for (const surface of [inspector, detail]) {
+            await expect
+              .soft(
+                surface.getByRole('button', {
+                  name: /pausar|retomar|cancelar impressão|iniciar impressão/i,
+                }),
+              )
+              .toHaveCount(0, { timeout: 2000 })
+          }
         }
         await expect(
           row.getByText('Conexão direta autenticada', { exact: true }),

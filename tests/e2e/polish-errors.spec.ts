@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
+import { setPolishTheme } from '../helpers/polish-theme.ts'
 
 // Isolated UI checks for the app error page (404, 403, 500) on mocked /api
 // routes. No real printer, database, auth service or external network is
@@ -78,7 +79,7 @@ async function open(
   })
   page.on('pageerror', (error) => logged.push(error.message))
   await page.setViewportSize(viewport)
-  await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+  await setPolishTheme(page, theme)
   await mockApi(page)
   if (scenario === 'not-found') await page.goto('/pagina-que-nao-existe')
   else {

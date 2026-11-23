@@ -83,7 +83,10 @@ function spool(id: number, fil: ReturnType<typeof filament>, used: number) {
 
 async function installMockFeatures(
   page: Page,
-  options: { role?: 'owner' | 'operator' | 'viewer' } = {},
+  options: {
+    role?: 'owner' | 'operator' | 'viewer'
+    denyThresholdUpdate?: boolean
+  } = {},
 ) {
   const role = options.role ?? 'owner'
   const access =
@@ -379,7 +382,7 @@ async function installMockFeatures(
     }),
   )
   await page.route(lib('low-stock/settings'), (route) => {
-    if (!canWrite || access !== 'manage')
+    if (options.denyThresholdUpdate || access !== 'manage')
       return fulfillJson(route, { message: 'Sem permissão.' }, 403)
     const body = route.request().postDataJSON() as {
       defaultLowStockThresholdGrams: number | null
@@ -779,7 +782,7 @@ test('viewer gets a read-only view without write controls', async ({
 test('a permission error from the server is shown instead of silently failing', async ({
   page,
 }) => {
-  await installMockFeatures(page, { role: 'operator' })
+  await installMockFeatures(page, { role: 'owner', denyThresholdUpdate: true })
   await open(page, '/bobinas/estoque')
   await page.getByLabel('Limite padrão (g)').fill('100')
   await page.getByRole('button', { name: 'Salvar limite padrão' }).click()

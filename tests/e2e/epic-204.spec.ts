@@ -99,7 +99,19 @@ test('reference client starts, pauses and cancels a simulated print', async ({
         `/api/farms/${journey.farmId}/integrations/apps/${app.app.id}/grants`,
         {
           printerAssignmentId: journey.assignmentId,
-          scopes: ['jobs:start', 'control:basic'],
+          scopes: ['jobs:read', 'control:basic', 'plates:confirm'],
+        },
+      ),
+    )
+
+    registeredGrant.parse(
+      await ownerPost(
+        journey.ownerPage,
+        `/api/farms/${journey.farmId}/integrations/apps/${app.app.id}/grants`,
+        {
+          printerAssignmentId: journey.assignmentId,
+          scopes: ['jobs:start'],
+          requiresApproval: true,
         },
       ),
     )
@@ -115,7 +127,12 @@ test('reference client starts, pauses and cancels a simulated print', async ({
       app.secret,
       loopbackFetcher(journey.origin, certificate),
     )
-    await client.authenticate(['jobs:start', 'control:basic'])
+    await client.authenticate([
+      'jobs:read',
+      'jobs:start',
+      'control:basic',
+      'plates:confirm',
+    ])
 
     const job = await client.startPrint(
       journey.assignmentId,
@@ -127,10 +144,49 @@ test('reference client starts, pauses and cancels a simulated print', async ({
       },
       'journey-start',
     )
+    expect(job.status).toBe('held')
+    const eligibility = await client.request<{ plate: { attemptId?: string } }>(
+      `jobs/${job.id}/eligibility?printerId=${journey.assignmentId}`,
+    )
+    const attempt = eligibility.plate.attemptId
+    expect(attempt).toBeDefined()
+    const clearance = await client.request<{ id: string }>(
+      `jobs/${job.id}/actions`,
+      {
+        method: 'POST',
+        headers: { 'Idempotency-Key': 'journey-initial-clearance' },
+        body: JSON.stringify({
+          action: 'confirm_collection',
+          args: { attempt },
+        }),
+      },
+    )
     await expect
-      .poll(async () => (await client.getJob(job.id)).status, {
+      .poll(async () => (await client.getAction(clearance.id)).status, {
         timeout: 60_000,
       })
+      .toBe('completed')
+    await ownerPost(
+      journey.ownerPage,
+      `/api/farms/${journey.farmId}/integrations/approvals/${job.id}/decision`,
+      { decision: 'approve' },
+    )
+    await expect
+      .poll(
+        async () => {
+          const current = await client.getJob(job.id)
+          if (current.status === 'refused') {
+            const { refusal } = current as typeof current & {
+              refusal?: { code: string; detail?: string }
+            }
+            throw new Error(
+              `Simulator start refused: ${refusal?.code ?? 'unknown'} (${refusal?.detail ?? 'no detail'})`,
+            )
+          }
+          return current.status
+        },
+        { timeout: 60_000 },
+      )
       .toBe('started')
     await expect
       .poll(() => journey.printer.model().state, { timeout: 15_000 })

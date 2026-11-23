@@ -3,7 +3,6 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import ShellNavigation from '../components/shell/ShellNavigation.vue'
 import Button from '../components/ui/Button.vue'
 import Dialog from '../components/ui/Dialog.vue'
-import { selectedFarm } from '../utils/farm-request-guard.ts'
 import { listenForAuthInvalidation } from '../utils/auth-invalidation'
 import { createShellShortcuts } from '../utils/shell-shortcuts'
 import { themeScript, themeStyles } from '../utils/pre-hydration'
@@ -53,14 +52,12 @@ const search = ref(false)
 const help = ref(false)
 const query = ref('')
 const shortcutsEnabled = ref(true)
-const activeFarm = computed(
-  () =>
-    route.query.farm ??
-    (farms.value.length === 1 ? farms.value[0]?.farmId : ''),
-)
-const selectedFarmId = computed(
-  () => selectedFarm(farms.value, route.query.farm)?.farmId,
-)
+const selectedFarmId = computed(() => {
+  const requested = route.query.farm
+  if (requested !== undefined)
+    return farms.value.find(({ farmId }) => farmId === requested)?.farmId
+  return farms.value.length === 1 ? farms.value[0]?.farmId : undefined
+})
 const { summary, failed } = useStatusSummary({
   farmId: () => selectedFarmId.value,
 })
@@ -329,7 +326,7 @@ async function refreshAccount() {
     })
     if (signal.aborted) return
     farms.value = page.farms
-    const farmId = selectedFarm(page.farms, route.query.farm)?.farmId
+    const farmId = selectedFarmId.value
     if (!farmId) return
     const devices = await $fetch<BrowserDevicePage>('/api/browser-devices', {
       query: { farm_id: farmId, limit: 1 },
@@ -364,8 +361,8 @@ async function refreshAccount() {
         >Atalhos</Button
       >
       <label v-if="farms.length">
-        Farm
-        <select :value="activeFarm ?? ''" @change="switchFarm">
+        Trocar farm
+        <select :value="selectedFarmId ?? ''" @change="switchFarm">
           <option disabled value="">Selecione uma farm</option>
           <option v-for="farm in farms" :key="farm.farmId" :value="farm.farmId">
             {{ farm.farmId }}
@@ -426,13 +423,12 @@ async function refreshAccount() {
       </nav>
     </aside>
     <aside class="sidebar">
-      <button
-        type="button"
+      <Button
         :aria-expanded="!sectionCollapsed"
         @click="sectionCollapsed = !sectionCollapsed"
       >
         {{ activeModule?.label ?? 'Navegação' }}
-      </button>
+      </Button>
       <nav v-if="!sectionCollapsed" aria-label="Navegação da seção">
         <NuxtLink
           v-for="link in links"
@@ -650,11 +646,15 @@ input {
 }
 .vitals {
   color: var(--ops-text);
+  min-inline-size: 0;
+  max-inline-size: 100%;
 }
 .vitals summary {
   cursor: pointer;
   min-height: 44px;
   display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--space-1);
   align-items: center;
 }
 .event-strip {

@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
+import { mockShellApi } from '../helpers/shell-api.ts'
 import { renderSpoolInventory } from './render-spool-inventory.ts'
 import { cameraDisplayBundle } from './mount-camera-display.ts'
 
@@ -9,6 +10,11 @@ const agent = '00000000-0000-4000-8000-000000000002'
 const assignment = '00000000-0000-4000-8000-000000000003'
 const key = `  e\u0301/<script>打印机</script> ${'x'.repeat(60)}  `
 async function inventory(page: Page) {
+  await mockShellApi(page, farm)
+  await page.route(
+    `**/api/farms/${farm}/printers/${assignment}/mode`,
+    (route) => route.fulfill({ json: { mode: 'in-service' } }),
+  )
   await page.route('**/api/auth/me', (route) =>
     route.fulfill({ json: { accountId: 'synthetic-ui-account' } }),
   )
@@ -49,6 +55,14 @@ async function inventory(page: Page) {
   )
 }
 
+const inspector = (page: Page) =>
+  page.getByRole('dialog', { name: 'Inspeção da impressora' })
+
+async function inspectPrinter(page: Page) {
+  await page.getByRole('button', { name: /^Inspecionar/ }).click()
+  await expect(inspector(page)).toBeVisible()
+}
+
 test('pt-BR inventory wraps exact keys at 320px, separates approval from status, and disables pause without a live connection', async ({
   page,
 }) => {
@@ -59,23 +73,29 @@ test('pt-BR inventory wraps exact keys at 320px, separates approval from status,
     page.getByRole('heading', { name: 'Minha farm', exact: true }),
   ).toBeFocused()
   await expect(page.getByLabel('Farm atual', { exact: true })).toHaveValue(farm)
-  await expect(page.locator(`#printer-${assignment}`)).toHaveText(key)
+  await inspectPrinter(page)
+  await expect(inspector(page).locator(`#printer-${assignment}`)).toHaveText(
+    key,
+  )
   expect(
     await page
       .locator(`#printer-${assignment}`)
       .evaluate((node) => node.textContent),
   ).toBe(key)
-  await expect(page.getByRole('article')).toContainText('Connector aprovado')
-  await expect(page.getByRole('article')).toContainText(
+  await expect(inspector(page).getByRole('article')).toContainText(
+    'Connector aprovado',
+  )
+  await expect(inspector(page).getByRole('article')).toContainText(
     'Conexão direta indisponível',
   )
-  await expect(page.getByRole('article')).toContainText(
+  await expect(inspector(page).getByRole('article')).toContainText(
     'Nenhum estado recebido',
   )
   await expect(
     page.getByRole('button', { name: 'Pausar impressão' }),
   ).toBeDisabled()
   await expect(page.locator('progress')).toHaveCount(0)
+  await inspector(page).getByRole('button', { name: 'Fechar inspeção' }).click()
   // Spool inventory is read-only and reports unavailability without a direct connection.
   await expect(
     page.getByRole('heading', { name: 'Estoque de filamento', exact: true }),
@@ -101,7 +121,8 @@ test('explicit origin setup has no outbound probe and renders an external anchor
       outbound.push(request.url())
   })
   await page.goto('/farm')
-  const setup = page.getByRole('button', {
+  await inspectPrinter(page)
+  const setup = inspector(page).getByRole('button', {
     name: 'Configurar interface local',
     exact: true,
   })
@@ -114,7 +135,7 @@ test('explicit origin setup has no outbound probe and renders an external anchor
   await page
     .getByLabel('Origem da interface local', { exact: true })
     .fill('http://printer.invalid:8080/')
-  await expect(page.getByRole('article')).toContainText(
+  await expect(inspector(page).getByRole('article')).toContainText(
     'Origem para conferir: http://printer.invalid:8080',
   )
   await page.keyboard.press('Tab')
@@ -138,7 +159,10 @@ test('explicit origin setup has no outbound probe and renders an external anchor
   expect(outbound).toEqual([])
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
   await expect(link).toHaveCount(0)
-  await expect(page.getByRole('article')).toContainText(
+  await expect(inspector(page)).toBeHidden()
+  await inspectPrinter(page)
+  await expect(link).toHaveCount(0)
+  await expect(inspector(page).getByRole('article')).toContainText(
     'Nenhum estado recebido',
   )
 })
@@ -193,7 +217,9 @@ for (const width of [320, 768, 1024, 1280]) {
     await inventory(page)
     await page.setViewportSize({ width, height: 800 })
     await page.goto('/farm')
-    await expect(page.locator(`#printer-${assignment}`)).toHaveText(key)
+    await expect(
+      page.getByRole('button', { name: /^Inspecionar/ }).locator('strong'),
+    ).toHaveText(key)
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= window.innerWidth,
@@ -212,6 +238,7 @@ test('axe finds no WCAG A/AA violations with the local interface form open and c
 }) => {
   await inventory(page)
   await page.goto('/farm')
+  await inspectPrinter(page)
   await page
     .getByRole('button', { name: 'Configurar interface local', exact: true })
     .click()
@@ -357,17 +384,24 @@ test('pause stays disabled with a pt-BR reason when control is not enabled or no
     }),
   )
   await page.goto('/farm')
-  const pause = page.getByRole('button', { name: 'Pausar impressão' })
+  await inspectPrinter(page)
+  const pause = inspector(page).getByRole('button', {
+    name: 'Pausar impressão',
+  })
   await expect(pause).toBeDisabled()
   await expect(pause).toHaveAccessibleDescription(
     'Pausa indisponível. O controle seguro não está habilitado.',
   )
-  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(
+    page.getByRole('dialog').and(page.locator('dialog:not(.floor-inspector)')),
+  ).toHaveCount(0)
   // aria-disabled keeps the button focusable so its reason is announced; a click opens nothing.
   await pause.focus()
   await expect(pause).toBeFocused()
   await pause.click({ force: true })
-  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(
+    page.getByRole('dialog').and(page.locator('dialog:not(.floor-inspector)')),
+  ).toHaveCount(0)
 
   await page.unroute('**/api/signalling/pause-metadata')
   await page.route('**/api/signalling/pause-metadata', (route) =>
@@ -380,12 +414,15 @@ test('pause stays disabled with a pt-BR reason when control is not enabled or no
     }),
   )
   await page.reload()
+  await inspectPrinter(page)
   await expect(pause).toBeDisabled()
   // No approved local device: the reason names what is missing, never a stale success.
   await expect(pause).toHaveAccessibleDescription(
     'Pausa indisponível. Selecione um dispositivo aprovado deste navegador.',
   )
-  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(
+    page.getByRole('dialog').and(page.locator('dialog:not(.floor-inspector)')),
+  ).toHaveCount(0)
 })
 
 test('camera region is named, unavailable without an authorized stream, silent and axe-clean', async ({
@@ -394,7 +431,8 @@ test('camera region is named, unavailable without an authorized stream, silent a
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await inventory(page)
   await page.goto('/farm')
-  const camera = page.getByRole('region', {
+  await inspectPrinter(page)
+  const camera = inspector(page).getByRole('region', {
     name: `Câmera da impressora ${key}`,
   })
   await expect(camera).toBeVisible()
@@ -417,6 +455,7 @@ test('camera region is named, unavailable without an authorized stream, silent a
   ).toBeDisabled()
   expect(await violations(page)).toEqual([])
   const handle = await video.elementHandle()
+  await inspector(page).getByRole('button', { name: 'Fechar inspeção' }).click()
   await page
     .getByRole('navigation', { name: 'Navegação da farm' })
     .getByRole('link', { name: 'Início', exact: true })

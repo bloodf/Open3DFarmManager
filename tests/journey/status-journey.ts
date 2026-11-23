@@ -105,18 +105,6 @@ export function statusJourney(name: StatusVendor) {
           row.getByText(/Dados desatualizados/).first(),
         ).toBeVisible()
         await farmReadOnly(row, inspector)
-        await detailReadOnly()
-
-        ;({ row, inspector } = await openFarmSurfaces(true))
-        await expect(
-          row.getByText(
-            'Conexão direta indisponível. Exibindo a última observação.',
-            { exact: true },
-          ),
-        ).toBeVisible({ timeout: 90_000 })
-        await expect(row.getByText(/Dados desatualizados/).first()).toBeVisible(
-          { timeout: 90_000 },
-        )
         fixture.recover()
         await expect(
           row.getByText('Conexão direta autenticada', { exact: true }),
@@ -124,6 +112,20 @@ export function statusJourney(name: StatusVendor) {
         await expect(row).toContainText('Ociosa', { timeout: 30_000 })
         await farmReadOnly(row, inspector)
         await detailReadOnly('Ociosa')
+        fixture.loseConnection()
+        const main = page.getByRole('main')
+        await expect(
+          main
+            .getByText(/Sem conexão direta: exibindo o último valor conhecido/)
+            .first(),
+        ).toBeVisible({ timeout: 90_000 })
+        await noControls(main, SURFACE_CONTROLS)
+        fixture.recover()
+        await expect(
+          main.getByText('Connector: conexão direta ativa', { exact: true }),
+        ).toBeVisible({ timeout: 90_000 })
+        await expect(main).toContainText('Ociosa', { timeout: 30_000 })
+
         if (name === 'qidi') {
           expect(new Set<string | number>([...fixture.requests])).toEqual(
             new Set([

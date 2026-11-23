@@ -1,10 +1,14 @@
+import type { ToolHeaters } from '../../../../packages/farm-protocol/src/state.ts'
 import {
   ControlArguments,
+  SpeedMode,
+  ToolTemperatureArgs,
   type ExtendedControlAction,
 } from '../../../../packages/farm-protocol/src/control-actions.ts'
 
 export const extendedActions = [
   'set_temperature',
+  'set_tool_temperature',
   'set_fan',
   'home',
   'set_light',
@@ -17,6 +21,7 @@ const labels: Partial<Record<ExtendedControlAction, string>> = {
   config_write: 'Editar configuração',
   bed_mesh: 'Malha da mesa',
   set_temperature: 'Definir temperatura',
+  set_tool_temperature: 'Definir temperatura da ferramenta',
   set_fan: 'Definir ventilador',
   home: 'Referenciar eixos',
   set_light: 'Definir luz',
@@ -64,7 +69,9 @@ export function unsupportedExtended(
     'load_filament',
     'unload_filament',
   ]
-  return known.filter((action) => !actions.includes(action))
+  return known.filter(
+    (action) => action !== 'set_tool_temperature' && !actions.includes(action),
+  )
 }
 export function buildExtendedArgs(
   action: FarmExtendedAction,
@@ -110,4 +117,38 @@ export function requiresExtendedConfirmation(
   action: FarmExtendedAction,
 ): boolean {
   return ['home', 'firmware_restart', 'emergency_stop'].includes(action)
+}
+
+export function speedModeOptions(modes: readonly SpeedMode[] | undefined) {
+  const labels: Record<SpeedMode, string> = {
+    silent: 'Silenciosa',
+    standard: 'Padrão',
+    sport: 'Esportiva',
+    ludicrous: 'Máxima',
+  }
+  return SpeedMode.options
+    .filter((mode) => modes === undefined || modes.includes(mode))
+    .map((value) => ({ value, label: labels[value] }))
+}
+
+export function toolHeaterOptions(
+  heaters: readonly ToolHeaters[number][] | undefined,
+) {
+  return (heaters ?? []).map(({ tool, maxC }) => ({
+    tool,
+    maxC,
+    label: `Ferramenta T${tool}`,
+  }))
+}
+
+export function buildToolTemperatureArgs(
+  heater: ToolHeaters[number],
+  input: string | number,
+) {
+  if (String(input).trim() === '') return
+  const parsed = ToolTemperatureArgs.safeParse({
+    tool: heater.tool,
+    target_c: Number(input),
+  })
+  if (parsed.success && parsed.data.target_c <= heater.maxC) return parsed.data
 }

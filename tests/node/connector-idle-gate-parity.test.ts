@@ -62,6 +62,7 @@ const ARGS: Partial<Record<Action, Record<string, unknown>>> = {
   resume: {},
   cancel: {},
   set_temperature: { heater: 'extruder', target_c: 200 },
+  set_tool_temperature: { tool: 0, target_c: 200 },
   set_fan: { fan: 'part', percent: 50 },
   home: { axes: ['x', 'y'] },
   set_light: { on: true },
@@ -85,6 +86,7 @@ const IDLE_ONLY: Action[] = [
   'start_print',
   'start_library_print',
 ]
+const TOOL_HEATERS = [{ tool: 0, maxC: 250 }] as const
 const ORIGIN = 'http://127.0.0.1:7125'
 let monotonic = 1000
 const monotonicNow = () => (monotonic += 0.001)
@@ -205,6 +207,7 @@ async function browserDecision(
       sequence: 1,
       ready: true,
       printState: state,
+      toolHeaters: TOOL_HEATERS,
       readyObservedMono: mono,
       printStateObservedMono: mono,
       receivedMono: mono,
@@ -381,7 +384,10 @@ async function apiDecision(
     },
     journal,
     printer: (id) => (id === ASSIGNMENT ? binding : undefined),
-    observe: (b) => (b === binding ? { ready: true, printState: state } : null),
+    observe: (b) =>
+      b === binding
+        ? { ready: true, printState: state, toolHeaters: TOOL_HEATERS }
+        : null,
     driver: {
       prepare: driver.prepare,
       controls: driver.controls,
@@ -429,12 +435,12 @@ async function apiDecision(
   }
 }
 
-test('the idle-only rule covers motion, filament, macros and job starts', () => {
+test('the busy rule covers motion, filament, macros, job starts and tool heating', () => {
   for (const action of ExtendedControlAction.options)
     for (const state of STATES)
       assert.equal(
         controlPrinterBusy(action, state),
-        IDLE_ONLY.includes(action) &&
+        (IDLE_ONLY.includes(action) || action === 'set_tool_temperature') &&
           (state === 'printing' || state === 'paused'),
         `${action} while ${state}`,
       )
@@ -449,6 +455,8 @@ for (const [action, args] of CASES)
       sentSomewhere ||= browser.sent
       const label = `${action} while ${state}`
       assert.equal(browser.sent, api.sent, `${label}: same send decision`)
+      if (action === 'set_tool_temperature')
+        assert.equal(browser.sent, state === 'idle', `${label}: idle only`)
       if (
         IDLE_ONLY.includes(action) &&
         ['printing', 'paused'].includes(state)

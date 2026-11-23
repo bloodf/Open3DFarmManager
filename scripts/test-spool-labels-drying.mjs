@@ -49,6 +49,9 @@ let sql
 try {
   sql = await fixture.start()
   await sql`CREATE ROLE spool_drying_test LOGIN IN ROLE farm_spool_features`
+  await sql.unsafe(
+    `ALTER ROLE "spool_drying_test" PASSWORD '${fixture.password}'`,
+  )
   const result = await exec(
     process.execPath,
     [
@@ -59,8 +62,8 @@ try {
     {
       env: {
         ...process.env,
-        SPOOL_DRYING_TEST_DATABASE_URL: `postgres://fixture@127.0.0.1:${fixture.port}/fixture`,
-        SPOOL_DRYING_FEATURE_DATABASE_URL: `postgres://spool_drying_test@127.0.0.1:${fixture.port}/fixture`,
+        SPOOL_DRYING_TEST_DATABASE_URL: `postgres://fixture:${fixture.password}@127.0.0.1:${fixture.port}/fixture`,
+        SPOOL_DRYING_FEATURE_DATABASE_URL: `postgres://spool_drying_test:${fixture.password}@127.0.0.1:${fixture.port}/fixture`,
       },
       timeout: 120000,
     },

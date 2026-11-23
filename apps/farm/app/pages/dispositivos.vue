@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useFarmRoute } from '../composables/useFarmRoute.ts'
+import { readFarmSelectionPage, resolveFarmScope } from '../utils/farm-scope.ts'
 import {
   BrowserDeviceHttpListResponse,
   BrowserDeviceHttpFarmPageResponse,
@@ -29,6 +31,7 @@ const farms = ref<
 >([])
 const nextFarm = ref<string | null>(null)
 const farmId = ref('')
+const { route, setFarmScope } = useFarmRoute()
 const page = ref<BrowserDeviceHttpListResponse | null>(null)
 const keys = shallowRef<LocalDeviceKey[]>([])
 const busy = ref(false)
@@ -83,17 +86,29 @@ async function loadFarms(after?: string) {
       retry: 0,
       timeout: 15000,
     })
-    const result = BrowserDeviceHttpFarmPageResponse.parse(
-      await $fetch('/api/farms', {
-        query: { limit: 20, ...(after ? { after } : {}) },
-        signal: controller.signal,
-        retry: 0,
-        timeout: 15000,
-      }),
+    const result = await readFarmSelectionPage(
+      async (cursor) =>
+        BrowserDeviceHttpFarmPageResponse.parse(
+          await $fetch('/api/farms', {
+            query: { limit: 20, ...(cursor ? { after: cursor } : {}) },
+            signal: controller.signal,
+            retry: 0,
+            timeout: 15000,
+          }),
+        ),
+      route.query.farm,
+      after,
     )
     if (token !== generation) return
     farms.value = result.farms
-    nextFarm.value = result.nextAfter
+    nextFarm.value = result.nextAfter ?? null
+    farmId.value =
+      resolveFarmScope(
+        result.farms,
+        route.query.farm,
+        !!after || !!result.nextAfter,
+      )?.farmId ?? ''
+    if (farmId.value) await loadDevices()
   } catch (cause) {
     if (token === generation) failure(cause)
   } finally {
@@ -229,6 +244,20 @@ async function decide(
     if (token === generation) busy.value = false
   }
 }
+function switchFarm() {
+  void setFarmScope(farmId.value)
+  void loadDevices()
+}
+watch(
+  () => route.query.farm,
+  (requested) => {
+    const selected =
+      resolveFarmScope(farms.value, requested, !!nextFarm.value)?.farmId ?? ''
+    if (farmId.value === selected) return
+    farmId.value = selected
+    void loadDevices()
+  },
+)
 onMounted(() => {
   shell.value?.focusHeading()
   void loadFarms()
@@ -268,7 +297,7 @@ onBeforeRouteLeave(clear)
     </OnboardingPanel>
     <OnboardingPanel heading-id="farms-heading" title="Suas farms" :busy="busy">
       <OnboardingField id="device-farm" label="Farm">
-        <select id="device-farm" v-model="farmId" @change="loadDevices()">
+        <select id="device-farm" v-model="farmId" @change="switchFarm">
           <option value="">Selecione</option>
           <option v-for="farm in farms" :key="farm.farmId" :value="farm.farmId">
             {{ farm.farmId }}

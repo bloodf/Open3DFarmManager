@@ -1,3 +1,4 @@
+import { openFarmInspector } from './farm-inspector.ts'
 import { isDockerSim } from '../../packages/sim-tools/src/mocks/env.ts'
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
@@ -174,13 +175,10 @@ export async function testPrintingPausePage(input: {
       },
       async confirm() {
         await stage('page-open')
-        const assignment = input.fixture.assignmentRefs[0]!
-        const row = page.getByRole('article').filter({
-          has: page.getByRole('heading', {
-            name: assignment.printerKey,
-            exact: true,
-          }),
-        })
+        assert.equal(input.fixture.assignmentRefs.length, 1)
+        const assignment = input.fixture.assignmentRefs[0]
+        assert.ok(assignment)
+        const row = await openFarmInspector(page, assignment.printerKey)
         await expect(
           row.getByText('Conexão direta autenticada', { exact: true }),
         ).toBeVisible({ timeout: 15000 })
@@ -214,7 +212,10 @@ export async function testPrintingPausePage(input: {
         return {
           klipper: await state(),
           journal: journal(),
-          ui: await page.getByRole('dialog').getByRole('status').innerText(),
+          ui: await page
+            .getByRole('dialog', { name: /^Pausar impressão de/ })
+            .getByRole('status')
+            .innerText(),
         }
       },
       async resume() {

@@ -106,12 +106,13 @@ try {
   })
   const role = 'spoolman_aux_' + randomUUID().replaceAll('-', '')
   await admin`CREATE ROLE ${admin(role)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS IN ROLE farm_spool_library, farm_spool_features`
+  await admin.unsafe(`ALTER ROLE "${role}" PASSWORD '${fixture.password}'`)
   runtime = postgres({
     host: '127.0.0.1',
     port: fixture.port,
     database: 'fixture',
     username: role,
-    password: '',
+    password: fixture.password,
     ssl: false,
     max: 2,
     connect_timeout: 3,
@@ -139,6 +140,7 @@ try {
           ...process.env,
           AUX_PG_PORT: String(fixture.port),
           AUX_PG_ROLE: role,
+          AUX_PG_PASSWORD: fixture.password,
           // The default module list reads this when imported: keep it unset so
           // the "no external library configured" behaviour is what is tested.
           SPOOLMAN_EXTERNAL_DB_URL: '',

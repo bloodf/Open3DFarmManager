@@ -5,6 +5,7 @@ import {
 } from '../control/printer-binding.ts'
 import { receiveApiCommand } from './api-command.ts'
 import {
+  ApiResinReplay,
   decodeApiEnvelopeFrame,
   encodeApiEnvelopeResultFrame,
 } from '../../../farm-protocol/src/api-envelope.ts'
@@ -117,6 +118,10 @@ export function refuseApiCommand(
         cmd_id: envelope.cmd_id,
         outcome: 'refused',
         refusal_code: code,
+        ...(code === 'unsupported' &&
+        ApiResinReplay.safeParse(envelope.action).success
+          ? { detail: 'resin-artifact-dispatch-unavailable' }
+          : {}),
         at: Date.now(),
       }),
     )
@@ -172,8 +177,16 @@ type PauseControlInput = {
   ) => Parameters<typeof receiveApiCommand>[0]['libraryPrint']
   /** Remembers what a library start printed so the finished job links to it (#385). */
   libraryLinks?: Parameters<typeof receiveApiCommand>[0]['libraryLinks']
+  resinCapabilities?: Parameters<
+    typeof receiveApiCommand
+  >[0]['resinCapabilities']
   /** True while local storage is degraded: commands are refused with `storage`. */
   storageDegraded?: () => boolean
+  speedModesFor?: (
+    printerKey: string,
+  ) =>
+    | readonly import('../../../farm-protocol/src/control-actions.ts').SpeedMode[]
+    | undefined
   /** Durable bed-collection hold: OpenFarm starts wait for `confirm_collection`. */
   collection?: QueueCollectionJournal
   /** Transport seam for tests. Defaults to the authenticated pause client. */
@@ -401,8 +414,17 @@ async function runAssignmentControl(
             },
           })
         : driver
-    const apiDriver = hold(router, true)
-    const libraryDriver = withLibraryPrint(router, {
+    // The same locally observed printer state supplies both advertised modes and the guard.
+    const speedDriver = {
+      ...router,
+      speedModes(binding: PrinterBinding) {
+        const mapping =
+          binding === printerBinding ? readPrinterBinding(binding) : null
+        return mapping ? input.speedModesFor?.(mapping.printer_key) : undefined
+      },
+    }
+    const apiDriver = hold(speedDriver, true)
+    const libraryDriver = withLibraryPrint(speedDriver, {
       starter: libraryPrint,
       targetFor(binding) {
         const mapping = readPrinterBinding(binding)
@@ -477,6 +499,9 @@ async function runAssignmentControl(
           journal,
           clock,
           driver: apiDriver,
+          ...(input.resinCapabilities
+            ? { resinCapabilities: input.resinCapabilities }
+            : {}),
           ...(libraryPrint ? { libraryPrint } : {}),
           ...(input.libraryLinks ? { libraryLinks: input.libraryLinks } : {}),
           jobFiles: {
@@ -490,6 +515,8 @@ async function runAssignmentControl(
             if (
               !observation ||
               observation.receivedMono > now ||
+              observation.readyObservedMono > observation.receivedMono ||
+              observation.printStateObservedMono > observation.receivedMono ||
               now - observation.readyObservedMono > maxAge ||
               now - observation.printStateObservedMono > maxAge
             )

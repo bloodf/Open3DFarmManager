@@ -1,3 +1,4 @@
+import { readFarmSelectionPage } from './farm-scope.ts'
 import { nextTick } from 'vue'
 import { DEFAULT_KOBRA_X_SETUP_MODE } from './kobra-x-setup-mode.ts'
 import type {
@@ -16,6 +17,7 @@ export function createFarmData(
   state: PrinterSetupRefs,
   epoch: KobraEpoch,
   { closeLiveFeeds, startLiveStatusFeed, closeKobraSession }: FarmDeps,
+  requestedFarm?: () => unknown,
 ) {
   const {
     farms,
@@ -153,13 +155,21 @@ export function createFarmData(
     farmId.value = ''
     message.value = ''
     await run(async (signal, current) => {
-      const page = await $fetch<{
-        farms: { farmId: string }[]
-        nextAfter: string | null
-      }>('/api/farms', { ...options(signal), query: after ? { after } : {} })
+      const page = await readFarmSelectionPage(
+        (cursor) =>
+          $fetch<{ farms: { farmId: string }[]; nextAfter: string | null }>(
+            '/api/farms',
+            {
+              ...options(signal),
+              query: cursor ? { after: cursor } : {},
+            },
+          ),
+        requestedFarm?.(),
+        after ?? undefined,
+      )
       if (current !== generation) return
       farms.value = page.farms
-      nextFarm.value = page.nextAfter
+      nextFarm.value = page.nextAfter ?? null
     })
   }
 

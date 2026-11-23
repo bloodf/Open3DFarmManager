@@ -213,12 +213,13 @@ try {
 
   const role = 'spool_library_' + randomUUID().replaceAll('-', '')
   await admin`CREATE ROLE ${admin(role)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS IN ROLE farm_spool_library`
+  await admin.unsafe(`ALTER ROLE "${role}" PASSWORD '${fixture.password}'`)
   runtime = postgres({
     host: '127.0.0.1',
     port: fixture.port,
     database: 'fixture',
     username: role,
-    password: '',
+    password: fixture.password,
     ssl: false,
     max: 4,
     connect_timeout: 3,

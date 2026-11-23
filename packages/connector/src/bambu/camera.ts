@@ -10,6 +10,8 @@ export type BambuCameraSource = Readonly<{
   model: string
   host: string
   accessCode: string
+  /** Alternate port on IPv4 loopback for local camera simulators. */
+  port?: number
   /** A local CA is required for RTSPS. JPEG also supports an exact certificate pin. */
   caFile?: string
   pinSha256?: string
@@ -26,19 +28,20 @@ export function selectBambuCamera(source: BambuCameraSource) {
       (parts[0] === 192 && parts[1] === 168) ||
       (parts[0] === 172 && parts[1]! >= 16 && parts[1]! <= 31)
     ) ||
+    (source.port !== undefined &&
+      (parts[0] !== 127 ||
+        !Number.isInteger(source.port) ||
+        source.port < 1 ||
+        source.port > 65535)) ||
     !/^[\x21-\x7e]{1,32}$/.test(accessCode) ||
     (source.pinSha256 !== undefined && !/^[a-f\d]{64}$/i.test(source.pinSha256))
   )
     throw Error('Invalid Bambu camera configuration')
   const normalized = model.toUpperCase().replace(/[ _-]/g, '')
   if (/^(A1(MINI)?|P1[PS]?)$/.test(normalized))
-    return { kind: 'jpeg' as const, port: 6000 }
-  if (/^(X1[CE]?|X1CARBON|H2[DSC]?|P2S?)$/.test(normalized)) {
-    const url = new URL(`rtsps://${host}:322/streaming/live/1`)
-    url.username = 'bblp'
-    url.password = accessCode
-    return { kind: 'rtsps' as const, port: 322, url: url.toString() }
-  }
+    return { kind: 'jpeg' as const, port: source.port ?? 6000 }
+  if (/^(X1[CE]?|X1CARBON|H2[DSC]?|P2S?)$/.test(normalized))
+    return { kind: 'rtsps' as const, port: source.port ?? 322 }
   throw Error('Unsupported Bambu camera model')
 }
 
@@ -123,7 +126,7 @@ export async function* streamBambuJpegs(input: {
       host: input.host,
       port: input.port ?? 6000,
       ...(input.caPem ? { ca: input.caPem } : {}),
-      rejectUnauthorized: !input.pinSha256,
+      rejectUnauthorized: Boolean(input.caPem) || !input.pinSha256,
     })
     const abort = () => socket.destroy()
     input.signal.addEventListener('abort', abort, { once: true })

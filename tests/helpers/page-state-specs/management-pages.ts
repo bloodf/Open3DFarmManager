@@ -396,7 +396,7 @@ export const register: RegisterStates = (harness) => {
           await expectNotStale(page)
           await expectNoRawText(page)
         },
-        { followRoute: true },
+        { followRoute: true, route: { path: '/integracoes', query: { farm } } },
       ))
   })
 

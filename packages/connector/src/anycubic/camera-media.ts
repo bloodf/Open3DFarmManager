@@ -54,7 +54,8 @@ export async function openAnycubicCameraSource(input: {
   }
   return (async function* () {
     let timestampUs = 0
-    for (let attempt = 0; attempt <= 3; attempt++) {
+    const retries = source.kind === 'stock' ? 3 : 0
+    for (let attempt = 0; attempt <= retries; attempt++) {
       if (input.signal.aborted || !input.isCurrent()) return
       const controller = new AbortController()
       const signal = AbortSignal.any([input.signal, controller.signal])
@@ -63,14 +64,21 @@ export async function openAnycubicCameraSource(input: {
       let closed: Promise<void> = Promise.resolve()
       let feed: Promise<void> = Promise.resolve()
       try {
-        // Even a failed activation may have enabled the camera light.
-        captureStarted = true
-        const url = selectAnycubicStream(
-          source,
-          await source.startCapture(signal),
-        )
+        let url: URL
+        if (source.kind === 'stock') {
+          // Even a failed activation may have enabled the camera light.
+          captureStarted = true
+          url = selectAnycubicStream(source, await source.startCapture(signal))
+        } else {
+          url = new URL(`http://${source.host}:${source.port}${source.path}`)
+        }
         if (signal.aborted || !input.isCurrent()) return
         const args = ['-hide_banner', '-loglevel', 'quiet', '-nostdin']
+        if (source.kind === 'kobra-x-flv') {
+          // FLV supplies its AVC configuration before the first frame. A
+          // multi-second probe can burst more frames than the RTC admission allows.
+          args.push('-analyzeduration', '1', '-probesize', '32768')
+        }
         if (url.protocol === 'http:') args.push('-f', 'flv', '-i', 'pipe:0')
         else
           args.push(
@@ -163,7 +171,7 @@ export async function openAnycubicCameraSource(input: {
         child?.stdout?.destroy()
         await closed
         await feed
-        if (captureStarted) {
+        if (captureStarted && source.kind === 'stock') {
           try {
             await source.stopCapture()
           } catch {
@@ -171,7 +179,7 @@ export async function openAnycubicCameraSource(input: {
           }
         }
       }
-      if (attempt === 3) throw Error('Anycubic camera unavailable')
+      if (attempt === retries) throw Error('Anycubic camera unavailable')
       try {
         await delay(250 * 2 ** attempt, undefined, { signal: input.signal })
       } catch {

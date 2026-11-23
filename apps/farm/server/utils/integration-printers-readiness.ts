@@ -22,7 +22,7 @@ export interface PrinterReadiness {
   paired: boolean
   eligible: boolean
   observedAt: number | null
-  degradedReason: PrinterDegradedReason | 'stale' | null
+  degradedReason: PrinterDegradedReason | 'firmware-shutdown' | 'stale' | null
   setupPath: string
 }
 
@@ -107,7 +107,13 @@ export function printerReadiness(
   const observedAt =
     row.observedAt ?? (parsed.success ? parsed.data.observedAt : null)
   const degradedReason =
-    (parsed.success ? printerDegradedReason(parsed.data) : null) ??
+    (parsed.success &&
+    parsed.data.state === 'error' &&
+    parsed.data.statusReason === 'firmware-shutdown'
+      ? ('firmware-shutdown' as const)
+      : parsed.success
+        ? printerDegradedReason(parsed.data)
+        : null) ??
     (observedAt !== null && observationIsStale(observedAt, now)
       ? 'stale'
       : null)

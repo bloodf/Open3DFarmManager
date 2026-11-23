@@ -29,6 +29,7 @@ import {
 import { automaticLockRecovery } from './queue-lock-platform.ts'
 import { credentialRenewalAcrossOutage } from './connector-outage-renewal.ts'
 import { runOutagePauseScenarios } from './connector-outage-pause.ts'
+import { outageDatabaseUrls } from './connector-outage-database-url.ts'
 
 const QUEUE_MAX_BYTES = 50 * 1024 * 1024 // Documented TelemetryQueue cap.
 const TELEMETRY = { timeoutMs: 3000, retryMinMs: 500, retryMaxMs: 2000 }
@@ -42,6 +43,7 @@ type Record = { eventId: string; queuedAt: number; kind: string } & {
 
 export async function runConnectorOutageScenarios(input: {
   admin: Sql
+  fixturePassword: string
   ports: Ports
   workDir: string
   /**
@@ -253,21 +255,25 @@ export async function runConnectorOutageScenarios(input: {
     )
 
     // Process control.
-    const databaseUrl = (user: string) =>
-      `postgres://${encodeURIComponent(user)}:${rolePassword}@127.0.0.1:${ports.db}/fixture`
+    const databaseUrls = outageDatabaseUrls({
+      port: ports.db,
+      fixturePassword: input.fixturePassword,
+      telemetryUser: prefix,
+      telemetryPassword: rolePassword,
+    })
     const appEnv = {
       PATH: process.env.PATH ?? '/usr/bin:/bin',
       NODE_ENV: 'production',
       NITRO_HOST: '127.0.0.1',
       NITRO_PORT: String(ports.app),
       NUXT_DATABASE_ENABLED: 'true',
-      NUXT_DATABASE_DATABASE_URL: databaseUrl('fixture'),
+      NUXT_DATABASE_DATABASE_URL: databaseUrls.fixture,
       NUXT_DATABASE_MIGRATIONS: 'verify',
       NUXT_DATABASE_MIGRATIONS_DIR: fileURLToPath(
         new URL('../../infra/db/migrations/', import.meta.url),
       ),
       NUXT_CONNECTOR_TELEMETRY_ENABLED: 'true',
-      NUXT_CONNECTOR_TELEMETRY_DATABASE_URL: databaseUrl(prefix),
+      NUXT_CONNECTOR_TELEMETRY_DATABASE_URL: databaseUrls.telemetry,
       NUXT_CONNECTOR_TELEMETRY_ORIGIN: proxy.origin,
       NUXT_CONNECTOR_TELEMETRY_ISSUER: issuer,
       NUXT_CONNECTOR_TELEMETRY_AUDIENCE: audience,

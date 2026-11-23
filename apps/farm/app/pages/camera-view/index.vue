@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import CameraDisplay from '../../components/CameraDisplay.vue'
 import { useFarmView } from '../../composables/useFarmView.ts'
 
@@ -8,7 +8,10 @@ definePageMeta({ layout: false })
 
 const target = ref<{ farmId: string; printerId: string } | null>(null)
 const status = ref('Abrindo link da câmera…')
-const view = useFarmView(undefined, () => target.value?.printerId ?? null)
+const view = useFarmView({
+  cameraTarget: () => target.value?.printerId ?? null,
+  requestedFarm: () => target.value?.farmId,
+})
 const stream = computed(() =>
   target.value && view.ready.value?.scope?.farmId === target.value.farmId
     ? view.cameraFor(target.value.printerId)
@@ -43,16 +46,6 @@ onMounted(async () => {
         ? 'Entre no OpenFarm e abra o link da câmera novamente.'
         : 'Link da câmera expirado ou câmera indisponível.'
   }
-})
-
-watch([target, view.ready], ([camera, ready]) => {
-  if (
-    camera &&
-    ready &&
-    ready.scope?.farmId !== camera.farmId &&
-    ready.farms.some(({ farmId }) => farmId === camera.farmId)
-  )
-    void view.selectFarm(camera.farmId)
 })
 </script>
 

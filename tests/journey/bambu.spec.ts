@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { assertCameraDetached } from '../helpers/signalling-farm-camera.ts'
 import type { startBambuSimulator } from '../../packages/sim-tools/src/bambu-simulator.ts'
 import {
   BAMBU_LAN_ADDRESS,
@@ -7,6 +8,7 @@ import {
   type JourneyHarness,
 } from './harness.ts'
 import { BAMBU_ACCESS_CODE } from './harness-vendors.ts'
+import { expectCameraFrames } from './discovery-page.ts'
 
 type BambuSim = Awaited<ReturnType<typeof startBambuSimulator>>
 const FILE = 'jornada-bambu.gcode'
@@ -503,3 +505,78 @@ if (journeyEnabled())
       expect(journey.simulatorObservation()).toMatchObject({ failure: false })
     })
   })
+
+if (journeyEnabled()) {
+  test.describe('journey: Bambu Lab camera', () => {
+    for (const camera of ['jpeg', 'rtsps', 'unmapped'] as const) {
+      test(`câmera Bambu Lab simulada: ${camera}`, async ({ browser }) => {
+        const journey = await startJourneyHarness({
+          browser,
+          simulator: 'bambu',
+          bambuCamera: camera,
+        })
+        try {
+          const row = await journey.openFarm()
+          await journey.ownerPage
+            .getByRole('button', {
+              name: new RegExp(`^Inspecionar ${escape(journey.printerKey)}\\b`),
+            })
+            .click()
+          await expect(
+            row.getByText('Conexão direta autenticada', { exact: true }),
+          ).toBeVisible({ timeout: 60_000 })
+          const region = row.getByRole('region', {
+            name: `Câmera da impressora ${journey.printerKey}`,
+          })
+          const fixture = journey.camera
+          if (!fixture?.activeConnections)
+            throw new Error('Bambu camera fixture missing')
+          if (camera === 'jpeg') {
+            await expectCameraFrames(journey)
+            expect(fixture.activeConnections()).toBeGreaterThan(0)
+          } else {
+            await expect(region.getByText('Câmera indisponível.')).toBeVisible()
+            await expect(
+              region.getByRole('button', { name: /imagem ao vivo/ }),
+            ).toHaveCount(0)
+            expect(fixture.requests()).toBe(0)
+          }
+          const recoveryPage = await journey.newOwnerPage()
+          try {
+            await recoveryPage.goto(new URL('/connectors', journey.origin).href)
+            await recoveryPage
+              .getByLabel('Selecione uma farm')
+              .selectOption(journey.farmId)
+            await recoveryPage
+              .getByRole('button', {
+                name: 'Revogar este Connector',
+                exact: true,
+              })
+              .click()
+            await recoveryPage
+              .getByRole('checkbox', { name: /revogar seu registro/ })
+              .check()
+            await recoveryPage
+              .getByRole('button', { name: 'Confirmar revogação' })
+              .click()
+            await expect(
+              recoveryPage.getByText(/Registro revogado/),
+            ).toBeVisible()
+            if (camera === 'jpeg')
+              await assertCameraDetached({
+                page: journey.ownerPage,
+                region,
+                helperPath: fixture.helper,
+                note: async () => {},
+              })
+            await expect.poll(fixture.activeConnections).toBe(0)
+          } finally {
+            await recoveryPage.close()
+          }
+        } finally {
+          await journey.close()
+        }
+      })
+    }
+  })
+}

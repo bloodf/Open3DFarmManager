@@ -1,7 +1,6 @@
 import { z } from 'zod'
 import { PrinterState } from './state.ts'
 import { SpoolInventory } from './inventory.ts'
-import { PRINTER_STRING_MAX_UNITS } from './string-bounds.ts'
 
 import {
   DiscoveryPrinter,
@@ -113,7 +112,9 @@ export const TELEMETRY_BATCH_JSON_LIMITS = Object.freeze({
   maxBytes: 64 * 1024,
   maxDepth: 7,
   maxValues: 2000,
-  maxStringChars: PRINTER_STRING_MAX_UNITS,
+  // PrinterState.statusMessage permits 256 UTF-16 units; individual schemas
+  // continue to enforce the tighter limits on all other fields.
+  maxStringChars: 256,
 })
 
 export const TelemetryBatch = z

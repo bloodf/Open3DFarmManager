@@ -1,16 +1,28 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import {
+  computed,
+  nextTick,
+  onMounted,
+  onUnmounted,
+  provide,
+  ref,
+  watch,
+} from 'vue'
 import ShellNavigation from '../components/shell/ShellNavigation.vue'
 import Button from '../components/ui/Button.vue'
 import Dialog from '../components/ui/Dialog.vue'
-import { selectedFarm } from '../utils/farm-request-guard.ts'
 import { listenForAuthInvalidation } from '../utils/auth-invalidation'
 import { createShellShortcuts } from '../utils/shell-shortcuts'
 import { themeScript, themeStyles } from '../utils/pre-hydration'
-import { useStatusSummary } from '../composables/useStatusSummary'
+import {
+  statusSummaryKey,
+  useStatusSummary,
+} from '../composables/useStatusSummary'
 import { useShellRecords } from '../composables/useShellRecords'
 import { spoolDisplayTitle } from '../utils/spool-library-format'
 import { jobHistoryRow } from '../utils/job-history-view'
+import { farmLocation, resolveFarmScope } from '../utils/farm-scope'
+import { fetchFarmMemberships } from '../composables/useFarmMemberships'
 
 useHead({
   script: [{ innerHTML: themeScript }],
@@ -53,17 +65,28 @@ const search = ref(false)
 const help = ref(false)
 const query = ref('')
 const shortcutsEnabled = ref(true)
-const activeFarm = computed(
-  () =>
-    route.query.farm ??
-    (farms.value.length === 1 ? farms.value[0]?.farmId : ''),
-)
 const selectedFarmId = computed(
-  () => selectedFarm(farms.value, route.query.farm)?.farmId,
+  () => resolveFarmScope(farms.value, route.query.farm)?.farmId,
 )
-const { summary, failed } = useStatusSummary({
-  farmId: () => selectedFarmId.value,
-})
+const navigationFarmId = computed(() =>
+  typeof route.query.farm === 'string'
+    ? route.query.farm
+    : selectedFarmId.value,
+)
+const scopedLink = (path: string, query?: Record<string, string>) =>
+  farmLocation(path, navigationFarmId.value, query)
+function scopedHref(path: string, query?: Record<string, string>) {
+  const search = new URLSearchParams(
+    Object.entries(scopedLink(path, query).query).map(([key, value]) => [
+      key,
+      String(value),
+    ]),
+  ).toString()
+  return search ? `${path}?${search}` : path
+}
+const statusSummary = useStatusSummary({ farmId: () => selectedFarmId.value })
+provide(statusSummaryKey, statusSummary)
+const { summary, failed } = statusSummary
 const summaryStale = computed(
   () =>
     failed.value ||
@@ -128,9 +151,7 @@ const pageLinks = computed(() => [
 const scopedPageLinks = computed(() =>
   pageLinks.value.map((link) => ({
     ...link,
-    to: selectedFarmId.value
-      ? `${link.to}?farm=${encodeURIComponent(selectedFarmId.value)}`
-      : link.to,
+    to: scopedHref(link.to),
   })),
 )
 
@@ -210,14 +231,14 @@ const paletteGroups = computed(() => {
         )
         .map((item) => ({
           label: item.displayName || item.printerKey,
-          to: `/impressoras/${encodeURIComponent(item.printerKey)}?farm=${encodeURIComponent(selectedFarmId.value ?? '')}`,
+          to: scopedHref(`/impressoras/${encodeURIComponent(item.printerKey)}`),
         })),
     },
     {
       label: 'Bobinas',
       items: spools.value.map((item) => ({
         label: `${spoolDisplayTitle(item)} · #${item.id}`,
-        to: `/bobinas?farm=${encodeURIComponent(selectedFarmId.value ?? '')}&q=${encodeURIComponent(String(item.id))}`,
+        to: scopedHref('/bobinas', { q: String(item.id) }),
       })),
     },
   ]
@@ -251,8 +272,8 @@ function paletteKey(event: KeyboardEvent) {
 const shortcuts = createShellShortcuts((shortcut) => {
   if (shortcut === 'search') search.value = true
   if (shortcut === 'help') help.value = true
-  if (shortcut === 'farm') void router.push('/farm')
-  if (shortcut === 'library') void router.push('/biblioteca')
+  if (shortcut === 'farm') void router.push(scopedLink('/farm'))
+  if (shortcut === 'library') void router.push(scopedLink('/biblioteca'))
 })
 watch(
   () => route.path,
@@ -265,7 +286,13 @@ watch(
 function switchFarm(event: Event) {
   const select = event.currentTarget
   if (select instanceof HTMLSelectElement && select.value)
-    void router.push({ path: '/farm', query: { farm: select.value } })
+    void router.push(
+      farmLocation(
+        '/farm',
+        select.value,
+        route.path === '/farm' ? route.query : undefined,
+      ),
+    )
 }
 
 function handleKeydown(event: KeyboardEvent) {
@@ -282,6 +309,7 @@ function handleKeydown(event: KeyboardEvent) {
 }
 let stopAuthListener: (() => void) | undefined
 let authRequest: AbortController | undefined
+let roleRequest: AbortController | undefined
 let desktop: MediaQueryList | undefined
 function closeDesktopDrawer() {
   if (desktop?.matches) drawer.value = false
@@ -298,39 +326,17 @@ onUnmounted(() => {
   desktop?.removeEventListener('change', closeDesktopDrawer)
   stopAuthListener?.()
   authRequest?.abort()
+  roleRequest?.abort()
 })
-watch(
-  () => route.query.farm,
-  () => {
-    void refreshAccount()
-  },
-)
-async function refreshAccount() {
-  authRequest?.abort()
-  authRequest = new AbortController()
-  const { signal } = authRequest
-  authenticated.value = false
-  currentRole.value = null
-  farms.value = []
-  try {
-    await $fetch('/api/auth/me', { signal, retry: 0, timeout: 10_000 })
-    if (signal.aborted) return
-    authenticated.value = true
-  } catch {
+watch(selectedFarmId, refreshRole)
+async function refreshRole(farmId: string | undefined) {
+  roleRequest?.abort()
+  if (!farmId) {
+    currentRole.value = null
     return
   }
-
+  const { signal } = (roleRequest = new AbortController())
   try {
-    const page = await $fetch<FarmPage>('/api/farms', {
-      query: { limit: 20 },
-      signal,
-      retry: 0,
-      timeout: 10_000,
-    })
-    if (signal.aborted) return
-    farms.value = page.farms
-    const farmId = selectedFarm(page.farms, route.query.farm)?.farmId
-    if (!farmId) return
     const devices = await $fetch<BrowserDevicePage>('/api/browser-devices', {
       query: { farm_id: farmId, limit: 1 },
       signal,
@@ -340,6 +346,23 @@ async function refreshAccount() {
     if (!signal.aborted) currentRole.value = devices.currentRole
   } catch {
     if (!signal.aborted) currentRole.value = null
+  }
+}
+async function refreshAccount() {
+  authRequest?.abort()
+  roleRequest?.abort()
+  const { signal } = (authRequest = new AbortController())
+  authenticated.value = false
+  currentRole.value = null
+  farms.value = []
+  try {
+    await $fetch('/api/auth/me', { signal, retry: 0, timeout: 10_000 })
+    if (signal.aborted) return
+    authenticated.value = true
+    const memberships = await fetchFarmMemberships({ signal })
+    if (!signal.aborted) farms.value = memberships
+  } catch {
+    // The account and farm reads can fail independently.
   }
 }
 </script>
@@ -364,8 +387,8 @@ async function refreshAccount() {
         >Atalhos</Button
       >
       <label v-if="farms.length">
-        Farm
-        <select :value="activeFarm ?? ''" @change="switchFarm">
+        Trocar farm
+        <select :value="selectedFarmId ?? ''" @change="switchFarm">
           <option disabled value="">Selecione uma farm</option>
           <option v-for="farm in farms" :key="farm.farmId" :value="farm.farmId">
             {{ farm.farmId }}
@@ -405,10 +428,7 @@ async function refreshAccount() {
         <NuxtLink
           v-for="item in modules"
           :key="item.to"
-          :to="{
-            path: item.to,
-            query: selectedFarmId ? { farm: selectedFarmId } : {},
-          }"
+          :to="scopedLink(item.to)"
           :aria-current="
             item.paths.some(
               (path) =>
@@ -426,21 +446,17 @@ async function refreshAccount() {
       </nav>
     </aside>
     <aside class="sidebar">
-      <button
-        type="button"
+      <Button
         :aria-expanded="!sectionCollapsed"
         @click="sectionCollapsed = !sectionCollapsed"
       >
         {{ activeModule?.label ?? 'Navegação' }}
-      </button>
+      </Button>
       <nav v-if="!sectionCollapsed" aria-label="Navegação da seção">
         <NuxtLink
           v-for="link in links"
           :key="link.to"
-          :to="{
-            path: link.to,
-            query: selectedFarmId ? { farm: selectedFarmId } : {},
-          }"
+          :to="scopedLink(link.to)"
           :aria-current="route.path === link.to ? 'page' : undefined"
         >
           {{ link.label }}
@@ -451,13 +467,15 @@ async function refreshAccount() {
       <div v-if="section && section.to !== '/'" class="breadcrumbs">
         <nav aria-label="Localização">
           <ol>
-            <li><NuxtLink to="/">Início</NuxtLink></li>
+            <li><NuxtLink :to="scopedLink('/')">Início</NuxtLink></li>
             <li v-if="route.path === section.to" aria-current="page">
               {{ section.label }}
             </li>
             <template v-else>
               <li>
-                <NuxtLink :to="section.to">{{ section.label }}</NuxtLink>
+                <NuxtLink :to="scopedLink(section.to)">{{
+                  section.label
+                }}</NuxtLink>
               </li>
               <li aria-current="page">Detalhes</li>
             </template>
@@ -479,13 +497,7 @@ async function refreshAccount() {
         >Consultando histórico…</template
       >
       <template v-else>Último evento indisponível</template> ·
-      <NuxtLink
-        :to="{
-          path: '/historico',
-          query: selectedFarmId ? { farm: selectedFarmId } : {},
-        }"
-        >Ver histórico</NuxtLink
-      >
+      <NuxtLink :to="scopedLink('/historico')">Ver histórico</NuxtLink>
     </footer>
     <Dialog v-model="drawer" class="drawer" title="Menu">
       <ShellNavigation
@@ -650,11 +662,15 @@ input {
 }
 .vitals {
   color: var(--ops-text);
+  min-inline-size: 0;
+  max-inline-size: 100%;
 }
 .vitals summary {
   cursor: pointer;
   min-height: 44px;
   display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--space-1);
   align-items: center;
 }
 .event-strip {

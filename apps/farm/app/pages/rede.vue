@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { farmLocation } from '../utils/farm-scope.ts'
+import { useFarmRoute } from '../composables/useFarmRoute.ts'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import FarmMap from '../components/network/FarmMap.vue'
 import FarmScopeSelector from '../components/farm/FarmScopeSelector.vue'
@@ -28,8 +30,9 @@ import { mergeNetworkDiscoveries } from '../utils/network-adoption.ts'
 import type { NetworkDiscovered } from '../utils/network-map.ts'
 
 const REFRESH_MS = 30_000
-const view = useFarmView()
-const { state, ready, now, discover, selectFarm } = view
+const { route, setFarmScope } = useFarmRoute()
+const view = useFarmView({ requestedFarm: () => route.query.farm })
+const { state, ready, now, discover } = view
 
 const data = ref<NetworkData | null>(null)
 const readAt = ref<number | null>(null)
@@ -42,6 +45,7 @@ const farmId = computed(() => ready.value?.scope?.farmId ?? '')
 
 const adoption = useNetworkAdoption()
 const router = useRouter()
+
 const approved = computed(() =>
   data.value?.canManage
     ? data.value.connectors.filter(
@@ -135,7 +139,8 @@ async function adopt(agentId: string, printer: DiscoveredPrinter) {
   const target = { farmId: farmId.value, agentId, printer }
   adoption.value = target
   try {
-    if (await router.push('/impressoras')) adoption.value = null
+    if (await router.push(farmLocation('/impressoras', target.farmId)))
+      adoption.value = null
   } catch {
     adoption.value = null
     scanMessage.value = 'Não foi possível abrir a configuração da impressora.'
@@ -304,7 +309,7 @@ const entries = computed(() =>
     <template v-else-if="ready">
       <FarmScopeSelector
         :ready="ready"
-        @select="selectFarm"
+        @select="setFarmScope"
         @discover="discover"
       />
       <ErrorState v-if="failure && !data" title="Rede indisponível">

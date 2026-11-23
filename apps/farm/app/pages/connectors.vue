@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { useFarmRoute } from '../composables/useFarmRoute.ts'
+import { fetchFarmSelectionPage } from '../composables/useFarmMemberships.ts'
+import { resolveFarmScope } from '../utils/farm-scope.ts'
 import {
   connectorRtcScopeHint,
   connectorVersionView,
@@ -29,6 +32,7 @@ type Connector = {
 const farms = ref<Farm[]>([])
 const connectors = ref<Connector[]>([])
 const farmId = ref('')
+const { route, setFarmScope } = useFarmRoute()
 watch([farmId, versionReady], ([selected, ready]) => {
   if (
     selected &&
@@ -87,9 +91,10 @@ async function load(kind: 'farms' | 'connectors', after: string | null = null) {
       farms.value = []
       farmId.value = ''
       nextFarm.value = null
-      const page = await $fetch<{ farms: Farm[]; nextAfter: string | null }>(
-        '/api/farms',
+      const page = await fetchFarmSelectionPage(
+        route.query.farm,
         options,
+        after ?? undefined,
       )
       const capability = await $fetch<{ enabled: boolean }>(
         '/api/connector-pairing/capability',
@@ -98,7 +103,16 @@ async function load(kind: 'farms' | 'connectors', after: string | null = null) {
       if (current !== generation) return
       pairingEnabled.value = capability.enabled
       farms.value = page.farms
-      nextFarm.value = page.nextAfter
+      nextFarm.value = page.nextAfter ?? null
+      const selected = resolveFarmScope(
+        page.farms,
+        route.query.farm,
+        !!after || !!page.nextAfter,
+      )
+      if (selected) {
+        farmId.value = selected.farmId
+        await load('connectors')
+      }
     } else {
       const selected = farmId.value
       const page = await $fetch<{
@@ -112,9 +126,11 @@ async function load(kind: 'farms' | 'connectors', after: string | null = null) {
   } catch (cause) {
     if (current !== generation) return
     // Clear all account data on any failed request; never retain a stale authorized view.
-    farms.value = []
-    farmId.value = ''
-    nextFarm.value = null
+    if (kind === 'farms') {
+      farms.value = []
+      farmId.value = ''
+      nextFarm.value = null
+    }
     const status =
       cause && typeof cause === 'object' && 'statusCode' in cause
         ? cause.statusCode
@@ -133,6 +149,20 @@ function selectRecovery(target: Connector | null) {
   recoveryTarget.value = target
   recoveryConfirmed.value = false
 }
+function switchFarm() {
+  void setFarmScope(farmId.value)
+  selectFarm()
+}
+watch(
+  () => route.query.farm,
+  (requested) => {
+    const selected =
+      resolveFarmScope(farms.value, requested, !!nextFarm.value)?.farmId ?? ''
+    if (farmId.value === selected) return
+    farmId.value = selected
+    selectFarm()
+  },
+)
 function selectFarm() {
   versionFeed.versions.value = new Map()
   if (farmId.value) void versionFeed.selectFarm(farmId.value)
@@ -231,7 +261,7 @@ onBeforeRouteLeave(() => {
           id="farm"
           v-model="farmId"
           :disabled="pending || !farms.length"
-          @change="selectFarm"
+          @change="switchFarm"
         >
           <option value="">Selecione</option>
           <option

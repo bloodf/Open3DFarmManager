@@ -171,8 +171,12 @@ function onFarmChange(event: Event) {
 
     <EmptyState
       v-else-if="noFarm"
-      title="Nenhuma farm disponível"
-      description="Esta conta ainda não tem uma farm para gerenciar bobinas. Crie uma farm ou peça acesso."
+      :title="farms.length ? 'Selecione uma farm' : 'Nenhuma farm disponível'"
+      :description="
+        farms.length
+          ? 'Escolha uma farm para gerenciar bobinas.'
+          : 'Esta conta ainda não tem uma farm para gerenciar bobinas. Crie uma farm ou peça acesso.'
+      "
     >
       <NuxtLink to="/farm" class="cta">Ir para farms</NuxtLink>
     </EmptyState>

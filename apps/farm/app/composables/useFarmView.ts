@@ -1,5 +1,6 @@
 import type { WebcamDetailOptions } from '../utils/webrtc/readonly-peer.ts'
-import { computed, onBeforeUnmount, onMounted, shallowRef } from 'vue'
+import { computed, onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
+import { resolveFarmScope } from '../utils/farm-scope.ts'
 import { onBeforeRouteLeave } from 'vue-router'
 import {
   createFarmView,
@@ -11,10 +12,17 @@ import { listDeviceKeys } from '../utils/device-key.ts'
 import { createAuthenticatedFarmStatusFeed } from '../utils/webrtc/farm-status-feed.ts'
 import { createFarmStatusKeyResolver } from '../utils/webrtc/farm-status-key-resolver.ts'
 
-export function useFarmView(
-  webcamDetail?: WebcamDetailOptions & { onClose: () => void },
-  cameraTarget?: () => string | null,
-) {
+type FarmViewOptions = {
+  webcamDetail?: WebcamDetailOptions & { onClose: () => void }
+  cameraTarget?: () => string | null
+  requestedFarm?: () => unknown
+}
+
+export function useFarmView({
+  webcamDetail,
+  cameraTarget,
+  requestedFarm,
+}: FarmViewOptions = {}) {
   // Per component instance, client-only. Never serialize private scope into a Nuxt payload.
   const state = shallowRef<FarmViewState>({ kind: 'loading' })
   const now = shallowRef({ wall: 0, mono: 0 })
@@ -34,6 +42,7 @@ export function useFarmView(
         timeout: 10_000,
         cache: 'no-store',
       }),
+    ...(requestedFarm ? { requestedFarm } : {}),
     listKeys: listDeviceKeys,
     clock,
     changed: (next) => {
@@ -49,6 +58,13 @@ export function useFarmView(
       },
     },
   })
+  if (requestedFarm)
+    watch(requestedFarm, (requested) => {
+      if (state.value.kind !== 'ready') return
+      const selected = resolveFarmScope(state.value.farms, requested)?.farmId
+      if (selected !== state.value.scope?.farmId)
+        void view.selectFarm(selected ?? '')
+    })
   let timer: ReturnType<typeof setInterval> | undefined
   let stopAuthInvalidation: (() => void) | undefined
   const revalidate = () => {

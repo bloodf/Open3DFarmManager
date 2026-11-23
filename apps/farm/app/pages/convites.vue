@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useFarmSelection } from '../composables/useFarmRoute.ts'
+import { fetchFarmMemberships } from '../composables/useFarmMemberships.ts'
 import { formatDateTime } from '../utils/ui-format.ts'
 import Button from '../components/ui/Button.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -12,7 +14,7 @@ const roles = [
   { value: 'admin', label: 'Administrador' },
 ]
 const farms = ref<Farm[]>([])
-const farmId = ref('')
+const farmId = useFarmSelection(farms)
 const role = ref('viewer')
 const loading = ref(true)
 const pending = ref(false)
@@ -28,13 +30,7 @@ async function loadFarms() {
   loadFailed.value = false
   errorMessage.value = ''
   try {
-    const page = await $fetch<{ farms: Farm[] }>('/api/farms', {
-      query: { limit: 50 },
-      retry: 0,
-      timeout: 15_000,
-    })
-    farms.value = page.farms
-    farmId.value = page.farms[0]?.farmId ?? ''
+    farms.value = await fetchFarmMemberships<Farm>({ timeout: 15_000 })
   } catch {
     loadFailed.value = true
     errorMessage.value = 'Entre na sua conta para criar convites.'
@@ -47,15 +43,23 @@ async function loadFarms() {
   }
 }
 onMounted(loadFarms)
+let scopeGeneration = 0
+watch(farmId, () => {
+  scopeGeneration++
+  link.value = ''
+  expiresAt.value = ''
+})
 
 async function submit() {
-  if (pending.value || !farmId.value) return
+  const selected = farmId.value
+  if (pending.value || !selected) return
+  const generation = scopeGeneration
   pending.value = true
   errorMessage.value = ''
   link.value = ''
   try {
     const result = await $fetch<{ token: string; expiresAt: string }>(
-      `/api/farms/${farmId.value}/invites`,
+      `/api/farms/${selected}/invites`,
       {
         method: 'POST',
         body: { role: role.value },
@@ -63,12 +67,14 @@ async function submit() {
         timeout: 15_000,
       },
     )
+    if (generation !== scopeGeneration) return
     link.value = `${window.location.origin}/criar-conta#codigo=${result.token}`
     expiresAt.value = formatDateTime(result.expiresAt) ?? ''
     // The link is shown once: move keyboard and screen-reader focus to it.
     await nextTick()
     resultHeading.value?.focus()
   } catch (error: unknown) {
+    if (generation !== scopeGeneration) return
     const status =
       error && typeof error === 'object' && 'statusCode' in error
         ? error.statusCode
@@ -131,6 +137,7 @@ async function submit() {
       <h2 id="invite-form-heading">Novo convite</h2>
       <Field label="Farm" v-slot="{ control }">
         <select v-bind="control" v-model="farmId" required :disabled="pending">
+          <option disabled value="">Selecione uma farm</option>
           <option
             v-for="(farm, index) in farms"
             :key="farm.farmId"

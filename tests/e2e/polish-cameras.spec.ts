@@ -292,6 +292,9 @@ async function open(
 ) {
   if (scenario === 'no-camera') {
     await prepare(page, 'populated', viewport, theme)
+    await page
+      .getByRole('button', { name: /Inspecionar Ender da bancada/ })
+      .click()
     const region = page.getByRole('region', {
       name: `Câmera da impressora ${longKey}`,
     })

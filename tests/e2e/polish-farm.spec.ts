@@ -40,11 +40,22 @@ async function open(
 
 async function settle(page: Page, scenario: Scenario) {
   switch (scenario) {
-    case 'populated':
-      await expect(page.locator(`#printer-${firstAssignment}`)).toHaveText(
+    case 'populated': {
+      const tile = page.getByRole('button', {
+        name: /Inspecionar Ender da bancada/,
+      })
+      await tile.click()
+      const inspector = page.getByRole('dialog', {
+        name: 'Inspeção da impressora',
+      })
+      await expect(inspector.locator(`#printer-${firstAssignment}`)).toHaveText(
         longKey,
       )
+      await inspector.getByRole('button', { name: 'Fechar inspeção' }).click()
+      await expect(tile).toBeFocused()
+      await page.getByRole('heading', { level: 1, name: 'Minha farm' }).focus()
       break
+    }
     case 'empty':
       await expect(
         page.getByText('Nenhuma impressora atribuída a esta farm.'),
@@ -166,7 +177,13 @@ test('error state moves focus to the alert and retry is a real button', async ({
 test('keyboard reaches navigation, scope and filters in order with a visible focus ring', async ({
   page,
 }) => {
-  await open(page, 'populated', viewports[1], 'light')
+  await prepare(page, 'populated', viewports[1], 'light')
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Minha farm' }),
+  ).toBeFocused()
+  await expect(
+    page.getByRole('button', { name: /Inspecionar Ender da bancada/ }),
+  ).toBeVisible()
   const seen: string[] = []
   for (let step = 0; step < 14; step++) {
     await page.keyboard.press('Tab')

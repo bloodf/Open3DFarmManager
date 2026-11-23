@@ -145,7 +145,7 @@ test('keyboard reaches farm, printer and refresh with a visible focus ring', asy
   await open(page, 'populated', viewports[1], 'light')
   await page.locator('#farm').focus()
   const seen: string[] = []
-  for (let step = 0; step < 3; step++) {
+  for (let step = 0; step < 4; step++) {
     const focus = await page.evaluate(() => {
       const element = document.activeElement as HTMLElement
       const style = getComputedStyle(element)
@@ -159,7 +159,7 @@ test('keyboard reaches farm, printer and refresh with a visible focus ring', asy
     seen.push(focus.label)
     await page.keyboard.press('Tab')
   }
-  expect(seen).toEqual(['farm', 'printer', 'Atualizar histórico'])
+  expect(seen).toEqual(['farm', 'printer', 'outcome', 'Atualizar histórico'])
 })
 
 test('loading is announced once and marks the results busy', async ({

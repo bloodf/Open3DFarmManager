@@ -35,6 +35,12 @@ export function alertRulesStore(sql: Sql) {
         WHERE farm_id = ${farmId}::uuid
       `
     },
+    async disabled(farmIds: string[]) {
+      return sql<{ farmId: string; kind: FarmAlertKind }[]>`
+        SELECT farm_id AS "farmId", kind FROM farm.integration_alert_rules
+        WHERE farm_id = ANY(${farmIds}::uuid[]) AND NOT enabled
+      `
+    },
     async manage<T>(
       appId: string,
       farmId: string,

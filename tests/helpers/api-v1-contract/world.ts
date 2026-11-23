@@ -820,7 +820,12 @@ export class World {
             },
           ]
         }
-        const [now, appId, printerId] = v as [number, string, string]
+        const [farmId, now, appId, printerId] = v as [
+          string,
+          number,
+          string,
+          string,
+        ]
         const actions = this.alertActions.filter(
           (entry) => entry.appId === appId,
         )
@@ -834,7 +839,7 @@ export class World {
           ? Math.min(...acknowledgements)
           : null
         const silencedUntil = silences.length ? Math.max(...silences) : null
-        return printerId === ids.printerA1
+        return farmId === ids.farmA && printerId === ids.printerA1
           ? [
               {
                 id: ids.alertA,

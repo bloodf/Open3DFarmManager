@@ -1,6 +1,10 @@
 import { defineEventHandler } from 'nuxt/server'
 import { integrationProblem } from '../../../../utils/integration-auth-http.ts'
-import { integrationAuthRuntime } from '../../../../utils/integration-auth-runtime.ts'
+import { alertRulesStore } from '../../../../storage/alert-rules-postgres.ts'
+import {
+  integrationAuthPool,
+  integrationAuthRuntime,
+} from '../../../../utils/integration-auth-runtime.ts'
 import type { IntegrationPrincipal } from '../../../../utils/integration-auth.ts'
 import { listBulkPrinterStatus } from '../../../../utils/webhooks/bulk-status.ts'
 
@@ -20,6 +24,8 @@ export default defineEventHandler(async (event) => {
         readPrinter: (id) => readPrinter.call(store, id),
       },
       new URL(event.req.url).searchParams,
+      Date.now(),
+      alertRulesStore(integrationAuthPool()).disabled,
     )
     if ('error' in result && result.error)
       return integrationProblem(result.error, headers)

@@ -29,7 +29,8 @@ export default defineEventHandler(async (event) => {
     const alerts = await sql`SELECT lifecycle.id, kind, label, message,
       opened_at::float8 AS "openedAt", resolved_at::float8 AS "resolvedAt",
       actions.acknowledged_at::float8 AS "acknowledgedAt", actions.silenced_until::float8 AS "silencedUntil",
-      (resolved_at IS NULL AND acknowledged_at IS NULL AND COALESCE(silenced_until <= ${now}, true)) AS "needsAttention"
+      (raised AND farm.integration_alert_enabled(${printer.farmId}::uuid, kind)
+        AND resolved_at IS NULL AND acknowledged_at IS NULL AND COALESCE(silenced_until <= ${now}, true)) AS "needsAttention"
       FROM farm.integration_alert_lifecycle lifecycle
       LEFT JOIN LATERAL (
         SELECT MIN(acted_at) FILTER (WHERE action = 'acknowledge') AS acknowledged_at,

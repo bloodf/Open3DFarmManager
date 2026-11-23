@@ -7,6 +7,7 @@ import {
   resolveWebhookTarget,
   webhookHeaders,
 } from '../../services/webhook-delivery.ts'
+import { openWebhookSecret } from '../webhooks/secret.ts'
 
 export function parseNotificationChannel(body: unknown) {
   if (
@@ -23,6 +24,13 @@ export function parseNotificationChannel(body: unknown) {
     return null
   const url = parseWebhookUrl(body.url)
   return url ? { url: url.href, secret: body.secret } : null
+}
+
+export function openNotificationChannel(sealed: string, keyring: string) {
+  const opened = openWebhookSecret(sealed, keyring)
+  return opened.legacy
+    ? null
+    : parseNotificationChannel(JSON.parse(opened.secret))
 }
 
 export type NotificationTestResult =

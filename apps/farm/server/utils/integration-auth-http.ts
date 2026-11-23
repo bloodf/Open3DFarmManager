@@ -231,6 +231,18 @@ const policies: RoutePolicy[] = [
   },
   {
     method: 'GET',
+    path: /^\/(?:telemetry|health)\/[^/]+$/,
+    scopes: ['printers:read'],
+  },
+  { method: 'GET', path: /^\/alerts\/[^/]+$/, scopes: ['printers:read'] },
+  {
+    method: 'POST',
+    path: /^\/alerts\/[^/]+\/[^/]+$/,
+    scopes: ['alerts:write'],
+  },
+  { method: 'GET', path: /^\/camera\/[^/]+$/, scopes: ['camera:view'] },
+  {
+    method: 'GET',
     path: /^\/inventory(?:\/spools(?:\/(?:search|usage))?)?$/,
     scopes: ['inventory:read'],
   },

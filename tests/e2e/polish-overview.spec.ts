@@ -438,10 +438,35 @@ test('compatibility search is a named landmark, announces the count and clears',
   expect(await fits(page)).toBe(true)
 })
 
-test('each compatibility entry labels its sources and limits', async ({
+test('compatibility catalog shows reviewed-model evidence and product sources', async ({
   page,
 }) => {
   await open(page, 'compat-catalog', viewports[0], 'light')
+  const reviewed = page.getByRole('region', { name: 'Modelos revisados' })
+  await expect(reviewed.getByRole('heading', { level: 2 })).toBeVisible()
+  await expect(
+    reviewed.getByText(
+      /Especificações publicadas e evidências de protocolo; não habilitam recursos do Connector\./,
+    ),
+  ).toBeVisible()
+  const reviewedModel = reviewed.locator('.reviewed-model').filter({
+    has: page.getByRole('heading', { name: 'Anycubic Kobra X' }),
+  })
+  await expect(reviewedModel).toContainText(
+    'Evidência do modelo: Qualificado em hardware',
+  )
+  await expect(reviewedModel).toContainText('Especificações: 260 × 260 × 260')
+  await expect(reviewedModel).toContainText(
+    'Rede: unverified (store pages returned HTTP 429)',
+  )
+  await expect(reviewedModel).toContainText(
+    'Protocolo: LAN Mode documented (A1), cloud off while enabled; ports not published by Anycubic, so unverified · Não verificado',
+  )
+  await expect(reviewedModel.getByRole('link').first()).toHaveAttribute(
+    'href',
+    /^https?:/,
+  )
+
   const first = page
     .locator('main section[aria-labelledby]')
     .filter({ has: page.getByRole('heading', { name: 'Áreas de controle' }) })

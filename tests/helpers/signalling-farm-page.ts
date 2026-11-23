@@ -75,7 +75,14 @@ export async function testAuthenticatedFarmPage(input: {
     await expect(
       page.getByLabel('Dispositivo aprovado deste navegador', { exact: true }),
     ).toHaveValue(fixture.browserKeyId)
-    const row = page.getByRole('article').filter({
+    await page
+      .getByRole('button', { name: /^Inspecionar / })
+      .filter({ has: page.getByText(assignment.printerKey, { exact: true }) })
+      .click()
+    const inspector = page.getByRole('dialog', {
+      name: 'Inspeção da impressora',
+    })
+    const row = inspector.getByRole('article').filter({
       has: page.getByRole('heading', {
         name: assignment.printerKey,
         exact: true,

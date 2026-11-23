@@ -429,6 +429,34 @@ record per video. Record fields (observed):
 - The scheme of the URL (`http`, `https` or `rtsp`) decides how the client plays it. (reported, S1)
 - Playing the stream needs `ffmpeg` on the client. (S1)
 
+### Connector support and capture limits
+
+A local camera entry can select a known always-live HTTP-FLV endpoint with
+`source.kind: kobra-x-flv`, the printer's literal LAN IPv4 address, port
+`18088`, and an exact `/flv` or `/live/<token>` path. Its `helper` is the
+absolute path and SHA-256 of the local FFmpeg executable. Keep this file
+private, especially when the path contains a token. The Connector reads the
+configured endpoint once per authorized WebRTC admission. Revocation closes
+the HTTP reader and FFmpeg. Browser signalling, status, and media use the
+camera and assignment IDs, with the source URL confined to the Connector.
+
+For capture-gated firmware, published integrations report
+`video/startCapture` and `video/stopCapture` on
+`anycubic/anycubicCloud/v1/web/printer/<modeId>/<deviceId>/video` with
+`data: null`. Start reports can carry the stream URL in `data.urls.rtspUrl`
+and are shared by clients of that printer. An MQTT acknowledgement identifies
+receipt only. Reports can carry a firmware-generated ID, and later info
+reports can mirror another client's URL. Topic, timing, action, success state,
+and a well-formed token cannot establish ownership. The observed stop command
+has no proven per-capture selector and may stop another client's stream.
+
+The Connector leaves capture-gated cameras disabled. It publishes neither
+start nor stop, including during cleanup or reconnect. Enabling the capability
+requires a confirmed request-to-capture binding and a stop operation scoped to
+that capture. Any future published start or stop without a scoped result must
+leave the outcome uncertain and block replay. The loopback fixture exercises
+the ambiguous broadcast and global stop behavior without qualifying firmware.
+
 ## Print Assist and printer details (not verified)
 
 The messages below come from S4's Workbench page (its web bundle, `libWorkbench`). They are sent on
@@ -523,6 +551,14 @@ The adapter must not depend on these until a capture exists. Each is also marked
 
 - S6: [Owner clean-room follow-up and synthetic vectors](https://github.com/bloodf/Open3DFarmManager/issues/363#issuecomment-6996775853).
 
-This document draws on S1 and S6. S2, S3, S4 and S5 were not read directly for it, and no code
+This document also draws on S7 and S8 for camera behavior.
+
+- S7: [stribor/anycubic_kobrax at 34955343](https://github.com/stribor/anycubic_kobrax/tree/34955343)
+  (MIT). Web camera commands and tokenized FLV URLs.
+
+- S8: [Grunna/ha-anycubic-kobra-x-lan at db9b2a8e](https://github.com/Grunna/ha-anycubic-kobra-x-lan/tree/db9b2a8e)
+  (MIT). Web topic and capture sequencing.
+
+S2, S3, S4 and S5 were not read directly for it, and no code
 from any source was copied. Facts that S1 attributes to those sources are restated here in OpenFarm's
 own words and stay `reported` until a Kobra X capture confirms them.

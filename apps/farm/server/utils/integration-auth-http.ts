@@ -169,9 +169,15 @@ const problems = {
   'payload-too-large': [413, 'Solicitação muito grande.'],
   'unsupported-media-type': [415, 'Formato de solicitação não aceito.'],
   'unsafe-target': [422, 'Destino do webhook não permitido.'],
+  'spool-location-changed': [
+    409,
+    'O registro da bobina mudou. Consulte o local atual.',
+  ],
   'webhook-limit-reached': [409, 'Limite de assinaturas de webhook atingido.'],
   'validation-failed': [422, 'Solicitação não aceita.'],
   unsupported: [422, 'Ação não suportada por esta impressora.'],
+  'device-stale': [409, 'Leitura do dispositivo desatualizada.'],
+  'device-not-ready': [409, 'Dispositivo não está pronto.'],
   'idempotency-key-reused': [
     409,
     'Chave de idempotência já usada com outra solicitação.',
@@ -186,6 +192,8 @@ const problems = {
 export function integrationProblem(
   code: keyof typeof problems,
   headers?: HeadersInit,
+  errors?: readonly { pointer: string; detail: string }[],
+  extensions?: { managementUrl?: string },
 ) {
   const [status, title] = problems[code]
   const responseHeaders = new Headers(headers)
@@ -193,7 +201,16 @@ export function integrationProblem(
   responseHeaders.set('cache-control', 'no-store')
   if (status === 503) responseHeaders.set('retry-after', '30')
   return Response.json(
-    { type: 'https://openfarm.dev/problems/' + code, title, status, code },
+    {
+      type: 'https://openfarm.dev/problems/' + code,
+      title,
+      status,
+      code,
+      ...(errors ? { errors } : {}),
+      ...(extensions?.managementUrl
+        ? { managementUrl: extensions.managementUrl }
+        : {}),
+    },
     {
       status,
       headers: responseHeaders,
@@ -215,9 +232,10 @@ const policies: RoutePolicy[] = [
   },
   {
     method: 'GET',
-    path: /^\/printers(?:\/status|\/readiness|\/[^/]+\/(?:status|capabilities))?$/,
+    path: /^\/printers(?:\/status|\/readiness|\/[^/]+\/(?:status|capabilities|mode))?$/,
     scopes: ['printers:read'],
   },
+  { method: 'POST', path: /^\/printers\/mode$/, scopes: ['control:extended'] },
   { method: 'GET', path: /^\/printers\/[^/]+\/files$/, scopes: ['files:read'] },
   {
     method: 'GET',
@@ -235,6 +253,22 @@ const policies: RoutePolicy[] = [
     path: /^\/(?:telemetry|health)\/[^/]+$/,
     scopes: ['printers:read'],
   },
+  { method: 'GET', path: /^\/alert-rules\/[^/]+$/, scopes: ['printers:read'] },
+  {
+    method: 'PATCH',
+    path: /^\/alert-rules\/[^/]+\/[^/]+$/,
+    scopes: ['alerts:manage'],
+  },
+  {
+    method: 'PUT',
+    path: /^\/notification-channels\/[^/]+$/,
+    scopes: ['alerts:manage'],
+  },
+  {
+    method: 'POST',
+    path: /^\/notification-channels\/[^/]+\/test$/,
+    scopes: ['alerts:manage'],
+  },
   { method: 'GET', path: /^\/alerts\/[^/]+$/, scopes: ['printers:read'] },
   {
     method: 'POST',
@@ -249,6 +283,16 @@ const policies: RoutePolicy[] = [
   },
   {
     method: 'GET',
+    path: /^\/inventory\/spools\/physical\/[^/]+$/,
+    scopes: ['inventory:read'],
+  },
+  {
+    method: 'POST',
+    path: /^\/inventory\/spools\/physical(?:\/[^/]+\/withdraw)?$/,
+    scopes: ['inventory:write'],
+  },
+  {
+    method: 'GET',
     path: /^\/resin\/(?:lots|vats|usage)$/,
     scopes: ['inventory:read'],
   },
@@ -256,6 +300,21 @@ const policies: RoutePolicy[] = [
     method: 'GET',
     path: /^\/environment\/measurements$/,
     scopes: ['environment:read'],
+  },
+  {
+    method: 'GET',
+    path: /^\/environment\/controls$/,
+    scopes: ['environment:read', 'environment:control'],
+  },
+  {
+    method: 'POST',
+    path: /^\/environment\/controls\/[^/]+\/actions$/,
+    scopes: ['environment:control'],
+  },
+  {
+    method: 'GET',
+    path: /^\/environment\/controls\/[^/]+\/actions\/[^/]+$/,
+    scopes: ['environment:control'],
   },
   { method: 'GET', path: /^\/library$/, scopes: ['library:read'] },
   { method: 'POST', path: /^\/library$/, scopes: ['library:write'] },

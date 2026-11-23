@@ -76,6 +76,9 @@ const scopeLabels: Record<IntegrationScope, string> = {
   'plates:confirm': 'Confirmar placa livre',
   'alerts:write': 'Enviar alertas',
   'camera:view': 'Ver câmera',
+  'inventory:write': 'Registrar e retirar carretéis',
+  'environment:control': 'Controlar ambiente',
+  'alerts:manage': 'Gerenciar regras de alerta e testar notificações',
 }
 const scopeOptions = INTEGRATION_SCOPES.map(
   (scope) => [scope, scopeLabels[scope]] as const,

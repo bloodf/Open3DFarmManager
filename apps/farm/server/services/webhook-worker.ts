@@ -1,9 +1,17 @@
-import { sendWebhook } from './webhook-delivery.ts'
-import type { PostgresWebhooks } from '../storage/webhook-postgres.ts'
+import { sendWebhook, type WebhookDelivery } from './webhook-delivery.ts'
 
-export async function deliverNextWebhook(
-  store: Pick<PostgresWebhooks, 'claim' | 'eligible' | 'finish'>,
-  send = sendWebhook,
+interface WebhookQueue<Delivery extends WebhookDelivery> {
+  claim(): Promise<Delivery | undefined>
+  eligible(delivery: NoInfer<Delivery>): Promise<boolean>
+  finish(
+    delivery: NoInfer<Delivery>,
+    outcome: 'delivered' | 'dead' | 'pending',
+  ): Promise<void>
+}
+
+export async function deliverNextWebhook<Delivery extends WebhookDelivery>(
+  store: WebhookQueue<Delivery>,
+  send: (delivery: NoInfer<Delivery>) => Promise<boolean> = sendWebhook,
 ) {
   const delivery = await store.claim()
   if (!delivery) return false

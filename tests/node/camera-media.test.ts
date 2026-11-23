@@ -82,7 +82,12 @@ const native = {
 } as unknown as CameraNative
 
 async function fixture(
-  options: { assigned?: boolean; slots?: number; units?: number } = {},
+  options: {
+    assigned?: boolean
+    slots?: number
+    units?: number
+    twoCameras?: boolean
+  } = {},
 ) {
   const identity = new ConnectorIdentity(
     generateKeyPairSync('ed25519').privateKey,
@@ -99,7 +104,8 @@ async function fixture(
   const browser = await validateBrowserDevicePublicKey({ kty, crv, x, y })
   const agentId = randomUUID(),
     farmId = randomUUID(),
-    assignmentId = randomUUID()
+    assignmentId = randomUUID(),
+    firstAssignmentId = randomUUID()
   const digest = () => randomBytes(32).toString('base64url')
   const now = Date.now()
   const binding = RtcSessionBinding.parse({
@@ -126,6 +132,7 @@ async function fixture(
     answer_sha256: digest(),
     browser_dtls: Array(32).fill('AA').join(':'),
     connector_dtls: Array(32).fill('BB').join(':'),
+    camera_printer_id: assignmentId,
     assignment_count: 1,
     assignment_digest: digest(),
   })
@@ -140,6 +147,15 @@ async function fixture(
     native,
     expectedAgentId: agentId,
     assignmentRefs: [
+      ...(options.twoCameras
+        ? [
+            {
+              assignmentId: firstAssignmentId,
+              agentId,
+              printerKey: 'printer zero',
+            },
+          ]
+        : []),
       {
         assignmentId: options.assigned === false ? randomUUID() : assignmentId,
         agentId,
@@ -147,6 +163,15 @@ async function fixture(
       },
     ],
     cameras: [
+      ...(options.twoCameras
+        ? [
+            {
+              cameraId: 'cam-0',
+              scope: { farmId, agentId, printerId: firstAssignmentId },
+              sourceHandle: 'rtsp-other',
+            },
+          ]
+        : []),
       {
         cameraId: 'cam-1',
         scope: { farmId, agentId, printerId: assignmentId },
@@ -334,4 +359,24 @@ test('a browser that closes only the camera channel declines without a violation
   assert.equal(f.track.open, false)
   assert.deepEqual(f.violations, [])
   assert.deepEqual(f.opened, [])
+})
+
+test('selects the target camera when another assigned camera appears first', async () => {
+  const f = await fixture({ twoCameras: true })
+  f.activate()
+  const statement = await countersign(f)
+  assert.equal(statement.camera_id, 'cam-1')
+  assert.equal(
+    statement.printer_id,
+    f.binding.v === 2 && f.binding.camera_printer_id,
+  )
+  f.channel.deliver(
+    await signCameraPurposeProof(
+      statement,
+      'browser',
+      f.browserKeys.privateKey,
+    ),
+  )
+  await until(() => f.track.sent.length === 3)
+  assert.deepEqual(f.opened, ['rtsp-sim'])
 })

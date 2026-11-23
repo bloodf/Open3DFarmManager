@@ -51,9 +51,11 @@ async function connect(
   const hello = record(await child.request({ kind: 'hello' }))
   const agent = randomUUID(),
     farm = randomUUID(),
-    assignment = randomUUID()
+    assignment = randomUUID(),
+    firstAssignment = randomUUID()
   const refs = [
-    { assignmentId: assignment, agentId: agent, printerKey: 'sim-1' },
+    { assignmentId: firstAssignment, agentId: agent, printerKey: 'sim-1' },
+    { assignmentId: assignment, agentId: agent, printerKey: 'sim-2' },
   ]
   const offer = String(
     record(
@@ -62,6 +64,7 @@ async function connect(
         agent,
         farm,
         assignment,
+        firstAssignment,
         helperPath: helper.path,
         helperSha256: helper.sha256,
         rtspPort: helper.port,
@@ -117,6 +120,7 @@ async function connect(
     answer_sha256: await rtcSdpHash(answer),
     browser_dtls: rtcDtlsFingerprint(answer),
     connector_dtls: rtcDtlsFingerprint(offer),
+    camera_printer_id: assignment,
     assignment_count: set.count,
     assignment_digest: set.digest,
   })
@@ -205,6 +209,7 @@ test(
           value.distinctFrames >= 5,
       )
       assert.equal(live.printerId, assignment)
+      assert.equal(live.cameraId, 'sim-camera-b')
       assert.equal(live.width, 320)
       assert.equal(live.height, 240)
       assert.equal(live.peer?.state, 'verified')

@@ -1,92 +1,61 @@
-// Failure diagnostics for browser journeys: a bounded, secret-free record of
-// what each browser page said on its signalling sockets and console, so a
-// journey that never reaches authenticated status shows where the session
-// stopped. Frame payloads are reduced to their `t` (frame type), `reason` and
-// `status` fields; signatures, tokens and SDP are never retained.
 import type { Page, TestInfo } from '@playwright/test'
 
-const MAX_EVENTS = 400
+const FRAME_TAGS = new Set([
+  'browser.begin',
+  'browser.challenge',
+  'browser.proof',
+  'browser.wait',
+  'rtc.ready',
+  'rtc.offer',
+  'rtc.answer',
+  'rtc.binding',
+  'rtc.ice',
+  'rtc.close',
+])
 
-type Event = Readonly<{ at: number; page: string; event: string }>
-
-function frameSummary(payload: string | Buffer): string {
-  if (typeof payload !== 'string') return `binary:${payload.length}`
+function frameTag(payload: string | Buffer): string {
+  if (typeof payload !== 'string') return 'binary'
   try {
     const value: unknown = JSON.parse(payload)
-    if (value && typeof value === 'object') {
-      const record = value as Record<string, unknown>
-      const pick = (key: string) =>
-        typeof record[key] === 'string' || typeof record[key] === 'number'
-          ? `${key}=${String(record[key]).slice(0, 64)}`
-          : undefined
-      return (
-        ['t', 'type', 'reason', 'status', 'code']
-          .map(pick)
-          .filter(Boolean)
-          .join(' ') || `json:${payload.length}`
-      )
+    if (value && typeof value === 'object' && 't' in value) {
+      const tag = value.t
+      if (typeof tag === 'string' && FRAME_TAGS.has(tag)) return tag
     }
   } catch {
-    /* Not JSON. */
+    // Count malformed frames without retaining their contents.
   }
-  return `text:${payload.length}`
+  return 'other'
 }
 
 export function recordJourneyDiagnostics() {
-  const started = Date.now()
-  let events: readonly Event[] = []
-  const push = (page: string, event: string) => {
-    events = [...events, { at: Date.now() - started, page, event }].slice(
-      -MAX_EVENTS,
-    )
+  const counts: Record<string, number> = {}
+  const count = (tag: string) => {
+    counts[tag] = (counts[tag] ?? 0) + 1
   }
   return {
-    watch(name: string, page: Page) {
+    watch(_name: string, page: Page) {
       page.on('console', (message) => {
-        if (message.type() === 'error' || message.type() === 'warning')
-          push(
-            name,
-            `console.${message.type()} ${message.text().slice(0, 240)}`,
-          )
+        if (message.type() === 'error') count('console.error')
+        if (message.type() === 'warning') count('console.warning')
       })
-      page.on('pageerror', (error) =>
-        push(name, `pageerror ${String(error.message).slice(0, 240)}`),
-      )
+      page.on('pageerror', () => count('pageerror'))
       page.on('websocket', (socket) => {
-        const path = new URL(socket.url()).pathname
-        push(name, `ws.open ${path}`)
+        count('ws.open')
         socket.on('framesent', ({ payload }) =>
-          push(name, `ws.sent ${path} ${frameSummary(payload)}`),
+          count(`ws.sent.${frameTag(payload)}`),
         )
         socket.on('framereceived', ({ payload }) =>
-          push(name, `ws.recv ${path} ${frameSummary(payload)}`),
+          count(`ws.recv.${frameTag(payload)}`),
         )
-        socket.on('socketerror', (error) =>
-          push(name, `ws.error ${path} ${error.slice(0, 160)}`),
-        )
-        socket.on('close', () => push(name, `ws.close ${path}`))
+        socket.on('socketerror', () => count('ws.error'))
+        socket.on('close', () => count('ws.close'))
       })
     },
-    async attach(
-      testInfo: TestInfo,
-      extra: Readonly<Record<string, unknown>>,
-    ): Promise<void> {
-      const browser = events
-        .map((e) => `${(e.at / 1000).toFixed(3)}s ${e.page} ${e.event}`)
-        .join('\n')
-      await testInfo.attach('browser-signalling.log', {
-        body: browser,
-        contentType: 'text/plain',
-      })
-      await testInfo.attach('runtime-diagnostics.json', {
-        body: JSON.stringify(extra, null, 2),
+    async attach(testInfo: TestInfo): Promise<void> {
+      await testInfo.attach('browser-signalling.json', {
+        body: JSON.stringify(counts, null, 2),
         contentType: 'application/json',
       })
-      console.error(
-        'Journey diagnostics',
-        JSON.stringify(extra),
-        `\n${browser.split('\n').slice(-80).join('\n')}`,
-      )
     },
   }
 }

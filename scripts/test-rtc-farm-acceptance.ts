@@ -17,7 +17,7 @@ import {
   spawn,
   type ChildProcess,
 } from 'node:child_process'
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { appendFileSync, existsSync, rmSync } from 'node:fs'
 import { copyFile, mkdir, readFile, rm, statfs } from 'node:fs/promises'
@@ -165,6 +165,7 @@ const stopGroup = (child: ChildProcess | undefined) => {
 // signal: best-effort synchronous cleanup of exactly this run, then exit.
 let interrupted = false
 let localDb: Awaited<ReturnType<typeof startLocalPostgres>> | undefined
+let dbPassword = randomBytes(32).toString('hex')
 const interrupt = () => {
   if (interrupted) {
     signalGroup(current, 'SIGKILL')
@@ -295,7 +296,7 @@ try {
       ...['--tmpfs', '/tmp:rw,mode=1777'],
       ...['-p', `127.0.0.1:${dbPort}:5432`],
       ...['-e', 'POSTGRES_USER=fixture', '-e', 'POSTGRES_DB=fixture'],
-      ...['-e', 'POSTGRES_HOST_AUTH_METHOD=trust'],
+      ...['-e', `POSTGRES_PASSWORD=${dbPassword}`],
       ...['-e', 'PGDATA=/var/lib/postgresql/data/pgdata'],
       image,
     )
@@ -309,13 +310,14 @@ try {
     )
   } else {
     localDb = await startLocalPostgres({ workDir, port: dbPort, ledger })
+    dbPassword = localDb.password
   }
   sql = postgres({
     host: '127.0.0.1',
     port: dbPort,
     database: 'fixture',
     username: 'fixture',
-    password: '',
+    password: dbPassword,
     ssl: false,
     max: 2,
     connect_timeout: 3,

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { createRequire } from 'node:module'
 import https from 'node:https'
+import type { RawData, WebSocket } from 'ws'
 import { FaultController } from './mocks/faults.ts'
 import { startHttpMock } from './mocks/http-mock.ts'
 import { ScenarioController, type ScenarioStep } from './mocks/scenario.ts'
@@ -8,8 +9,7 @@ import { ScenarioController, type ScenarioStep } from './mocks/scenario.ts'
 const require = createRequire(
   new URL('../../connector/package.json', import.meta.url),
 )
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const { WebSocketServer } = require('ws') as any
+const { WebSocketServer }: typeof import('ws') = require('ws')
 
 export interface CrealitySimulatorOptions {
   /** Spec-derived, not captured: https://github.com/CrealityOfficial/CrealityPrint/blob/6262848e302b8c0d593f2b341cd01310aa2f58a1/src/slic3r/GUI/print_manage/AppUtils.cpp#L349-L352 */
@@ -55,17 +55,44 @@ export async function createCrealitySimulator(
   }
 
   function disconnect() {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    for (const socket of wss.clients as Set<any>) socket.terminate()
+    for (const socket of wss.clients) socket.terminate()
   }
 
-  function sendRaw(data: string, targets?: Iterable<any>) {
-    const sockets = targets ?? (wss.clients as Set<any>)
+  function sendRaw(data: string, targets?: Iterable<WebSocket>) {
+    const sockets = targets ?? wss.clients
     for (const client of sockets) {
       if (client.readyState === 1 /* OPEN */) {
         client.send(data)
       }
     }
+  }
+
+  async function challengeHeartbeat(timeoutMs = 1500) {
+    const replies = await Promise.all(
+      Array.from(wss.clients, (socket) => {
+        if (socket.readyState !== socket.OPEN) return false
+        return new Promise<boolean>((resolve) => {
+          const finish = (acknowledged: boolean) => {
+            clearTimeout(deadline)
+            socket.off('message', onMessage)
+            socket.off('close', onClose)
+            resolve(acknowledged)
+          }
+          const onMessage = (data: RawData, binary: boolean) => {
+            if (!binary && data.toString() === 'ok') finish(true)
+          }
+          const onClose = () => finish(false)
+          const deadline = setTimeout(() => {
+            socket.terminate()
+            finish(false)
+          }, timeoutMs)
+          socket.on('message', onMessage)
+          socket.once('close', onClose)
+          socket.send(JSON.stringify({ ModeCode: 'heart_beat' }))
+        })
+      }),
+    )
+    return replies.filter(Boolean).length
   }
 
   function formatMalformed(payload?: Buffer | string): string {
@@ -74,7 +101,7 @@ export async function createCrealitySimulator(
     return '{malformed'
   }
 
-  function broadcast(payload: object, targets?: Iterable<any>) {
+  function broadcast(payload: object, targets?: Iterable<WebSocket>) {
     const fault = faults.matchFault({ path: '/', method: 'REPORT' })
     if (fault) {
       if (fault.type === 'drop') {
@@ -236,10 +263,8 @@ export async function createCrealitySimulator(
     emitWithAckFault(currentFrame)
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  wss.on('connection', (socket: any) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    socket.on('message', (data: any) => {
+  wss.on('connection', (socket) => {
+    socket.on('message', (data) => {
       const raw = data.toString()
       received.push(raw)
       const msgFault = faults.matchFault({ path: '/', method: 'PUBLISH' })
@@ -283,7 +308,7 @@ export async function createCrealitySimulator(
   const wsHttp = await startHttpMock({
     faults,
     onUpgrade: (req, socket, head) => {
-      wss.handleUpgrade(req, socket, head, (ws: unknown) => {
+      wss.handleUpgrade(req, socket, head, (ws) => {
         wss.emit('connection', ws, req)
       })
     },
@@ -315,7 +340,7 @@ export async function createCrealitySimulator(
   if (secureServer) {
     secureServer.on('upgrade', (req, socket, head) => {
       secureConnections++
-      wss.handleUpgrade(req, socket, head, (ws: unknown) =>
+      wss.handleUpgrade(req, socket, head, (ws) =>
         wss.emit('connection', ws, req),
       )
     })
@@ -426,6 +451,8 @@ export async function createCrealitySimulator(
     emitFrame(frame: object) {
       broadcast(frame)
     },
+    /** One stock keepalive challenge per live peer. The reply is a text frame. */
+    challengeHeartbeat,
     disconnect,
     close() {
       closed = true

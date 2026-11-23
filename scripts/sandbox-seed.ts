@@ -15,7 +15,6 @@ import {
   enrollConnector,
   ENROLLMENT,
 } from '../tests/helpers/connector-enrollment.ts'
-import { loadMigrationCatalog, runMigrations } from './db/migrations.ts'
 
 const printerKeys = ['sandbox-klipper', 'sandbox-bambu']
 
@@ -42,8 +41,6 @@ export async function seedSandbox(
       typeof value === 'string' ? value : JSON.stringify(value),
       { mode: 0o600 },
     )
-  await runMigrations(admin, await loadMigrationCatalog(), { kind: 'up' })
-
   const groups = {
     sandbox_pair: 'farm_pairing_runtime',
     sandbox_owner: 'farm_printer_ownership',

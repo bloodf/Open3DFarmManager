@@ -450,7 +450,11 @@ export function createMoonrakerSubscription(input: {
         ])
         const now = performance.now()
         let changed = nextFingerprint !== fingerprint
-        if (!changed && durableChamber !== undefined) {
+        if (
+          !changed &&
+          durableChamber !== undefined &&
+          durableChamber !== lastChamberReading
+        ) {
           // Only the chamber reading moved: record it when the change is
           // meaningful or when the bounded rate allows another record.
           const significant =

@@ -199,15 +199,20 @@ test('a meaningful chamber change is still recorded as a durable observation', a
   const directory = mkdtempSync(join(tmpdir(), 'open3d-chamber-'))
   const queue = new TelemetryQueue(join(directory, 'queue'), Date.now())
   const controller = new AbortController()
+  let liveCount = 0
   const done = collectIntoQueue({
     config: config(server.origin),
     queue,
     signal: controller.signal,
     onDiagnostic() {},
+    onRawObservation() {
+      liveCount++
+    },
   })
   try {
     await waitFor(() => server.updates() === CHAMBER_UPDATES)
-    await waitFor(() => queue.depth > 0)
+    await waitFor(() => liveCount > CHAMBER_UPDATES)
+    assert.ok(queue.depth > 0 && queue.depth <= MAX_QUEUED_RECORDS)
     const before = queue.depth
     await server.move(CHAMBER_START + 5)
     await waitFor(() => queue.depth > before)

@@ -1,9 +1,14 @@
+import { isChamberTemperatureObject } from './temperature-observation.ts'
 import { moonrakerSession, moonrakerAuthHeaders } from '../config/moonraker.ts'
 import { z } from 'zod'
 import { createMoonrakerSocket } from './socket.ts'
 import { Reply, decodeMoonrakerFrame } from './frame.ts'
 import { parseMoonrakerServerInfo } from './parse.ts'
-import { parseIdentifyResult } from './discovery-parse.ts'
+import {
+  extruderIndex,
+  parseIdentifyResult,
+  selectToolObjects,
+} from './discovery-parse.ts'
 import type { MoonrakerLimits } from '../config/moonraker.ts'
 export {
   validateMoonrakerInput,
@@ -79,6 +84,14 @@ export async function readMoonrakerReady(input: {
   }
 }
 
+// Status objects have open fields, including explicitly nullable values.
+const ObjectStatus = z.record(z.string(), z.record(z.string(), z.unknown()))
+const StatusUpdate = z.tuple([ObjectStatus, z.number().nonnegative()])
+const StatusResult = z.object({
+  status: ObjectStatus,
+  eventtime: z.number().nonnegative(),
+})
+
 const Notification = z.strictObject({
   jsonrpc: z.literal('2.0'),
   method: z.string().max(128),
@@ -87,6 +100,8 @@ const Notification = z.strictObject({
 
 export type MoonrakerCompleteObservation = Readonly<{
   result: unknown
+  /** This request selected toolhead.extruder alongside the nozzle readings. */
+  activeToolQuery: boolean
   requestStartedAtMonoMs: number
   receivedAtMonoMs: number
 }>
@@ -115,6 +130,7 @@ const jobObjects = {
     'filename',
     'print_duration',
     'total_duration',
+    'filament_used',
     'info',
   ],
 }
@@ -135,6 +151,8 @@ export function openMoonrakerClient(input: {
   discoverObjects?: boolean
   /** Also subscribe to the print_stats fields a finished-job summary needs. */
   jobFields?: boolean
+  /** Model-specific read-only objects added to every subscription and query. */
+  extraObjects?: Readonly<Record<string, readonly string[]>>
   /** Connector identity registered with Moonraker on every connection. */
   client?: { name: string; version: string; url: string }
   onStatus: (params: unknown) => void
@@ -153,15 +171,28 @@ export function openMoonrakerClient(input: {
   let queryTimer: ReturnType<typeof setTimeout> | undefined
   let queryTimeout: ReturnType<typeof setTimeout> | undefined
   let nextId = 1
-  let pending: { id: number; started: number } | undefined
+  let pending:
+    { id: number; started: number; activeToolQuery: boolean } | undefined
   let finished = false
   let subscribed = false
   let identified = false
   let discovering = input.discoverObjects === true
-  const baseObjects = input.jobFields ? jobObjects : selectedObjects
-  const baseQueryObjects = input.jobFields
-    ? { ...jobObjects, ...temperatureObjects }
-    : completeObjects
+  const extraObjects = Object.fromEntries(
+    Object.entries(input.extraObjects ?? {}).map(([name, fields]) => [
+      name,
+      [...fields],
+    ]),
+  )
+  const baseObjects = {
+    ...(input.jobFields ? jobObjects : selectedObjects),
+    ...extraObjects,
+  }
+  const baseQueryObjects = {
+    ...(input.jobFields
+      ? { ...jobObjects, ...temperatureObjects }
+      : completeObjects),
+    ...extraObjects,
+  }
   let objects: Record<string, string[]> = { ...baseObjects }
   let queryObjects: Record<string, string[]> = { ...baseQueryObjects }
   let resolveSnapshot: (value: unknown) => void = () => {}
@@ -218,7 +249,7 @@ export function openMoonrakerClient(input: {
     if (finished) return
     clearTimeout(timer)
     timer = setTimeout(
-      () => finish('offline'),
+      () => finish(earlyUpdates.length ? 'invalid-response' : 'offline'),
       input.onComplete
         ? Math.min(1000, input.limits.requestTimeoutMs)
         : input.limits.requestTimeoutMs,
@@ -239,35 +270,48 @@ export function openMoonrakerClient(input: {
       }),
     )
   }
-  function begin() {
-    pending = { id: 1, started: performance.now() }
-    if (discovering) {
-      discoveryTimer = setTimeout(
-        () => {
-          if (finished || !discovering) return
-          discovering = false
-          pending = { id: 1, started: performance.now() }
-          socket!.send(
-            JSON.stringify({
-              jsonrpc: '2.0',
-              id: nextId,
-              method: 'printer.objects.subscribe',
-              params: { objects },
-            }),
-          )
-        },
-        Math.min(50, input.limits.requestTimeoutMs / 2),
-      )
+  function sendStatusRequest(
+    method: 'printer.objects.subscribe' | 'printer.objects.query',
+    requestObjects: Record<string, string[]>,
+  ) {
+    pending = {
+      id: nextId,
+      started: performance.now(),
+      activeToolQuery:
+        requestObjects.toolhead?.includes('extruder') === true &&
+        Object.entries(requestObjects).some(
+          ([name, fields]) =>
+            extruderIndex(name) !== undefined && fields.includes('temperature'),
+        ),
     }
+    socket!.send(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: nextId,
+        method,
+        params: { objects: requestObjects },
+      }),
+    )
+  }
+  function begin() {
+    if (!discovering) {
+      sendStatusRequest('printer.objects.subscribe', objects)
+      return
+    }
+    discoveryTimer = setTimeout(
+      () => {
+        if (finished || !discovering) return
+        discovering = false
+        sendStatusRequest('printer.objects.subscribe', objects)
+      },
+      Math.min(50, input.limits.requestTimeoutMs / 2),
+    )
     // Optional RTC discovery precedes the subscription on the same connection.
     socket!.send(
       JSON.stringify({
         jsonrpc: '2.0',
-        id: discovering ? Number.MAX_SAFE_INTEGER : 1,
-        method: discovering
-          ? 'printer.objects.list'
-          : 'printer.objects.subscribe',
-        ...(discovering ? {} : { params: { objects } }),
+        id: Number.MAX_SAFE_INTEGER,
+        method: 'printer.objects.list',
       }),
     )
   }
@@ -279,22 +323,14 @@ export function openMoonrakerClient(input: {
           finish('invalid-response')
           return
         }
-        const started = performance.now()
-        pending = { id: ++nextId, started }
+        nextId++
         queryTimeout = setTimeout(
           () => finish('stale'),
           Math.min(1000, input.limits.requestTimeoutMs),
         )
         try {
           if (socket!.bufferedAmount !== 0) throw Error('Outbound queue')
-          socket!.send(
-            JSON.stringify({
-              jsonrpc: '2.0',
-              id: nextId,
-              method: 'printer.objects.query',
-              params: { objects: queryObjects },
-            }),
-          )
+          sendStatusRequest('printer.objects.query', queryObjects)
         } catch {
           finish('offline')
         }
@@ -307,23 +343,17 @@ export function openMoonrakerClient(input: {
   function sendExtension() {
     if (!extendSubscription || pending || finished) return
     extendSubscription = false
-    extensionId = nextId + 1
+    extensionId = ++nextId
     clearTimeout(queryTimer)
-    pending = { id: ++nextId, started: performance.now() }
     queryTimeout = setTimeout(
       () => finish('stale'),
       input.limits.requestTimeoutMs,
     )
-    socket!.send(
-      JSON.stringify({
-        jsonrpc: '2.0',
-        id: nextId,
-        method: 'printer.objects.subscribe',
-        params: { objects },
-      }),
-    )
+    sendStatusRequest('printer.objects.subscribe', objects)
   }
   let lastRequestStarted = 0
+  const earlyUpdates: z.infer<typeof StatusUpdate>[] = []
+  let earlyBytes = 0
   function message(data: import('ws').RawData, isBinary: boolean) {
     if (finished) return
     try {
@@ -364,30 +394,41 @@ export function openMoonrakerClient(input: {
                 (name) =>
                   name === 'fan' ||
                   name.startsWith('fan_generic ') ||
-                  name === 'output_pin caselight',
+                  name === 'output_pin caselight' ||
+                  (input.jobFields &&
+                    (/^extruder(?:[1-9][0-9]{0,2})?$/.test(name) ||
+                      isChamberTemperatureObject(name))),
               )
               .map((name) => [
                 name,
-                [name === 'output_pin caselight' ? 'value' : 'speed'],
+                /^extruder/.test(name) || name === 'heater_generic chamber'
+                  ? ['temperature', 'target']
+                  : isChamberTemperatureObject(name)
+                    ? ['temperature']
+                    : [name === 'output_pin caselight' ? 'value' : 'speed'],
               ]),
           )
           objects = { ...baseObjects, ...optional }
           queryObjects = { ...baseQueryObjects, ...optional }
+          if (input.onComplete && listed.objects.includes('toolhead')) {
+            const tools = selectToolObjects(listed)
+            if (tools.some((name) => name !== 'extruder')) {
+              delete queryObjects.extruder
+              // Fields a caller already selected for the tool projection,
+              // including `target` and the active tool, must survive.
+              for (const name of tools)
+                queryObjects[name] = extraObjects[name] ?? ['temperature']
+              queryObjects.toolhead = extraObjects.toolhead ?? ['extruder']
+            }
+          }
           discovering = false
           if (!wasDiscovering) {
             extendSubscription = true
             sendExtension()
             return
           }
-          pending = { id: ++nextId, started: performance.now() }
-          socket!.send(
-            JSON.stringify({
-              jsonrpc: '2.0',
-              id: nextId,
-              method: 'printer.objects.subscribe',
-              params: { objects },
-            }),
-          )
+          nextId++
+          sendStatusRequest('printer.objects.subscribe', objects)
           return
         }
         if (
@@ -396,21 +437,19 @@ export function openMoonrakerClient(input: {
           !Object.hasOwn(reply.data, 'result')
         )
           throw new Error('Unexpected reply')
-        const received = performance.now(),
-          started = pending.started
+        const received = performance.now()
+        const { started, activeToolQuery } = pending
         if (
           received < started ||
           (input.onComplete &&
             received - started >= Math.min(1000, input.limits.requestTimeoutMs))
         )
           throw Error('Late observation')
+        const replayAfter = earlyUpdates.length
+          ? StatusResult.parse(reply.data.result).eventtime
+          : undefined
         if (reply.data.id === extensionId) {
-          const result = z
-            .object({
-              status: z.record(z.string(), z.unknown()),
-              eventtime: z.number(),
-            })
-            .parse(reply.data.result)
+          const result = StatusResult.parse(reply.data.result)
           input.onStatus([result.status, result.eventtime])
           extensionId = undefined
         }
@@ -421,6 +460,7 @@ export function openMoonrakerClient(input: {
         input.onComplete?.(
           Object.freeze({
             result: reply.data.result,
+            activeToolQuery,
             requestStartedAtMonoMs: started,
             receivedAtMonoMs: received,
           }),
@@ -429,6 +469,21 @@ export function openMoonrakerClient(input: {
           subscribed = true
           clearTimeout(timer)
           resolveSnapshot(reply.data.result)
+          if (replayAfter !== undefined) {
+            // The async subscriber installs its baseline from the snapshot
+            // continuation. Replay only updates newer than that snapshot.
+            queueMicrotask(() => {
+              if (finished) return
+              try {
+                for (const update of earlyUpdates)
+                  if (update[1] > replayAfter) input.onStatus(update)
+              } catch {
+                finish('invalid-response')
+              } finally {
+                earlyUpdates.length = 0
+              }
+            })
+          }
         }
         if (extendSubscription) sendExtension()
         else scheduleQuery()
@@ -436,8 +491,20 @@ export function openMoonrakerClient(input: {
       }
       const notification = Notification.parse(value)
       if (notification.method === 'notify_status_update') {
-        if (!subscribed) throw new Error('Status before baseline')
-        input.onStatus(notification.params)
+        const update = StatusUpdate.parse(notification.params)
+        if (subscribed) input.onStatus(update)
+        else {
+          // Moonraker delivers status asynchronously while the subscribe
+          // reply is in flight. The frame decoder already requires a Buffer.
+          if (!pending || discovering) throw Error('Status before subscription')
+          earlyBytes += (data as Buffer).byteLength
+          if (
+            earlyBytes > input.limits.maxMessageBytes ||
+            earlyUpdates.length >= 64
+          )
+            throw Error('Early status limit')
+          earlyUpdates.push(update)
+        }
       } else if (
         [
           'notify_klippy_disconnected',

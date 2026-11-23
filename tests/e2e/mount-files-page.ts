@@ -47,6 +47,8 @@ async function connect(signal: AbortSignal): Promise<any> {
   const result = await build({
     stdin: {
       contents: `const $fetch = async () => ({ enabled: true, origin: location.origin }); const definePageMeta = () => {};
+globalThis.useRoute = () => ({ path: '/arquivos', query: {}, hash: '' });
+globalThis.useRouter = () => ({ replace: async () => {} });
 ${script.replace('export default', 'const component =')}
 import { createApp, h } from 'vue'
 window.filesCommands = []

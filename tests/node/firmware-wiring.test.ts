@@ -123,7 +123,7 @@ test(
             shortCircuit: true,
             source: readFileSync(new URL(url), 'utf8').replace(
               'return { observe, invalidate, setInventory, open, close }',
-              `globalThis.firmwareProbe.read = () => { const now = performance.now(); return snapshot(now, now + 5000); }; return { observe, invalidate, setInventory, open, close }`,
+              `globalThis.firmwareProbe.read = () => { const now = performance.now(); return snapshot(now, now + 5000)?.value; }; return { observe, invalidate, setInventory, open, close }`,
             ),
           }
         return next(url, context)
@@ -261,11 +261,14 @@ test(
                   },
                 ],
               }
-              assertReads = () =>
-                assert.deepEqual(
-                  remote.requests.map((request) => request.command),
-                  ['get_version'],
-                )
+              assertReads = () => {
+                assert.deepEqual(remote.queries, [
+                  { command: 'pushall', sequence_id: '0' },
+                  { command: 'get_version', sequence_id: '0' },
+                ])
+                // Reading the firmware never sends a printer command.
+                assert.deepEqual(remote.requests, [])
+              }
             } else if (vendor === 'creality') {
               const remote = await createCrealitySimulator(
                 { state: 1, printProgress: 25 },

@@ -188,6 +188,13 @@ export interface KobraXMockOptions {
   httpPort?: number | undefined
   mqttPort?: number | undefined
   camera?: boolean | undefined
+  /**
+   * Opt-in capture-gated HTTP-FLV. The stream is dark until MQTT
+   * `video/startCapture`, which answers `data.urls.rtspUrl` with a distinct
+   * synthetic token. `video/stopCapture` invalidates it and closes open FLV
+   * responses. Default off: the always-live URL stays unchanged.
+   */
+  captureGatedFlv?: boolean | undefined
   strictCtrlQuery?: boolean | undefined
   requireMqttAuth?: boolean | undefined
   requireExactClientCert?: boolean | undefined
@@ -227,7 +234,10 @@ export interface KobraXMockInstance {
   }
   camera:
     | {
-        flvUrl: string
+        /** Always-live URL; undefined in capture-gated mode. */
+        flvUrl: string | undefined
+        flvBase: string
+        capture: Awaited<ReturnType<typeof startCameraMock>>['capture']
         rtspUrl: string
         cameraUrl: string
         state: { stall: boolean; disconnect: boolean }
@@ -511,10 +521,24 @@ export async function startKobraXMock(
   // 2. Camera mock (HTTP-FLV from E16.7)
   let cameraMock: Awaited<ReturnType<typeof startCameraMock>> | undefined
   if (options.camera !== false) {
-    cameraMock = await startCameraMock({ token })
+    cameraMock = await startCameraMock({
+      token,
+      captureGated: options.captureGatedFlv === true,
+    })
   }
   const flvUrl = cameraMock?.flvUrl
-  const flvPort = flvUrl ? Number(new URL(flvUrl).port) : undefined
+  const flvPort = cameraMock
+    ? Number(new URL(cameraMock.flvBase).port)
+    : undefined
+  /** URL announced to clients: always-live, or the active capture session's. */
+  const announcedFlvUrl = (): string | undefined => {
+    if (!cameraMock) return undefined
+    if (!cameraMock.capture.gated) return flvUrl
+    const captureToken = cameraMock.capture.token()
+    return captureToken === undefined
+      ? undefined
+      : `${cameraMock.flvBase}/live/${captureToken}`
+  }
 
   // 3. HTTP 18910 (/info, /ctrl, /gcode_upload)
   let httpPort = 0
@@ -767,7 +791,7 @@ export async function startKobraXMock(
       curr_layer: isPreparation ? 0 : currLayer,
       total_layers: totalLayers,
       print_time: isPreparation ? 0 : printTimeSec,
-      remain_time: remainTimeSec,
+      remain_time: Math.ceil(remainTimeSec / 60),
       ...(errorCode !== undefined ? { error_code: errorCode } : {}),
     }
   }
@@ -789,7 +813,7 @@ export async function startKobraXMock(
         camera_timelapse_support: true,
       },
       urls: {
-        ...(flvUrl ? { rtspUrl: flvUrl } : {}),
+        ...(announcedFlvUrl() ? { rtspUrl: announcedFlvUrl() } : {}),
       },
       temp: { ...tempState },
       fan_speed_pct: fanSpeedPct,
@@ -818,27 +842,20 @@ export async function startKobraXMock(
   }
 
   function emitWithLegacySuffixDelivery(
-    clientKind: KobraXClientKind,
     suffix: string,
     payload: unknown,
     faultMethod: 'ACK' | 'REPORT',
   ) {
     if (!brokerRef) return
-    const canonicalTopic = `anycubic/anycubicCloud/v1/${clientKind}/printer/public/${modeId}/${deviceId}/${suffix}`
-    const emitted = brokerRef.control.publish(
-      canonicalTopic,
-      payload,
-      0,
-      faultMethod,
-    )
+    // Real Kobra X reports and acks use `printer/public` with no `slicer/` or
+    // `web/` segment. A subscription on the query prefix must not receive them.
+    const topic = `anycubic/anycubicCloud/v1/printer/public/${modeId}/${deviceId}/${suffix}`
+    const emitted = brokerRef.control.publish(topic, payload, 0, faultMethod)
     if (!emitted) return
 
-    // Deliver to subscribers using unprefixed or bare `<deviceId>/response` / `<type>/report` filters
-    // ONLY when those sockets would not already receive `canonicalTopic`.
-    const altTopics = [
-      `anycubic/anycubicCloud/v1/printer/public/${modeId}/${deviceId}/${suffix}`,
-      suffix === 'response' ? `${deviceId}/response` : suffix,
-    ]
+    // Bare `<deviceId>/response` and `<type>/report` filters do not match the
+    // printer topic. Deliver that alias only when the socket missed `topic`.
+    const altTopic = suffix === 'response' ? `${deviceId}/response` : suffix
     const rawBuf = Buffer.from(
       typeof payload === 'string' ? payload : JSON.stringify(payload),
     )
@@ -847,35 +864,29 @@ export async function startKobraXMock(
       if (!sock.writable) continue
       let alreadyMatched = false
       for (const filter of topics) {
-        if (matchMqttTopic(filter, canonicalTopic)) {
+        if (matchMqttTopic(filter, topic)) {
           alreadyMatched = true
           break
         }
       }
       if (alreadyMatched) continue
-
-      for (const altTopic of altTopics) {
-        let matchedAlt = false
-        for (const filter of topics) {
-          if (matchMqttTopic(filter, altTopic)) {
-            matchedAlt = true
-            break
-          }
-        }
-        if (matchedAlt) {
-          const tBuf = Buffer.from(altTopic)
-          const lBuf = Buffer.alloc(2)
-          lBuf.writeUInt16BE(tBuf.length)
-          sock.write(encodePacket(0x30, Buffer.concat([lBuf, tBuf, rawBuf])))
+      let matchedAlt = false
+      for (const filter of topics) {
+        if (matchMqttTopic(filter, altTopic)) {
+          matchedAlt = true
           break
         }
       }
+      if (!matchedAlt) continue
+      const tBuf = Buffer.from(altTopic)
+      const lBuf = Buffer.alloc(2)
+      lBuf.writeUInt16BE(tBuf.length)
+      sock.write(encodePacket(0x30, Buffer.concat([lBuf, tBuf, rawBuf])))
     }
   }
 
-  function publishAck(msgid: string, clientKind: KobraXClientKind = 'slicer') {
+  function publishAck(msgid: string, _clientKind: KobraXClientKind = 'slicer') {
     emitWithLegacySuffixDelivery(
-      clientKind,
       'response',
       {
         type: '',
@@ -912,12 +923,7 @@ export async function startKobraXMock(
       msg: reportOptions.msg ?? 'success',
       data,
     }
-    emitWithLegacySuffixDelivery(
-      reportOptions.clientKind ?? 'slicer',
-      `${type}/report`,
-      body,
-      'REPORT',
-    )
+    emitWithLegacySuffixDelivery(`${type}/report`, body, 'REPORT')
   }
 
   function startAdvancingPrint(durationMs?: number) {
@@ -1050,10 +1056,6 @@ export async function startKobraXMock(
     authorizeSubscribe: (topic) =>
       topic === '#' ||
       topic === 'anycubic/anycubicCloud/v1/#' ||
-      topic ===
-        `anycubic/anycubicCloud/v1/slicer/printer/public/${modeId}/${deviceId}/#` ||
-      topic ===
-        `anycubic/anycubicCloud/v1/web/printer/public/${modeId}/${deviceId}/#` ||
       topic ===
         `anycubic/anycubicCloud/v1/printer/public/${modeId}/${deviceId}/#` ||
       topic === `${deviceId}/response` ||
@@ -1519,6 +1521,26 @@ export async function startKobraXMock(
           } else if (action === 'stopCapture') {
             videoCapturing = false
           }
+          if (cameraMock?.capture.gated) {
+            let rtspUrl: string | undefined
+            if (action === 'startCapture') {
+              rtspUrl = cameraMock.capture.start().url
+            } else if (action === 'stopCapture') {
+              cameraMock.capture.stop()
+            } else {
+              rtspUrl = announcedFlvUrl()
+            }
+            publishTypedReport(
+              'video',
+              action || 'startCapture',
+              {
+                urls: { ...(rtspUrl ? { rtspUrl } : {}) },
+                active: cameraMock.capture.active(),
+              },
+              { clientKind },
+            )
+            break
+          }
           publishTypedReport(
             'video',
             action || 'startCapture',
@@ -1734,6 +1756,8 @@ export async function startKobraXMock(
     camera: cameraMock
       ? {
           flvUrl: cameraMock.flvUrl,
+          flvBase: cameraMock.flvBase,
+          capture: cameraMock.capture,
           rtspUrl: cameraMock.rtspUrl,
           cameraUrl: cameraMock.cameraUrl,
           state: cameraMock.state,

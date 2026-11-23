@@ -19,6 +19,7 @@ import { PostgresPrinterOwnership } from '../../apps/farm/server/storage/postgre
 import { loadOrCreateIdentity } from '../../packages/connector/src/identity/store.ts'
 import {
   handlerErrors,
+  interruption,
   startConnector,
   startFakeMoonraker,
   startFarmApp,
@@ -28,6 +29,7 @@ import {
 import { automaticLockRecovery } from './queue-lock-platform.ts'
 import { credentialRenewalAcrossOutage } from './connector-outage-renewal.ts'
 import { runOutagePauseScenarios } from './connector-outage-pause.ts'
+import { outageDatabaseUrls } from './connector-outage-database-url.ts'
 
 const QUEUE_MAX_BYTES = 50 * 1024 * 1024 // Documented TelemetryQueue cap.
 const TELEMETRY = { timeoutMs: 3000, retryMinMs: 500, retryMaxMs: 2000 }
@@ -41,6 +43,7 @@ type Record = { eventId: string; queuedAt: number; kind: string } & {
 
 export async function runConnectorOutageScenarios(input: {
   admin: Sql
+  fixturePassword: string
   ports: Ports
   workDir: string
   /**
@@ -58,6 +61,7 @@ export async function runConnectorOutageScenarios(input: {
     { name: prefix + '_pair', group: 'farm_pairing_runtime' },
     { name: prefix + '_owner', group: 'farm_printer_ownership' },
   ]
+  const rolePassword = randomUUID().replaceAll('-', '')
   const created: string[] = []
   const pools: Sql[] = []
   const closers: Array<() => Promise<void>> = []
@@ -68,6 +72,7 @@ export async function runConnectorOutageScenarios(input: {
   try {
     for (const role of roles) {
       await admin`CREATE ROLE ${admin(role.name)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS IN ROLE ${admin(role.group)}`
+      await admin.unsafe(`ALTER ROLE "${role.name}" PASSWORD '${rolePassword}'`)
       created.push(role.name)
       ledger({ resource: 'database-role', name: role.name })
     }
@@ -78,7 +83,7 @@ export async function runConnectorOutageScenarios(input: {
         port: ports.db,
         database: 'fixture',
         username,
-        password: '',
+        password: rolePassword,
         ssl: false,
         max: 2,
         connect_timeout: 3,
@@ -250,21 +255,25 @@ export async function runConnectorOutageScenarios(input: {
     )
 
     // Process control.
-    const databaseUrl = (user: string) =>
-      `postgres://${encodeURIComponent(user)}:synthetic@127.0.0.1:${ports.db}/fixture`
+    const databaseUrls = outageDatabaseUrls({
+      port: ports.db,
+      fixturePassword: input.fixturePassword,
+      telemetryUser: prefix,
+      telemetryPassword: rolePassword,
+    })
     const appEnv = {
       PATH: process.env.PATH ?? '/usr/bin:/bin',
       NODE_ENV: 'production',
       NITRO_HOST: '127.0.0.1',
       NITRO_PORT: String(ports.app),
       NUXT_DATABASE_ENABLED: 'true',
-      NUXT_DATABASE_DATABASE_URL: databaseUrl('fixture'),
+      NUXT_DATABASE_DATABASE_URL: databaseUrls.fixture,
       NUXT_DATABASE_MIGRATIONS: 'verify',
       NUXT_DATABASE_MIGRATIONS_DIR: fileURLToPath(
         new URL('../../infra/db/migrations/', import.meta.url),
       ),
       NUXT_CONNECTOR_TELEMETRY_ENABLED: 'true',
-      NUXT_CONNECTOR_TELEMETRY_DATABASE_URL: databaseUrl(prefix),
+      NUXT_CONNECTOR_TELEMETRY_DATABASE_URL: databaseUrls.telemetry,
       NUXT_CONNECTOR_TELEMETRY_ORIGIN: proxy.origin,
       NUXT_CONNECTOR_TELEMETRY_ISSUER: issuer,
       NUXT_CONNECTOR_TELEMETRY_AUDIENCE: audience,
@@ -540,7 +549,10 @@ export async function runConnectorOutageScenarios(input: {
 
     await scenario('3-connector-sigkill-after-commit-before-ack', async () => {
       const victim = connector!
-      const held = proxy.holdNextCommit()
+      const held = proxy.holdNextCommit({
+        timeoutMs: 30_000,
+        signal: interruption.signal,
+      })
       await push(3)
       const { eventIds, release } = await held
       const killedPid = victim.child.pid
@@ -702,19 +714,25 @@ export async function runConnectorOutageScenarios(input: {
       // Database rows, not diagnostics: the diagnostic budget is bounded per run.
       const delivered = (await rows()).length - rowsBefore
       assert.ok(current.running, 'no crash while draining a full queue')
+      await current.stop()
+      assert.equal((await current.exited).code, 0)
+      // A resubscription can add a snapshot while the queue is still full,
+      // after the pre-drain inspection. Include those reported evictions.
+      const finalEvicted = current.diagnostics
+        .filter((d) => d.kind === 'loss' && d.phase === 'retention')
+        .reduce((n, d) => n + Number(d.capacity), 0)
+      assert.ok(finalEvicted >= evicted && finalEvicted < seeded.length)
       const first =
-        await admin`SELECT count(*)::int AS n FROM farm.telemetry_events WHERE agent_id=${agentId}::uuid AND event_id=${seeded[evicted]!}::uuid`
+        await admin`SELECT count(*)::int AS n FROM farm.telemetry_events WHERE agent_id=${agentId}::uuid AND event_id=${seeded[finalEvicted]!}::uuid`
       assert.equal(first[0]?.n, 1, 'oldest retained record delivered')
       const firstCommit = proxy.log
         .slice(logFrom)
         .find((e) => e.route === 'commit' && e.outcome === 200)
       assert.equal(
         firstCommit?.eventIds?.[0],
-        seeded[evicted],
+        seeded[finalEvicted],
         'oldest retained record is the first committed after restart',
       )
-      await current.stop()
-      assert.equal((await current.exited).code, 0)
       const drainRecordsPerSecond = Math.round(delivered / seconds)
       const backlogDrainEstimateS = Math.round(
         lines.length / Math.max(1, delivered / seconds),
@@ -726,7 +744,7 @@ export async function runConnectorOutageScenarios(input: {
         seededRecords: seededCount,
         queueBytes: fullBytes,
         reopenMs: openMs,
-        evicted,
+        evicted: finalEvicted,
         drainRecordsPerSecond,
         backlogDrainEstimateS,
       }

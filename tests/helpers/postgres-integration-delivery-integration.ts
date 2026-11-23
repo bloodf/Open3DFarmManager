@@ -1,10 +1,7 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import type { Sql } from 'postgres'
-import {
-  IntegrationDeliveryService,
-  type EnvelopeInbox,
-} from '../../apps/farm/server/services/integration-delivery.ts'
+import { IntegrationDeliveryService } from '../../apps/farm/server/services/integration-delivery.ts'
 import { IntegrationAuditService } from '../../apps/farm/server/services/integration-audit.ts'
 import { PostgresIntegrationAudit } from '../../apps/farm/server/storage/integration-audit-postgres.ts'
 import { PostgresIntegrationDelivery } from '../../apps/farm/server/storage/integration-delivery-postgres.ts'
@@ -14,6 +11,38 @@ const denied = async (promise: PromiseLike<unknown>, what: string) => {
   await assert.rejects(Promise.resolve(promise), Error, what)
 }
 
+export type RecordedAuthority = {
+  scope: string
+  confirmedAt: number
+}
+
+/** Inbox fake that keeps the authority the delivery service passed in. */
+export function createRecordingDeliveryInbox() {
+  const sent: string[] = []
+  const authorities: RecordedAuthority[] = []
+  const inbox = {
+    mode: 'sent' as 'sent' | 'no-inbox' | 'throw',
+    sent,
+    authorities,
+    sendToAgentInbox(
+      _farm: string,
+      _agent: string,
+      wire: string,
+      authority: RecordedAuthority,
+    ): 'sent' | 'no-inbox' {
+      if (this.mode === 'throw') throw new Error('socket error')
+      if (this.mode === 'no-inbox') return 'no-inbox'
+      sent.push(wire)
+      authorities.push({
+        scope: authority.scope,
+        confirmedAt: authority.confirmedAt,
+      })
+      return 'sent'
+    },
+  }
+  return inbox
+}
+
 /** Disposable migrated empty database only. Caller owns pools, roles and teardown. */
 export async function testPostgresIntegrationDelivery(
   admin: Sql,
@@ -21,18 +50,10 @@ export async function testPostgresIntegrationDelivery(
 ) {
   const checks: string[] = []
   const check = (name: string) => checks.push(name)
-  const clock = { now: 5_000_000 }
+  const clock = { now: Date.now() }
   const store = new PostgresIntegrationDelivery(runtime)
-  const sent: string[] = []
-  const inbox: EnvelopeInbox & { mode: 'sent' | 'no-inbox' | 'throw' } = {
-    mode: 'sent',
-    sendToAgentInbox(_farm, _agent, wire) {
-      if (this.mode === 'throw') throw new Error('socket error')
-      if (this.mode === 'no-inbox') return 'no-inbox'
-      sent.push(wire)
-      return 'sent'
-    },
-  }
+  const inbox = createRecordingDeliveryInbox()
+  const sent = inbox.sent
   const pair = await crypto.subtle.generateKey('Ed25519', false, [
     'sign',
     'verify',
@@ -201,6 +222,10 @@ export async function testPostgresIntegrationDelivery(
   assert.equal(await status(racing.cmdId), 'sent')
   assert.equal(await service.deliver(racing.cmdId), 'sent')
   assert.equal(sent.length - before, 1)
+  assert.equal(inbox.authorities.length, 1)
+  assert.equal(inbox.authorities[0]?.scope, racing.requiredScope)
+  assert.equal(inbox.authorities[0]?.confirmedAt, clock.now)
+  assert.ok((inbox.authorities[0]?.confirmedAt ?? 0) > 0)
   check('concurrent deliveries write to the inbox once')
 
   // No inbox: back to pending. Throwing write: unknown and never claimed again.

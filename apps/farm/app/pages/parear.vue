@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { useFarmRoute } from '../composables/useFarmRoute.ts'
+import { fetchFarmSelectionPage } from '../composables/useFarmMemberships.ts'
+import { resolveFarmScope } from '../utils/farm-scope.ts'
 import {
   normalizePairingCode,
   PairingApprovalRequest,
@@ -7,8 +10,13 @@ import Button from '../components/ui/Button.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import ErrorState from '../components/ui/ErrorState.vue'
 import Skeleton from '../components/ui/Skeleton.vue'
+import OnboardingField from '../components/onboarding/OnboardingField.vue'
+import OnboardingNotice from '../components/onboarding/OnboardingNotice.vue'
+import OnboardingPage from '../components/onboarding/OnboardingPage.vue'
+import OnboardingPanel from '../components/onboarding/OnboardingPanel.vue'
 const farms = ref<{ farmId: string }[]>([])
 const farmId = ref('')
+const { route, setFarmScope } = useFarmRoute()
 const nextFarm = ref<string | null>(null)
 const code = ref('')
 const fingerprint = ref('')
@@ -45,19 +53,16 @@ async function start() {
       retry: 0,
       timeout: 10000,
     })
-    const page = await $fetch<{
-      farms: { farmId: string }[]
-      nextAfter: string | null
-    }>('/api/farms', {
+    const page = await fetchFarmSelectionPage(route.query.farm, {
       signal: controller.signal,
-      query: { limit: 50 },
-      retry: 0,
-      timeout: 10000,
     })
     if (current !== generation) return
     farms.value = page.farms
+    farmId.value =
+      resolveFarmScope(page.farms, route.query.farm, !!page.nextAfter)
+        ?.farmId ?? ''
     ready.value = true
-    nextFarm.value = page.nextAfter
+    nextFarm.value = page.nextAfter ?? null
   } catch {
     if (current !== generation) return
     clear()
@@ -67,6 +72,18 @@ async function start() {
   } finally {
     loading.value = false
   }
+}
+watch(
+  () => route.query.farm,
+  (requested) => {
+    farmId.value =
+      resolveFarmScope(farms.value, requested, !!nextFarm.value)?.farmId ?? ''
+    confirmed.value = false
+  },
+)
+function switchFarm() {
+  confirmed.value = false
+  void setFarmScope(farmId.value)
 }
 onMounted(start)
 async function nextFarmPage() {
@@ -148,22 +165,31 @@ onBeforeUnmount(clear)
 onBeforeRouteLeave(clear)
 </script>
 <template>
-  <main id="conteudo">
-    <h1>Aprovar Connector</h1>
-    <nav aria-label="Conta">
-      <NuxtLink to="/connectors">Inventário e recuperação</NuxtLink> ·
+  <OnboardingPage title="Aprovar Connector">
+    <template #intro>
+      <p>
+        Somente proprietários e administradores podem aprovar. Compare a
+        impressão digital completa com a exibida no Connector que você está
+        configurando.
+      </p>
+    </template>
+    <nav class="links" aria-label="Conta">
+      <NuxtLink to="/connectors">Inventário e recuperação</NuxtLink>
       <NuxtLink to="/entrar">Entrar na conta</NuxtLink>
     </nav>
-    <p>
-      Somente proprietários e administradores podem aprovar. Compare a impressão
-      digital completa com a exibida no Connector que você está configurando.
-    </p>
-    <p>
-      A confirmação de identidade dura até 60 segundos, incluindo a aprovação e
-      a conclusão no Connector. Prepare este formulário antes de confirmar a
-      identidade no Connector. Se o prazo terminar, inicie um novo pareamento.
-    </p>
-    <div ref="summary" :role="failed ? 'alert' : 'status'" tabindex="-1">
+    <OnboardingNotice tone="warning">
+      <p>
+        A confirmação de identidade dura até 60 segundos, incluindo a aprovação
+        e a conclusão no Connector. Prepare este formulário antes de confirmar a
+        identidade no Connector. Se o prazo terminar, inicie um novo pareamento.
+      </p>
+    </OnboardingNotice>
+    <div
+      ref="summary"
+      class="alert"
+      :role="failed ? 'alert' : 'status'"
+      tabindex="-1"
+    >
       <ErrorState
         v-if="failed"
         title="Pareamento não concluído"
@@ -171,12 +197,14 @@ onBeforeRouteLeave(clear)
       >
         <Button @click="start()">Recarregar formulário</Button>
       </ErrorState>
-      <p v-else>{{ message }}</p>
+      <OnboardingNotice v-else-if="message"
+        ><p>{{ message }}</p></OnboardingNotice
+      >
     </div>
-    <div v-if="loading" aria-busy="true">
+    <OnboardingPanel v-if="loading" busy>
       <p role="status">Carregando suas farms…</p>
-      <Skeleton /><Skeleton /><Skeleton />
-    </div>
+      <div class="skeletons"><Skeleton /><Skeleton /><Skeleton /></div>
+    </OnboardingPanel>
     <EmptyState
       v-else-if="ready && !pending && !farms.length && !nextFarm"
       title="Nenhuma farm disponível"
@@ -184,83 +212,153 @@ onBeforeRouteLeave(clear)
     >
       <NuxtLink to="/entrar">Usar outra conta</NuxtLink>
     </EmptyState>
-    <form v-else :aria-busy="pending" @submit.prevent="approve">
-      <label for="pairing-farm">Farm de destino</label>
-      <select
-        id="pairing-farm"
-        v-model="farmId"
-        :disabled="!ready || pending"
-        required
-        @change="confirmed = false"
-      >
-        <option value="">Selecione</option>
-        <option v-for="farm in farms" :key="farm.farmId" :value="farm.farmId">
-          {{ farm.farmId }}
-        </option>
-      </select>
-      <button
-        v-if="nextFarm"
-        type="button"
-        :disabled="pending || !ready"
-        @click="nextFarmPage"
-      >
-        Próxima página de farms
-      </button>
-      <label for="pairing-code">Código exibido no Connector</label>
-      <input
-        id="pairing-code"
-        v-model="code"
-        maxlength="32"
-        autocomplete="off"
-        spellcheck="false"
-        :disabled="!ready || pending"
-        required
-        @input="confirmed = false"
-      />
-      <label for="pairing-fingerprint"
-        >Impressão digital exibida no Connector</label
-      >
-      <input
-        id="pairing-fingerprint"
-        v-model="fingerprint"
-        maxlength="50"
-        autocomplete="off"
-        spellcheck="false"
-        :disabled="!ready || pending"
-        required
-        @input="confirmed = false"
-      />
-      <label
-        ><input
-          v-model="confirmed"
-          type="checkbox"
-          :disabled="!ready || pending"
-        />
-        Conferi a impressão digital completa e a farm de destino.</label
-      >
-      <button type="submit" :disabled="!ready || pending || !confirmed">
-        {{ pending ? 'Aprovando…' : 'Aprovar Connector' }}
-      </button>
-    </form>
-  </main>
+    <OnboardingPanel
+      v-else
+      heading-id="pairing-heading"
+      title="Dados do Connector"
+      :busy="pending"
+    >
+      <form class="form" :aria-busy="pending" @submit.prevent="approve">
+        <OnboardingField
+          id="pairing-farm"
+          label="Farm de destino"
+          help="A farm que receberá este Connector."
+          v-slot="{ describedBy }"
+        >
+          <select
+            id="pairing-farm"
+            v-model="farmId"
+            :aria-describedby="describedBy"
+            :disabled="!ready || pending"
+            required
+            @change="switchFarm"
+          >
+            <option value="">Selecione</option>
+            <option
+              v-for="farm in farms"
+              :key="farm.farmId"
+              :value="farm.farmId"
+            >
+              {{ farm.farmId }}
+            </option>
+          </select>
+        </OnboardingField>
+        <div v-if="nextFarm" class="actions">
+          <Button :disabled="pending || !ready" @click="nextFarmPage">
+            Próxima página de farms
+          </Button>
+        </div>
+        <OnboardingField
+          id="pairing-code"
+          label="Código exibido no Connector"
+          help="Digite o código de pareamento mostrado no Connector."
+          v-slot="{ describedBy }"
+        >
+          <input
+            id="pairing-code"
+            v-model="code"
+            maxlength="32"
+            autocomplete="off"
+            spellcheck="false"
+            :aria-describedby="describedBy"
+            :disabled="!ready || pending"
+            required
+            @input="confirmed = false"
+          />
+        </OnboardingField>
+        <OnboardingField
+          id="pairing-fingerprint"
+          label="Impressão digital exibida no Connector"
+          help="Copie a impressão digital completa, inclusive o prefixo SHA256:."
+          v-slot="{ describedBy }"
+        >
+          <input
+            id="pairing-fingerprint"
+            v-model="fingerprint"
+            class="mono"
+            maxlength="50"
+            autocomplete="off"
+            spellcheck="false"
+            :aria-describedby="describedBy"
+            :disabled="!ready || pending"
+            required
+            @input="confirmed = false"
+          />
+        </OnboardingField>
+        <label class="check"
+          ><input
+            v-model="confirmed"
+            type="checkbox"
+            :disabled="!ready || pending"
+          />
+          <span
+            >Conferi a impressão digital completa e a farm de destino.</span
+          ></label
+        >
+        <div class="actions">
+          <Button type="submit" :disabled="!ready || pending || !confirmed">
+            {{ pending ? 'Aprovando…' : 'Aprovar Connector' }}
+          </Button>
+        </div>
+      </form>
+    </OnboardingPanel>
+  </OnboardingPage>
 </template>
 <style scoped>
-label {
-  display: block;
-  margin-top: 1rem;
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
 }
-input,
-select,
-button {
-  font: inherit;
+.alert:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: var(--focus-ring-offset);
+  border-radius: var(--radius-md);
+}
+.alert:empty {
+  display: none;
+}
+.alert :deep(.ui-card) {
+  border: 1px solid var(--color-border);
+  box-shadow: none;
+}
+.skeletons {
+  display: grid;
+  gap: var(--space-3);
+}
+.form {
+  display: grid;
+  gap: var(--space-4);
+  max-width: 34rem;
+}
+.mono {
+  font-family: ui-monospace, monospace;
+}
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
   min-height: 2.75rem;
-  max-width: 100%;
 }
-input:not([type='checkbox']) {
-  width: 100%;
+.check input {
+  flex: none;
+  inline-size: 1.5rem;
+  block-size: 1.5rem;
+  margin: 0;
+  accent-color: var(--color-accent);
 }
-:focus-visible {
-  outline: 3px solid currentColor;
-  outline-offset: 3px;
+.check input:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+}
+@media (max-width: 30rem) {
+  .actions :deep(.ui-button) {
+    width: 100%;
+  }
 }
 </style>

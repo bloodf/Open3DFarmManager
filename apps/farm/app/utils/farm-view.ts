@@ -1,3 +1,4 @@
+import { readFarmMemberships, resolveFarmScope } from './farm-scope.ts'
 import { z } from 'zod'
 import {
   BrowserDeviceHttpAccountResponse,
@@ -210,6 +211,7 @@ type Read = (
 ) => Promise<unknown>
 type Dependencies = {
   read: Read
+  requestedFarm?: () => unknown
   listKeys: (scope: {
     accountId: string
     farmId: string
@@ -312,11 +314,22 @@ export const printerStateLabel: Record<
   paused: 'Pausada',
   error: 'Erro',
   offline: 'Indisponível segundo o Connector',
+  unknown: 'Estado da impressora desconhecido',
 }
 
-export function formatPrinterStateLabel(
-  printer: Pick<z.infer<typeof PrinterState>, 'state' | 'statusReason'>,
+type PrinterOperationalState = Pick<
+  PrinterState,
+  'state' | 'statusReason' | 'preformStatus' | 'statusMessage'
+>
+
+export function formatPrinterOperationalStateLabel(
+  printer: PrinterOperationalState,
 ): string {
+  if (printer.state === 'error' && printer.statusReason === 'firmware-shutdown')
+    return printer.statusMessage
+      ? `Firmware desligado — ${printer.statusMessage}`
+      : 'Firmware desligado'
+  if (printer.preformStatus) return `PreForm informou: ${printer.preformStatus}`
   if (
     printer.state === 'offline' &&
     printer.statusReason === 'client-certificate-missing'
@@ -324,6 +337,24 @@ export function formatPrinterStateLabel(
     return 'Certificado do cliente ausente (client certificate missing)'
   }
   return printerStateLabel[printer.state]
+}
+
+export function formatPrinterAlarmLabel(
+  alarms: PrinterState['alarms'],
+): string {
+  const labels: string[] = []
+  if (alarms?.printError) labels.push(`Erro de impressão: ${alarms.printError}`)
+  if (alarms?.hmsCount && alarms.hmsCode)
+    labels.push(`Alertas HMS: ${alarms.hmsCount} (${alarms.hmsCode})`)
+  return labels.join(' — ')
+}
+
+export function formatPrinterStateLabel(
+  printer: PrinterOperationalState & Pick<PrinterState, 'alarms'>,
+): string {
+  const state = formatPrinterOperationalStateLabel(printer)
+  const alarms = formatPrinterAlarmLabel(printer.alarms)
+  return alarms ? `${state} — ${alarms}` : state
 }
 
 /** Live-region copy: only stable live/unavailable changes, never transient steps. */
@@ -469,12 +500,17 @@ export function createFarmView(deps: Dependencies) {
     try {
       const accountId = await me(run.signal)
       if (!run.current()) return
-      const page = FarmDiscoveryPage.parse(
-        await deps.read('/api/farms', run.signal, {
-          limit: 20,
-          ...(after ? { after: BrowserDeviceUuid.parse(after) } : {}),
-        }),
-      )
+      const readPage = async (cursor?: string) =>
+        FarmDiscoveryPage.parse(
+          await deps.read('/api/farms', run.signal, {
+            limit: 20,
+            ...(cursor ? { after: BrowserDeviceUuid.parse(cursor) } : {}),
+          }),
+        )
+      const page =
+        deps.requestedFarm && after === null
+          ? { farms: await readFarmMemberships(readPage), nextAfter: null }
+          : await readPage(after ?? undefined)
       if (!run.current()) return
       await me(run.signal, accountId)
       if (!run.current()) return
@@ -494,14 +530,10 @@ export function createFarmView(deps: Dependencies) {
         canManage: false,
         keys: { kind: 'loading' },
       })
-      if (
-        run.current() &&
-        after === null &&
-        page.farms.length === 1 &&
-        page.nextAfter === null &&
-        page.farms[0]
-      )
-        await selectFarm(page.farms[0].farmId)
+      if (run.current() && after === null && page.nextAfter === null) {
+        const selected = resolveFarmScope(page.farms, deps.requestedFarm?.())
+        if (selected) await selectFarm(selected.farmId)
+      }
     } catch (error) {
       if (run.current()) failed(error)
     }

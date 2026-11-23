@@ -4,6 +4,7 @@
 import {
   createHash,
   generateKeyPairSync,
+  KeyObject,
   randomBytes,
   randomUUID,
 } from 'node:crypto'
@@ -188,6 +189,7 @@ async function farmServer(farmId: string, options: { tamper?: boolean } = {}) {
       publicKeySpki,
     })
     return {
+      identity: new ConnectorIdentity(KeyObject.from(pair.privateKey)),
       agent_id: agentId,
       farm_id: farmId,
       device_token: await issueConnectorCredential({
@@ -300,9 +302,11 @@ async function connector(
     agent_id: agentId,
     farm_id: farmId,
   })
+  const connectorCredential = await server.credential(agentId)
   const library = await createConnectorLibrary({
     endpoint: server.endpoint,
-    credential: await server.credential(agentId),
+    credential: connectorCredential,
+    identity: connectorCredential.identity,
     dataDirectory,
     ca: cert,
   })
@@ -703,7 +707,7 @@ describe('command journal', () => {
       ).sql
       expect(sql).toContain("'config_write','start_library_print'")
       db.exec(
-        `DROP TABLE control_command_actions; ${sql.replace(",'start_library_print'", '')}; INSERT INTO control_command_actions VALUES ('retained', 'config_write'); PRAGMA user_version=15;`,
+        `DROP INDEX pause_active_assignment; DROP INDEX pause_active_printer; CREATE UNIQUE INDEX pause_active_assignment ON pause_commands(assignment_id) WHERE status IN ('claimed','write-started','outcome-unknown'); CREATE UNIQUE INDEX pause_active_printer ON pause_commands(farm_id,printer_key) WHERE status IN ('claimed','write-started','outcome-unknown'); DROP TABLE control_command_actions; ${sql.replace(",'start_library_print'", '')}; INSERT INTO control_command_actions VALUES ('retained', 'config_write'); PRAGMA user_version=15;`,
       )
     } finally {
       db.close()
@@ -720,7 +724,7 @@ describe('command journal', () => {
         .prepare('INSERT INTO control_command_actions VALUES (?,?)')
         .run('library', 'start_library_print')
       expect(upgraded.prepare('PRAGMA user_version').get()).toEqual({
-        user_version: 16,
+        user_version: 17,
       })
     } finally {
       upgraded.close()

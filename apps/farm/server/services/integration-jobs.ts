@@ -1,7 +1,9 @@
+import { validateResinArtifactContract } from '../../../../packages/shared/src/print-file/resin-artifacts.ts'
 import { createHash, randomUUID } from 'node:crypto'
 import {
   ApiEnvelopeAction,
   ApiEnvelopeJob,
+  ApiResinReplay,
 } from '../../../../packages/farm-protocol/src/api-envelope.ts'
 import {
   libraryJobFileUrl,
@@ -58,6 +60,7 @@ export interface JobFile {
   libraryVersionId?: string
   plate?: number
   storageMode?: StorageMode
+  resinProfile?: string
 }
 export interface NewJob extends JobFile {
   id: string
@@ -123,13 +126,18 @@ export interface JobView {
   libraryVersionId?: string
   plate?: number
   storageMode?: StorageMode
+  resinProfile?: string
   historyEntryId?: string
   createdAt: number
   updatedAt: number
 }
 export type SubmitJobResult =
   | { ok: true; created: boolean; job: JobView }
-  | { ok: false; problem: JobProblem }
+  | {
+      ok: false
+      problem: JobProblem
+      reason?: { pointer: string; detail: string }
+    }
 
 const PENDING_DELIVERY: readonly EnvelopeStatus[] = [
   'pending',
@@ -175,6 +183,7 @@ export function jobView(
       : {}),
     ...(record.plate !== undefined ? { plate: record.plate } : {}),
     ...(record.storageMode ? { storageMode: record.storageMode } : {}),
+    ...(record.resinProfile ? { resinProfile: record.resinProfile } : {}),
     createdAt: record.createdAt,
     updatedAt: Math.max(record.updatedAt, envelope?.updatedAt ?? 0),
   }
@@ -243,6 +252,19 @@ export function parseLibraryJobRequest(
   return { libraryVersionId: id.toLowerCase(), plate: input.plate }
 }
 
+export function resinReplayAction(file: JobFile) {
+  return ApiResinReplay.parse({
+    action: 'start_library_print',
+    args: {
+      sha256: file.sha256,
+      versionId: file.libraryVersionId,
+      filename: file.displayName,
+      profile: file.resinProfile,
+      plate: file.plate,
+    },
+  })
+}
+
 export function jobRequestHash(printerId: string, file: JobFile) {
   return createHash('sha256')
     .update(
@@ -285,6 +307,8 @@ export type IntegrationJobsOptions = Readonly<{
       outcome: 'accepted' | 'held'
     }): Promise<void>
   }
+  /** Read current operational availability before accepting a job. */
+  fleetMode?: (printerId: string) => Promise<'in-service' | 'maintenance'>
   /** Absent when no envelope signer is configured: only held jobs can be accepted. */
   envelopes?: JobEnvelopes
   maxFileBytes?: number
@@ -304,6 +328,19 @@ export class IntegrationJobsService {
 
   get maxFileBytes() {
     return this.o.maxFileBytes ?? DEFAULT_MAX_JOB_BYTES
+  }
+
+  async actionTarget(principal: IntegrationPrincipal, jobId: string) {
+    if (!uuidPattern.test(jobId)) return null
+    const result = await this.o.store.get(jobId, principal.appId)
+    if (!result) return null
+    const { record, envelope } = result
+    return {
+      id: record.id,
+      farmId: record.farmId,
+      printerId: record.printerAssignmentId,
+      runId: envelope?.cmdId,
+    }
   }
 
   async get(principal: IntegrationPrincipal, jobId: string) {
@@ -363,15 +400,40 @@ export class IntegrationJobsService {
 
     const target = await this.o.store.target(printer)
     const grant = target
-      ? integrationGrantFor(principal, 'jobs:start', target.farmId, printer)
+      ? libraryRequest
+        ? (principal.grants
+            .filter(
+              (candidate) =>
+                candidate.scopes.includes('jobs:start') &&
+                candidate.scopes.includes('jobs:write') &&
+                candidate.farmId === target.farmId &&
+                (candidate.printerAssignmentId === null ||
+                  candidate.printerAssignmentId === printer),
+            )
+            .find((candidate) => !candidate.requiresApproval) ??
+          principal.grants.find(
+            (candidate) =>
+              candidate.scopes.includes('jobs:start') &&
+              candidate.scopes.includes('jobs:write') &&
+              candidate.farmId === target.farmId &&
+              (candidate.printerAssignmentId === null ||
+                candidate.printerAssignmentId === printer),
+          ))
+        : integrationGrantFor(principal, 'jobs:start', target.farmId, printer)
       : undefined
-    const writeGrant =
-      libraryRequest && target
-        ? integrationGrantFor(principal, 'jobs:write', target.farmId, printer)
-        : undefined
-    if (!target || !grant) return { ok: false, problem: 'not-found' }
-    if (libraryRequest && !writeGrant)
-      return { ok: false, problem: 'insufficient-scope' }
+    if (!target) return { ok: false, problem: 'not-found' }
+    if (!grant)
+      return {
+        ok: false,
+        problem: libraryRequest ? 'insufficient-scope' : 'not-found',
+      }
+
+    if ((await this.o.fleetMode?.(printer)) === 'maintenance')
+      return {
+        ok: false,
+        problem: 'validation-failed',
+        reason: { pointer: '/printerId', detail: 'maintenance' },
+      }
 
     let file = parsed
     if (libraryRequest) {
@@ -384,8 +446,31 @@ export class IntegrationJobsService {
         return { ok: false, problem: 'service-unavailable' }
       }
       if (!this.o.library) return { ok: false, problem: 'service-unavailable' }
-      if (!resolved || resolved.farmId !== target.farmId)
+      if (
+        !resolved ||
+        resolved.id !== libraryRequest.libraryVersionId ||
+        resolved.farmId !== target.farmId
+      )
         return { ok: false, problem: 'not-found' }
+      if (resolved.resinProfile !== undefined) {
+        const contract = validateResinArtifactContract(
+          resolved.displayName,
+          resolved.resinProfile,
+          libraryRequest.plate,
+        )
+        if (!contract.ok)
+          return {
+            ok: false,
+            problem: 'validation-failed',
+            reason: {
+              pointer:
+                contract.reason === 'plate-mismatch'
+                  ? '/plate'
+                  : '/libraryVersionId',
+              detail: contract.reason,
+            },
+          }
+      }
       if (
         libraryRequest.plate !== undefined &&
         libraryRequest.plate > resolved.plateCount
@@ -398,9 +483,11 @@ export class IntegrationJobsService {
         displayName: resolved.displayName,
         libraryVersionId: resolved.id,
         storageMode: resolved.storageMode,
-        ...(libraryRequest.plate !== undefined
-          ? { plate: libraryRequest.plate }
-          : {}),
+        ...(resolved.resinProfile !== undefined
+          ? { resinProfile: resolved.resinProfile, plate: 1 }
+          : libraryRequest.plate !== undefined
+            ? { plate: libraryRequest.plate }
+            : {}),
       }
     }
     if (!file) return { ok: false, problem: 'validation-failed' }
@@ -454,32 +541,37 @@ export class IntegrationJobsService {
       // New job, or a retry of a job whose envelope was never issued.
       const issued = await envelopes.issue({
         appId: record.appId,
-        grantId: writeGrant?.id ?? record.grantId,
+        grantId: record.grantId,
         farmId: record.farmId,
         agentId: target.agentId,
         printerAssignmentId: record.printerAssignmentId,
         resourceId: record.id,
         ttlMs: this.o.envelopeTtlMs ?? DEFAULT_JOB_ENVELOPE_TTL_MS,
-        command: libraryRequest
-          ? {
-              kind: 'action',
-              action: ApiEnvelopeAction.parse({
-                action: 'start_library_print',
-                args: {
-                  sha256: record.sha256,
-                  ...(file.plate !== undefined ? { plate: file.plate } : {}),
+        command:
+          record.resinProfile !== undefined
+            ? { kind: 'action', action: resinReplayAction(record) }
+            : libraryRequest
+              ? {
+                  kind: 'action',
+                  action: ApiEnvelopeAction.parse({
+                    action: 'start_library_print',
+                    args: {
+                      sha256: record.sha256,
+                      ...(file.plate !== undefined
+                        ? { plate: file.plate }
+                        : {}),
+                    },
+                  }),
+                }
+              : {
+                  kind: 'job',
+                  job: {
+                    file_url: record.fileUrl,
+                    sha256: record.sha256,
+                    size_bytes: record.sizeBytes,
+                    display_name: record.displayName,
+                  },
                 },
-              }),
-            }
-          : {
-              kind: 'job',
-              job: {
-                file_url: record.fileUrl,
-                sha256: record.sha256,
-                size_bytes: record.sizeBytes,
-                display_name: record.displayName,
-              },
-            },
       })
       if (!issued.ok)
         return {

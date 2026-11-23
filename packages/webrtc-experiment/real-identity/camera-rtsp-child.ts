@@ -55,13 +55,19 @@ lines.on('line', (line) => {
           const agent = text(control, 'agent'),
             farm = text(control, 'farm'),
             assignment = text(control, 'assignment'),
+            firstAssignment = text(control, 'firstAssignment'),
             helperPath = text(control, 'helperPath'),
             helperSha256 = text(control, 'helperSha256')
           const port = Number(control.rtspPort)
           if (!Number.isInteger(port) || port < 1 || port > 65535)
             throw Error('Bad port')
           const refs = [
-            { assignmentId: assignment, agentId: agent, printerKey: 'sim-1' },
+            {
+              assignmentId: firstAssignment,
+              agentId: agent,
+              printerKey: 'sim-1',
+            },
+            { assignmentId: assignment, agentId: agent, printerKey: 'sim-2' },
           ]
           peer?.close()
           camera = new ConnectorCameraMedia({
@@ -70,9 +76,18 @@ lines.on('line', (line) => {
             assignmentRefs: refs,
             cameras: [
               {
-                cameraId: 'sim-camera',
+                cameraId: 'sim-camera-a',
+                scope: {
+                  farmId: farm,
+                  agentId: agent,
+                  printerId: firstAssignment,
+                },
+                sourceHandle: 'rtsp-sim-a',
+              },
+              {
+                cameraId: 'sim-camera-b',
                 scope: { farmId: farm, agentId: agent, printerId: assignment },
-                sourceHandle: 'rtsp-sim',
+                sourceHandle: 'rtsp-sim-b',
               },
             ],
             signProof: (statement) =>
@@ -86,7 +101,7 @@ lines.on('line', (line) => {
                 sourceHandle: handle,
                 // Private local resolution; the browser never sees this.
                 resolveLocal: (value) =>
-                  value === 'rtsp-sim'
+                  value === 'rtsp-sim-b'
                     ? { address: '127.0.0.1', port, path: '/test' }
                     : undefined,
                 signal,

@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import type { LibraryRuntimeConfig } from '../config/runtime.ts'
+import type { ConnectorIdentity } from '../identity/store.ts'
 import type {
   LibraryMigrationDirectionValue,
   LibraryMigrationOutcomeValue,
@@ -92,6 +93,8 @@ export function createPrinterProfiles() {
 export async function createConnectorLibrary(config: {
   endpoint: string
   credential: { device_token: string; farm_id: string; agent_id: string }
+  /** Enrolled key: signs a fresh proof of possession on every request (#580). */
+  identity: Pick<ConnectorIdentity, 'signLibraryProof'>
   dataDirectory: string
   /** Trust anchor for a private server certificate. */
   ca?: string | Buffer
@@ -107,10 +110,17 @@ export async function createConnectorLibrary(config: {
   }
   if (baseUrl.protocol !== 'https:') return undefined
   const { device_token, farm_id, agent_id } = config.credential
+  const { identity } = config
   const headers = () => ({
     authorization: `Bearer ${device_token}`,
     'x-connector-agent': agent_id,
     'x-connector-farm': farm_id,
+    ...identity.signLibraryProof({
+      token: device_token,
+      agentId: agent_id,
+      farmId: farm_id,
+      now: Date.now(),
+    }),
   })
   const download = createHttpsLibraryDownloader({
     baseUrl: baseUrl.origin,

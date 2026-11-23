@@ -11,7 +11,8 @@ describe('catálogo de integrações simuladas', () => {
       'creality-k1-stock-lan',
       ['telemetry', 'files', 'pause', 'resume', 'cancel'],
     ],
-    ['anycubic-kobra-x', ['telemetry', 'files', 'pause', 'resume', 'cancel']],
+    // Telemetry on the Kobra X is hardware-proven; the rest stay simulated.
+    ['anycubic-kobra-x', ['files', 'pause', 'resume', 'cancel']],
   ] as const)('%s informa os recursos e limites', (id, capabilities) => {
     const product = compatibilityPageCatalog.find((item) => item.id === id)
     expect(product).toBeDefined()

@@ -162,6 +162,7 @@ export function createConfigurationSignallingClient(
     let retries = 0
     let context: Context | null = null
     let leaseTimer: ReturnType<typeof setTimeout> | undefined
+    let retryTimer: ReturnType<typeof setTimeout> | undefined
     let readied = false
     let stage: FrameStage = 'frame-shape'
     let miss: WindowMiss | null = null
@@ -193,6 +194,8 @@ export function createConfigurationSignallingClient(
       if (stopped) return
       stopped = true
       clearTimeout(leaseTimer)
+      clearTimeout(retryTimer)
+      retryTimer = undefined
       if (online) options.runtime().revokeAll()
       online = false
       closeContext('signalling-closed')
@@ -321,8 +324,15 @@ export function createConfigurationSignallingClient(
       switch (frame.t) {
         case 'config.retry':
           if (phase !== 'begin' || ++retries > 2) throw new Error('Busy')
-          setTimeout(() => {
-            if (!signal.aborted) begin()
+          clearTimeout(retryTimer)
+          retryTimer = setTimeout(() => {
+            retryTimer = undefined
+            if (signal.aborted || stopped) return
+            try {
+              begin()
+            } catch {
+              stop()
+            }
           }, frame.retry_after_ms)
           return
         case 'config.connector-challenge': {

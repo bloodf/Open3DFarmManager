@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
 import { build, type Plugin } from 'esbuild'
@@ -10,6 +10,11 @@ const sfc = createRequire(join(app, 'package.json'))('vue/compiler-sfc')
 // Mount the actual page script and form, replacing only network discovery and lifecycle.
 export async function setupFormsBundle(revision: number | null = 1) {
   const page = readFileSync(join(pages, 'impressoras.vue'), 'utf8')
+  const panelPath = join(
+    app,
+    'app/components/printer-setup/AddPrinterPanel.vue',
+  )
+  const panel = existsSync(panelPath) ? readFileSync(panelPath, 'utf8') : page
   const script = page
     .slice(0, page.indexOf('</script>'))
     .replace(
@@ -25,6 +30,10 @@ const openPrinterDiscoverySession = async () => ({
 const useNetworkAdoption = () => ref(null)`,
     )
     .replace(
+      "import AddPrinterPanel from '../components/printer-setup/AddPrinterPanel.vue'",
+      "import DiscoveryPanel from '../components/printer-setup/DiscoveryPanel.vue'\nimport SetupForm from '../components/printer-setup/SetupForm.vue'",
+    )
+    .replace(
       /onMounted\(\(\) => \{[\s\S]*$/,
       `kobraBootstrap.value = { kind: 'ready', data: { bootstrap: { revision: ${JSON.stringify(revision)} } } }
 kobraKeyId.value = 'synthetic'
@@ -32,12 +41,12 @@ kobraKeyState.value = { kind: 'available', accountId: 'synthetic', choices: [{ k
 kobraController = new AbortController()
 </script>`,
     )
-  const start = page.indexOf(
-    '      <div v-if="kobraStage === \'idle\'" class="setup-columns">',
+  const start = panel.indexOf(
+    '<div v-if="kobraStage === \'idle\'" class="setup-columns">',
   )
-  const end = page.indexOf('      <div v-if="kobraBusy"', start)
+  const end = panel.indexOf('<div v-if="kobraBusy"', start)
   if (start < 0 || end < 0) throw new Error('Setup form not found')
-  const source = `${script}<template><main><p v-if="kobraError" ref="kobraErrorSummary" role="alert" tabindex="-1">{{ kobraError }}</p>${page.slice(start, end)}</main></template>`
+  const source = `${script}<template><main><p v-if="kobraError" ref="kobraErrorSummary" role="alert" tabindex="-1">{{ kobraError }}</p>${panel.slice(start, end)}</main></template>`
   const compile = (text: string, filename: string) => {
     const { descriptor, errors } = sfc.parse(text, { filename })
     if (errors.length) throw errors[0]

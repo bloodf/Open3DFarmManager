@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{title}}</title>
+    <meta name="description" content="{{description}}" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+    <script>
+      /*theme-init*/
+    </script>
+    <link rel="stylesheet" href="assets/site.css" />
+    <script src="assets/site.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#conteudo">Ir para o conteúdo</a>
+    <header class="site-header">
+      <p class="status-strip">
+        <strong>Prévia de desenvolvimento.</strong> Fase 0 em andamento; nada
+        comprovado em hardware físico.
+      </p>
+      <div class="container site-header__bar">
+        <a class="brand" href="#inicio">
+          <svg
+            class="brand__mark"
+            viewBox="0 0 32 32"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+            aria-hidden="true"
+          >
+            <rect x="3" y="3" width="26" height="26" />
+            <path d="M3 21h26M12 21v8M20 21v8M16 3v8" />
+          </svg>
+          <span>Open3DFarmManager</span>
+        </a>
+        <nav class="site-nav" aria-label="Principal">
+          <ul>
+            {{nav}}
+          </ul>
+        </nav>
+        <button
+          class="theme-toggle"
+          type="button"
+          aria-pressed="false"
+          data-theme-toggle
+          hidden
+        >
+          <span class="theme-toggle__glyph" aria-hidden="true"></span>
+          Tema escuro
+        </button>
+      </div>
+    </header>
+    <main id="conteudo" tabindex="-1">{{sections}}</main>
+    <footer class="site-footer">
+      <div class="container site-footer__grid">
+        <div>
+          <p class="brand">Open3DFarmManager</p>
+          <p class="site-footer__note">
+            Projeto open source sob a
+            <a href="{{repo}}/blob/main/LICENSE">licença MIT</a>. Dependências e
+            fontes de terceiros mantêm suas próprias licenças e avisos; veja
+            <a href="{{repo}}/blob/main/THIRD_PARTY.md">THIRD_PARTY.md</a>.
+          </p>
+          <p class="site-footer__note">
+            Em desenvolvimento: não é uma versão pronta para operar uma farm em
+            produção. Nenhuma capacidade está comprovada em hardware físico.
+          </p>
+        </div>
+        <nav aria-labelledby="footer-projeto">
+          <h2 id="footer-projeto">Projeto</h2>
+          <ul>
+            <li><a href="{{repo}}">Repositório no GitHub</a></li>
+            <li>
+              <a href="{{repo}}/blob/main/docs/PHASE-0.md"
+                >Registro da Fase 0</a
+              >
+            </li>
+            <li><a href="{{repo}}/issues">Issues</a></li>
+          </ul>
+        </nav>
+        <nav aria-labelledby="footer-docs">
+          <h2 id="footer-docs">Documentação</h2>
+          <ul>
+            <li><a href="{{repo}}/blob/main/README.md">README</a></li>
+            <li>
+              <a href="{{repo}}/blob/main/docs/SELF-HOSTING.md"
+                >Hospedagem própria</a
+              >
+            </li>
+            <li>
+              <a href="{{repo}}/tree/main/docs/compatibility"
+                >Compatibilidade</a
+              >
+            </li>
+            <li>
+              <a href="{{repo}}/blob/main/docs/UI-GLOSSARY.md"
+                >Glossário da interface</a
+              >
+            </li>
+          </ul>
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>

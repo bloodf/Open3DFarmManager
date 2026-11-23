@@ -42,6 +42,7 @@ const icons = {
   paused: 'Ⅱ',
   error: '!',
   offline: '×',
+  unknown: '?',
 }
 const state = computed(() => props.observation?.state)
 const job = computed(() => state.value && farmJobView(state.value))

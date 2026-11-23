@@ -2,19 +2,27 @@
  * Stock LAN wire facts only; no vendor implementation copied.
  * Upload and K1 start path:
  * https://github.com/OrcaSlicer/OrcaSlicer/blob/main/src/slic3r/Utils/CrealityPrint.cpp
- * No listing request/response contract in these sources:
- * https://github.com/ChestnutLabs/printer-protocol-orchard/blob/main/protocols/creality.md
+ * Listing request, reply and stock storage paths:
+ * https://github.com/Accessible3D-Edis/AccessSlice/blob/620e023e5425137c58353ffa6974c260b103d134/app/creality_lan.py#L17-L24
  * This module consumes an already staged Connector file; it creates no relay.
  */
 import { open } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { Readable } from 'node:stream'
 import WebSocket from 'ws'
+import { z } from 'zod'
+import type { PrinterFile } from '../../../farm-protocol/src/file-list.ts'
+import {
+  readCrealityPrinterBinding,
+  type PrinterBinding,
+} from '../control/printer-binding.ts'
+import { resolveCrealityEndpoint } from '../discovery/creality.ts'
+import { crealityGcodeReference } from './gcode-path.ts'
 
 export const CREALITY_MAX_FILE_BYTES = 512 * 1024 * 1024
 export const CREALITY_FILE_CAPABILITIES = {
   upload: true,
-  list: false,
+  list: true,
   start: true,
 } as const
 
@@ -26,8 +34,112 @@ function validateName(name: string) {
     throw new Error('Invalid Creality G-code filename')
 }
 
-export async function listCrealityFiles(): Promise<never> {
-  throw new Error('unsupported: Creality stock file listing is undocumented')
+const FileEntry = z.object({
+  name: z.string(),
+  path: z.string(),
+  size: z.number().int().nonnegative(),
+})
+const FileReport = z.object({ retGcodeFileInfo2: z.array(z.unknown()) })
+
+function readFileReport(value: unknown) {
+  const files = new Map<string, z.infer<typeof PrinterFile>>()
+  for (const item of FileReport.parse(value).retGcodeFileInfo2) {
+    const entry = FileEntry.safeParse(item)
+    if (!entry.success) continue
+    const { name, path, size } = entry.data
+    const reference = crealityGcodeReference(name, path)
+    if (!reference) continue
+    const printRef = reference === name ? undefined : reference
+    const previous = files.get(name)
+    if (previous && previous.printRef !== printRef)
+      throw Error('Ambiguous Creality filenames')
+    files.set(name, {
+      name,
+      size,
+      modified: 0,
+      ...(printRef ? { printRef } : {}),
+    })
+  }
+  return [...files.values()].slice(0, 200)
+}
+
+export async function listCrealityFiles(input: {
+  binding: PrinterBinding
+  signal: AbortSignal
+  authorized(): boolean
+}): Promise<z.infer<typeof PrinterFile>[]> {
+  const local = readCrealityPrinterBinding(input.binding)
+  const signal = AbortSignal.any([input.signal, AbortSignal.timeout(8000)])
+  const check = () => {
+    signal.throwIfAborted()
+    if (
+      !local ||
+      readCrealityPrinterBinding(input.binding) !== local ||
+      !input.authorized()
+    )
+      throw Error('unauthorized')
+    return local
+  }
+  const endpoint = await resolveCrealityEndpoint(check())
+  const { host } = check()
+  const socketHost = host.includes(':') ? `[${host}]` : host
+  const socket = new WebSocket(
+    `${endpoint.secure ? 'wss' : 'ws'}://${socketHost}:${endpoint.port}/`,
+    {
+      ...(endpoint.ca ? { ca: endpoint.ca } : {}),
+      maxPayload: 1024 * 1024,
+      perMessageDeflate: false,
+      followRedirects: false,
+      handshakeTimeout: 5000,
+    },
+  )
+  try {
+    return await new Promise((resolve, reject) => {
+      const abort = () => finish(signal.reason)
+      function finish(error: unknown) {
+        signal.removeEventListener('abort', abort)
+        reject(error)
+      }
+      signal.addEventListener('abort', abort, { once: true })
+      socket.once('error', finish)
+      socket.once('close', () => finish(Error('Creality connection closed')))
+      socket.once('open', () => {
+        try {
+          check()
+          socket.send(
+            JSON.stringify({ method: 'get', params: { reqGcodeFile: 1 } }),
+          )
+        } catch (error) {
+          finish(error)
+        }
+      })
+      socket.on('message', (raw, binary) => {
+        if (binary) return
+        try {
+          check()
+          let value: unknown
+          try {
+            value = JSON.parse(raw.toString())
+          } catch {
+            return
+          }
+          if (!value || typeof value !== 'object') return
+          if ('ModeCode' in value && value.ModeCode === 'heart_beat') {
+            socket.send('ok')
+            return
+          }
+          if (!('retGcodeFileInfo2' in value)) return
+          const files = readFileReport(value)
+          signal.removeEventListener('abort', abort)
+          resolve(files)
+        } catch (error) {
+          finish(error)
+        }
+      })
+    })
+  } finally {
+    socket.terminate()
+  }
 }
 
 export async function uploadCrealityFile(input: {

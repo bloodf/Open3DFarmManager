@@ -1,15 +1,25 @@
+import {
+  temperatureJournalAction,
+  toolTemperatureRefusal,
+} from './control-driver.ts'
+import { ToolHeaters } from '../../../farm-protocol/src/state.ts'
 import { authorityConfirmation } from '../auth/offline-authority.ts'
 import {
   controlWithinLimits,
   type ControlLimits,
 } from '../runtime/control-limits.ts'
 import {
+  speedModeAllowed,
+  controlPrinterBusy,
   controlSourceState,
   controlRoleAllowed,
   controlTargetState,
   ControlResultCode,
+  ToolIndex,
+  ToolTemperatureArgs,
   type ControlAction,
   type ExtendedControlAction,
+  type SpeedMode,
 } from '../../../farm-protocol/src/control-actions.ts'
 import { createHash } from 'node:crypto'
 import {
@@ -62,6 +72,7 @@ const Observation = z.strictObject({
   readyObservedMono: mono,
   printStateObservedMono: mono,
   receivedMono: mono,
+  toolHeaters: ToolHeaters.optional(),
   effect: z
     .discriminatedUnion('kind', [
       z.strictObject({
@@ -73,6 +84,12 @@ const Observation = z.strictObject({
         kind: z.literal('temperature'),
         heater: z.enum(['extruder', 'bed', 'chamber']),
         target_c: z.number().finite(),
+        observedMono: mono,
+      }),
+      z.strictObject({
+        kind: z.literal('tool-temperature'),
+        tool: ToolIndex,
+        target_c: z.number().int().nonnegative(),
         observedMono: mono,
       }),
       z.strictObject({
@@ -125,6 +142,12 @@ export function controlEffectMatches(
         (observation.printState === 'printing' ||
           observation.printState === 'paused')
       )
+    case 'set_tool_temperature':
+      return (
+        effect.kind === 'tool-temperature' &&
+        effect.tool === args.tool &&
+        effect.target_c === args.target_c
+      )
     case 'set_temperature':
       return (
         effect.kind === 'temperature' &&
@@ -172,6 +195,7 @@ export interface PauseDriver {
   macros?(binding: PrinterBinding): readonly string[] | undefined
   macroParams?(binding: PrinterBinding): MacroParamMap | undefined
   controls?(binding: PrinterBinding): readonly ExtendedControlAction[]
+  speedModes?(binding: PrinterBinding): readonly SpeedMode[] | undefined
   pauseOnce(input: {
     args?: Record<string, unknown>
     action?: ControlAction
@@ -254,6 +278,7 @@ export function createPauseDispatcher(config: {
   const driver = Object.freeze({
     execute: config.driver.execute?.bind(config.driver),
     controls: config.driver.controls?.bind(config.driver),
+    speedModes: config.driver.speedModes?.bind(config.driver),
     macros: config.driver.macros?.bind(config.driver),
     macroParams: config.driver.macroParams?.bind(config.driver),
     prepare: config.driver.prepare.bind(config.driver),
@@ -422,6 +447,10 @@ export function createPauseDispatcher(config: {
         !controlWithinLimits(command.action, command.args, config.controlLimits)
       )
         return Promise.resolve({ kind: 'rejected', reason: 'invalid-command' })
+      const toolArgs =
+        command.action === 'set_tool_temperature'
+          ? ToolTemperatureArgs.parse(command.args)
+          : undefined
       const candidateMapping = readPrinterBinding(printerBinding)
       if (!candidateMapping)
         return Promise.resolve({ kind: 'rejected', reason: 'scope' })
@@ -571,6 +600,14 @@ export function createPauseDispatcher(config: {
         )
           return 'scope'
         if (
+          command.action === 'set_speed' &&
+          !speedModeAllowed(
+            driver.speedModes?.(printerBinding),
+            command.args.level,
+          )
+        )
+          return 'unsupported-action'
+        if (
           command.action === 'run_macro' &&
           (typeof command.args.name !== 'string' ||
             !driver.macros?.(printerBinding)?.includes(command.args.name) ||
@@ -629,12 +666,20 @@ export function createPauseDispatcher(config: {
           observation.connectionGeneration === connectionGeneration
         )
       }
+      /** Set by eligible() when the shared idle-only rule refused the command. */
+      let refusedBusy = false
       function eligible(): ControlObservation | null {
         if (!capability) return null
         const now = sample()
         if (!now) return null
         const current = readObservation(printerBinding, capability, now)
+        if (toolArgs) resultCode = toolTemperatureRefusal(current, toolArgs)
+        refusedBusy =
+          !!current &&
+          current.ready &&
+          controlPrinterBusy(command.action, current.printState)
         if (
+          (toolArgs && resultCode) ||
           !current ||
           !current.ready ||
           !controlSourceState(command.action, current.printState) ||
@@ -667,7 +712,10 @@ export function createPauseDispatcher(config: {
           capability,
           now,
         )
+        if (toolArgs)
+          resultCode = toolTemperatureRefusal(finalObservation, toolArgs)
         if (
+          (toolArgs && resultCode) ||
           !finalObservation ||
           !finalObservation.ready ||
           !controlSourceState(command.action, finalObservation.printState) ||
@@ -728,7 +776,12 @@ export function createPauseDispatcher(config: {
           try {
             claiming = true
             claim = claimCommand(journal, {
-              command,
+              command: toolArgs
+                ? {
+                    ...command,
+                    ...temperatureJournalAction(toolArgs.target_c),
+                  }
+                : command,
               printerKey: mapping.printer_key,
               wireSha256: createHash('sha256')
                 .update(encodeCommandV2(command))
@@ -780,7 +833,7 @@ export function createPauseDispatcher(config: {
             !current ||
             current.connectionGeneration !== connectionGeneration
           ) {
-            finalize('not-sent', 'state', 'guard-denied')
+            finalize('not-sent', refusedBusy ? 'busy' : 'state', 'guard-denied')
             return
           }
           observationVersion = observationVersions.get(printerBinding)
@@ -801,7 +854,9 @@ export function createPauseDispatcher(config: {
                 binding: printerBinding,
                 beforeSend,
                 transportId: command.transport_id,
-                stillAuthorized: () => !live(),
+                stillAuthorized: () =>
+                  !live() &&
+                  (command.action !== 'start_library_print' || !!eligible()),
                 signal: controller.signal,
               })
             : driver.pauseOnce({
@@ -842,8 +897,26 @@ export function createPauseDispatcher(config: {
             interrupted('deadline')
             return
           }
-          if (command.action === 'config_write') {
-            finalize('applied', 'applied', 'applied', now.wall)
+          // Local writes have no printer effect to observe.
+          if (
+            command.action === 'config_write' ||
+            command.action === 'confirm_collection'
+          ) {
+            if (command.action === 'config_write') {
+              finalize('applied', 'applied', 'applied', now.wall)
+              return
+            }
+            cleanup()
+            const completedAt = sample()
+            if (!completedAt || completedAt.mono >= resultDeadline) {
+              finalize(
+                'outcome-unknown',
+                'state-unconfirmed',
+                'state-unconfirmed',
+              )
+              return
+            }
+            finalize('applied', 'applied', 'applied', completedAt.wall)
             return
           }
           const paused = await driver.waitForPaused({

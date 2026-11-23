@@ -1,6 +1,7 @@
 import {
   parseBoundedJson,
   TELEMETRY_BATCH_JSON_LIMITS,
+  TelemetryBatch,
 } from '@open3dfarmmanager/farm-protocol'
 import {
   TelemetryQueue,
@@ -16,19 +17,22 @@ export type TelemetrySender = (
 export type DrainResult =
   | { status: 'uncertain'; reason: 'queue'; loss?: QueueLoss }
   | { status: 'empty'; loss: QueueLoss }
+  | { status: 'dropped'; loss: QueueLoss }
   | { status: 'delivered'; count: number; loss: QueueLoss }
   | {
       status: 'retained'
-      reason:
-        'busy' | 'cancelled' | 'transport' | 'acknowledgement' | 'oversized'
+      reason: 'busy' | 'cancelled' | 'transport' | 'acknowledgement'
       loss?: QueueLoss
     }
 
 const active = new WeakSet<TelemetryQueue>()
+const MAX_BATCH_RECORDS = 100
 
 function withinBatchLimits(records: readonly TelemetryRecord[]): boolean {
   try {
-    parseBoundedJson(JSON.stringify(records), TELEMETRY_BATCH_JSON_LIMITS)
+    TelemetryBatch.parse(
+      parseBoundedJson(JSON.stringify(records), TELEMETRY_BATCH_JSON_LIMITS),
+    )
     return true
   } catch {
     return false
@@ -67,6 +71,7 @@ export async function drainTelemetryOnce(
   send: TelemetrySender,
   now: () => number,
   signal: AbortSignal,
+  onDrop: () => void = () => console.warn('telemetry-entry-dropped'),
 ): Promise<DrainResult> {
   if (active.has(queue)) return { status: 'retained', reason: 'busy' }
   if (signal.aborted) return { status: 'retained', reason: 'cancelled' }
@@ -77,18 +82,49 @@ export async function drainTelemetryOnce(
   let deliverySettled = false
   let finished = false
   try {
-    let batch
-    try {
-      batch = queue.batch(now(), 100, 64 * 1024)
-      loss = batch.loss
-    } catch {
-      return { status: 'uncertain', reason: 'queue' }
+    let records: readonly TelemetryRecord[]
+    for (let dropped = 0; ; dropped++) {
+      if (loss && (dropped === MAX_BATCH_RECORDS || queue.storageDegraded))
+        return { status: 'dropped', loss }
+      if (signal.aborted)
+        return {
+          status: 'retained',
+          reason: 'cancelled',
+          ...(loss && { loss }),
+        }
+      let batch
+      let batchNow
+      try {
+        batchNow = now()
+        batch = queue.batch(
+          batchNow,
+          MAX_BATCH_RECORDS,
+          TELEMETRY_BATCH_JSON_LIMITS.maxBytes,
+        )
+      } catch {
+        return { status: 'uncertain', reason: 'queue', ...(loss && { loss }) }
+      }
+      if (loss) {
+        loss.expired += batch.loss.expired
+        loss.capacity += batch.loss.capacity
+        loss.partialTail ||= batch.loss.partialTail
+      } else {
+        loss = batch.loss
+      }
+      if (signal.aborted)
+        return { status: 'retained', reason: 'cancelled', loss }
+      records = fittingPrefix(batch.records)
+      if (records.length) break
+      if (!queue.depth) return { status: 'empty', loss }
+      // Batch preparation and removal are synchronous. The unencodable head
+      // has not reached the sender and cannot be fixed by retrying it.
+      try {
+        queue.discardHead(batchNow)
+      } catch {
+        return { status: 'uncertain', reason: 'queue', loss }
+      }
+      onDrop()
     }
-    const records = fittingPrefix(batch.records)
-    if (!records.length)
-      return queue.depth
-        ? { status: 'retained', reason: 'oversized', loss }
-        : { status: 'empty', loss }
     const ids = records.map((record) => record.eventId)
     // The immutable serialized body prevents the adapter from changing the acknowledgement target.
     const body = JSON.stringify(records)

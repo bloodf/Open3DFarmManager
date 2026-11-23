@@ -7,6 +7,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { startBambuCameraFixture } from '../journey/bambu-camera-fixture.ts'
 import {
   bambuCameraAuth,
   MAX_BAMBU_JPEG_BYTES,
@@ -44,7 +45,7 @@ async function collect<T>(values: AsyncIterable<T>) {
   return result
 }
 
-test('models select local TLS JPEG or authenticated RTSPS 322', () => {
+test('models map to TLS JPEG or the reserved RTSPS port', () => {
   for (const model of ['A1', 'A1 mini', 'P1P', 'P1S'])
     assert.deepEqual(
       selectBambuCamera({
@@ -60,17 +61,9 @@ test('models select local TLS JPEG or authenticated RTSPS 322', () => {
       host: '192.168.1.2',
       accessCode: 'a:@?',
     })
-    assert.equal(selected.kind, 'rtsps')
-    if (selected.kind === 'rtsps') {
-      const url = new URL(selected.url)
-      assert.equal(url.protocol, 'rtsps:')
-      assert.equal(url.port, '322')
-      assert.equal(url.pathname, '/streaming/live/1')
-      assert.equal(url.username, 'bblp')
-      assert.equal(decodeURIComponent(url.password), 'a:@?')
-    }
+    assert.deepEqual(selected, { kind: 'rtsps', port: 322 })
   }
-  for (const model of ['unknown', 'P1S/evil'])
+  for (const model of ['unknown', 'P1S/evil', 'A2L', 'X2D', 'H2D Pro', 'H3C'])
     assert.throws(
       () =>
         selectBambuCamera({
@@ -296,4 +289,81 @@ test('untrusted codec is rejected before process creation', async () => {
     }),
     /encoder/,
   )
+})
+
+test('a trusted certificate for a different numeric IP cannot receive JPEG authentication', async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'bambu-jpeg-identity-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const fixture = await startBambuCameraFixture({
+    directory,
+    accessCode: 'synthetic',
+    certificateIp: '127.0.0.2',
+  })
+  try {
+    const caPem = readFileSync(fixture.caFile)
+    const pinSha256 = createHash('sha256')
+      .update(new X509Certificate(caPem).raw)
+      .digest('hex')
+    for (const pin of [undefined, pinSha256]) {
+      await assert.rejects(
+        collect(
+          streamBambuJpegs({
+            host: fixture.host,
+            port: fixture.port,
+            accessCode: 'synthetic',
+            caPem,
+            ...(pin ? { pinSha256: pin } : {}),
+            maxReconnects: 0,
+            signal: AbortSignal.timeout(5000),
+          }),
+        ),
+        /unavailable/,
+      )
+    }
+    assert.equal(fixture.connections(), 2)
+    assert.equal(fixture.requests(), 0)
+  } finally {
+    await fixture.close()
+  }
+})
+
+test('staged RTSPS refuses trusted wrong identity and redirect fixtures before dialing', async (t) => {
+  const start = async (
+    options: Partial<Parameters<typeof startBambuCameraFixture>[0]> = {},
+  ) => {
+    const directory = mkdtempSync(join(tmpdir(), 'bambu-rtsps-refusal-'))
+    t.after(() => rmSync(directory, { recursive: true, force: true }))
+    const fixture = await startBambuCameraFixture({
+      directory,
+      accessCode: 'synthetic',
+      ...options,
+    })
+    t.after(() => fixture.close())
+    return fixture
+  }
+  const wrongIdentity = await start({ certificateIp: '127.0.0.2' })
+  const redirectTarget = await start()
+  const redirect = await start({
+    redirectTo: `rtsps://${redirectTarget.host}:${redirectTarget.port}/streaming/live/1`,
+  })
+  for (const fixture of [wrongIdentity, redirect]) {
+    await assert.rejects(
+      openBambuCameraSource({
+        source: {
+          model: 'X1C',
+          host: fixture.host,
+          port: fixture.port,
+          caFile: fixture.caFile,
+          accessCode: 'synthetic',
+        },
+        ffmpeg: encoder.ffmpeg,
+        signal: AbortSignal.timeout(5000),
+      }),
+      /RTSPS ingest unavailable/,
+    )
+  }
+  for (const fixture of [wrongIdentity, redirect, redirectTarget]) {
+    assert.equal(fixture.connections(), 0)
+    assert.equal(fixture.requests(), 0)
+  }
 })

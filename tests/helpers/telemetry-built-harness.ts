@@ -1,4 +1,5 @@
 import { captureFixtureStderr } from './telemetry-fixture-diagnostic.ts'
+import { releaseOnFailure } from './owned-cleanup.ts'
 // Disposable fixture helper. The caller owns the directory and isolated database.
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { createServer as createTcpServer } from 'node:net'
@@ -131,15 +132,6 @@ export async function startBuiltTelemetryFixture(input: {
   if (!proxyAddress || typeof proxyAddress === 'string')
     throw new Error('Missing TLS listener')
   const origin = `https://127.0.0.1:${proxyAddress.port}`
-  await appendFile(
-    input.ledgerPath,
-    JSON.stringify({
-      resource: 'loopback-proxy',
-      port: proxyAddress.port,
-      appPort,
-    }) + '\n',
-    { mode: 0o600 },
-  )
   const env = {
     PATH: process.env.PATH ?? '/usr/bin:/bin',
     NODE_ENV: 'production',
@@ -155,15 +147,6 @@ export async function startBuiltTelemetryFixture(input: {
     NUXT_CONNECTOR_TELEMETRY_PROOF_TTL_MS: '30000',
     NUXT_CONNECTOR_TELEMETRY_BODY_TIMEOUT_MS: '5000',
   }
-  const app = spawn(nodePath, [resolve('apps/farm/.output/server/index.mjs')], {
-    env,
-    stdio: 'ignore',
-  })
-  await appendFile(
-    input.ledgerPath,
-    JSON.stringify({ resource: 'built-app-process', pid: app.pid }) + '\n',
-    { mode: 0o600 },
-  )
   async function stopApp(processToStop: ChildProcess) {
     if (processToStop.exitCode !== null || processToStop.signalCode !== null)
       return
@@ -183,12 +166,39 @@ export async function startBuiltTelemetryFixture(input: {
       clearTimeout(timer)
     }
   }
-  async function close() {
+  async function closeProxy() {
     proxy.closeAllConnections()
     await new Promise<void>((resolveClose) => proxy.close(() => resolveClose()))
-    await stopApp(app)
   }
-  try {
+  return releaseOnFailure(async (hold) => {
+    hold(closeProxy)
+    await appendFile(
+      input.ledgerPath,
+      JSON.stringify({
+        resource: 'loopback-proxy',
+        port: proxyAddress.port,
+        appPort,
+      }) + '\n',
+      { mode: 0o600 },
+    )
+    const app = spawn(
+      nodePath,
+      [resolve('apps/farm/.output/server/index.mjs')],
+      {
+        env,
+        stdio: 'ignore',
+      },
+    )
+    hold(() => stopApp(app))
+    await appendFile(
+      input.ledgerPath,
+      JSON.stringify({ resource: 'built-app-process', pid: app.pid }) + '\n',
+      { mode: 0o600 },
+    )
+    async function close() {
+      await closeProxy()
+      await stopApp(app)
+    }
     const deadline = Date.now() + 10000
     while (true) {
       if (app.exitCode !== null || app.signalCode !== null)
@@ -206,103 +216,100 @@ export async function startBuiltTelemetryFixture(input: {
         throw new Error('Built app did not become ready')
       await new Promise((resolveWait) => setTimeout(resolveWait, 50))
     }
-  } catch (error) {
-    await close()
-    throw error
-  }
-  return {
-    origin,
-    async runClient(
-      fixture: {
-        token: string
-        agentId: string
-        farmId: string
-        privateKey: string
-      },
-      phase: 'deliver' | 'revoked',
-    ) {
-      const path = join(input.directory, 'client.json')
-      await writeFile(
-        path,
-        JSON.stringify({
-          ...fixture,
-          endpoint: origin + '/api/connector/telemetry',
-          audience: input.audience,
-          queueDir: join(input.directory, 'built-queue'),
-        }),
-        { mode: 0o600 },
-      )
-      const child = spawn(
-        nodePath,
-        [
-          '--experimental-transform-types',
-          '--disable-warning=ExperimentalWarning',
-          resolve('scripts/test-telemetry-http-built-client.ts'),
-        ],
-        {
-          env: {
-            PATH: env.PATH,
-            NODE_EXTRA_CA_CERTS: cert,
-            TELEMETRY_HTTP_BUILT_FIXTURE: path,
-            TELEMETRY_HTTP_BUILT_PHASE: phase,
-          },
-          stdio: ['ignore', 'pipe', 'pipe'],
+    return {
+      origin,
+      async runClient(
+        fixture: {
+          token: string
+          agentId: string
+          farmId: string
+          privateKey: string
         },
-      )
-      const finishDiagnostic = captureFixtureStderr(child.stderr, [
-        fixture.token,
-        fixture.privateKey,
-      ])
-      let output = ''
-      child.stdout.setEncoding('utf8')
-      child.stdout.on('data', (chunk) => {
-        output += chunk
-        if (output.length > 4096) child.kill('SIGKILL')
-      })
-      await appendFile(
-        input.ledgerPath,
-        JSON.stringify({
-          resource: 'built-client-process',
-          pid: child.pid,
-          phase,
-          executable: nodePath,
-        }) + '\n',
-        { mode: 0o600 },
-      )
-      const timeout = setTimeout(() => child.kill('SIGKILL'), 15000)
-      try {
-        const [code, signal] = await once(child, 'close')
-        if (code !== 0 || output.length > 4096) {
-          const diagnostic = finishDiagnostic()
-          await appendFile(
-            input.ledgerPath,
-            JSON.stringify({
-              observation: 'client-failure',
-              stage: 'built-client',
-              phase,
-              code,
-              signal,
-              diagnostic,
-            }) + '\n',
-            { mode: 0o600 },
-          )
-          throw new Error('Synthetic built client failed')
-        }
-        const value: unknown = JSON.parse(output)
-        if (
-          !value ||
-          typeof value !== 'object' ||
-          !('phase' in value) ||
-          value.phase !== phase ||
-          !('eventId' in value) ||
-          typeof value.eventId !== 'string'
+        phase: 'deliver' | 'revoked',
+      ) {
+        const path = join(input.directory, 'client.json')
+        await writeFile(
+          path,
+          JSON.stringify({
+            ...fixture,
+            endpoint: origin + '/api/connector/telemetry',
+            audience: input.audience,
+            queueDir: join(input.directory, 'built-queue'),
+          }),
+          { mode: 0o600 },
         )
-          throw new Error('Invalid synthetic client result')
-        return value.eventId
-      } finally {
-        clearTimeout(timeout)
-      }
-    },
-    close,
-  }
+        const child = spawn(
+          nodePath,
+          [
+            '--experimental-transform-types',
+            '--disable-warning=ExperimentalWarning',
+            resolve('scripts/test-telemetry-http-built-client.ts'),
+          ],
+          {
+            env: {
+              PATH: env.PATH,
+              NODE_EXTRA_CA_CERTS: cert,
+              TELEMETRY_HTTP_BUILT_FIXTURE: path,
+              TELEMETRY_HTTP_BUILT_PHASE: phase,
+            },
+            stdio: ['ignore', 'pipe', 'pipe'],
+          },
+        )
+        const finishDiagnostic = captureFixtureStderr(child.stderr, [
+          fixture.token,
+          fixture.privateKey,
+        ])
+        let output = ''
+        child.stdout.setEncoding('utf8')
+        child.stdout.on('data', (chunk) => {
+          output += chunk
+          if (output.length > 4096) child.kill('SIGKILL')
+        })
+        await appendFile(
+          input.ledgerPath,
+          JSON.stringify({
+            resource: 'built-client-process',
+            pid: child.pid,
+            phase,
+            executable: nodePath,
+          }) + '\n',
+          { mode: 0o600 },
+        )
+        const timeout = setTimeout(() => child.kill('SIGKILL'), 15000)
+        try {
+          const [code, signal] = await once(child, 'close')
+          if (code !== 0 || output.length > 4096) {
+            const diagnostic = finishDiagnostic()
+            await appendFile(
+              input.ledgerPath,
+              JSON.stringify({
+                observation: 'client-failure',
+                stage: 'built-client',
+                phase,
+                code,
+                signal,
+                diagnostic,
+              }) + '\n',
+              { mode: 0o600 },
+            )
+            throw new Error('Synthetic built client failed')
+          }
+          const value: unknown = JSON.parse(output)
+          if (
+            !value ||
+            typeof value !== 'object' ||
+            !('phase' in value) ||
+            value.phase !== phase ||
+            !('eventId' in value) ||
+            typeof value.eventId !== 'string'
+          )
+            throw new Error('Invalid synthetic client result')
+          return value.eventId
+        } finally {
+          clearTimeout(timeout)
+        }
+      },
+      close,
+    }
+  })
 }

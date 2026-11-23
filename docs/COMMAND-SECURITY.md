@@ -1,6 +1,8 @@
 # Command authorization prototype
 
-This branch implements a library boundary, not a printer-control feature. No driver or WebRTC transport invokes it yet. The authenticated Connector context and key distribution remain unimplemented.
+The command verifier is called by the Connector pause dispatcher (`packages/connector/src/control/pause-dispatcher.ts`) for browser-originated pause commands through `verifyCommandV2`. This does not mean the verifier is wired to a printer driver or authorizes physical dispatch; it validates a command before the dispatch boundary. The authenticated Connector context and key distribution remain integration requirements.
+
+> The v1 verifier (`authorizeCommand` in `packages/connector/src/auth/verify.ts`) was removed in #609; it had no caller outside tests. Its tests now run against the v2 path, which splits the decision across components: canonical decoding (`decodeCommandV2`), capability admission (an opaque handle issued by the dispatcher's pause-capability verifier), signature verification (`verifyCommandV2`) and the durable command journal (`claimCommand`). The paragraphs below describe the original v1 prototype; the sections after them describe the current boundary. The unused v1 replay store was also removed; replay protection is enforced by the command journal.
 
 The browser generates a nonextractable ECDSA P-256 key with WebCrypto. Each signature covers canonical JSON, including farm, Connector, printer, user, key and session IDs, action, timestamps, random command ID and a 128-bit nonce. The Connector verifies the P1363 signature with Node crypto. Wire JSON must be canonical: duplicate fields, padding and alternate representations are rejected. Frames are limited to 8 KiB. Only pause, resume, cancel and emergency stop are represented; arbitrary G-code is excluded.
 
@@ -16,9 +18,9 @@ Validation includes canonicalization edge cases, signature tampering, scope subs
 
 ## Runtime rejection boundary
 
-The integrated verifier validates the runtime structure of the supplied authorization context before accessing its fields. Missing or malformed context returns `invalid-context` without invoking replay storage. This shape check does not authenticate the context or change its provenance requirements. Existing scope, role, signature, freshness and replay decisions remain required.
+The v2 dispatcher takes no caller-built context. Authority is an opaque handle the dispatcher's own verifier admitted; a missing, forged, copied or revoked handle returns `invalid-authority`, and a printer binding outside the admitted assignment returns `scope`, both without a journal claim. Malformed or non-canonical frames return `invalid-command` before any other check.
 
-Storage results are restricted to the declared result set. An unexpected adapter result is mapped to `storage-unavailable`, never returned as an arbitrary protocol reason. Each valid request makes at most one claim attempt; no retry is introduced. Rejection reasons now have a closed TypeScript union. Tests reproduce missing-context exceptions and leaked adapter result strings before these fixes, then assert fixed denials and zero replay calls for malformed input.
+Journal denials (`replay`, `assignment-busy`, `capacity`, `clock-regressed`, `rate-limited`, `storage-unavailable`) are returned by `claimCommand` as themselves. The dispatcher maps `replay` and `assignment-busy` to `replay` and `busy` and every other journal failure, including a closed journal or a throwing storage gate, to `storage`; no internal detail reaches the result. Each valid request makes at most one claim attempt; no retry is introduced. The dispatcher's rejection reasons are a closed TypeScript union. Tests: `tests/unit/command-fail-closed.test.ts`, `tests/unit/command-signing.test.ts`, `tests/node/security-regression.test.ts` and the Chromium specs `tests/e2e/command-boundaries.spec.ts` and `tests/e2e/command-signing.spec.ts`.
 
 ## Command authorization rule
 

@@ -133,24 +133,31 @@ export async function integrationTokenRequest(
   if (!id || id.length > 128 || !secret || secret.length > 256)
     return oauthError('invalid_client', 401)
 
-  const rate = rateLimits.take(
-    'token:' + createHash('sha256').update(id).digest('base64url'),
-    30,
-  )
-  if (!rate.allowed)
-    return oauthError('rate_limited', 429, {
-      'retry-after': String(rate.retry),
-    })
-
   try {
-    const issued = await runtime().issue(id, secret, scope?.split(' '))
+    const auth = runtime()
+    const credential = await auth.store.findActiveCredential(id)
+    const rateKey = credential
+      ? 'token:' + createHash('sha256').update(id).digest('base64url')
+      : 'source:' +
+        createHash('sha256')
+          .update(
+            request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+              'unknown-source',
+          )
+          .digest('base64url')
+    const rate = rateLimits.take(rateKey, 30)
+    if (!rate.allowed)
+      return oauthError('rate_limited', 429, {
+        'retry-after': String(rate.retry),
+      })
+    const issued = await auth.issue(id, secret, scope?.split(' '))
     if (issued === 'invalid_client') return oauthError(issued, 401)
     if (issued === 'invalid_scope') return oauthError(issued)
     return Response.json(issued, {
       headers: { ...noStore, pragma: 'no-cache' },
     })
   } catch {
-    return oauthError('temporarily_unavailable', 503)
+    return oauthError('temporarily_unavailable', 503, { 'retry-after': '30' })
   }
 }
 
@@ -162,9 +169,15 @@ const problems = {
   'payload-too-large': [413, 'Solicitação muito grande.'],
   'unsupported-media-type': [415, 'Formato de solicitação não aceito.'],
   'unsafe-target': [422, 'Destino do webhook não permitido.'],
+  'spool-location-changed': [
+    409,
+    'O registro da bobina mudou. Consulte o local atual.',
+  ],
   'webhook-limit-reached': [409, 'Limite de assinaturas de webhook atingido.'],
   'validation-failed': [422, 'Solicitação não aceita.'],
   unsupported: [422, 'Ação não suportada por esta impressora.'],
+  'device-stale': [409, 'Leitura do dispositivo desatualizada.'],
+  'device-not-ready': [409, 'Dispositivo não está pronto.'],
   'idempotency-key-reused': [
     409,
     'Chave de idempotência já usada com outra solicitação.',
@@ -179,13 +192,25 @@ const problems = {
 export function integrationProblem(
   code: keyof typeof problems,
   headers?: HeadersInit,
+  errors?: readonly { pointer: string; detail: string }[],
+  extensions?: { managementUrl?: string },
 ) {
   const [status, title] = problems[code]
   const responseHeaders = new Headers(headers)
   responseHeaders.set('content-type', 'application/problem+json')
   responseHeaders.set('cache-control', 'no-store')
+  if (status === 503) responseHeaders.set('retry-after', '30')
   return Response.json(
-    { type: 'https://openfarm.dev/problems/' + code, title, status, code },
+    {
+      type: 'https://openfarm.dev/problems/' + code,
+      title,
+      status,
+      code,
+      ...(errors ? { errors } : {}),
+      ...(extensions?.managementUrl
+        ? { managementUrl: extensions.managementUrl }
+        : {}),
+    },
     {
       status,
       headers: responseHeaders,
@@ -207,9 +232,10 @@ const policies: RoutePolicy[] = [
   },
   {
     method: 'GET',
-    path: /^\/printers(?:\/status|\/[^/]+\/status)?$/,
+    path: /^\/printers(?:\/status|\/readiness|\/[^/]+\/(?:status|capabilities|mode))?$/,
     scopes: ['printers:read'],
   },
+  { method: 'POST', path: /^\/printers\/mode$/, scopes: ['control:extended'] },
   { method: 'GET', path: /^\/printers\/[^/]+\/files$/, scopes: ['files:read'] },
   {
     method: 'GET',
@@ -222,7 +248,74 @@ const policies: RoutePolicy[] = [
     path: /^\/printers\/[^/]+\/actions$/,
     scopes: ['control:basic', 'control:extended'],
   },
-  { method: 'GET', path: /^\/inventory$/, scopes: ['inventory:read'] },
+  {
+    method: 'GET',
+    path: /^\/(?:telemetry|health)\/[^/]+$/,
+    scopes: ['printers:read'],
+  },
+  { method: 'GET', path: /^\/alert-rules\/[^/]+$/, scopes: ['printers:read'] },
+  {
+    method: 'PATCH',
+    path: /^\/alert-rules\/[^/]+\/[^/]+$/,
+    scopes: ['alerts:manage'],
+  },
+  {
+    method: 'PUT',
+    path: /^\/notification-channels\/[^/]+$/,
+    scopes: ['alerts:manage'],
+  },
+  {
+    method: 'POST',
+    path: /^\/notification-channels\/[^/]+\/test$/,
+    scopes: ['alerts:manage'],
+  },
+  { method: 'GET', path: /^\/alerts\/[^/]+$/, scopes: ['printers:read'] },
+  {
+    method: 'POST',
+    path: /^\/alerts\/[^/]+\/[^/]+$/,
+    scopes: ['alerts:write'],
+  },
+  { method: 'GET', path: /^\/camera\/[^/]+$/, scopes: ['camera:view'] },
+  {
+    method: 'GET',
+    path: /^\/inventory(?:\/spools(?:\/(?:search|usage))?)?$/,
+    scopes: ['inventory:read'],
+  },
+  {
+    method: 'GET',
+    path: /^\/inventory\/spools\/physical\/[^/]+$/,
+    scopes: ['inventory:read'],
+  },
+  {
+    method: 'POST',
+    path: /^\/inventory\/spools\/physical(?:\/[^/]+\/withdraw)?$/,
+    scopes: ['inventory:write'],
+  },
+  {
+    method: 'GET',
+    path: /^\/resin\/(?:lots|vats|usage)$/,
+    scopes: ['inventory:read'],
+  },
+  {
+    method: 'GET',
+    path: /^\/environment\/measurements$/,
+    scopes: ['environment:read'],
+  },
+  {
+    method: 'GET',
+    path: /^\/environment\/controls$/,
+    scopes: ['environment:read', 'environment:control'],
+  },
+  {
+    method: 'POST',
+    path: /^\/environment\/controls\/[^/]+\/actions$/,
+    scopes: ['environment:control'],
+  },
+  {
+    method: 'GET',
+    path: /^\/environment\/controls\/[^/]+\/actions\/[^/]+$/,
+    scopes: ['environment:control'],
+  },
   { method: 'GET', path: /^\/library$/, scopes: ['library:read'] },
   { method: 'POST', path: /^\/library$/, scopes: ['library:write'] },
   {
@@ -236,6 +329,16 @@ const policies: RoutePolicy[] = [
     scopes: ['library:write'],
   },
   { method: 'GET', path: /^\/library\/[^/]+$/, scopes: ['library:read'] },
+  {
+    method: 'GET',
+    path: /^\/jobs\/[^/]+\/(eligibility|plate)$/,
+    scopes: ['jobs:read', 'jobs:start'],
+  },
+  {
+    method: 'POST',
+    path: /^\/jobs\/[^/]+\/actions$/,
+    scopes: ['control:basic', 'plates:confirm'],
+  },
   { method: 'GET', path: /^\/jobs$/, scopes: ['jobs:read'] },
   {
     method: 'GET',
@@ -245,7 +348,7 @@ const policies: RoutePolicy[] = [
   {
     method: 'GET',
     path: /^\/actions\/[^/]+$/,
-    scopes: ['control:basic', 'control:extended'],
+    scopes: ['control:basic', 'control:extended', 'plates:confirm'],
   },
   { method: 'GET', path: /^\/webhooks$/, scopes: ['events:subscribe'] },
   {
@@ -406,7 +509,7 @@ export async function authorizeIntegrationRequest(
         return integrationProblem('insufficient-scope', headers)
       if (replay) scopes = [...scopes, 'jobs:write']
     }
-    if (method === 'POST' && path.endsWith('/actions')) {
+    if (method === 'POST' && /^\/printers\/[^/]+\/actions$/.test(path)) {
       const scope = await readActionScope(request)
       if (
         scope === 'invalid-request' ||
@@ -423,7 +526,11 @@ export async function authorizeIntegrationRequest(
     const farms = [
       '/printers',
       '/printers/status',
+      '/printers/readiness',
       '/inventory',
+      '/inventory/spools',
+      '/inventory/spools/search',
+      '/inventory/spools/usage',
       '/jobs',
       '/library',
       '/library/settings',
@@ -460,7 +567,8 @@ export async function authorizeIntegrationRequest(
           grant.printerAssignmentId === printerId,
       )
       .filter(
-        (grant) => path !== '/inventory' || grant.printerAssignmentId === null,
+        (grant) =>
+          !path.startsWith('/inventory') || grant.printerAssignmentId === null,
       )
       .map((grant) => ({
         ...grant,

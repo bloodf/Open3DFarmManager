@@ -88,9 +88,20 @@ async function holdInChild(directory: string) {
     { stdio: ['ignore', 'pipe', 'inherit'] },
   )
   const lines = createInterface({ input: child.stdout })
-  await once(lines, 'line', { signal: AbortSignal.timeout(5000) })
-  lines.close()
-  return child
+  const closed = once(child, 'close')
+  try {
+    await once(lines, 'line', { signal: AbortSignal.timeout(5000) })
+    if (child.exitCode !== null || child.signalCode !== null)
+      throw new Error('queue child exited during readiness')
+    return child
+  } catch (error) {
+    lines.close()
+    if (child.exitCode === null && child.signalCode === null)
+      child.kill('SIGKILL')
+    await closed
+    rmSync(directory, { recursive: true, force: true })
+    throw error
+  }
 }
 
 test('a SIGKILLed owner is recovered automatically where supported', async () => {

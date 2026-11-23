@@ -38,6 +38,7 @@ type FarmState = {
   version: number
   wire: string | null
   chain: Promise<void>
+  lastUsed: number
 }
 const MAX_FARMS = 256
 
@@ -52,15 +53,33 @@ export function createTrustedKeyPublisher(options: TrustedKeyPublisherOptions) {
   const { source, inboxes, signer, clock, timers } = options
   const farms = new Map<string, FarmState>()
   let closed = false
+  const touch = (farm: FarmState) => {
+    farm.lastUsed = clock.wall()
+  }
+  const evictIdle = () => {
+    let oldestId: string | null = null
+    let oldest = Number.POSITIVE_INFINITY
+    for (const [id, farm] of farms) {
+      if (farm.lastUsed < oldest) {
+        oldest = farm.lastUsed
+        oldestId = id
+      }
+    }
+    if (oldestId) farms.delete(oldestId)
+  }
   function state(farmId: string): FarmState | null {
     const known = farms.get(farmId)
-    if (known) return known
-    if (farms.size >= MAX_FARMS) return null
+    if (known) {
+      touch(known)
+      return known
+    }
+    if (farms.size >= MAX_FARMS) evictIdle()
     const created: FarmState = {
       digest: null,
       version: 0,
       wire: null,
       chain: Promise.resolve(),
+      lastUsed: clock.wall(),
     }
     farms.set(farmId, created)
     return created

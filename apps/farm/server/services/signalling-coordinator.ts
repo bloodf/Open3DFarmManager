@@ -31,6 +31,7 @@ const Scope = z.strictObject({
   farmId: BrowserDeviceUuid,
   agentId: BrowserDeviceUuid,
   keyId: BrowserDeviceUuid,
+  cameraPrinterId: BrowserDeviceUuid.optional(),
 })
 export type SignallingScope = z.infer<typeof Scope>
 const shape = RtcSessionBindingV2.shape
@@ -643,6 +644,9 @@ export class SignallingCoordinator {
             const { validUntil: _, ...pins } = c.authority
             const binding = RtcSessionBindingV2.parse({
               ...pins,
+              ...(c.scope.cameraPrinterId
+                ? { camera_printer_id: c.scope.cameraPrinterId }
+                : {}),
               v: 2,
               purpose: 'read-only-rtc',
               transport_id: c.id,

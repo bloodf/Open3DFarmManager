@@ -11,6 +11,9 @@ import {
   KOBRA_X_NATIVE_CHOICE_LABEL,
 } from '../../utils/kobra-x-setup-mode.ts'
 import { usePrinterSetup } from '../../utils/printer-setup-state.ts'
+import { createLatestRequestGuard } from '../ui-misc-guards.ts'
+
+const validationRequests = createLatestRequestGuard()
 
 const {
   kobraIp,
@@ -27,6 +30,7 @@ const {
 } = usePrinterSetup()
 
 async function runFileValidation(files: readonly KobraCertCachedFile[]) {
+  const request = validationRequests.next()
   kobraError.value = ''
   if (!files.length) {
     kobraCertInline.value = null
@@ -39,6 +43,7 @@ async function runFileValidation(files: readonly KobraCertCachedFile[]) {
     files,
     passphrase: kobraCertPassphrase.value || undefined,
   })
+  if (!validationRequests.isCurrent(request)) return
   kobraCertSummary.value = res.summary
   if (res.ok) {
     kobraCertInline.value = res.payload
@@ -52,6 +57,8 @@ async function runFileValidation(files: readonly KobraCertCachedFile[]) {
 }
 
 async function onFileSelected(event: Event) {
+  const request = validationRequests.next()
+  kobraCertFiles.value = []
   const input = event.target as HTMLInputElement | null
   const list = input?.files ? Array.from(input.files) : []
   if (!list.length) {
@@ -65,11 +72,13 @@ async function onFileSelected(event: Event) {
       bytes: new Uint8Array(await file.arrayBuffer()),
     })),
   )
+  if (!validationRequests.isCurrent(request)) return
   kobraCertFiles.value = cached
   await runFileValidation(cached)
 }
 
 function onSourceChanged() {
+  validationRequests.invalidate()
   kobraError.value = ''
   kobraCertError.value = ''
   if (kobraCertSource.value === 'install-path') {

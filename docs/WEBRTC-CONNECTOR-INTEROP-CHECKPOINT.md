@@ -1,6 +1,8 @@
+> Registro histórico: o adaptador e o harness sintéticos descritos abaixo foram removidos em #609. Os testes atuais usam os peers mantidos do Connector.
+
 # Interoperabilidade WebRTC do Connector sintético
 
-O experimento conecta um Chromium real a um peer nativo executado pelo código do Connector, em processo separado. O adaptador fica em `packages/connector/src/webrtc/synthetic-peer.ts` e não é importado pelo CLI. A sessão compartilhada em `synthetic-session.ts` usa Web Crypto. A fixture do navegador importa somente essa sessão portátil. Não há impressoras, comandos executáveis, autenticação de conta ou serviço de produção.
+O experimento conecta um Chromium real a um peer nativo executado pelo código do Connector, em processo separado. O adaptador sintético usado na época foi removido. A sessão compartilhada em `synthetic-session.ts` usa Web Crypto. A fixture do navegador importa somente essa sessão portátil. Não há impressoras, comandos executáveis, autenticação de conta ou serviço de produção.
 
 ## Limite da prova
 

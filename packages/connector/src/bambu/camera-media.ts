@@ -60,7 +60,6 @@ function hasIdr(data: Buffer) {
       return true
   return false
 }
-const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'"
 
 /** Local-only codec. Secrets enter a private pipe, never argv, stderr, or DTOs. */
 export async function openBambuCameraSource(input: {
@@ -72,6 +71,7 @@ export async function openBambuCameraSource(input: {
 }): Promise<AsyncIterable<CameraAccessUnit>> {
   const source = { ...input.source }
   const selected = selectBambuCamera(source)
+  if (selected.kind === 'rtsps') throw Error('Bambu RTSPS ingest unavailable')
   const executable = { ...input.ffmpeg }
   if (
     !isAbsolute(executable.path) ||
@@ -81,60 +81,43 @@ export async function openBambuCameraSource(input: {
       .digest('hex') !== executable.sha256
   )
     throw Error('Invalid Bambu camera encoder')
-  if (
-    selected.kind === 'rtsps' &&
-    (!source.caFile ||
-      !isAbsolute(source.caFile) ||
-      /[\r\n\0]/.test(source.caFile))
-  )
-    throw Error('Bambu RTSPS camera CA required')
   const caPem = source.caFile ? await readFile(source.caFile) : undefined
   return (async function* () {
     if (input.signal.aborted) return
     const controller = new AbortController()
     const signal = AbortSignal.any([input.signal, controller.signal])
-    const args = ['-hide_banner', '-loglevel', 'quiet', '-nostdin']
-    if (selected.kind === 'jpeg')
-      args.push(
-        '-probesize',
-        '32',
-        '-analyzeduration',
-        '0',
-        '-f',
-        'mjpeg',
-        '-framerate',
-        '10',
-        '-i',
-        'pipe:0',
-        '-an',
-        '-c:v',
-        'libx264',
-        '-preset',
-        'ultrafast',
-        '-tune',
-        'zerolatency',
-        '-pix_fmt',
-        'yuv420p',
-        '-x264-params',
-        'aud=1:keyint=10',
-      )
-    else
-      args.push(
-        '-protocol_whitelist',
-        'pipe,file,tcp,tls,rtsp,rtsps,crypto',
-        '-f',
-        'concat',
-        '-safe',
-        '0',
-        '-i',
-        'pipe:0',
-        '-an',
-        '-c:v',
-        'copy',
-        '-bsf:v',
-        'h264_mp4toannexb,h264_metadata=aud=insert',
-      )
-    args.push('-f', 'h264', 'pipe:1')
+    const args = [
+      '-hide_banner',
+      '-loglevel',
+      'quiet',
+      '-nostdin',
+      '-protocol_whitelist',
+      'pipe',
+      '-probesize',
+      '32',
+      '-analyzeduration',
+      '0',
+      '-f',
+      'mjpeg',
+      '-framerate',
+      '10',
+      '-i',
+      'pipe:0',
+      '-an',
+      '-c:v',
+      'libx264',
+      '-preset',
+      'ultrafast',
+      '-tune',
+      'zerolatency',
+      '-pix_fmt',
+      'yuv420p',
+      '-x264-params',
+      'aud=1:keyint=10',
+      '-f',
+      'h264',
+      'pipe:1',
+    ]
     const child = spawn(executable.path, args, {
       stdio: ['pipe', 'pipe', 'ignore'],
       signal,
@@ -153,23 +136,18 @@ export async function openBambuCameraSource(input: {
     child.stdin.on('error', () => {})
     const feed = (async () => {
       try {
-        if (selected.kind === 'rtsps') {
-          child.stdin.end(
-            `ffconcat version 1.0\nfile ${quote(selected.url)}\noption rtsp_transport tcp\noption tls_verify 1\noption ca_file ${quote(source.caFile!)}\n`,
-          )
-        } else {
-          for await (const jpeg of (input.jpegStream ?? streamBambuJpegs)({
-            host: source.host,
-            accessCode: source.accessCode,
-            ...(caPem ? { caPem } : {}),
-            ...(source.pinSha256 ? { pinSha256: source.pinSha256 } : {}),
-            signal,
-          })) {
-            if (!child.stdin.write(jpeg))
-              await once(child.stdin, 'drain', { signal })
-          }
-          child.stdin.end()
+        for await (const jpeg of (input.jpegStream ?? streamBambuJpegs)({
+          host: source.host,
+          port: selected.port,
+          accessCode: source.accessCode,
+          ...(caPem ? { caPem } : {}),
+          ...(source.pinSha256 ? { pinSha256: source.pinSha256 } : {}),
+          signal,
+        })) {
+          if (!child.stdin.write(jpeg))
+            await once(child.stdin, 'drain', { signal })
         }
+        child.stdin.end()
       } catch {
         failed = true
         controller.abort()

@@ -156,7 +156,9 @@ test('snapshot configuration is local, bounded and exclusive with RTSP', () => {
       },
       [assignmentId],
     )
-  assert.equal(config(source).cameras[0]?.source.path, '/?action=snapshot')
+  const parsed = config(source).cameras[0]?.source
+  assert.ok(parsed && 'path' in parsed)
+  assert.equal(parsed.path, '/?action=snapshot')
   for (const patch of [
     { address: '8.8.8.8' },
     { path: '//foreign/snapshot' },

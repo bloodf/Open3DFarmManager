@@ -20,6 +20,7 @@ COPY --from=build /app/node_modules/node-datachannel ./node_modules/node-datacha
 COPY --from=build /app/node_modules/@node-datachannel ./node_modules/@node-datachannel
 COPY --from=build /app/node_modules/detect-libc ./node_modules/detect-libc
 COPY --from=build /app/node_modules/node-gyp-build ./node_modules/node-gyp-build
+COPY packages/connector/notices/node-datachannel ./notices/node-datachannel
 RUN mkdir -p /data /config && chown 1000:1000 /data /config && chmod 700 /data /config
 USER 1000:1000
 VOLUME ["/data", "/config"]

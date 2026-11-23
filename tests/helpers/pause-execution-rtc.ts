@@ -944,6 +944,21 @@ export function createPauseExecutionRtcFixtureExtension(
         ])
 
         if (rejection) {
+          const recordRejection = async (
+            before: PauseExecutionNativeObservation,
+            after: PauseExecutionNativeObservation,
+          ) => {
+            await session.note(verifyRtcRejection(rejection, before, after))
+            await session.note(
+              'rtc-command-rejection-observed:' +
+                JSON.stringify({
+                  row: rejection,
+                  outcome: after.commandOutcome,
+                  terminal: after.terminal,
+                  relayReason: after.relayDiagnostics?.lastReason ?? null,
+                }),
+            )
+          }
           let before = await observeNative()
           const outcome = session.actor.evaluate((actor) => actor.pause())
           if (rejection === 'replayed') {
@@ -966,7 +981,7 @@ export function createPauseExecutionRtcFixtureExtension(
               input.signal,
               8000,
             )
-            await session.note(verifyRtcRejection(rejection, before, after))
+            await recordRejection(before, after)
           } else if (rejection === 'revoked-device') {
             await until(
               observeNative,
@@ -1002,7 +1017,7 @@ export function createPauseExecutionRtcFixtureExtension(
               8000,
             )
             assert.notEqual(await outcome, 'applied')
-            await session.note(verifyRtcRejection(rejection, before, after))
+            await recordRejection(before, after)
           } else {
             const after = await until(
               observeNative,
@@ -1011,7 +1026,7 @@ export function createPauseExecutionRtcFixtureExtension(
               10000,
             )
             assert.equal(await outcome, 'rejected')
-            await session.note(verifyRtcRejection(rejection, before, after))
+            await recordRejection(before, after)
           }
           completed = true
           return

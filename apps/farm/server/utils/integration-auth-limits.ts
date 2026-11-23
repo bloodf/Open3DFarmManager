@@ -20,8 +20,10 @@ export class IntegrationLimits {
         for (const [id, entry] of this.buckets)
           if (now - entry.updatedAt >= 60_000) this.buckets.delete(id)
       }
-      if (this.buckets.size >= 10_000)
-        return { allowed: false, limit, remaining: 0, reset: 60, retry: 60 }
+      if (this.buckets.size >= 10_000) {
+        const oldest = this.buckets.keys().next().value
+        if (oldest !== undefined) this.buckets.delete(oldest)
+      }
       bucket = { tokens: limit, updatedAt: now }
       this.buckets.set(key, bucket)
     }

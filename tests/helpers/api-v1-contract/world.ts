@@ -2,6 +2,8 @@
 // jobs and actions services and the real handlers run on top of these fakes.
 // Nothing here opens a socket or a database; the fakes implement the same
 // store seams the PostgreSQL adapters implement.
+import type { FarmAlertKind } from '../../../apps/farm/app/utils/farm-alerts.ts'
+import type { FleetModeRecord } from '../../../apps/farm/server/utils/integration-fleet-mode.ts'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import {
   hashClientSecret,
@@ -58,6 +60,7 @@ export const ids = {
   printerB1: 'bbbbbbbb-0000-4000-8000-000000000001',
   agentA: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
   agentB: 'bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb',
+  alertA: 'aaaaaaaa-4444-4444-8444-aaaaaaaaaaaa',
   unknown: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
   itemA: 'aaaaaaaa-2222-4222-8222-aaaaaaaaaaa1',
   itemB: 'aaaaaaaa-2222-4222-8222-aaaaaaaaaaa2',
@@ -102,6 +105,10 @@ type InboxResult =
       nextOffset: number | null
     }
   | { kind: 'macros'; data: { name: string }[]; nextOffset: number | null }
+  | Extract<
+      import('../../../packages/farm-protocol/src/api-query.ts').ApiQueryResult,
+      { kind: 'dispatch' }
+    >
   | {
       kind: 'error'
       error: 'unsupported' | 'connector-unavailable' | 'connector-timeout'
@@ -112,6 +119,48 @@ export interface InventoryRow {
   connectorId: string
   observedAt: number
   snapshot: unknown
+}
+/** A ranked row of the OpenFarm spool library, as the spool finder selects it. */
+export interface SpoolStockRow {
+  farmId: string
+  spoolId: number
+  name: string | null
+  material: string | null
+  colorHex: string | null
+  location: string | null
+  remainingGrams: number | null
+  colorDistance: number | null
+  loaded: boolean
+  loadedAt: {
+    printerId: string
+    slotKind: 'printer' | 'ams' | 'toolhead'
+    slotIndex: number
+    assignedAt: number
+  }[]
+}
+/** Rows of farm.spool_usage_records, as the usage feed selects them. */
+export interface SpoolUsageRow {
+  usageId: string
+  farmId: string
+  jobId: string
+  spoolId: number
+  printerId: string | null
+  grams: number
+  source: 'telemetry' | 'manual' | 'api'
+  observedAt: number
+  corrected: boolean
+}
+export interface ResinLedgerEntryRow {
+  id: string
+  printerId: string
+  kind: 'vat' | 'bottle' | 'volume' | 'film' | 'lcd'
+  target: string | null
+  name: string | null
+  volumeMl: number | null
+  layers: number | null
+  hours: number | null
+  source: 'manual' | 'reported'
+  recordedAt: number
 }
 export interface HistoryRow {
   id: string
@@ -403,6 +452,18 @@ export class MemoryWebhooks {
 
 export class World {
   clock = 1_700_000_000_000
+  private alertActions: {
+    appId: string
+    action: string
+    actedAt: number
+    silencedUntil: number | null
+  }[] = []
+  disabledAlertRules: { farmId: string; kind: FarmAlertKind }[] = []
+  get alertActionCount() {
+    return this.alertActions.length
+  }
+  telemetryFixture: { states: unknown[]; transitions: unknown[] } | null = null
+  cameraEnabled = false
   readonly faults = new Set<Fault>()
   readonly config: {
     integrationAuth: { readLimit: number; writeLimit: number }
@@ -423,6 +484,10 @@ export class World {
   readonly actions: IntegrationActionsService
   inventory: InventoryRow[] = []
   history: HistoryRow[] = []
+  /** Rows of farm.resin_ledger_entries, as the resin reader selects them. */
+  resinLedger: ResinLedgerEntryRow[] = []
+  spoolStock: SpoolStockRow[] = []
+  spoolUsage: SpoolUsageRow[] = []
   inbox: InboxResult = { kind: 'files', data: [], nextOffset: null }
   inboxCalls: { farmId: string; agentId: string; query: unknown }[] = []
   readonly pool: unknown
@@ -531,7 +596,10 @@ export class World {
           observedAt: this.clock,
           stale: false,
           total: 2,
-          spools: [spool, { ...spool, name: null, remainingGrams: -5 }],
+          spools: [
+            { spoolId: 7, ...spool },
+            { ...spool, name: null, remainingGrams: -5 },
+          ],
         },
       },
       {
@@ -539,6 +607,101 @@ export class World {
         connectorId: 'aaaaaaaa-2222-4222-8222-aaaaaaaaaaaa',
         observedAt: this.clock,
         snapshot: { observedAt: this.clock, stale: true, total: 0, spools: [] },
+      },
+    ]
+    this.spoolStock = [
+      {
+        farmId: ids.farmA,
+        spoolId: 7,
+        name: 'PLA Red',
+        material: 'PLA',
+        colorHex: 'ff0000',
+        location: 'Shelf 1',
+        remainingGrams: 640,
+        colorDistance: 0,
+        loaded: true,
+        loadedAt: [
+          {
+            printerId: ids.printerA1,
+            slotKind: 'ams',
+            slotIndex: 0,
+            assignedAt: this.clock - 5_000,
+          },
+        ],
+      },
+      {
+        farmId: ids.farmA,
+        spoolId: 8,
+        name: 'PLA Red',
+        material: 'PLA',
+        colorHex: 'ee1100',
+        location: null,
+        remainingGrams: null,
+        colorDistance: 24.5,
+        loaded: false,
+        loadedAt: [],
+      },
+    ]
+    this.spoolUsage = [
+      {
+        usageId: '00000000-0000-4000-8000-0000000000a1',
+        farmId: ids.farmA,
+        jobId: '101',
+        spoolId: 7,
+        printerId: ids.printerA1,
+        grams: 12.5,
+        source: 'telemetry',
+        observedAt: this.clock - 1_000,
+        corrected: true,
+      },
+      {
+        usageId: '00000000-0000-4000-8000-0000000000a2',
+        farmId: ids.farmA,
+        jobId: '101',
+        spoolId: 8,
+        printerId: null,
+        grams: 3,
+        source: 'manual',
+        observedAt: this.clock - 500,
+        corrected: false,
+      },
+    ]
+    this.resinLedger = [
+      {
+        id: '00000000-0000-4000-8000-000000000001',
+        printerId: ids.printerA1,
+        kind: 'bottle',
+        target: null,
+        name: 'Lote-A1',
+        volumeMl: 750,
+        layers: null,
+        hours: null,
+        source: 'manual',
+        recordedAt: this.clock - 2_000,
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000002',
+        printerId: ids.printerA1,
+        kind: 'vat',
+        target: null,
+        name: 'Vat-1',
+        volumeMl: null,
+        layers: null,
+        hours: null,
+        source: 'reported',
+        recordedAt: this.clock - 1_000,
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000003',
+        printerId: ids.printerA2,
+        kind: 'bottle',
+        target: null,
+        name: 'Lote-B7',
+        volumeMl: null,
+        layers: null,
+        hours: null,
+        source: 'manual',
+        recordedAt: this.clock - 500,
       },
     ]
     this.history = [3, 2, 1].map((n) => ({
@@ -600,9 +763,221 @@ export class World {
   }
 
   private makeSql() {
+    const fleetModes = new Map<string, FleetModeRecord>()
     const fn = async (strings: TemplateStringsArray, ...v: unknown[]) => {
       if (this.faults.has('pool')) throw new Error('pool down')
       const text = strings.join('?')
+      if (
+        text.startsWith('\n      SELECT p.id FROM farm.printer_assignments p')
+      )
+        return v[0]
+      if (text.includes('farm.integration_fleet_mode')) {
+        if (text.includes('INSERT INTO')) {
+          const [mode, version, previousMode, appId, target] = v
+          const printerId = (await target) as string
+          if (fleetModes.has(printerId)) return { count: 0 }
+          fleetModes.set(printerId, {
+            mode,
+            version,
+            previousMode,
+            appId,
+          } as FleetModeRecord)
+          return { count: 1 }
+        }
+        if (text.includes('UPDATE')) {
+          const [mode, version, previousMode, appId, target, expectedVersion] =
+            v
+          const printerId = (await target) as string
+          if (fleetModes.get(printerId)?.version !== expectedVersion)
+            return { count: 0 }
+          fleetModes.set(printerId, {
+            mode,
+            version,
+            previousMode,
+            appId,
+          } as FleetModeRecord)
+          return { count: 1 }
+        }
+        const current = fleetModes.get(v[0] as string)
+        return current ? [current] : []
+      }
+      if (
+        text.includes('FROM farm.integration_alert_rules') &&
+        text.includes('AND NOT enabled')
+      ) {
+        const [farmIds] = v as [string[]]
+        return this.disabledAlertRules.filter(({ farmId }) =>
+          farmIds.includes(farmId),
+        )
+      }
+      if (text.includes('farm.integration_alert_lifecycle')) {
+        if (text.includes('INSERT INTO farm.integration_alert_actions')) {
+          const [appId, action, actedAt, silencedUntil, printerId, alertId] =
+            v as [string, string, number, number | null, string, string]
+          if (printerId !== ids.printerA1 || alertId !== ids.alertA) return []
+          const previous = this.alertActions.find(
+            (entry) => entry.appId === appId,
+          )
+          if (previous && text.includes('ON CONFLICT (alert_id, app_id)')) {
+            if (previous.action !== 'acknowledge') {
+              previous.action = action
+              previous.actedAt = actedAt
+            }
+            if (silencedUntil !== null)
+              previous.silencedUntil = Math.max(
+                previous.silencedUntil ?? 0,
+                silencedUntil,
+              )
+          } else {
+            this.alertActions.push({ appId, action, actedAt, silencedUntil })
+          }
+          const actions = this.alertActions.filter(
+            (entry) => entry.appId === appId,
+          )
+          const acknowledgements = actions
+            .filter((entry) => entry.action === 'acknowledge')
+            .map((entry) => entry.actedAt)
+          const silences = actions.flatMap((entry) =>
+            entry.silencedUntil === null ? [] : [entry.silencedUntil],
+          )
+          return [
+            {
+              id: alertId,
+              acknowledgedAt: acknowledgements.length
+                ? Math.min(...acknowledgements)
+                : null,
+              silencedUntil: silences.length ? Math.max(...silences) : null,
+            },
+          ]
+        }
+        const [now, appId, printerId] = v as [number, string, string]
+        const actions = this.alertActions.filter(
+          (entry) => entry.appId === appId,
+        )
+        const acknowledgements = actions
+          .filter((entry) => entry.action === 'acknowledge')
+          .map((entry) => entry.actedAt)
+        const silences = actions.flatMap((entry) =>
+          entry.silencedUntil === null ? [] : [entry.silencedUntil],
+        )
+        const acknowledgedAt = acknowledgements.length
+          ? Math.min(...acknowledgements)
+          : null
+        const silencedUntil = silences.length ? Math.max(...silences) : null
+        return printerId === ids.printerA1
+          ? [
+              {
+                id: ids.alertA,
+                kind: 'error',
+                label: 'Erro',
+                message: 'Impressora em estado de erro.',
+                openedAt: this.clock,
+                resolvedAt: null,
+                acknowledgedAt,
+                silencedUntil,
+                needsAttention:
+                  acknowledgedAt === null &&
+                  (silencedUntil === null || silencedUntil <= now),
+              },
+            ]
+          : []
+      }
+      if (text.includes('farm.connector_heartbeats')) {
+        if (!this.cameraEnabled) return []
+        return [
+          {
+            health: {
+              connector: {
+                version: 'fixture',
+                uptimeMs: 1,
+                queueBacklog: 0,
+                storage: 'healthy',
+                rtcScope: 'lan',
+              },
+              printers: [],
+              cameraAssignments: [ids.printerA1],
+            },
+          },
+        ]
+      }
+      if (text.includes('farm.telemetry_events')) {
+        if (this.telemetryFixture) {
+          if (text.includes("'printer-transition'"))
+            return this.telemetryFixture.transitions.map((payload) => ({
+              payload,
+            }))
+          if (text.includes('DESC, event_id DESC LIMIT 1')) return []
+          return this.telemetryFixture.states.map((payload) => ({ payload }))
+        }
+        if (!text.includes("'printer-state'") || !text.includes('LIMIT ?'))
+          return []
+        const [farmId, agentId, printerKey, since, until] = v
+        return this.authStore.printers
+          .filter(
+            (row) =>
+              row.farmId === farmId &&
+              row.agentId === agentId &&
+              row.printerKey === printerKey &&
+              row.observedAt !== null &&
+              row.observedAt >= Number(since) &&
+              row.observedAt < Number(until),
+          )
+          .map((row) => ({ payload: { state: row.state } }))
+      }
+      if (text.includes('jsonb_array_elements(s.snapshot')) {
+        const [farmIds, posFarm, , posConnector, posIndex, limit] = v as [
+          string[],
+          string | null,
+          string | null,
+          string | null,
+          number | null,
+          number,
+        ]
+        const key = (farm: string, connector: string, index: number) =>
+          `${farm}|${connector}|${String(index).padStart(4, '0')}`
+        return this.inventory
+          .filter((row) => farmIds.includes(row.farmId))
+          .flatMap((row) =>
+            (row.snapshot as { spools: unknown[] }).spools.map((_, index) => ({
+              ...row,
+              index,
+            })),
+          )
+          .sort((a, b) =>
+            key(a.farmId, a.connectorId, a.index).localeCompare(
+              key(b.farmId, b.connectorId, b.index),
+            ),
+          )
+          .filter(
+            (row) =>
+              posFarm === null ||
+              key(row.farmId, row.connectorId, row.index) >
+                key(posFarm, posConnector ?? '', posIndex ?? 0),
+          )
+          .slice(0, limit)
+      }
+      if (text.includes('farm.spool_usage_records')) {
+        const [farmIds, jobId, cursor, , limit] = v as [
+          string[],
+          string,
+          string | null,
+          unknown,
+          number,
+        ]
+        return this.spoolUsage
+          .filter((row) => farmIds.includes(row.farmId))
+          .filter((row) => row.jobId === jobId)
+          .filter((row) => cursor === null || row.usageId > cursor)
+          .sort((a, b) => a.usageId.localeCompare(b.usageId))
+          .slice(0, limit)
+      }
+      if (text.includes('farm.spool_slot_assignments')) {
+        const farmIds = v.find(Array.isArray) as string[]
+        const limit = v.at(-1) as number
+        return this.spoolStock
+          .filter((row) => farmIds.includes(row.farmId))
+          .slice(0, limit)
+      }
       if (text.includes('farm.connector_inventory_snapshots')) {
         const [farmIds, posFarm, , posConnector, limit] = v as [
           string[],
@@ -624,6 +999,54 @@ export class World {
               `${row.farmId}|${row.connectorId}` > `${posFarm}|${posConnector}`,
           )
           .slice(0, limit)
+      }
+      if (text.includes('farm.resin_ledger_entries')) {
+        if (text.includes('ranked')) {
+          const [printerIds, limit] = v as [string[], number]
+          return this.resinLedger
+            .filter((row) => printerIds.includes(row.printerId))
+            .sort((a, b) => b.recordedAt - a.recordedAt)
+            .slice(0, limit)
+        }
+        const [farmWide, assignments, farmId, , afterId, , limit] = v as [
+          string[],
+          string[],
+          string | null,
+          unknown,
+          string | null,
+          unknown,
+          number,
+        ]
+        return this.authStore.printers
+          .filter(
+            (row) =>
+              farmWide.includes(row.farmId) || assignments.includes(row.id),
+          )
+          .filter((row) => farmId === null || row.farmId === farmId)
+          .filter((row) => afterId === null || row.id > afterId)
+          .filter((row) =>
+            this.resinLedger.some((entry) => entry.printerId === row.id),
+          )
+          .sort((a, b) => a.id.localeCompare(b.id))
+          .slice(0, limit)
+          .map((row) => ({
+            id: row.id,
+            farmId: row.farmId,
+            printerKey: row.printerKey,
+          }))
+      }
+      if (text.includes('PARTITION BY p.id')) {
+        const [printerIds, limit] = v as [string[], number]
+        return this.history
+          .filter((row) => printerIds.includes(row.printerId))
+          .sort((a, b) => b.endedAt - a.endedAt || Number(b.id) - Number(a.id))
+          .slice(0, limit)
+          .map((row) => ({
+            id: row.id,
+            printerId: row.printerId,
+            outcome: row.outcome,
+            endedAt: row.endedAt,
+          }))
       }
       if (text.includes('farm.job_history')) {
         const [
@@ -675,7 +1098,13 @@ export class World {
         'Unexpected SQL in the contract world: ' + text.slice(0, 80),
       )
     }
-    return Object.assign(fn, { array: (value: unknown[]) => value })
+    return Object.assign(fn, {
+      array: (value: unknown[]) => value,
+      begin: async <T>(run: (tx: typeof fn) => Promise<T>) => {
+        if (this.faults.has('pool')) throw new Error('pool down')
+        return run(fn)
+      },
+    })
   }
 
   async queryAgentInbox(

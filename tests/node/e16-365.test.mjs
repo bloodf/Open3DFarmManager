@@ -514,7 +514,7 @@ test('MQTT over mTLS acknowledges on <deviceId>/response and emits <type>/report
   try {
     assert.equal(client.returnCode, 0)
     const subGrant = await client.subscribe(
-      `anycubic/anycubicCloud/v1/slicer/printer/public/${modeId}/${deviceId}/#`,
+      `anycubic/anycubicCloud/v1/printer/public/${modeId}/${deviceId}/#`,
     )
     assert.equal(subGrant, 0)
 
@@ -648,7 +648,7 @@ test('Scenarios: idle, print with preparation phases -> printing -> finish, 1011
   const clientB = await connectKobraXMqttClient(mock, { clientId: 'client-b' })
 
   try {
-    const publicFilter = `anycubic/anycubicCloud/v1/slicer/printer/public/${modeId}/${deviceId}/#`
+    const publicFilter = `anycubic/anycubicCloud/v1/printer/public/${modeId}/${deviceId}/#`
     assert.equal(await clientA.subscribe(publicFilter), 0)
     assert.equal(await clientB.subscribe(publicFilter), 0)
 
@@ -873,7 +873,7 @@ test('Faults: wrong client certificate refused, broker drop, and ack without rep
     const client = await connectKobraXMqttClient(mock)
     assert.equal(client.returnCode, 0)
     await client.subscribe(
-      `anycubic/anycubicCloud/v1/slicer/printer/public/${modeId}/${deviceId}/#`,
+      `anycubic/anycubicCloud/v1/printer/public/${modeId}/${deviceId}/#`,
     )
 
     mock.control.faults.setFault({

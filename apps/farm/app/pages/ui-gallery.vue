@@ -6,6 +6,8 @@ import { formatTemperature } from '../utils/ui-format.ts'
 import { ref } from 'vue'
 import Button from '../components/ui/Button.vue'
 import Card from '../components/ui/Card.vue'
+import Stat from '../components/ui/Stat.vue'
+import PageHeader from '../components/ui/PageHeader.vue'
 import DataTable from '../components/ui/DataTable.vue'
 import Dialog from '../components/ui/Dialog.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -39,7 +41,34 @@ const rows = [
 
 <template>
   <main class="gallery">
-    <h1>Galeria de componentes</h1>
+    <PageHeader
+      title="Galeria de componentes"
+      description="Elementos compartilhados para operações."
+    />
+    <Card>
+      <h2>Estados e indicadores</h2>
+      <div class="statuses">
+        <StatusBadge tone="printing" label="Em impressão" />
+        <StatusBadge tone="attention" label="Precisa de atenção" />
+        <StatusBadge tone="fault" label="Falha" />
+        <StatusBadge tone="maintenance" label="Manutenção programada" />
+        <StatusBadge tone="idle" label="Ociosa" />
+        <StatusBadge tone="offline" label="Desconectada" />
+        <StatusBadge tone="stale" label="Dados desatualizados" />
+      </div>
+      <dl>
+        <Stat
+          label="Impressoras em operação"
+          :value="12"
+          unit="impressoras"
+          context="Atualizado agora"
+        />
+      </dl>
+      <EmptyState
+        title="Nenhum trabalho na fila"
+        description="Adicione um trabalho para começar."
+      />
+    </Card>
     <Card>
       <h2>Impressora</h2>
       <StatusBadge tone="printing" label="Em impressão" />
@@ -140,6 +169,11 @@ const rows = [
 </template>
 
 <style scoped>
+.statuses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ops-space-2);
+}
 .gallery {
   display: grid;
   gap: var(--space-4);

@@ -91,6 +91,7 @@ try {
   const admin = await database.start()
   const report = await runSimFarmAcceptance({
     admin,
+    fixtureDatabaseUrl: database.connectionString,
     ports,
     workDir,
     ledger,

@@ -314,6 +314,7 @@ test('maximum legal proof fields fit the explicit canonical wire budget and UTF8
     v: 2,
     assignment_count: 16,
     assignment_digest: 'A'.repeat(43),
+    camera_printer_id: f.binding.agent_id,
     account_id: 'a'.repeat(128),
     origin,
     audience: 'a'.repeat(128),

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
 import type { Sql } from 'postgres'
 import {
   IntegrationAppsService,
@@ -209,6 +210,37 @@ export async function testPostgresIntegrationApps(
   // Revoking a printer assignment disables printer-scoped grants (and only those).
   const printerA = await assignment(farm, 'printer-a')
   const printerB = await assignment(farm, 'printer-b')
+  // Rehearse the forward migration with retained pre-upgrade action history.
+  const alert = randomUUID()
+  await admin`INSERT INTO farm.integration_alert_lifecycle (id, printer_id, alert_key, kind, label, message, opened_at)
+    VALUES (${alert}::uuid, ${printerB}::uuid, 'fixture', 'error', 'Erro', 'Erro', 1)`
+  const migration = new URL(
+    '../../infra/db/migrations/0100_integration_alert_action_state.up.sql',
+    import.meta.url,
+  )
+  const rollback = new URL(
+    '../../infra/db/migrations/0100_integration_alert_action_state.down.sql',
+    import.meta.url,
+  )
+  await admin.unsafe(await readFile(rollback, 'utf8'))
+  await admin`INSERT INTO farm.integration_alert_actions (alert_id, app_id, action, acted_at, silenced_until) VALUES
+    (${alert}::uuid, ${app.id}::uuid, 'silence', 10, 500),
+    (${alert}::uuid, ${app.id}::uuid, 'acknowledge', 20, NULL),
+    (${alert}::uuid, ${app.id}::uuid, 'acknowledge', 30, NULL),
+    (${alert}::uuid, ${app.id}::uuid, 'silence', 40, 600)`
+  await admin.unsafe(await readFile(migration, 'utf8'))
+  const migrated =
+    await admin`SELECT action, acted_at::int, silenced_until::int FROM farm.integration_alert_actions WHERE alert_id = ${alert}::uuid AND app_id = ${app.id}::uuid`
+  assert.deepEqual(
+    [...migrated],
+    [{ action: 'acknowledge', acted_at: 20, silenced_until: 600 }],
+  )
+  await denied(
+    runtime`INSERT INTO farm.integration_alert_actions (alert_id, app_id, action, acted_at, silenced_until)
+    VALUES (${alert}::uuid, ${app.id}::uuid, 'silence', 50, 700)`,
+    'one alert action row per app',
+  )
+  checks.push('alert-action-migration-preserves-state-and-enforces-uniqueness')
   const scopedA = await service.createGrant(owner, {
     appId: app.id,
     farmId: farm,

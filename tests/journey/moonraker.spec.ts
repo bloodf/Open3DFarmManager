@@ -501,12 +501,7 @@ if (journeyEnabled())
       })
     }
 
-    /**
-     * One file operation over a fresh control session. The page reports a
-     * session that failed, or that it cancelled because the live state
-     * blinked, before the work was done; the operator repeats the operation,
-     * and so does the journey.
-     */
+    // Listing is read-only and can be retried on a fresh control session.
     async function fileOperation(page: Page, label: string, result: string) {
       const undone = [
         'Não foi possível concluir pela conexão direta. Verifique a impressora antes de tentar novamente.',
@@ -567,7 +562,16 @@ if (journeyEnabled())
           mimeType: 'text/plain',
           buffer: UPLOAD_BYTES,
         })
-        await fileOperation(page, 'Enviar arquivo', UPLOADED)
+        await controlInbox()
+        await expect(page.locator('#files-upload')).toBeEnabled({
+          timeout: 45_000,
+        })
+        await page
+          .getByRole('button', { name: 'Enviar arquivo', exact: true })
+          .click()
+        await expect(page.getByRole('status').last()).toHaveText(UPLOADED, {
+          timeout: 60_000,
+        })
 
         // The fixture's own upload endpoint stored exactly what the browser
         // sent, under the name it sent.
@@ -607,6 +611,14 @@ if (journeyEnabled())
         expect(written()).toEqual(
           Object.fromEntries(PRINT_CALLS.map((method) => [method, 0])),
         )
+        expect(written()).toEqual(
+          Object.fromEntries(PRINT_CALLS.map((method) => [method, 0])),
+        )
+        const calls = journey.printer.calls()
+        for (const method of PRINT_CALLS) {
+          const request = 'HTTP POST /' + method.replaceAll('.', '/')
+          expect(calls[request] ?? 0, request).toBe(0)
+        }
         expect(journey.printer.control.gcodeScripts).toEqual([])
         expect(journey.printer.model().state).toBe('standby')
         expect(journey.simulatorObservation()).toMatchObject({ failure: false })

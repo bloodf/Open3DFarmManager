@@ -48,6 +48,13 @@ const PAUSE_AUTHORITY_SERVER_LOG =
 
 /** Every discovered suite must have a contract; sort order is the run order. */
 export const PG_SUITE_CONTRACTS: Record<string, PgSuiteContract> = {
+  'test-postgres-alert-rules.ts': {
+    migrations: 'full',
+    fixture: {
+      port: 'ALERT_RULES_SYNTHETIC_TEST_PORT',
+      admitted: 'ALERT_RULES_SYNTHETIC_TEST_DISPOSABLE',
+    },
+  },
   'test-postgres-atomic-telemetry.ts': {
     migrations: 'none',
     fixture: {

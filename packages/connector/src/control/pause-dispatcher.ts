@@ -1,7 +1,4 @@
-import {
-  temperatureJournalAction,
-  toolTemperatureRefusal,
-} from './control-driver.ts'
+import { toolTemperatureRefusal } from './control-driver.ts'
 import { ToolHeaters } from '../../../farm-protocol/src/state.ts'
 import { authorityConfirmation } from '../auth/offline-authority.ts'
 import {
@@ -776,12 +773,7 @@ export function createPauseDispatcher(config: {
           try {
             claiming = true
             claim = claimCommand(journal, {
-              command: toolArgs
-                ? {
-                    ...command,
-                    ...temperatureJournalAction(toolArgs.target_c),
-                  }
-                : command,
+              command,
               printerKey: mapping.printer_key,
               wireSha256: createHash('sha256')
                 .update(encodeCommandV2(command))

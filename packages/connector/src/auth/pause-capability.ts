@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 import type { TrustedKeyAuthority } from './trusted-key-store.ts'
 import { MAX_PAUSE_ISSUER_KEYRING } from '../config/pause.ts'
 import { canonicalize } from '../../../farm-protocol/src/canonical.ts'
+import { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
 import {
   ControlSessionBinding,
   controlBindingHash,
@@ -64,7 +65,7 @@ export type PauseCapabilitySnapshot = Readonly<
   readonly browser_public_key: Readonly<
     SignedPauseCapabilityV1['browser_public_key']
   >
-  readonly actions: readonly import('../../../farm-protocol/src/control-actions.ts').ExtendedControlAction[]
+  readonly actions: readonly ExtendedControlAction[]
 }
 type ClockSample = Readonly<{ wall: number; mono: number }>
 class PeerHandle {
@@ -154,8 +155,9 @@ export function createPauseCapabilityVerifier(config: {
   const monotonicNow = config.clock.monotonicNow.bind(config.clock)
   const freshness = config.freshness
   const trustedKeys = config.trustedKeys
-  const browserAllowed = (capability: PauseCapabilitySnapshot) =>
-    !trustedKeys || trustedKeys.allowsBrowser(capability)
+  const browserAllowed = (
+    capability: Parameters<TrustedKeyAuthority['allowsBrowser']>[0],
+  ) => !trustedKeys || trustedKeys.allowsBrowser(capability)
   function cachedAuthorityFresh(now: ClockSample): boolean {
     try {
       return !freshness || freshness.freshAt(now) === true
@@ -496,8 +498,11 @@ export function createPauseCapabilityVerifier(config: {
           return { ok: false, reason: 'signature-rejected' }
         if (!fresh()) return { ok: false, reason: 'expired-or-inactive' }
         Object.freeze(capability.browser_public_key)
-        Object.freeze(capability.actions)
-        Object.freeze(capability)
+        // Filter the local grants only after verifying every signed action.
+        const actions = capability.actions.flatMap((action) => {
+          const known = ExtendedControlAction.safeParse(action)
+          return known.success ? [known.data] : []
+        })
         const handle = new CapabilityHandle()
         handles.set(handle, {
           binding: expected,
@@ -506,7 +511,10 @@ export function createPauseCapabilityVerifier(config: {
           peer: admission.peer,
           revoked: false,
           expired: false,
-          capability,
+          capability: Object.freeze({
+            ...capability,
+            actions: Object.freeze(actions),
+          }),
           deadline:
             admission.start.mono +
             Math.min(

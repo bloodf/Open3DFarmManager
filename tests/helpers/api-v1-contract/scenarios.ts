@@ -726,6 +726,24 @@ export const fixtures: Record<string, Fixture> = {
           })),
       },
       {
+        name: 'tool temperature action',
+        run: (world) => {
+          world.actionsStore.targets.set(P, {
+            farmId: ids.farmA,
+            agentId: ids.agentA,
+            controls: ['set_tool_temperature'],
+          })
+          return asApp(world, farm(['control:extended']), () => ({
+            method: 'POST',
+            path: `/printers/${P}/actions`,
+            ...json({
+              action: 'set_tool_temperature',
+              args: { tool: 1, target_c: 200 },
+            }),
+          }))
+        },
+      },
+      {
         name: 'grant requiring approval holds the action',
         run: (world) =>
           asApp(world, farm(['control:basic'], true), () => ({
@@ -1319,6 +1337,26 @@ export const fixtures: Record<string, Fixture> = {
                   status: 'refused',
                   refusalCode: 'wrong-state',
                 },
+              ).id
+            }`,
+          })),
+      },
+      {
+        name: 'tool temperature response retains tool and target',
+        run: (world) =>
+          asApp(world, farm(['control:extended']), (app) => ({
+            method: 'GET',
+            path: `/actions/${
+              world.seedAction(
+                app,
+                {
+                  action: {
+                    action: 'set_tool_temperature',
+                    args: { tool: 1, target_c: 200 },
+                  } as never,
+                  requiredScope: 'control:extended',
+                },
+                { appId: app.appId, status: 'completed' },
               ).id
             }`,
           })),

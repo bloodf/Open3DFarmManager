@@ -539,6 +539,7 @@ describe('command journal', () => {
         ).sql
         expect(sql).toContain("'set_pin','gcode'")
         const v14 = sql
+          .replace(",'set_tool_temperature'", '')
           .replace(",'start_library_print'", '')
           .replace(",'config_write'", '')
         const historical =
@@ -546,7 +547,7 @@ describe('command journal', () => {
             ? v14
             : v14.replace(",'gcode'", '').replace(",'file_op'", '')
         db.exec(
-          `DROP INDEX pause_active_assignment; DROP INDEX pause_active_printer; CREATE UNIQUE INDEX pause_active_assignment ON pause_commands(assignment_id) WHERE status IN ('claimed','write-started','outcome-unknown'); CREATE UNIQUE INDEX pause_active_printer ON pause_commands(farm_id,printer_key) WHERE status IN ('claimed','write-started','outcome-unknown'); DROP TABLE control_command_actions; ${historical}; INSERT INTO control_command_actions VALUES ('retained', 'set_pin'); PRAGMA user_version=${version};`,
+          `DROP INDEX pause_active_assignment; DROP INDEX pause_active_printer; CREATE UNIQUE INDEX pause_active_assignment ON pause_commands(assignment_id) WHERE status IN ('claimed','write-started','outcome-unknown'); CREATE UNIQUE INDEX pause_active_printer ON pause_commands(farm_id,printer_key) WHERE status IN ('claimed','write-started','outcome-unknown'); DROP TABLE control_tool_temperature_args; DROP TABLE control_command_actions; ${historical}; INSERT INTO control_command_actions VALUES ('retained', 'set_pin'); PRAGMA user_version=${version};`,
         )
       } finally {
         db.close()

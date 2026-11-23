@@ -475,7 +475,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ActionRequest'
+              $ref: '#/components/schemas/PrinterActionRequest'
       responses:
         '202':
           description: Action accepted (new or replayed).
@@ -2590,6 +2590,8 @@ components:
         - unload_filament
         - confirm_collection
     JobActionRequest:
+      allOf:
+        - $ref: '#/components/schemas/ActionRequest'
       oneOf:
         - type: object
           required: [action, args]
@@ -2600,21 +2602,28 @@ components:
             args:
               type: object
               additionalProperties: false
-        - type: object
-          required: [action, args]
+        - $ref: '#/components/schemas/PlateConfirmationRequest'
+    PlateConfirmationRequest:
+      type: object
+      required: [action, args]
+      additionalProperties: false
+      properties:
+        action:
+          const: confirm_collection
+        args:
+          type: object
+          required: [attempt]
           additionalProperties: false
           properties:
-            action:
-              const: confirm_collection
-            args:
-              type: object
-              required: [attempt]
-              additionalProperties: false
-              properties:
-                attempt:
-                  type: string
-                  pattern: '^(?:0|[1-9][0-9]{0,15})$'
+            attempt:
+              type: string
+              pattern: '^(?:0|[1-9][0-9]{0,15})$'
     ActionRequest:
+      description: Accepted action names and arguments across the printer and job action routes.
+      oneOf:
+        - $ref: '#/components/schemas/PrinterActionRequest'
+        - $ref: '#/components/schemas/PlateConfirmationRequest'
+    PrinterActionRequest:
       description: One action and its arguments; `args` is required and `{}` for actions without arguments.
       oneOf:
         - type: object

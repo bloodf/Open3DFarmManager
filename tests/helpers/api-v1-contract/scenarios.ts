@@ -82,6 +82,15 @@ interface Fixture {
 }
 
 const P = ids.printerA1
+const fleetModeSet = (printerId: string): CallInput => ({
+  method: 'POST',
+  path: '/printers/mode',
+  body: {
+    action: 'set',
+    mode: 'maintenance',
+    targets: [{ printerId, expectedVersion: null }],
+  },
+})
 const seedWebhook = (world: World, app: App) =>
   world.webhooks.seed(app.appId, 1)[0]!.id
 
@@ -316,6 +325,37 @@ export const fixtures: Record<string, Fixture> = {
     }),
     fault: 'printers',
   },
+  'POST /printers/mode': {
+    scopes: ['control:extended'],
+    success: '200',
+    valid: () => fleetModeSet(P),
+    bad: () => ({ ...fleetModeSet(P), body: { action: 'set', targets: [] } }),
+    missing: () => fleetModeSet(ids.printerB1),
+    fault: 'pool',
+    extra: {
+      '413': [
+        {
+          name: 'oversized body',
+          run: (world) =>
+            asApp(world, farm(['control:extended']), () => ({
+              ...fleetModeSet(P),
+              body: ' '.repeat(8193),
+              headers: { 'content-type': 'application/json' },
+            })),
+        },
+      ],
+      '415': [
+        {
+          name: 'wrong content type',
+          run: (world) =>
+            asApp(world, farm(['control:extended']), () => ({
+              ...fleetModeSet(P),
+              headers: { 'content-type': 'text/plain' },
+            })),
+        },
+      ],
+    },
+  },
   'GET /printers/readiness': {
     scopes: ['printers:read'],
     success: '200',
@@ -378,6 +418,14 @@ export const fixtures: Record<string, Fixture> = {
         },
       ],
     },
+  },
+  'GET /printers/{printerId}/mode': {
+    scopes: ['printers:read'],
+    success: '200',
+    valid: () => ({ method: 'GET', path: `/printers/${P}/mode` }),
+    missing: () => ({ method: 'GET', path: `/printers/${ids.unknown}/mode` }),
+    printerPath: true,
+    fault: 'pool',
   },
   'GET /printers/{printerId}/status': {
     scopes: ['printers:read'],

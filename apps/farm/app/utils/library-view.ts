@@ -12,6 +12,7 @@ export type LibraryMetadata = {
   slicer?: string
   slicerVersion?: string
   printerModel?: string
+  resinProfile?: string
   tools?: LibraryTool[]
   estimatedTimeSeconds?: number
   layerHeight?: number
@@ -27,7 +28,7 @@ export type LibraryVersion = {
   storageLocation: StorageMode
   agentId: string | null
   originalName: string
-  kind: 'gcode' | '3mf'
+  kind: 'gcode' | '3mf' | 'resin'
   plateCount: number
   metadata: LibraryMetadata
   hasThumbnail: boolean
@@ -161,6 +162,7 @@ export function compatibleWith(
   const { model, nozzleDiameterMm } = profile?.effective.values ?? {}
   if (!profile || !model) return [...items]
   return items.filter(({ latest }) => {
+    if (latest.kind === 'resin') return false
     const result = checkCompatibility(
       { ...latest.metadata, format: latest.kind },
       {

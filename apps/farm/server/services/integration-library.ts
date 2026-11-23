@@ -1,3 +1,7 @@
+import {
+  resinArtifactFormatFor,
+  validateResinArtifactContract,
+} from '../../../../packages/shared/src/print-file/resin-artifacts.ts'
 import { createHash, randomUUID } from 'node:crypto'
 import type { IntegrationPrincipal } from '../utils/integration-auth.ts'
 import { uuidPattern } from '../utils/integration-auth.ts'
@@ -17,7 +21,8 @@ export interface LibraryVersionView {
   sizeBytes: number
   storageLocation: StorageMode
   originalName: string
-  kind: 'gcode' | '3mf'
+  kind: 'gcode' | '3mf' | 'resin'
+  resinProfile?: string
   plateCount: number
   createdAt: number
 }
@@ -34,6 +39,7 @@ export interface ResolvedLibraryVersion {
   sha256: string
   sizeBytes: number
   displayName: string
+  resinProfile?: string
   storageMode: StorageMode
   plateCount: number
 }
@@ -64,13 +70,15 @@ export type LibraryProblem =
   | 'insufficient-scope'
 
 export type LibraryResult<T> =
-  { ok: true; value: T } | { ok: false; problem: LibraryProblem }
+  | { ok: true; value: T }
+  | { ok: false; problem: LibraryProblem; reason?: string }
 
 export interface NewLibraryVersion {
   farmId: string
   title: string
   originalName: string
-  kind: 'gcode' | '3mf'
+  kind: 'gcode' | '3mf' | 'resin'
+  resinProfile?: string
   sha256: string
   sizeBytes: number
   plateCount: number
@@ -95,7 +103,12 @@ export interface IntegrationLibraryStore {
   /** Where a connector-mode upload is stored. Null when the farm has no Connector. */
   agentFor(farmId: string): Promise<string | null>
   /** Server mode keeps the bytes. Connector mode keeps none. */
-  retain(sha256: string, bytes: Uint8Array, mode: StorageMode): Promise<void>
+  retain(
+    sha256: string,
+    bytes: Uint8Array,
+    mode: StorageMode,
+    target?: { farmId: string; agentId: string | null },
+  ): Promise<void>
   addVersion(version: NewLibraryVersion): Promise<LibraryItemView>
   insertAudit(entry: LibraryAudit, now: number): Promise<void>
 }
@@ -306,7 +319,12 @@ export class IntegrationLibraryService {
 
   async upload(
     principal: IntegrationPrincipal,
-    input: { farmId: string; name: string; bytes: Uint8Array },
+    input: {
+      farmId: string
+      name: string
+      bytes: Uint8Array
+      resinProfile?: string
+    },
     maxBytes: number,
   ): Promise<LibraryResult<LibraryUploadView>> {
     if (!principal.scopes.includes('library:write'))
@@ -317,7 +335,20 @@ export class IntegrationLibraryService {
     )
       return fail('not-found')
     if (!NAME.test(input.name)) return fail('invalid-request')
-    const kind = kindOf(input.name)
+    const resin = resinArtifactFormatFor(input.name)
+    const kind = resin ? 'resin' : kindOf(input.name)
+    if (resin || input.resinProfile !== undefined) {
+      const contract = validateResinArtifactContract(
+        input.name,
+        input.resinProfile ?? '',
+      )
+      if (!contract.ok)
+        return {
+          ok: false,
+          problem: 'validation-failed',
+          reason: contract.reason,
+        }
+    }
     if (!kind) return fail('unsupported-media-type')
     if (input.bytes.length < 1) return fail('invalid-request')
     if (input.bytes.length > maxBytes) return fail('payload-too-large')
@@ -326,16 +357,31 @@ export class IntegrationLibraryService {
       const agentId =
         mode === 'connector' ? await this.store.agentFor(input.farmId) : null
       if (mode === 'connector' && !agentId) return fail('service-unavailable')
-      const parsed = await ingest(kind, sourceOf(input.bytes))
+      const parsed =
+        kind === 'resin'
+          ? { ok: true as const, plateCount: 1 }
+          : await ingest(kind, sourceOf(input.bytes))
       if (!parsed.ok) return fail('validation-failed')
       const sha256 = createHash('sha256').update(input.bytes).digest('hex')
-      await this.store.retain(sha256, input.bytes, mode)
+      await this.store.retain(
+        sha256,
+        input.bytes,
+        mode,
+        resin ? { farmId: input.farmId, agentId } : undefined,
+      )
+
       const now = this.now()
       const existing = (
         await this.store.list(input.farmId, null, MAX_PAGE)
       ).find(
         (item) =>
-          item.latest.sha256 === sha256 && item.latest.storageLocation === mode,
+          item.latest.sha256 === sha256 &&
+          item.latest.storageLocation === mode &&
+          item.latest.kind === kind &&
+          item.latest.resinProfile === input.resinProfile &&
+          (!resin ||
+            resinArtifactFormatFor(item.latest.originalName)?.extension ===
+              resin.extension),
       )
       const saved =
         existing ??
@@ -343,9 +389,14 @@ export class IntegrationLibraryService {
           id: randomUUID(),
           itemId: randomUUID(),
           farmId: input.farmId,
-          title: input.name.replace(/\.(gcode|3mf)$/i, '').trim() || input.name,
+          title:
+            input.name.slice(0, input.name.lastIndexOf('.')).trim() ||
+            input.name,
           originalName: input.name,
           kind,
+          ...(input.resinProfile === undefined
+            ? {}
+            : { resinProfile: input.resinProfile }),
           sha256,
           sizeBytes: input.bytes.length,
           plateCount: parsed.plateCount,
@@ -466,6 +517,9 @@ export class MemoryLibraryStore implements IntegrationLibraryStore {
         storageLocation: row.storageLocation,
         originalName: row.originalName,
         kind: row.kind,
+        ...(row.resinProfile === undefined
+          ? {}
+          : { resinProfile: row.resinProfile }),
         plateCount: row.plateCount,
         createdAt: row.createdAt,
       },
@@ -505,6 +559,9 @@ export class MemoryLibraryStore implements IntegrationLibraryStore {
       sha256: row.sha256,
       sizeBytes: row.sizeBytes,
       displayName: row.originalName,
+      ...(row.resinProfile === undefined
+        ? {}
+        : { resinProfile: row.resinProfile }),
       storageMode: row.storageLocation,
       plateCount: row.plateCount,
     }

@@ -312,11 +312,16 @@ export const printerStateLabel: Record<
   paused: 'Pausada',
   error: 'Erro',
   offline: 'Indisponível segundo o Connector',
+  unknown: 'Estado da impressora desconhecido',
 }
 
 export function formatPrinterStateLabel(
-  printer: Pick<z.infer<typeof PrinterState>, 'state' | 'statusReason'>,
+  printer: Pick<
+    z.infer<typeof PrinterState>,
+    'state' | 'statusReason' | 'preformStatus'
+  >,
 ): string {
+  if (printer.preformStatus) return `PreForm informou: ${printer.preformStatus}`
   if (
     printer.state === 'offline' &&
     printer.statusReason === 'client-certificate-missing'

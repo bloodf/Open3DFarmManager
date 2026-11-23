@@ -49,6 +49,9 @@ export type RawPrinterObservation = Omit<
           creality: Readonly<Partial<Record<keyof PrinterState, number>>>
         }>
       | Readonly<{
+          formlabs: Readonly<Partial<Record<keyof PrinterState, number>>>
+        }>
+      | Readonly<{
           sdcp: Readonly<Partial<Record<keyof PrinterState, number>>>
         }>
       | Readonly<{
@@ -57,6 +60,7 @@ export type RawPrinterObservation = Omit<
   }
 
 function fieldTimes(timing: RawPrinterObservation['fieldObservedAtMonoMs']) {
+  if ('formlabs' in timing) return timing.formlabs
   return 'sdcp' in timing
     ? timing.sdcp
     : 'anycubic' in timing
@@ -327,7 +331,11 @@ export function createFarmSnapshotSource(input: {
     }
     const timing = value.fieldObservedAtMonoMs
     const fieldStamped =
-      'anycubic' in timing || 'bambu' in timing || 'creality' in timing
+      'formlabs' in timing ||
+      'sdcp' in timing ||
+      'anycubic' in timing ||
+      'bambu' in timing ||
+      'creality' in timing
     const times = fieldTimes(timing)
     const connectionOnly = 'connection' in times
     const previousTiming = previous?.fieldObservedAtMonoMs
@@ -341,6 +349,7 @@ export function createFarmSnapshotSource(input: {
             [
               'identity',
               'statusReason',
+              'preformStatus',
               'progress',
               'filename',
               'materials',
@@ -374,7 +383,9 @@ export function createFarmSnapshotSource(input: {
           previousTimes &&
           ('connection' in previousTimes !== connectionOnly ||
             (!!previousTiming &&
-              ('anycubic' in previousTiming ||
+              ('formlabs' in previousTiming ||
+                'sdcp' in previousTiming ||
+                'anycubic' in previousTiming ||
                 'bambu' in previousTiming ||
                 'creality' in previousTiming)) !== fieldStamped)
             ? Math.max(...Object.values(previousTimes))
@@ -487,6 +498,9 @@ export function createFarmSnapshotSource(input: {
         : {}),
       printerKey: parsedPrinter.data.printerKey,
       state: parsedPrinter.data.state,
+      ...(parsedPrinter.data.preformStatus
+        ? { preformStatus: parsedPrinter.data.preformStatus }
+        : {}),
       ...(parsedPrinter.data.statusReason
         ? { statusReason: parsedPrinter.data.statusReason }
         : {}),

@@ -836,7 +836,9 @@ watch(
       v-else
       :name="row.assignment.displayName || row.assignment.printerKey"
       :state-label="state ? formatPrinterStateLabel(state) : 'Sem dados'"
-      :state-tone="state?.state ?? 'offline'"
+      :state-tone="
+        state?.state === 'unknown' ? 'stale' : (state?.state ?? 'offline')
+      "
       :connector-label="
         row.connection === 'authenticated'
           ? 'conexão direta ativa'

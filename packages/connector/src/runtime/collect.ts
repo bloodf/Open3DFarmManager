@@ -812,8 +812,8 @@ export async function collectIntoQueue(input: {
           binding,
           signal,
           onObservation(value) {
+            // PreForm reports host data. Keep it out of printer history.
             input.onRawObservation?.(value)
-            onEvent({ kind: 'snapshot', printer: value.printer })
           },
           onUnavailable(epoch) {
             input.onRawUnavailable?.({ printerKey: binding.printerKey, epoch })

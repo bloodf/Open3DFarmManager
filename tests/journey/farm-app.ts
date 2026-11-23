@@ -131,9 +131,12 @@ export async function startFarmApp(
     // farm workspace resolves instead of assuming apps/farm/node_modules.
     const nuxt = await resolveNuxtInstall(farm)
     await symlink(nuxt.nodeModules, join(layer, 'node_modules'), 'dir')
+    // The account plugin makes the client entry async. On loopback it can
+    // run before Nuxt's inline runtime config, so keep the default deferred
+    // entry in the journey build.
     await writeFile(
       join(layer, 'nuxt.config.ts'),
-      `export default defineNuxtConfig({ extends: ${JSON.stringify(farm)}, srcDir: ${JSON.stringify(join(farm, 'app'))}, runtimeConfig: { connectorSignalling: { enabled: true } }, nitro: { preset: 'node-server', experimental: { websocket: true }, output: { dir: ${JSON.stringify(built)} } } })\n`,
+      `export default defineNuxtConfig({ extends: ${JSON.stringify(farm)}, srcDir: ${JSON.stringify(join(farm, 'app'))}, runtimeConfig: { connectorSignalling: { enabled: true } }, nitro: { preset: 'node-server', ignore: ['plugins/pre-hydration.ts'], experimental: { websocket: true }, output: { dir: ${JSON.stringify(built)} } } })\n`,
       { mode: 0o600 },
     )
     const buildEnv = {

@@ -9,9 +9,12 @@ lists clear the snapshot. Retrieval time expires independently of printer status
 The collection selects the configured device ID and gates on connection state
 and model. The host list may include remote entries and other models. Form 4
 and Form 4L pass the model gate. Form Studio 1 lacks a qualified status schema
-and is unsupported. Because the response has no printer-side observation time,
-the collection reports status unavailable even after a successful retrieval of a
-connected supported device.
+and is unsupported. Each successful poll of a connected
+supported device can publish the host-reported status text over the signed live
+Farm connection. The timestamp records when the Connector queried PreForm.
+Printer state and progress remain unknown because PreForm can cache data and
+provides no printer observation timestamp. Readings expire after five seconds
+and are withdrawn on a failed poll. This status is live-only.
 
 The synthetic fixture exercises the Form 4 family and retains extra vendor fields
 for reference. The current adapter returns device ID, product name, status text,

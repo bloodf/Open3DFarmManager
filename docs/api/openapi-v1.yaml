@@ -704,6 +704,217 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /inventory/spools:
+    get:
+      operationId: listObservedSpools
+      tags: [Inventory]
+      summary: Page spool observations from Connector snapshots
+      description: |
+        Requires a farm-wide inventory grant. Each observation is bounded;
+        partial snapshots omit spools and updates may change page membership.
+      security:
+        - clientCredentials: ['inventory:read']
+      parameters:
+        - $ref: '#/components/parameters/FarmIdFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Page of observed spools.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, nextCursor]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        [farmId, connectorId, observedAt, stale, partial, spool]
+                      properties:
+                        farmId: { type: string, format: uuid }
+                        connectorId: { type: string, format: uuid }
+                        observedAt:
+                          { type: integer, description: Unix milliseconds }
+                        stale: { type: boolean }
+                        partial: { type: boolean }
+                        spool:
+                          $ref: '#/components/schemas/Spool'
+                  nextCursor: { type: [string, 'null'] }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /inventory/spools/search:
+    get:
+      operationId: searchInventorySpools
+      tags: [Inventory]
+      summary: Rank matching spools in the OpenFarm library
+      description: Requires a farm-wide inventory grant and the spool usage runtime. Orders by Euclidean RGB distance, farm and spool ID.
+      security:
+        - clientCredentials: ['inventory:read']
+      parameters:
+        - $ref: '#/components/parameters/FarmIdFilter'
+        - $ref: '#/components/parameters/Limit'
+        - name: color
+          in: query
+          schema: { type: string, pattern: '^#?[0-9a-fA-F]{6}$' }
+        - name: material
+          in: query
+          schema: { type: string, minLength: 1, maxLength: 64 }
+        - name: availability
+          in: query
+          schema: { type: string, enum: [any, stored, loaded], default: any }
+        - name: minRemainingGrams
+          in: query
+          schema: { type: number, minimum: 0 }
+      responses:
+        '200':
+          description: Ranked spools and the query time.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, assessedAt]
+                properties:
+                  assessedAt: { type: integer, description: Unix milliseconds }
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        [
+                          farmId,
+                          spoolId,
+                          name,
+                          material,
+                          colorHex,
+                          location,
+                          remainingGrams,
+                          colorDistance,
+                          loaded,
+                          loadedAt,
+                        ]
+                      properties:
+                        farmId: { type: string, format: uuid }
+                        spoolId: { type: integer, minimum: 1 }
+                        name: { type: [string, 'null'] }
+                        material: { type: [string, 'null'] }
+                        colorHex: { type: [string, 'null'] }
+                        location: { type: [string, 'null'] }
+                        remainingGrams: { type: [number, 'null'] }
+                        colorDistance: { type: [number, 'null'] }
+                        loaded: { type: boolean }
+                        loadedAt:
+                          type: array
+                          items:
+                            type: object
+                            required:
+                              [printerId, slotKind, slotIndex, assignedAt]
+                            properties:
+                              printerId: { type: string, format: uuid }
+                              slotKind:
+                                { type: string, enum: [printer, ams, toolhead] }
+                              slotIndex: { type: integer, minimum: 0 }
+                              assignedAt:
+                                {
+                                  type: integer,
+                                  description: Unix milliseconds,
+                                }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /inventory/spools/usage:
+    get:
+      operationId: listInventorySpoolUsage
+      tags: [Inventory]
+      summary: List spool ledger records for a finished run
+      description: Requires a farm-wide inventory grant and the spool usage runtime. Upsert records by farm and usage ID. Corrections replace grams under the same usage ID.
+      security:
+        - clientCredentials: ['inventory:read']
+      parameters:
+        - $ref: '#/components/parameters/FarmIdFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: jobId
+          in: query
+          required: true
+          description: Numeric id from GET /jobs.
+          schema: { type: string, pattern: '^[1-9][0-9]{0,18}$' }
+      responses:
+        '200':
+          description: Page of spool ledger entries.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, nextCursor]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        [
+                          usageId,
+                          farmId,
+                          jobId,
+                          spoolId,
+                          printerId,
+                          grams,
+                          source,
+                          observedAt,
+                          corrected,
+                        ]
+                      properties:
+                        usageId: { type: string, format: uuid }
+                        farmId: { type: string, format: uuid }
+                        jobId: { type: string }
+                        spoolId: { type: integer, minimum: 1 }
+                        printerId: { type: [string, 'null'], format: uuid }
+                        grams: { type: number, minimum: 0 }
+                        source: { type: string, enum: [telemetry, manual, api] }
+                        observedAt:
+                          { type: integer, description: Unix milliseconds }
+                        corrected: { type: boolean }
+                  nextCursor: { type: [string, 'null'] }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /library:
     get:
       operationId: listLibrary
@@ -2526,6 +2737,10 @@ components:
       required: [name, material, colorHex, remainingGrams, location, archived]
       additionalProperties: false
       properties:
+        spoolId:
+          type: integer
+          minimum: 1
+          description: Spoolman ID scoped to the Connector's configured Spoolman service; absent in older observations.
         name:
           type: [string, 'null']
           maxLength: 32

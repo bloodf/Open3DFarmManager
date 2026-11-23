@@ -254,7 +254,8 @@ if (mode === '--prepare-layer') {
     join(layer, 'node_modules'),
     'dir',
   )
-  const config = `export default defineNuxtConfig({ extends: ${JSON.stringify(app)}, srcDir: ${JSON.stringify(join(app, 'app'))}, runtimeConfig: { connectorSignalling: { enabled: true } }, nitro: { preset: 'node-server', output: { dir: ${JSON.stringify(output)} } } })\n`
+  // Keep the fixture entry deferred so it runs after Nuxt's inline runtime config.
+  const config = `export default defineNuxtConfig({ extends: ${JSON.stringify(app)}, srcDir: ${JSON.stringify(join(app, 'app'))}, runtimeConfig: { connectorSignalling: { enabled: true } }, nitro: { preset: 'node-server', ignore: ['plugins/pre-hydration.ts'], output: { dir: ${JSON.stringify(output)} } } })\n`
   await writeFile(join(layer, 'nuxt.config.ts'), config, {
     mode: 0o600,
     flag: 'wx',

@@ -49,6 +49,9 @@ export type RawPrinterObservation = Omit<
           creality: Readonly<Partial<Record<keyof PrinterState, number>>>
         }>
       | Readonly<{
+          prusaLink: Readonly<Partial<Record<keyof PrinterState, number>>>
+        }>
+      | Readonly<{
           formlabs: Readonly<Partial<Record<keyof PrinterState, number>>>
         }>
       | Readonly<{
@@ -60,6 +63,7 @@ export type RawPrinterObservation = Omit<
   }
 
 function fieldTimes(timing: RawPrinterObservation['fieldObservedAtMonoMs']) {
+  if ('prusaLink' in timing) return timing.prusaLink
   if ('formlabs' in timing) return timing.formlabs
   return 'sdcp' in timing
     ? timing.sdcp
@@ -336,6 +340,7 @@ export function createFarmSnapshotSource(input: {
     }
     const timing = value.fieldObservedAtMonoMs
     const fieldStamped =
+      'prusaLink' in timing ||
       'formlabs' in timing ||
       'sdcp' in timing ||
       'anycubic' in timing ||
@@ -389,7 +394,8 @@ export function createFarmSnapshotSource(input: {
           previousTimes &&
           ('connection' in previousTimes !== connectionOnly ||
             (!!previousTiming &&
-              ('formlabs' in previousTiming ||
+              ('prusaLink' in previousTiming ||
+                'formlabs' in previousTiming ||
                 'sdcp' in previousTiming ||
                 'anycubic' in previousTiming ||
                 'bambu' in previousTiming ||

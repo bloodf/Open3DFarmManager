@@ -79,10 +79,12 @@ export async function testAuthenticatedFarmPage(input: {
       .getByRole('button', { name: /^Inspecionar / })
       .filter({ has: page.getByText(assignment.printerKey, { exact: true }) })
       .click()
-    await expect(
-      page.getByRole('dialog', { name: 'Inspeção da impressora', exact: true }),
-    ).toBeVisible()
-    const row = page.getByRole('article').filter({
+    const inspector = page.getByRole('dialog', {
+      name: 'Inspeção da impressora',
+      exact: true,
+    })
+    await expect(inspector).toBeVisible()
+    const row = inspector.getByRole('article').filter({
       has: page.getByRole('heading', {
         name: assignment.printerKey,
         exact: true,

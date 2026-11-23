@@ -20,11 +20,18 @@ import { startBambuSimulator } from '../../packages/sim-tools/src/bambu-simulato
 import { createCrealitySimulator } from '../../packages/sim-tools/src/creality-simulator.ts'
 import { startFormlabsJourneyFixture } from './formlabs-fixture.ts'
 import { startSdcpFixture } from './sdcp-fixture.ts'
+import { startPrusaLinkJourneyFixture } from './prusa-link-fixture.ts'
 import { createJourneyCameraEncoder } from './camera-encoder.ts'
 import { startKobraBridgeSimulator } from './harness-kobralink-bridge.ts'
 
 export type VendorName =
-  'bambu' | 'creality' | 'anycubic' | 'kobralink' | 'sdcp' | 'formlabs'
+  | 'bambu'
+  | 'creality'
+  | 'anycubic'
+  | 'kobralink'
+  | 'sdcp'
+  | 'formlabs'
+  | 'prusa-link'
 
 /** What a spec can do to the running simulated print. */
 export type VendorControls = Readonly<{
@@ -57,7 +64,7 @@ export type RuntimeScope = Readonly<{
 
 /** The Connector runtime file sections this vendor needs. */
 export type VendorRuntime = Readonly<{
-  version: 2 | 3 | 4 | 5 | 6 | 7
+  version: 2 | 3 | 4 | 5 | 6 | 7 | 8
   collection: Readonly<Record<string, unknown>>
   assignment: Readonly<Record<string, unknown>>
   /**
@@ -106,6 +113,7 @@ export type VendorSimulator = Readonly<{
 
 /** Moonraker is the harness default; everything else is a VendorName. */
 export const VENDOR_DESCRIPTIONS: Readonly<Record<VendorName, string>> = {
+  'prusa-link': 'Loopback PrusaLink status simulator',
   formlabs: 'Loopback Formlabs PreForm status simulator',
   sdcp: 'Loopback SDCP status simulator',
   bambu:
@@ -265,7 +273,43 @@ export async function startVendorSimulator(
     let controls: VendorControls
     let runtime: VendorSimulator['runtime']
 
-    if (name === 'formlabs') {
+    if (name === 'prusa-link') {
+      const fixture = await startPrusaLinkJourneyFixture()
+      undo.push(fixture.close)
+      raw = fixture
+      const unsupported = () => {
+        throw new Error('PrusaLink journey is read-only')
+      }
+      controls = {
+        setProgress: unsupported,
+        finishPrint: unsupported,
+        failPrint: unsupported,
+      }
+      const apiKeyFile = join(directory, 'prusa-key.json')
+      await privateJson(apiKeyFile, {
+        origin: fixture.simulator.endpoint,
+        apiKey: fixture.apiKey,
+      })
+      runtime = async (scope) => ({
+        version: 8,
+        collection: {
+          version: 8,
+          allowedOrigins: [fixture.simulator.endpoint],
+          printers: [],
+          drivers: [
+            {
+              family: 'prusa-link',
+              printerKey: scope.printerKey,
+              origin: fixture.simulator.endpoint,
+              apiKeyFile,
+              expect: { serial: 'SIM-PRUSA', printerType: '1.4.0' },
+            },
+          ],
+          limits: { staleAfterMs: 5000 },
+        },
+        assignment: { ...localAssignment(scope), backend: 'prusa-link' },
+      })
+    } else if (name === 'formlabs') {
       const fixture = await startFormlabsJourneyFixture()
       undo.push(fixture.close)
       raw = fixture
@@ -409,7 +453,12 @@ export async function startVendorSimulator(
         // A started print lasts long enough for the page to show it running.
         // The status heartbeat keeps the observation current, as stock
         // firmware does while a client is connected.
-        { durationMs: 6000, totalLayers: 12, heartbeatMs: 1000 },
+        {
+          durationMs: 6000,
+          totalLayers: 12,
+          heartbeatMs: 1000,
+          gcodeDirectory: '/mnt/UDISK/printer_data/gcodes',
+        },
       )
       undo.push(() => sim.close())
       raw = sim

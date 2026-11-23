@@ -19,22 +19,23 @@ import {
 } from '../moonraker/files.ts'
 import type {
   createKobraLinkClient,
-  PrinterBinding,
+  PrinterBinding as KobraLinkPrinterBinding,
 } from '../kobralink/client.ts'
 import { listBambuFiles, type BambuListOptions } from '../bambu/files.ts'
 import { listAnycubicFiles } from '../anycubic/files.ts'
-import type { PrinterBinding as LocalPrinterBinding } from '../control/printer-binding.ts'
+import type { PrinterBinding } from '../control/printer-binding.ts'
 import { createBambuSdCard } from '../bambu/printer-detail.ts'
+import { listCrealityFiles } from '../creality/files.ts'
 
 export type FileListTarget =
-  | { backend: 'creality' }
-  | { backend: 'anycubic'; binding?: LocalPrinterBinding }
+  | { backend: 'creality'; binding?: PrinterBinding }
+  | { backend: 'anycubic'; binding?: PrinterBinding }
   | {
       backend: 'kobralink'
       client(
         signal: AbortSignal,
       ): Promise<ReturnType<typeof createKobraLinkClient>>
-      binding: PrinterBinding
+      binding: KobraLinkPrinterBinding
     }
   | {
       backend: 'moonraker'
@@ -410,7 +411,8 @@ export async function readPrinterFiles(
     throw Error('unsupported')
   switch (target.backend) {
     case 'creality':
-      throw Error('unsupported')
+      if (!target.binding) throw Error('unsupported')
+      return listCrealityFiles({ ...input, binding: target.binding })
     case 'anycubic':
       if (!target.binding) throw Error('unsupported')
       return listAnycubicFiles({ binding: target.binding, ...input })

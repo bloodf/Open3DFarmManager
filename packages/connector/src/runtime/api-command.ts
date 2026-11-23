@@ -11,12 +11,14 @@ import {
   ApiPlateAction,
   ApiResinReplay,
   API_RUN_CONTROLS,
-  scopeForApiAction,
+  isApiEnvironmentAction,
+  scopeForApiCommand,
   decodeApiEnvelopeFrame,
   encodeApiEnvelopeResultFrame,
   verifyApiEnvelope,
   type ApiEnvelopeRefusalCode,
   type ApiEnvelopeV1,
+  type ApiEnvironmentAction,
 } from '../../../farm-protocol/src/api-envelope.ts'
 import {
   controlPrinterBusy,
@@ -95,11 +97,58 @@ export interface QualifiedResinDispatch extends ResinArtifactDispatchCapability 
 
 type DriverRequest = z.infer<typeof ControlArguments>
 
+/**
+ * The qualified driver request behind an environment control, or undefined
+ * when the Connector has no qualified capability for it. Extraction is the
+ * chamber fan (`set_fan`), journalled like any API action. Smart plugs and
+ * drying programs have no qualified API path yet (no journalled API action
+ * and no qualified drying driver), so they are refused as unsupported.
+ */
+export function environmentDriverRequest(
+  action: ApiEnvironmentAction,
+): DriverRequest | undefined {
+  if (action.action === 'extraction_set')
+    return {
+      action: 'set_fan',
+      args: { fan: 'chamber', percent: action.args.percent },
+    }
+  return undefined
+}
+
 function driverAction(envelope: ApiEnvelopeV1): DriverRequest | undefined {
   const scoped = ApiRunAction.safeParse(envelope.action)
   if (scoped.success)
     return { action: API_RUN_CONTROLS[scoped.data.action], args: {} }
+  if (isApiEnvironmentAction(envelope.action))
+    return environmentDriverRequest(envelope.action)
   return envelope.action as DriverRequest | undefined
+}
+
+const ACTIVE_PRINT_STATES: readonly string[] = ['printing', 'paused']
+
+/**
+ * Safety interlocks for environment controls, decided from the Connector's
+ * own observation; an unknown state refuses, it never allows. A smart plug is
+ * never switched while a print runs or is paused, and extraction is never
+ * turned off during one.
+ */
+export function environmentInterlock(
+  action: ApiEnvironmentAction,
+  observed: ApiPrinterObservation | null,
+): [ApiEnvelopeRefusalCode, string] | null {
+  if (
+    !observed ||
+    !observed.ready ||
+    observed.printState === 'unknown' ||
+    observed.printState === 'error'
+  )
+    return ['not-ready', 'environment-interlock-state-unknown']
+  const active = ACTIVE_PRINT_STATES.includes(observed.printState)
+  if (action.action === 'plug_switch' && active)
+    return ['printer-busy', 'plug-interlock-print-active']
+  if (action.action === 'extraction_set' && action.args.percent === 0 && active)
+    return ['printer-busy', 'extraction-interlock-print-active']
+  return null
 }
 
 export type ApiCommandResult =
@@ -118,7 +167,7 @@ const MAX_EXECUTE_MS = 5000
 /** The scope a grant must hold for this envelope; mirrors the server's issue check. */
 export function apiEnvelopeScope(envelope: ApiEnvelopeV1): string {
   if (envelope.kind === 'job') return 'jobs:start'
-  return scopeForApiAction(envelope.action!.action)
+  return scopeForApiCommand(envelope.action!.action)
 }
 
 /**
@@ -409,8 +458,22 @@ export function createApiCommandRunner(config: {
         config.storageDegraded?.()
       )
         return refuse(envelope, 'not-ready', 'printer or journal unavailable')
+      // An environment control without a qualified capability is refused
+      // before anything is journalled or sent.
+      const environment = isApiEnvironmentAction(envelope.action)
+        ? environmentDriverRequest(envelope.action)
+        : undefined
+      if (isApiEnvironmentAction(envelope.action) && !environment)
+        return refuse(
+          envelope,
+          'unsupported',
+          'no qualified capability for this environment control',
+        )
       const claim = claimApiCommand(config.journal, {
-        envelope,
+        // The journal records the driver action the environment control runs.
+        envelope: environment
+          ? { ...envelope, action: environment as ApiEnvelopeV1['action'] }
+          : envelope,
         printerKey: mapping.printer_key,
         wireSha256: createHash('sha256').update(String(wire)).digest('hex'),
       })
@@ -483,6 +546,13 @@ export function createApiCommandRunner(config: {
         )
           return ['wrong-state', 'run-mismatch']
         return stateRefusal(action, binding, observed)
+      }
+      if (isApiEnvironmentAction(envelope.action)) {
+        const observed = config.observe(binding)
+        return (
+          environmentInterlock(envelope.action, observed) ??
+          stateRefusal(action, binding, observed ?? undefined)
+        )
       }
       return stateRefusal(action, binding)
     }

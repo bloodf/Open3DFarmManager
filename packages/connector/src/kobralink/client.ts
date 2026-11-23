@@ -1,3 +1,4 @@
+import { boundPrinterString } from '@open3dfarmmanager/farm-protocol'
 import {
   kobraLinkUploadBody,
   parseKobraLinkFiles,
@@ -355,9 +356,12 @@ export function createKobraLinkClient(options: KobraLinkOptions) {
           : live?.kobraState === 'failed'
             ? 'failed'
             : undefined
-    const filename = live?.filename
-      ?.replace(/[\u0000-\u001f\u007f-\u009f]/g, '')
-      .slice(0, 255)
+    const filename =
+      live?.filename === undefined
+        ? undefined
+        : boundPrinterString(
+            live.filename.replace(/[\u0000-\u001f\u007f-\u009f]/g, ''),
+          )
     const endedAt = live?.updatedAt
     return {
       ...(availability === 'available' &&

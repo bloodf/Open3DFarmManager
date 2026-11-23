@@ -1,4 +1,8 @@
 export * from './state.ts'
+export {
+  boundPrinterString,
+  PRINTER_STRING_MAX_UNITS,
+} from './string-bounds.ts'
 export * from './machine-profile.ts'
 export * from './status.ts'
 export * from './command.ts'

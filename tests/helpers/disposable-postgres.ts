@@ -11,7 +11,14 @@ import assert from 'node:assert/strict'
 import { execFile, execFileSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { existsSync, readdirSync } from 'node:fs'
-import { appendFile, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
+import {
+  appendFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -172,6 +179,8 @@ export interface DisposablePostgresInput {
 
 export interface DisposablePostgresFixture {
   readonly port: number
+  readonly password: string
+  readonly connectionString: string
   readonly container?: string | undefined
   readonly dataDir?: string | undefined
   readonly tempDir?: string | undefined
@@ -201,10 +210,18 @@ export function disposablePostgres(
   let testDbName: string | undefined
   let ownedRole: string | undefined
   let rootSql: Sql | undefined
+  const password = randomBytes(32).toString('hex')
+  let connectionString = ''
 
   return {
     get port() {
       return port
+    },
+    get password() {
+      return password
+    },
+    get connectionString() {
+      return connectionString
     },
     get container() {
       return container
@@ -255,7 +272,7 @@ export function disposablePostgres(
           ...['--tmpfs', '/tmp:rw,mode=1777'],
           ...['-p', `127.0.0.1:${input.port || ''}:5432`],
           ...['-e', 'POSTGRES_USER=fixture', '-e', 'POSTGRES_DB=fixture'],
-          ...['-e', 'POSTGRES_HOST_AUTH_METHOD=trust'],
+          ...['-e', `POSTGRES_PASSWORD=${password}`],
           ...['-e', 'PGDATA=/var/lib/postgresql/data/pgdata'],
           image,
           ...(input.postgresArgs ?? []),
@@ -280,7 +297,7 @@ export function disposablePostgres(
           onnotice: () => {},
           database: 'fixture',
           username: 'fixture',
-          password: '',
+          password,
           ssl: false,
           max: 4,
           connect_timeout: 3,
@@ -299,7 +316,7 @@ export function disposablePostgres(
         testDbName = databaseName
         try {
           await rootSql.unsafe(
-            `CREATE ROLE "${assertPgIdent(roleName)}" WITH SUPERUSER LOGIN`,
+            `CREATE ROLE "${assertPgIdent(roleName)}" WITH SUPERUSER LOGIN PASSWORD '${password}'`,
           )
           ownedRole = roleName
           await rootSql.unsafe(
@@ -317,7 +334,7 @@ export function disposablePostgres(
             onnotice: () => {},
             database: databaseName,
             username: roleName,
-            password: '',
+            password,
             ssl: false,
             max: 4,
             connect_timeout: 3,
@@ -345,17 +362,20 @@ export function disposablePostgres(
         const logDir = join(dataDir, 'log')
         logPath = join(logDir, 'postgresql.log')
         const pgCtlLog = join(tempDir, 'pg_ctl.log')
+        const passwordFile = join(tempDir, 'password')
 
         ledger({ resource: 'cluster', name, tempDir, port })
 
         try {
+          await writeFile(passwordFile, password, { mode: 0o600 })
           await exec(bins.initdb, [
             '-D',
             dataDir,
             '-U',
             'fixture',
-            '--auth-local=trust',
-            '--auth-host=trust',
+            '--auth-local=scram-sha-256',
+            '--auth-host=scram-sha-256',
+            `--pwfile=${passwordFile}`,
             '--no-instructions',
             '--no-locale',
             '-E',
@@ -428,7 +448,7 @@ log_timezone = 'UTC'
             onnotice: () => {},
             database: 'postgres',
             username: 'fixture',
-            password: '',
+            password,
             ssl: false,
             max: 1,
             connect_timeout: 5,
@@ -442,7 +462,7 @@ log_timezone = 'UTC'
             onnotice: () => {},
             database: 'fixture',
             username: 'fixture',
-            password: '',
+            password,
             ssl: false,
             max: 4,
             connect_timeout: 3,
@@ -479,6 +499,17 @@ log_timezone = 'UTC'
           throw startupErr
         }
       }
+
+      const host = testDatabaseUrl
+        ? new URL(testDatabaseUrl).hostname
+        : '127.0.0.1'
+      const url = new URL('postgresql://localhost')
+      url.hostname = host
+      url.port = String(port)
+      url.username = ownedRole ?? 'fixture'
+      url.password = password
+      url.pathname = `/${testDbName ?? 'fixture'}`
+      connectionString = url.toString()
 
       try {
         assert.equal(

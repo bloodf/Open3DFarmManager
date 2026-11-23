@@ -2,7 +2,10 @@ import type {
   FilamentUsage,
   PrinterState,
 } from '@open3dfarmmanager/farm-protocol'
-import { parseBoundedJson } from '@open3dfarmmanager/farm-protocol'
+import {
+  boundPrinterString,
+  parseBoundedJson,
+} from '@open3dfarmmanager/farm-protocol'
 
 /** Maximum payload size in bytes for a Bambu MQTT report frame (128 KiB). */
 export const MAX_BAMBU_FRAME_BYTES = 128 * 1024
@@ -247,7 +250,8 @@ export function decodeBambuReport(input: unknown): BambuReportResult {
       value.trim().length > 0 &&
       value.length <= 255,
   )
-  if (filename !== undefined) observation.filename = filename
+  if (filename !== undefined)
+    observation.filename = boundPrinterString(filename)
   for (const [source, target] of [
     ['layer_num', 'currentLayer'],
     ['total_layer_num', 'totalLayer'],
@@ -404,7 +408,7 @@ function decodeMaterials(
       t.tray_type.length > 0 &&
       t.tray_type.length <= 64
     )
-      item.materialType = t.tray_type
+      item.materialType = boundPrinterString(t.tray_type)
     if (typeof t.tray_color === 'string' && /^[0-9a-f]{8}$/i.test(t.tray_color))
       item.colorHex = t.tray_color.toUpperCase()
     if (

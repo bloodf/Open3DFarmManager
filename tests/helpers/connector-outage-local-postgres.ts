@@ -1,8 +1,10 @@
 // Disposable local PostgreSQL 17 cluster for the Docker-free (OPENFARM_SIM=mock)
-// outage run. Loopback TCP only, trust auth, data inside the caller's work
+// outage run. Loopback TCP with password authentication, data inside the caller's work
 // directory, removed with it. Stops exactly the postmaster it started.
 import { execFile, execFileSync } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import { existsSync } from 'node:fs'
+import { writeFile } from 'node:fs/promises'
 import { delimiter, dirname, isAbsolute, join } from 'node:path'
 import { promisify } from 'node:util'
 
@@ -21,17 +23,7 @@ function binary(name: string) {
   return name // PATH fallback; the version check below rejects a wrong major.
 }
 
-export async function startLocalPostgres(input: {
-  workDir: string
-  port: number
-  ledger: (value: object) => void
-}) {
-  const [initdb, pgCtl, createdb, postgresBin] = [
-    'initdb',
-    'pg_ctl',
-    'createdb',
-    'postgres',
-  ].map(binary) as [string, string, string, string]
+async function postgresEnv(postgresBin: string) {
   const env = { ...process.env }
   // pg_config reports paths relative to the selected installation, including
   // unpacked distributions whose libraries are outside the system search path.
@@ -49,16 +41,64 @@ export async function startLocalPostgres(input: {
         .filter(Boolean)
         .join(delimiter)
   }
+  return env
+}
+
+const isRequiredVersion = (version: string) => / 17\./.test(version)
+
+/** Whether the binaries selected by this helper are available for a v17 cluster. */
+export async function hasLocalPostgres(): Promise<boolean> {
+  try {
+    const postgresBin = binary('postgres')
+    const env = await postgresEnv(postgresBin)
+    const version = (
+      await exec(postgresBin, ['--version'], { env, timeout: 5000 })
+    ).stdout
+    if (!isRequiredVersion(version)) return false
+    for (const name of ['initdb', 'pg_ctl', 'createdb'])
+      await exec(binary(name), ['--version'], { env, timeout: 5000 })
+    return true
+  } catch {
+    return false
+  }
+}
+
+export async function startLocalPostgres(input: {
+  workDir: string
+  port: number
+  ledger: (value: object) => void
+}) {
+  const [initdb, pgCtl, createdb, postgresBin] = [
+    'initdb',
+    'pg_ctl',
+    'createdb',
+    'postgres',
+  ].map(binary) as [string, string, string, string]
+  const env = await postgresEnv(postgresBin)
   const version = (await exec(postgresBin, ['--version'], { env })).stdout
-  if (!/ 17\./.test(version))
+  if (!isRequiredVersion(version))
     throw new Error(
       `PostgreSQL 17 required for the local cluster, got ${version.trim()}`,
     )
   const data = join(input.workDir, 'pgdata')
   const log = join(input.workDir, 'postgres.log')
+  const password = randomBytes(32).toString('hex')
+  const passwordFile = join(input.workDir, 'postgres-password')
+  await writeFile(passwordFile, password, { mode: 0o600 })
   await exec(
     initdb,
-    ['-D', data, '-U', 'fixture', '-A', 'trust', '-E', 'UTF8', '--no-sync'],
+    [
+      '-D',
+      data,
+      '-U',
+      'fixture',
+      '--auth-local=scram-sha-256',
+      '--auth-host=scram-sha-256',
+      `--pwfile=${passwordFile}`,
+      '-E',
+      'UTF8',
+      '--no-sync',
+    ],
     { env, timeout: 60000 },
   )
   input.ledger({
@@ -95,7 +135,7 @@ export async function startLocalPostgres(input: {
     await exec(
       createdb,
       ['-h', '127.0.0.1', '-p', String(input.port), '-U', 'fixture', 'fixture'],
-      { env, timeout: 30000 },
+      { env: { ...env, PGPASSWORD: password }, timeout: 30000 },
     )
   } catch (error) {
     await stop().catch(() => {})
@@ -109,5 +149,5 @@ export async function startLocalPostgres(input: {
     )
     input.ledger({ removed: 'local-postgres-process', data })
   }
-  return { stop, stopSync, logPath: log }
+  return { stop, stopSync, logPath: log, password }
 }

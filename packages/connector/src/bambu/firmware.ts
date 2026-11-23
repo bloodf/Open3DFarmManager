@@ -1,4 +1,7 @@
-import { firmwareUpdateAvailable } from '@open3dfarmmanager/farm-protocol'
+import {
+  boundPrinterString,
+  firmwareUpdateAvailable,
+} from '@open3dfarmmanager/farm-protocol'
 import { decodeBambuVersion } from './version.ts'
 
 type Firmware = {
@@ -16,7 +19,7 @@ function record(value: unknown): Record<string, unknown> | undefined {
 
 function text(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 && value.length <= 64
-    ? value
+    ? boundPrinterString(value)
     : undefined
 }
 

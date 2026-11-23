@@ -465,8 +465,8 @@ test('an existing cluster drops its owned role and omits credentials from the le
   let parentSql: Awaited<ReturnType<typeof parent.start>> | undefined
   try {
     parentSql = await parent.start()
-    const password = 's3cret-password'
-    process.env.OPENFARM_TEST_DATABASE_URL = `postgresql://fixture:${encodeURIComponent(password)}@127.0.0.1:${parent.port}/fixture`
+    const password = parent.password
+    process.env.OPENFARM_TEST_DATABASE_URL = parent.connectionString
     const success: object[] = []
     const child = disposablePostgres({
       name: `pg700b${randomBytes(3).toString('hex')}`,

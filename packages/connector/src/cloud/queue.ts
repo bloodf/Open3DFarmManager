@@ -21,6 +21,7 @@ import { acquireQueueLock } from './queue-lock.ts'
 import {
   DiscoveryResults,
   HeartbeatHealth,
+  LegacyQueuedPrinterState,
   TelemetryEvent,
   PrinterState,
   PrinterTransition,
@@ -122,7 +123,7 @@ function parseRecord(value: unknown): TelemetryRecord {
     eventId: record.eventId,
     queuedAt: record.queuedAt,
     kind: 'printer-state',
-    state: PrinterState.parse(record.state),
+    state: LegacyQueuedPrinterState.parse(record.state),
   }
 }
 const line = (record: TelemetryRecord) => JSON.stringify(record) + '\n'
@@ -613,9 +614,8 @@ export class TelemetryQueue {
     }
     if (!eventIds.length) return
     const rest = this.records.slice(eventIds.length)
-    // The server durably accepted these records. On a storage fault the
-    // acknowledgement is kept in memory and persisted by `retryStorage`; a crash
-    // before then resends them, which the server deduplicates by event ID.
+    // On a storage fault the cursor advance stays in memory and is persisted
+    // by `retryStorage`. A crash before then can replay the removed prefix.
     if (!this.degraded) {
       try {
         this.writeCursor(eventIds.at(-1)!)
@@ -636,6 +636,11 @@ export class TelemetryQueue {
         if (!this.degraded || this.failed) throw error
       }
     }
+  }
+  /** Remove a head that is locally known to be unencodable. */
+  discardHead(now: number): void {
+    const head = this.records[0]
+    if (head) this.acknowledge([head.eventId], now)
   }
   get depth(): number {
     return this.records.length

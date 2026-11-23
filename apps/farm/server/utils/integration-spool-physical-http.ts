@@ -20,13 +20,12 @@ export function physicalSpoolAccess(
     return integrationProblem('invalid-request', event.res.headers)
   if (!grantedFarms.includes(farmId))
     return integrationProblem('not-found', event.res.headers)
-  const grants = principal.grants
-    .filter(
-      (grant) =>
-        grant.farmId === farmId &&
-        grant.printerAssignmentId === null &&
-        grant.scopes.includes(scope),
-    )
+  const grants = principal.grants.filter(
+    (grant) =>
+      grant.farmId === farmId &&
+      grant.printerAssignmentId === null &&
+      grant.scopes.includes(scope),
+  )
   if (!grants.length) return integrationProblem('not-found', event.res.headers)
   const grantIds = grants
     .filter((grant) => scope !== 'inventory:write' || !grant.requiresApproval)

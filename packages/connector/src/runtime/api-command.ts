@@ -1,6 +1,11 @@
 import { createHash } from 'node:crypto'
+import type { z } from 'zod'
 import {
   API_ENVELOPE_ISSUER,
+  ApiRunAction,
+  ApiPlateAction,
+  API_RUN_CONTROLS,
+  scopeForApiAction,
   decodeApiEnvelopeFrame,
   encodeApiEnvelopeResultFrame,
   verifyApiEnvelope,
@@ -11,7 +16,7 @@ import {
   controlPrinterBusy,
   controlSourceState,
   LibraryPrintArgs,
-  LIBRARY_PRINT_API_SCOPE,
+  type ControlArguments,
 } from '../../../farm-protocol/src/control-actions.ts'
 import { macroParamsAllowed } from '../moonraker/control-macros.ts'
 import type { SignallingServerFrame } from '../../../farm-protocol/src/signalling-socket.ts'
@@ -39,7 +44,7 @@ import { controlWithinLimits, type ControlLimits } from './control-limits.ts'
 import { fetchJobFile, JobFileError } from './job-file-fetch.ts'
 import { supportsFileUpload, type FileUploadTarget } from './file-upload.ts'
 import type { createLibraryPrintStarter } from './library-print-start.ts'
-import type { ApiJobLifecycle } from './api-job-lifecycle.ts'
+import type { ApiJobLifecycle, ApiRunEvidence } from './api-job-lifecycle.ts'
 import type { LibraryJobLinks } from './library-job-links.ts'
 
 /** A grant as last confirmed by the server; `freshness` bounds how long it is trusted offline. */
@@ -58,8 +63,22 @@ export type ApiCommandDriver = Pick<
   PreparedPauseDriver,
   'execute' | 'controls' | 'macros' | 'macroParams'
 > &
-  Partial<Pick<PreparedPauseDriver, 'prepare' | 'closeAttempt'>> &
-  PlateStartGuard
+  Partial<Pick<PreparedPauseDriver, 'closeAttempt'>> & {
+    prepare?(
+      input: Parameters<PreparedPauseDriver['prepare']>[0] & {
+        observeRun?: (evidence: ApiRunEvidence) => void
+      },
+    ): ReturnType<PreparedPauseDriver['prepare']>
+  } & PlateStartGuard
+type DriverRequest = z.infer<typeof ControlArguments>
+
+function driverAction(envelope: ApiEnvelopeV1): DriverRequest | undefined {
+  const scoped = ApiRunAction.safeParse(envelope.action)
+  if (scoped.success)
+    return { action: API_RUN_CONTROLS[scoped.data.action], args: {} }
+  return envelope.action as DriverRequest | undefined
+}
+
 export type ApiCommandResult =
   /** Unauthenticated, not ours, or a replay: nothing is reported. */
   | {
@@ -71,17 +90,12 @@ export type ApiCommandResult =
   /** The send may have happened; nothing is reported and nothing is retried. */
   | { kind: 'outcome-unknown' }
 
-const CONTROL_BASIC = new Set(['pause', 'resume', 'cancel'])
 const MAX_EXECUTE_MS = 5000
 
 /** The scope a grant must hold for this envelope; mirrors the server's issue check. */
 export function apiEnvelopeScope(envelope: ApiEnvelopeV1): string {
   if (envelope.kind === 'job') return 'jobs:start'
-  if (envelope.action!.action === 'start_library_print')
-    return LIBRARY_PRINT_API_SCOPE
-  return CONTROL_BASIC.has(envelope.action!.action)
-    ? 'control:basic'
-    : 'control:extended'
+  return scopeForApiAction(envelope.action!.action)
 }
 
 /**
@@ -107,7 +121,7 @@ export function createApiCommandRunner(config: {
   clock: { wallNow(): number; monotonicNow(): number }
   controlLimits?: ControlLimits
   confirmEffect?: (
-    action: NonNullable<ApiEnvelopeV1['action']>,
+    action: DriverRequest,
     input: { binding: PrinterBinding; sentMono: number; signal: AbortSignal },
   ) => Promise<boolean>
   storageDegraded?: () => boolean
@@ -212,7 +226,12 @@ export function createApiCommandRunner(config: {
         return ['unsupported', 'job delivery is not supported by this printer']
       return null
     }
-    const { action, args } = envelope.action!
+    const { action, args } = driverAction(envelope)!
+    if (action === 'confirm_collection')
+      return config.driver.apiCollectionRefusal &&
+        config.driver.confirmApiCollection
+        ? null
+        : ['unsupported', 'plate confirmation is not supported by this printer']
     // A library start runs the driver's ordinary `start_print` after the file is in place.
     const libraryStart = action === 'start_library_print'
     if (
@@ -238,14 +257,15 @@ export function createApiCommandRunner(config: {
   }
 
   function stateRefusal(
-    action: NonNullable<ApiEnvelopeV1['action']>['action'],
+    action: DriverRequest['action'],
     binding: PrinterBinding,
+    observedOverride?: ApiPrinterObservation,
   ): [ApiEnvelopeRefusalCode, string] | null {
     if (action === 'start_print' || action === 'start_library_print') {
       const plate = config.driver.plateStartRefusal?.(binding)
       if (plate) return ['wrong-state', plate]
     }
-    const observed = config.observe(binding)
+    const observed = observedOverride ?? config.observe(binding)
     if (
       !observed ||
       !observed.ready ||
@@ -344,12 +364,47 @@ export function createApiCommandRunner(config: {
             action: 'start_print' as const,
             args: { file: envelope.job.display_name },
           }
-        : envelope.action
+        : driverAction(envelope)
     if (!request) {
       finishCommand(config.journal, receipt, 'not-sent', 'guard-denied')
       return refuse(envelope, 'unsupported', 'missing command')
     }
     const { action, args } = request
+    const run = ApiRunAction.safeParse(envelope.action)
+    const plate = ApiPlateAction.safeParse(envelope.action)
+    let runEvidence: ApiRunEvidence | undefined
+    const commandStateRefusal = (): [ApiEnvelopeRefusalCode, string] | null => {
+      if (run.success || plate.success) {
+        const observed = config.observe(binding)
+        if (!observed?.ready || observed.printState === 'unknown')
+          return ['not-ready', 'printer not ready']
+        if (plate.success) {
+          if (!['idle', 'cancelled'].includes(observed.printState))
+            return ['wrong-state', 'plate-state-uncertain']
+          const refusal = config.driver.apiCollectionRefusal?.(
+            binding,
+            plate.data.args.attempt,
+          )
+          return refusal ? ['wrong-state', refusal] : null
+        }
+        if (['idle', 'cancelled', 'error'].includes(observed.printState))
+          return ['wrong-state', 'already-ended']
+        const mapping = readPrinterBinding(binding)
+        if (
+          !run.success ||
+          !mapping ||
+          !runEvidence ||
+          !config.apiJobs?.matchesActiveRun(
+            mapping.printer_key,
+            run.data.args.expectedRunId,
+            runEvidence,
+          )
+        )
+          return ['wrong-state', 'run-mismatch']
+        return stateRefusal(action, binding, observed)
+      }
+      return stateRefusal(action, binding)
+    }
     let lastRefusal: [ApiEnvelopeRefusalCode, string] | null = null
     let guardCalled = false
     let permitted = false
@@ -388,7 +443,7 @@ export function createApiCommandRunner(config: {
           ? ['grant-revoked', 'issuer no longer trusted']
           : (authorityRefusal(envelope, now) ??
             safetyRefusal(envelope, binding) ??
-            stateRefusal(action, binding))
+            commandStateRefusal())
       if (lastRefusal || signal.aborted || !readPrinterBinding(binding))
         return false
       sentMono = now.mono
@@ -397,15 +452,25 @@ export function createApiCommandRunner(config: {
       return true
     }
     const executeDriver = async (
-      driverRequest: NonNullable<ApiEnvelopeV1['action']> = request,
+      driverRequest: DriverRequest = request,
       onSend?: (sentAt: number) => void,
     ) => {
       if (!prepared) {
-        await config.driver.prepare?.({ binding, signal })
+        await config.driver.prepare?.({
+          binding,
+          signal,
+          ...(run.success
+            ? {
+                observeRun(evidence) {
+                  runEvidence = evidence
+                },
+              }
+            : {}),
+        })
         prepared = true
       }
       lastRefusal =
-        authorityRefusal(envelope, sample()) ?? stateRefusal(action, binding)
+        authorityRefusal(envelope, sample()) ?? commandStateRefusal()
       if (!lastRefusal && !signal.aborted) {
         attempted = true
         acknowledged =
@@ -430,16 +495,24 @@ export function createApiCommandRunner(config: {
               },
             )
           ).acknowledged === true
-        if (permitted && acknowledged && config.confirmEffect)
-          confirmed = await config.confirmEffect(driverRequest, {
-            binding,
-            sentMono,
-            signal,
-          })
+        if (permitted && acknowledged)
+          confirmed = config.confirmEffect
+            ? await config.confirmEffect(driverRequest, {
+                binding,
+                sentMono,
+                signal,
+              })
+            : !run.success
       }
     }
     try {
-      if (action === 'start_library_print') {
+      if (plate.success) {
+        await config.driver.prepare?.({ binding, signal })
+        if (beforeSend()) {
+          config.driver.confirmApiCollection!(binding, plate.data.args.attempt)
+          acknowledged = true
+        }
+      } else if (action === 'start_library_print') {
         const mapping = readPrinterBinding(binding)
         const target = jobTarget(binding)
         const parsed = LibraryPrintArgs.safeParse(args)
@@ -451,7 +524,7 @@ export function createApiCommandRunner(config: {
               ? ['grant-revoked', 'issuer no longer trusted']
               : (authorityRefusal(envelope, sample()) ??
                 safetyRefusal(envelope, binding) ??
-                stateRefusal(action, binding))
+                commandStateRefusal())
           return (
             !lastRefusal &&
             !signal.aborted &&
@@ -505,7 +578,7 @@ export function createApiCommandRunner(config: {
               ? ['grant-revoked', 'issuer no longer trusted']
               : (authorityRefusal(envelope, sample()) ??
                 safetyRefusal(envelope, binding) ??
-                stateRefusal(action, binding))
+                commandStateRefusal())
           return (
             !lastRefusal &&
             !signal.aborted &&

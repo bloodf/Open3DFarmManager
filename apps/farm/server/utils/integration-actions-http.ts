@@ -36,6 +36,7 @@ export async function submitIntegrationActionRequest(
   printerId: string,
   service: IntegrationActionsService,
   headers?: HeadersInit,
+  job?: { id: string; farmId: string; runId: string | undefined },
 ) {
   if (
     request.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() !==
@@ -56,7 +57,7 @@ export async function submitIntegrationActionRequest(
     )
   }
   try {
-    const result = await service.submit(principal, printerId, key, body)
+    const result = await service.submit(principal, printerId, key, body, job)
     if (!result.ok) return integrationProblem(result.problem, headers)
     const responseHeaders = new Headers(headers)
     responseHeaders.set('cache-control', 'no-store')

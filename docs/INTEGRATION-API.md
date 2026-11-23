@@ -22,23 +22,23 @@ Owners can grant one or more scopes across a farm or limit them to a printer ass
 
 ### Scopes
 
-| Scope              | Grants                                                                            |
-| ------------------ | --------------------------------------------------------------------------------- |
-| `printers:read`    | Read printers and their status.                                                   |
-| `files:read`       | List files stored on printers.                                                    |
-| `inventory:read`   | Read Spoolman inventory snapshots.                                                |
-| `jobs:read`        | Read job history and API-submitted jobs.                                          |
-| `jobs:start`       | Submit print jobs.                                                                |
-| `control:basic`    | Pause, resume and cancel.                                                         |
-| `control:extended` | Temperatures, fans, lights, speed, homing, filament and macros; list macros.      |
-| `events:subscribe` | Manage webhook subscriptions and receive events.                                  |
-| `jobs:write`       | Start a library replay on a granted printer.                                      |
-| `library:read`     | Read library files and the storage mode.                                          |
-| `library:write`    | Upload library files and set the storage mode.                                    |
-| `environment:read` | Read enclosure and room environment readings. Reserved: no endpoint uses it yet.  |
-| `plates:confirm`   | Confirm that a printer's build plate is clear. Reserved: no endpoint uses it yet. |
-| `alerts:write`     | Raise integration alerts for a farm. Reserved: no endpoint uses it yet.           |
-| `camera:view`      | View printer camera snapshots. Reserved: no endpoint uses it yet.                 |
+| Scope              | Grants                                                                           |
+| ------------------ | -------------------------------------------------------------------------------- |
+| `printers:read`    | Read printers and their status.                                                  |
+| `files:read`       | List files stored on printers.                                                   |
+| `inventory:read`   | Read Spoolman inventory snapshots.                                               |
+| `jobs:read`        | Read job history and API-submitted jobs.                                         |
+| `jobs:start`       | Submit print jobs.                                                               |
+| `control:basic`    | Pause, resume and cancel.                                                        |
+| `control:extended` | Temperatures, fans, lights, speed, homing, filament and macros; list macros.     |
+| `events:subscribe` | Manage webhook subscriptions and receive events.                                 |
+| `jobs:write`       | Start a library replay on a granted printer.                                     |
+| `library:read`     | Read library files and the storage mode.                                         |
+| `library:write`    | Upload library files and set the storage mode.                                   |
+| `environment:read` | Read enclosure and room environment readings. Reserved: no endpoint uses it yet. |
+| `plates:confirm`   | Confirm that a printer's build plate is clear.                                   |
+| `alerts:write`     | Raise integration alerts for a farm. Reserved: no endpoint uses it yet.          |
+| `camera:view`      | View printer camera snapshots. Reserved: no endpoint uses it yet.                |
 
 Owners can grant the reserved scopes and tokens can carry them, but they
 authorize nothing until an endpoint that requires them ships. Any command an
@@ -126,7 +126,10 @@ printer. For Moonraker, the Connector combines live printer state with its
 collection journal. The plate state is `awaiting-collection`,
 `operator-confirmed`, or `unknown`. An available attempt ID identifies the
 journal entry. Eligibility requires a pending job, an idle printer and a
-confirmed plate.
+confirmed plate. For a stopped Moonraker printer with no collection history,
+the read reports `unknown` with attempt ID `0`. An operator can inspect and
+clear the bed, then acknowledge that initial attempt before the first API
+start.
 
 For a signed start, the Connector checks its local collection journal before
 staging the file and again at the printer send boundary. A start refused with
@@ -134,6 +137,30 @@ staging the file and again at the printer send boundary. A start refused with
 requires plate clearance, or `plate-state-uncertain` when the Connector cannot
 establish clearance from its journal. Resolve the plate state locally before
 submitting another start.
+
+### Acknowledge plate clearance or control a job run
+
+Send `POST /jobs/{jobId}/actions` with an `Idempotency-Key` and JSON.
+The job must belong to the calling integration, and the grant must cover its
+assigned printer. A grant that requires operator approval holds the action.
+
+- For plate clearance, use `plates:confirm` and send
+  `{"action":"confirm_collection","args":{"attempt":"<attemptId>"}}` after an
+  operator clears the bed. Take the attempt ID from the plate read for the
+  assigned printer. The Connector records the acknowledgement while the
+  printer is stopped. Confirming the current collected attempt again is safe.
+  An older attempt cannot release a newer hold. The refusal details are
+  `plate-attempt-mismatch` and `plate-state-uncertain`.
+- For job control, use `control:basic` and send `pause`, `resume`, or `cancel`
+  with `"args":{}`. The Farm binds the command to that job's original start
+  envelope. The Moonraker Connector checks the active run immediately before
+  dispatch and reports `already-ended` for a stopped printer or
+  `run-mismatch` when it cannot verify that the active run is the expected one.
+
+Follow the response's `Location` to read the action result. Reuse the same
+idempotency key and request to retrieve the existing action, including after
+a lost response. An `outcome-unknown` requires reconciliation before making
+another request. The service never automatically retries an uncertain write.
 
 ## Request actions
 

@@ -1,5 +1,8 @@
 import { z } from 'zod'
-import type { QueueCollectionJournal } from '../control/queue-collection-journal.ts'
+import {
+  INITIAL_COLLECTION_ATTEMPT,
+  type QueueCollectionJournal,
+} from '../control/queue-collection-journal.ts'
 import {
   ApiQueryFile,
   ApiQueryMacro,
@@ -112,6 +115,18 @@ export async function readDispatchObservation(
         attemptId: awaiting.id,
       }
     const latest = collection?.attempts.at(-1)
+    if (
+      printerState === 'idle' &&
+      collection &&
+      !latest &&
+      collection.dispatchedAt === undefined
+    )
+      return {
+        printerState,
+        observedAt,
+        plateState: 'unknown',
+        attemptId: INITIAL_COLLECTION_ATTEMPT,
+      }
     if (
       printerState === 'idle' &&
       collection?.dispatchedAt === undefined &&

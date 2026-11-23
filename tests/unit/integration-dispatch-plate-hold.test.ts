@@ -92,6 +92,7 @@ test('signed starts refuse unresolved dispatch and recheck collection after stag
           journal: collection,
           printerKey: () => printerKey,
           clock: () => wall,
+          requireInitialClearance: () => true,
         },
       )
       const runner = createApiCommandRunner({
@@ -113,7 +114,7 @@ test('signed starts refuse unresolved dispatch and recheck collection after stag
             app_id: appId,
             farm_id: farmId,
             revoked: false,
-            scopes: ['jobs:write'],
+            scopes: ['jobs:write', 'plates:confirm'],
           }),
           freshness: { freshAt: () => true },
         },
@@ -133,7 +134,12 @@ test('signed starts refuse unresolved dispatch and recheck collection after stag
         },
       })
 
-      async function start() {
+      async function start(
+        action: import('../../packages/farm-protocol/src/api-envelope.ts').ApiEnvelopeAction = {
+          action: 'start_library_print',
+          args: { sha256: 'a'.repeat(64) },
+        },
+      ) {
         wall += 10_000
         return runner.run(
           encodeApiEnvelopeFrame({
@@ -156,10 +162,7 @@ test('signed starts refuse unresolved dispatch and recheck collection after stag
                 issued_at: wall,
                 expires_at: wall + 30_000,
                 kind: 'action',
-                action: {
-                  action: 'start_library_print',
-                  args: { sha256: 'a'.repeat(64) },
-                },
+                action,
               },
               pair.privateKey,
             ),
@@ -167,6 +170,17 @@ test('signed starts refuse unresolved dispatch and recheck collection after stag
         )
       }
 
+      expect(await start()).toMatchObject({
+        kind: 'refused',
+        detail: 'plate-state-uncertain',
+      })
+      expect(stages).toBe(0)
+      const initial = {
+        action: 'confirm_collection',
+        args: { attempt: '0' },
+      } as const
+      expect(await start(initial)).toEqual({ kind: 'completed' })
+      expect(await start(initial)).toEqual({ kind: 'completed' })
       expect(await start()).toEqual({ kind: 'completed' })
       expect(mock.control.model().state).toBe('printing')
       expect(await start()).toMatchObject({
@@ -178,6 +192,10 @@ test('signed starts refuse unresolved dispatch and recheck collection after stag
       expect(await start()).toMatchObject({
         kind: 'refused',
         detail: 'awaiting-collection',
+      })
+      expect(await start(initial)).toMatchObject({
+        kind: 'refused',
+        detail: 'plate-attempt-mismatch',
       })
       expect(stages).toBe(1)
       const [attempt] = collection.awaiting(printerKey)

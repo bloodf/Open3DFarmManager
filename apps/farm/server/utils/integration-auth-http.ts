@@ -248,6 +248,11 @@ const policies: RoutePolicy[] = [
     path: /^\/jobs\/[^/]+\/(eligibility|plate)$/,
     scopes: ['jobs:read', 'jobs:start'],
   },
+  {
+    method: 'POST',
+    path: /^\/jobs\/[^/]+\/actions$/,
+    scopes: ['control:basic', 'plates:confirm'],
+  },
   { method: 'GET', path: /^\/jobs$/, scopes: ['jobs:read'] },
   {
     method: 'GET',
@@ -257,7 +262,7 @@ const policies: RoutePolicy[] = [
   {
     method: 'GET',
     path: /^\/actions\/[^/]+$/,
-    scopes: ['control:basic', 'control:extended'],
+    scopes: ['control:basic', 'control:extended', 'plates:confirm'],
   },
   { method: 'GET', path: /^\/webhooks$/, scopes: ['events:subscribe'] },
   {
@@ -418,7 +423,7 @@ export async function authorizeIntegrationRequest(
         return integrationProblem('insufficient-scope', headers)
       if (replay) scopes = [...scopes, 'jobs:write']
     }
-    if (method === 'POST' && path.endsWith('/actions')) {
+    if (method === 'POST' && /^\/printers\/[^/]+\/actions$/.test(path)) {
       const scope = await readActionScope(request)
       if (
         scope === 'invalid-request' ||

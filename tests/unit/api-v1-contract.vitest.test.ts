@@ -116,11 +116,15 @@ function requestViolations(op: OperationSpec, outcome: Outcome) {
   return validateValue(schema, value, 'request')
 }
 
-/** The Action schema leaves `args` free-form; it must still be an ActionRequest's args. */
+/** The Action schema leaves `args` free-form; validate them against the request schema. */
 function actionArgsViolations(json: unknown) {
   const action = json as { action: string; args: Record<string, unknown> }
   return validateValue(
-    resolveRef('#/components/schemas/ActionRequest'),
+    resolveRef(
+      action.action === 'confirm_collection'
+        ? '#/components/schemas/JobActionRequest'
+        : '#/components/schemas/ActionRequest',
+    ),
     { action: action.action, args: action.args },
     'Action',
   )

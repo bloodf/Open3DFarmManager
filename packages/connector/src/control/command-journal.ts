@@ -8,6 +8,8 @@ import { BrowserDeviceUuid } from '../../../farm-protocol/src/browser-device-pro
 import { canonicalize } from '../../../farm-protocol/src/canonical.ts'
 import {
   API_ENVELOPE_CLOCK_SKEW_MS,
+  API_RUN_CONTROLS,
+  ApiRunAction,
   ApiEnvelopeV1,
 } from '../../../farm-protocol/src/api-envelope.ts'
 
@@ -47,7 +49,7 @@ if (
 const RETENTION_MS = 600_000
 const MAX_CAPACITY = 10_000
 const APPLICATION_ID = 0x4f334450
-const SCHEMA_VERSION = 17
+const SCHEMA_VERSION = 18
 const MAX_CLOCK_STEP_MS = RETENTION_MS + 1_000
 const reasons = [
   'guard-denied',
@@ -268,9 +270,13 @@ const configWriteActionSchema = bedMeshActionSchema.replace(
   "'bed_mesh'",
   "'bed_mesh','config_write'",
 )
-const actionSchema = configWriteActionSchema.replace(
+const previousActionSchemaV17 = configWriteActionSchema.replace(
   "'config_write'",
   "'config_write','start_library_print'",
+)
+const actionSchema = previousActionSchemaV17.replace(
+  "'start_library_print'",
+  "'start_library_print','confirm_collection'",
 )
 /**
  * Journals from the power, timelapse and console units were rebuilt from the
@@ -344,6 +350,25 @@ const previousSchema = schema.map((sql) =>
     'CREATE UNIQUE INDEX pause_active_',
   ),
 )
+function migrateActionTable(database: DatabaseSyncType) {
+  database.exec(
+    'ALTER TABLE control_command_actions RENAME TO legacy_control_command_actions',
+  )
+  database.exec(actionSchema)
+  database.exec(
+    'INSERT INTO control_command_actions SELECT * FROM legacy_control_command_actions',
+  )
+  database.exec('DROP TABLE legacy_control_command_actions')
+}
+
+function migrateActiveIndexes(database: DatabaseSyncType) {
+  database.exec(
+    'DROP INDEX pause_active_assignment; DROP INDEX pause_active_printer',
+  )
+  for (const name of ['pause_active_assignment', 'pause_active_printer'])
+    database.exec(schema.find((sql) => sql.startsWith(`CREATE INDEX ${name}`))!)
+}
+
 function privateEntry(path: string, directory: boolean) {
   const stat = lstatSync(path)
   if (
@@ -535,7 +560,10 @@ export function openCommandJournal(input: {
           )!,
         )
         database.exec(`PRAGMA user_version=${SCHEMA_VERSION}`)
-      } else if (version === 16 && app === APPLICATION_ID) {
+      } else if ((version === 16 || version === 17) && app === APPLICATION_ID) {
+        const expected = (version === 16 ? previousSchema : schema)
+          .map((sql) => (sql === actionSchema ? previousActionSchemaV17 : sql))
+          .sort()
         const definitions = database
           .prepare(
             "SELECT sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY sql",
@@ -543,25 +571,12 @@ export function openCommandJournal(input: {
           .all()
           .map((row) => row.sql)
         if (
-          definitions.length !== previousSchema.length ||
-          definitions.some(
-            (sql, index) => sql !== [...previousSchema].sort()[index],
-          )
+          definitions.length !== expected.length ||
+          definitions.some((sql, index) => sql !== expected[index])
         )
           throw new Error('Invalid command journal schema')
-        database.exec(
-          'DROP INDEX pause_active_assignment; DROP INDEX pause_active_printer',
-        )
-        database.exec(
-          schema.find((sql) =>
-            sql.startsWith('CREATE INDEX pause_active_assignment'),
-          )!,
-        )
-        database.exec(
-          schema.find((sql) =>
-            sql.startsWith('CREATE INDEX pause_active_printer'),
-          )!,
-        )
+        migrateActionTable(database)
+        if (version === 16) migrateActiveIndexes(database)
         database.exec(`PRAGMA user_version=${SCHEMA_VERSION}`)
       } else if (
         Object.hasOwn(previousActionSchemas, Number(version)) &&
@@ -585,27 +600,8 @@ export function openCommandJournal(input: {
           },
         )
         if (!matchesLegacy) throw new Error('Invalid command journal schema')
-        database.exec(
-          'ALTER TABLE control_command_actions RENAME TO legacy_control_command_actions',
-        )
-        database.exec(actionSchema)
-        database.exec(
-          'INSERT INTO control_command_actions SELECT * FROM legacy_control_command_actions',
-        )
-        database.exec('DROP TABLE legacy_control_command_actions')
-        database.exec(
-          'DROP INDEX pause_active_assignment; DROP INDEX pause_active_printer',
-        )
-        database.exec(
-          schema.find((sql) =>
-            sql.startsWith('CREATE INDEX pause_active_assignment'),
-          )!,
-        )
-        database.exec(
-          schema.find((sql) =>
-            sql.startsWith('CREATE INDEX pause_active_printer'),
-          )!,
-        )
+        migrateActionTable(database)
+        migrateActiveIndexes(database)
         database.exec(`PRAGMA user_version=${SCHEMA_VERSION}`)
       } else if (version !== SCHEMA_VERSION || app !== APPLICATION_ID)
         throw new Error('Unknown command journal version')
@@ -693,6 +689,7 @@ export function claimApiCommand(
   const parsed = ApiClaimInput.safeParse(input)
   if (!parsed.success) return { ok: false, reason: 'storage-unavailable' }
   const envelope = parsed.data.envelope
+  const run = ApiRunAction.safeParse(envelope.action)
   return claimRow(
     handle,
     {
@@ -705,7 +702,12 @@ export function claimApiCommand(
       account_id: envelope.app_id,
       transport_id: 'api-envelope',
       capability_id: envelope.grant_id,
-      action: envelope.kind === 'job' ? 'start_print' : envelope.action!.action,
+      action:
+        envelope.kind === 'job'
+          ? 'start_print'
+          : run.success
+            ? API_RUN_CONTROLS[run.data.action]
+            : envelope.action!.action,
       not_before: Math.max(0, envelope.issued_at - API_ENVELOPE_CLOCK_SKEW_MS),
       expires_at: envelope.expires_at,
     },

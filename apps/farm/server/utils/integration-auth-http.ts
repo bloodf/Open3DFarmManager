@@ -169,6 +169,10 @@ const problems = {
   'payload-too-large': [413, 'Solicitação muito grande.'],
   'unsupported-media-type': [415, 'Formato de solicitação não aceito.'],
   'unsafe-target': [422, 'Destino do webhook não permitido.'],
+  'spool-location-changed': [
+    409,
+    'O registro da bobina mudou. Consulte o local atual.',
+  ],
   'webhook-limit-reached': [409, 'Limite de assinaturas de webhook atingido.'],
   'validation-failed': [422, 'Solicitação não aceita.'],
   unsupported: [422, 'Ação não suportada por esta impressora.'],
@@ -253,6 +257,16 @@ const policies: RoutePolicy[] = [
     method: 'GET',
     path: /^\/inventory(?:\/spools(?:\/(?:search|usage))?)?$/,
     scopes: ['inventory:read'],
+  },
+  {
+    method: 'GET',
+    path: /^\/inventory\/spools\/physical\/[^/]+$/,
+    scopes: ['inventory:read'],
+  },
+  {
+    method: 'POST',
+    path: /^\/inventory\/spools\/physical(?:\/[^/]+\/withdraw)?$/,
+    scopes: ['inventory:write'],
   },
   {
     method: 'GET',

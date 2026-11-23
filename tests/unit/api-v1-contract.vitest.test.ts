@@ -37,6 +37,7 @@ vi.mock(
 import { mismatches } from '../helpers/api-v1-contract/mismatches.ts'
 import {
   apiBase,
+  type CallInput,
   call,
   matchRoute,
   routeFiles,
@@ -60,7 +61,7 @@ import { jobBody } from '../helpers/api-v1-contract/world.ts'
 import { openJourney } from '../helpers/api-v1-contract/journey.ts'
 
 const ops = operations()
-const scenarios = allScenarios()
+const scenarios = [...allScenarios(), ...physicalSpoolScenarios()]
 const pairs = ops.flatMap((op) =>
   op.responses.map((response) => ({
     op,
@@ -68,6 +69,164 @@ const pairs = ops.flatMap((op) =>
     key: `${op.key} ${response.status}`,
   })),
 )
+
+function physicalSpoolScenarios(): Scenario[] {
+  const base = '/inventory/spools/physical'
+  const farmQuery = `?farmId=${ids.farmA}`
+  const routes = [
+    {
+      method: 'POST',
+      path: base,
+      scope: 'inventory:write',
+      suffix: '',
+      success: '201',
+    },
+    {
+      method: 'GET',
+      path: `${base}/{spoolId}`,
+      scope: 'inventory:read',
+      suffix: '/7',
+      success: '200',
+    },
+    {
+      method: 'POST',
+      path: `${base}/{spoolId}/withdraw`,
+      scope: 'inventory:write',
+      suffix: '/7/withdraw',
+      success: '200',
+    },
+  ] as const
+
+  return routes.flatMap(({ method, path, scope, suffix, success }) => {
+    const scenario = (
+      status: string,
+      name: string,
+      options: {
+        input?: Partial<CallInput>
+        noToken?: boolean
+        wrongScope?: boolean
+        printerOnly?: boolean
+        failPool?: boolean
+        rateLimited?: boolean
+      } = {},
+    ): Scenario => ({
+      op: `${method} ${path}`,
+      status,
+      name,
+      async run(world) {
+        const app = world.addApp(
+          [
+            {
+              scopes: [options.wrongScope ? 'jobs:read' : scope],
+              ...(options.printerOnly ? { printerId: ids.printerA1 } : {}),
+            },
+          ],
+          { sandbox: true },
+        )
+        const token = options.noToken ? undefined : await tokenFor(world, app)
+        let failPool = false
+        const spool = { id: 7, location: 'Gaveta A', revision: '71:(0,1)' }
+        Object.assign(world.pool as object, {
+          begin: (
+            work: (
+              tx: (
+                query: TemplateStringsArray,
+                ...values: unknown[]
+              ) => unknown,
+            ) => unknown,
+          ) => {
+            if (failPool) throw new Error('pool down')
+            return work((query, ...values) => {
+              const text = query.join('')
+              if (text.includes('farm.integration_app_grants'))
+                return [{ id: 'grant' }]
+              if (text.includes('FROM farm.spool_filaments'))
+                return values[1] === 1 ? [{ id: 1 }] : []
+              if (text.includes('INSERT INTO farm.spools'))
+                return [{ ...spool, id: 8, location: values[3] }]
+              if (text.includes('UPDATE farm.spools'))
+                return [{ ...spool, location: null, revision: '72:(0,2)' }]
+              if (text.includes('FROM farm.spools'))
+                return values[1] === spool.id ? [spool] : []
+              throw new Error('Unexpected physical inventory query')
+            })
+          },
+        })
+        let body
+        if (suffix === '') body = { filamentId: 1, location: spool.location }
+        if (suffix.endsWith('/withdraw')) {
+          const appRead = world.addApp([{ scopes: ['inventory:read'] }], {
+            sandbox: true,
+          })
+          const lookup = await call({
+            method: 'GET',
+            path: `${base}/7${farmQuery}`,
+            token: await tokenFor(world, appRead),
+          })
+          body = {
+            expectedLocation: spool.location,
+            version: (lookup.json as { version?: string }).version,
+          }
+        }
+        const input: CallInput = {
+          method,
+          path: base + suffix + farmQuery,
+          ...(body ? { body } : {}),
+          ...(token ? { token } : {}),
+          ...options.input,
+        }
+        failPool = options.failPool === true
+        if (options.rateLimited) {
+          world.config.integrationAuth.readLimit = 1
+          world.config.integrationAuth.writeLimit = 1
+          await call(input)
+        }
+        return { input, result: await call(input) }
+      },
+    })
+
+    const cases = [
+      scenario(success, 'farm-wide sandbox grant'),
+      scenario('400', 'missing required farmId', {
+        input: { path: base + suffix },
+      }),
+      scenario('401', 'missing bearer token', { noToken: true }),
+      scenario('403', 'token lacks the operation scope', { wrongScope: true }),
+      scenario('404', 'outside the farm grant', {
+        input: { path: base + suffix + `?farmId=${ids.farmB}` },
+      }),
+      scenario('404', 'printer-only grant cannot access farm inventory', {
+        printerOnly: true,
+      }),
+      scenario('405', 'unsupported method', { input: { method: 'DELETE' } }),
+      scenario('429', 'exhausted request budget', { rateLimited: true }),
+      scenario('503', 'spool storage unavailable', { failPool: true }),
+    ]
+    if (method === 'POST') {
+      cases.push(
+        scenario('413', 'JSON body exceeds 8 KiB', {
+          input: {
+            body: ' '.repeat(8193),
+            headers: { 'content-type': 'application/json' },
+          },
+        }),
+        scenario('415', 'JSON content type required', {
+          input: { headers: { 'content-type': 'text/plain' } },
+        }),
+      )
+    }
+    if (suffix.endsWith('/withdraw')) {
+      cases.push(
+        scenario('409', 'stale version', {
+          input: {
+            body: { expectedLocation: 'Gaveta A', version: 'x'.repeat(43) },
+          },
+        }),
+      )
+    }
+    return cases
+  })
+}
 
 const statusMatches = (documented: string, actual: number) =>
   /^\dXX$/.test(documented)

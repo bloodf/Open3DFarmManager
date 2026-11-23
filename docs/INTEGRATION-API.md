@@ -171,8 +171,7 @@ by Euclidean RGB distance, then farm and spool ID. Colour filtering
 excludes unknown colours and a weight threshold excludes unknown weights.
 A missing location is `null`. The response includes `assessedAt` (Unix
 milliseconds) and each active slot's `assignedAt` timestamp. Loaded
-state reflects the library's assignment ledger at query time. Physical
-find actions, label changes and bin LEDs remain in OpenFarm.
+state reflects the library's assignment ledger at query time.
 
 Usage accepts the numeric `id` from the history endpoint `GET /jobs`
 as `jobId`, plus the optional `cursor` returned in `nextCursor`. Each
@@ -187,6 +186,39 @@ Join finder results and usage records by `(farmId, spoolId)`. Connector
 observations share that ID space when the Connector reads the farm's
 OpenFarm Spoolman-compatible library. External Spoolman IDs belong to
 their own service and can overlap with library IDs.
+
+### Physical spool registration and withdrawal
+
+All three routes require a `farmId` query parameter and a farm-wide grant.
+Use `POST /inventory/spools/physical?farmId=…` with `inventory:write` and a
+JSON body containing an existing library `filamentId`, a bin `location`,
+and optional `initialWeightGrams`. Each successful registration creates a
+distinct spool, even when the filament and location match. Use its
+`(farmId, spoolId)` in the finder and in subsequent requests. The ID also
+appears in Connector observations when the Connector reads that farm's
+OpenFarm library.
+
+Use `GET /inventory/spools/physical/{spoolId}?farmId=…` with
+`inventory:read` to find its current location. Open `label.href` on the
+same OpenFarm origin in a signed-in browser with farm access to print
+the exact spool's QR label. A null location means the location is unknown.
+`binLight.status` is `unsupported` because OpenFarm has no qualified bin-light
+capability.
+
+Use `POST /inventory/spools/physical/{spoolId}/withdraw?farmId=…` with
+`inventory:write`. Send the non-null `location` as `expectedLocation`,
+and the `version` from the same lookup or registration. A successful
+withdrawal clears that spool's location and returns `withdrawn`. A request
+for a spool with no current location returns `already-unlocated` without
+a write, including when replayed after a successful withdrawal. If the
+spool is still located and the location or version differs, the API
+returns `409 spool-location-changed`. Fetch the spool again to decide
+whether to start a new withdrawal. An old request stays harmless even
+if the spool later returns to the original bin.
+
+To exercise two identical registrations and concurrent withdrawal against a
+disposable local PostgreSQL sandbox, run
+`OPENFARM_TEST_PHYSICAL_PG=1 npx vitest run tests/unit/integration-spool-physical`.
 
 A `GET /printers` item may carry a read-only `specs` object with what the
 Connector or printer profile reported: `buildVolumeMm` (`x`, `y`, `z` in mm),

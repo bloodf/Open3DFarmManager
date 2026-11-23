@@ -536,6 +536,126 @@ describe('the validator rejects undocumented fields', () => {
   })
 })
 
+describe('resin artifacts on the existing library and job routes', () => {
+  it('publishes the catalog, rejects mismatches, and replays the immutable version', async () => {
+    const world = freshWorld()
+    const token = await tokenFor(
+      world,
+      world.addApp([
+        {
+          scopes: [
+            'library:read',
+            'library:write',
+            'jobs:start',
+            'jobs:write',
+            'jobs:read',
+          ],
+        },
+      ]),
+    )
+    const library = await call({
+      method: 'GET',
+      path: `/library?farmId=${ids.farmA}`,
+      token,
+    })
+    expect(library.status).toBe(200)
+    expect(library.json).toMatchObject({
+      resinArtifactFormats: expect.arrayContaining([
+        expect.objectContaining({
+          extension: '.pm7m',
+          profiles: ['anycubic:photon-mono-m7-max'],
+        }),
+      ]),
+    })
+    const body = {
+      farmId: ids.farmA,
+      name: 'fixture.pm7m',
+      contentBase64: Buffer.from('spec-derived, not captured').toString(
+        'base64',
+      ),
+      resinProfile: 'anycubic:photon-mono-m7-max',
+    }
+    const incompatible = await call({
+      method: 'POST',
+      path: '/library',
+      token,
+      body: { ...body, resinProfile: 'anycubic:photon-mono-m7-pro' },
+    })
+    expect(incompatible.status).toBe(422)
+    expect(incompatible.json).toMatchObject({
+      errors: [{ pointer: '/resinProfile', detail: 'profile-mismatch' }],
+    })
+    const accepted = await call({
+      method: 'POST',
+      path: '/library',
+      token,
+      body,
+    })
+    expect(accepted.status).toBe(201)
+    const version = (
+      accepted.json as { version: { id: string; sha256: string } }
+    ).version
+    expect(version).toMatchObject({
+      kind: 'resin',
+      resinProfile: body.resinProfile,
+      plateCount: 1,
+    })
+    const submit = {
+      method: 'POST',
+      path: `/printers/${ids.printerA1}/jobs`,
+      token,
+      headers: { 'idempotency-key': 'resin-replay' },
+    }
+    const wrongPlate = await call({
+      ...submit,
+      body: { libraryVersionId: version.id, plate: 2 },
+    })
+    expect(wrongPlate.status).toBe(422)
+    expect(wrongPlate.json).toMatchObject({
+      errors: [{ pointer: '/plate', detail: 'plate-mismatch' }],
+    })
+    const replay = await call({
+      ...submit,
+      body: { libraryVersionId: version.id },
+    })
+    expect(replay.status).toBe(202)
+    expect(replay.json).toMatchObject({
+      libraryVersionId: version.id,
+      sha256: version.sha256,
+      resinProfile: body.resinProfile,
+      plate: 1,
+    })
+    const { id: jobId } = replay.json as { id: string }
+    const envelope = world.envelopes.byResource(jobId)!
+    expect(world.envelopes.commands.get(envelope.cmdId)).toMatchObject({
+      kind: 'action',
+      action: {
+        action: 'start_library_print',
+        args: {
+          versionId: version.id,
+          sha256: version.sha256,
+          profile: body.resinProfile,
+          plate: 1,
+        },
+      },
+    })
+    envelope.status = 'refused'
+    envelope.refusalCode = 'unsupported'
+    envelope.resultDetail = 'resin-artifact-dispatch-unavailable'
+    const receipt = await call({ method: 'GET', path: `/jobs/${jobId}`, token })
+    expect(receipt.status).toBe(200)
+    expect(receipt.json).toMatchObject({
+      libraryVersionId: version.id,
+      sha256: version.sha256,
+      status: 'refused',
+      refusal: {
+        code: 'unsupported',
+        detail: 'resin-artifact-dispatch-unavailable',
+      },
+    })
+  })
+})
+
 describe('sandbox printer operational availability', () => {
   it('applies a qualified target, refuses the others, and restores only the current app-owned version', async () => {
     const world = freshWorld()

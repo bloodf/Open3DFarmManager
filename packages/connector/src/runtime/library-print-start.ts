@@ -84,7 +84,7 @@ export type LibraryPrintStart = (
 const refuse = (
   code: LibraryPrintRefusal,
   reasons?: readonly string[],
-): LibraryPrintResult => ({
+): Extract<LibraryPrintResult, { ok: false }> => ({
   ok: false,
   code,
   message: LIBRARY_PRINT_MESSAGES[code],
@@ -199,6 +199,48 @@ export function createLibraryPrintStarter(config: {
   }
 
   return {
+    async withVerifiedArtifact(
+      sha256: string,
+      signal: AbortSignal,
+      use: (path: string) => Promise<void>,
+    ): Promise<{ ok: true } | Extract<LibraryPrintResult, { ok: false }>> {
+      let release = () => {}
+      try {
+        const local = await resolveLocal(sha256)
+        let path: string
+        if (local) {
+          if (local.state !== 'stored') return refuse('local-file-missing')
+          try {
+            path = (await config.local!.openForPrint(sha256)).path
+          } catch (error) {
+            if (error instanceof LibraryStoreError)
+              return refuse(
+                error.code === 'hash-mismatch'
+                  ? 'checksum-mismatch'
+                  : 'local-file-missing',
+              )
+            throw error
+          }
+        } else {
+          try {
+            const cached = await config.cache.acquire(
+              sha256,
+              config.download,
+              signal,
+            )
+            release = cached.release
+            path = cached.path
+          } catch (error) {
+            if (error instanceof LibraryCacheError) return refuse(error.code)
+            throw error
+          }
+        }
+        await use(path)
+        return { ok: true }
+      } finally {
+        release()
+      }
+    },
     async start(input: {
       args: LibraryPrintArgs
       target: FileUploadTarget
@@ -345,7 +387,8 @@ function driverRefusal(result: Extract<LibraryPrintResult, { ok: false }>) {
 export function withLibraryPrint<D extends PreparedPauseDriver>(
   driver: D,
   config: {
-    starter: ReturnType<typeof createLibraryPrintStarter> | undefined
+    starter:
+      Pick<ReturnType<typeof createLibraryPrintStarter>, 'start'> | undefined
     /** Upload target of the locally provisioned printer behind a binding. */
     targetFor(binding: PrinterBinding): FileUploadTarget | undefined
     remember?(

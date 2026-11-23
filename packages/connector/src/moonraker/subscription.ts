@@ -459,12 +459,7 @@ export function createMoonrakerSubscription(input: {
                       // Temperature is independent display evidence from this
                       // complete query. Keep the newer delta's state/progress
                       // while publishing those conservatively timed readings.
-                      if (
-                        observation.activeToolQuery ||
-                        fields.tool.kind === 'reading' ||
-                        fields.bed.kind === 'reading'
-                      )
-                        publish(baseline, { fields, observedAtMonoMs: stamp })
+                      publish(baseline, { fields, observedAtMonoMs: stamp })
                     }
                     return
                   }

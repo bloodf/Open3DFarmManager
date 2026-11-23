@@ -5,7 +5,14 @@
 // loopback discovery probe. Nothing here touches a physical printer.
 import { X509Certificate, createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { chmod, copyFile, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import {
+  chmod,
+  copyFile,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -61,6 +68,12 @@ export type VendorOptions = Readonly<{
   ftpsPort?: number
   /** Bambu simulator address for its browser onboarding journey. */
   host?: string
+  /**
+   * Creality only: the printer advertises a secure endpoint (HTTPS `/info`
+   * naming a WSS port) with a synthetic certificate that the Connector trusts
+   * through its binding's `caFile`. Off by default: stock plain WebSocket.
+   */
+  secure?: boolean
 }>
 
 export type RuntimeScope = Readonly<{
@@ -89,6 +102,10 @@ export type VendorDiscovery = Readonly<{
   /** Loopback endpoint the discovery/probe responder listens on. */
   host: string
   port: number
+  /** Secure discovery only: how the Connector's probe reaches the responder. */
+  secure?: Readonly<{ https: number; caFile: string }>
+  /** Plain `/info` requests the discovery responder served so far. */
+  plainRequests?(): number
   /** Runs the Connector's own probe against the responder. */
   probe(): Promise<
     Printer | { vendor: 'kobralink'; host: string; port: number } | undefined
@@ -153,6 +170,34 @@ async function privateJson(path: string, value: unknown) {
 
 function pinOf(pem: string): string {
   return createHash('sha256').update(new X509Certificate(pem).raw).digest('hex')
+}
+
+/**
+ * Synthetic self-signed certificate for the secure Creality simulator. The
+ * certificate doubles as the CA file the Connector's binding trusts.
+ */
+async function syntheticCrealityTls(directory: string) {
+  const caFile = join(directory, 'creality-ca.pem')
+  const keyFile = join(directory, 'creality-key.pem')
+  execFileSync(
+    'openssl',
+    [
+      ...['req', '-x509', '-newkey', 'rsa:2048', '-nodes'],
+      ...['-keyout', keyFile, '-out', caFile, '-days', '1'],
+      ...['-subj', '/CN=127.0.0.1'],
+      ...['-addext', 'subjectAltName=IP:127.0.0.1'],
+    ],
+    { stdio: 'ignore', timeout: 15_000 },
+  )
+  return {
+    caFile,
+    material: {
+      key: await readFile(keyFile, 'utf8'),
+      cert: await readFile(caFile, 'utf8'),
+      // The stock /info answer of the plain responder next to it.
+      info: { model: 'Creality K1', mac: 'AA:BB:CC:00:00:01' },
+    },
+  }
 }
 
 function listening(server: Server) {
@@ -514,6 +559,9 @@ export async function startVendorSimulator(
         }
       }
     } else if (name === 'creality') {
+      const secure = options.secure
+        ? await syntheticCrealityTls(directory)
+        : undefined
       const sim = await createCrealitySimulator(
         {
           state: 1,
@@ -535,6 +583,7 @@ export async function startVendorSimulator(
           totalLayers: 12,
           heartbeatMs: 1000,
           gcodeDirectory: '/mnt/UDISK/printer_data/gcodes',
+          ...(secure ? { secure: secure.material } : {}),
         },
       )
       undo.push(() => sim.close())
@@ -546,7 +595,9 @@ export async function startVendorSimulator(
         failPrint: () => sim.setFrame({ state: 0, err: 1 }),
       }
       // The Creality probe reads GET /info from the printer's HTTP port.
+      let plainInfoRequests = 0
       const info = createServer((request, response) => {
+        plainInfoRequests++
         if (request.method !== 'GET' || request.url !== '/info') {
           response.writeHead(404).end()
           return
@@ -561,7 +612,21 @@ export async function startVendorSimulator(
       discovery = {
         host: '127.0.0.1',
         port: infoPort,
-        probe: () => probeCreality('127.0.0.1', { https: 1, http: infoPort }),
+        plainRequests: () => plainInfoRequests,
+        ...(secure && sim.securePort !== undefined
+          ? {
+              secure: { https: sim.securePort, caFile: secure.caFile },
+              probe: () =>
+                probeCreality('127.0.0.1', {
+                  https: sim.securePort!,
+                  http: infoPort,
+                  caFile: secure.caFile,
+                }),
+            }
+          : {
+              probe: () =>
+                probeCreality('127.0.0.1', { https: 1, http: infoPort }),
+            }),
       }
       const crealityCamera = await startCamera('creality-mjpeg', undo)
       camera = crealityCamera.camera
@@ -581,6 +646,15 @@ export async function startVendorSimulator(
                 port: sim.port,
                 // Stock HTTP upload endpoint of the simulator.
                 httpPort: sim.httpPort,
+                ...(secure && sim.securePort !== undefined
+                  ? {
+                      // The Connector resolves the advertised WSS port from
+                      // the verified HTTPS /info; no plain fallback.
+                      transport: 'wss',
+                      httpsPort: sim.securePort,
+                      caFile: secure.caFile,
+                    }
+                  : {}),
               },
             ],
           },

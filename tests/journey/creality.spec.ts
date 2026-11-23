@@ -1,5 +1,10 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import type { createCrealitySimulator } from '../../packages/sim-tools/src/creality-simulator.ts'
+import {
+  commandDialog,
+  expectInspectedTelemetry,
+  inspectPrinter,
+} from './creality-inspector.ts'
 import { discoverOnPage, expectCameraFrames } from './discovery-page.ts'
 import {
   journeyEnabled,
@@ -89,7 +94,7 @@ if (journeyEnabled())
       button: string,
       outcome: string,
     ) {
-      const dialog = page.getByRole('dialog')
+      const dialog = commandDialog(started(), page)
       const status = dialog.getByRole('status')
       const confirmation = dialog.getByRole('button', {
         name: button,
@@ -260,14 +265,14 @@ if (journeyEnabled())
         hostField: 'creality-host',
       })
       // Set up: the assignment is active on an approved Connector.
-      const row = await journey.openFarm()
+      const row = await inspectPrinter(journey)
       await expect(row).toContainText('Atribuição ativa. Connector aprovado.')
     })
 
     test('live telemetry reaches the farm page', async () => {
       test.setTimeout(2 * 60_000)
       const journey = started()
-      await journey.expectLiveTelemetry()
+      await expectInspectedTelemetry(journey)
       const row = printerRow(journey.ownerPage)
       await reportedState(row, 'Imprimindo')
       const temperatures = row.getByLabel('Temperaturas observadas')
@@ -402,7 +407,7 @@ if (journeyEnabled())
       // print, so that print ends on its own first.
       if ([1, 2].includes(simulator().state.state as number)) {
         journey.controls.finishPrint()
-        await reportedState(await journey.openFarm(), 'Ociosa')
+        await reportedState(await inspectPrinter(journey), 'Ociosa')
       }
       await page.goto(journey.origin + '/arquivos', {
         waitUntil: 'domcontentloaded',
@@ -485,7 +490,7 @@ if (journeyEnabled())
       ])
 
       // The print runs to the end on its own; the card names the finished job.
-      const row = await journey.openFarm()
+      const row = await inspectPrinter(journey)
       // The end card belongs to this file, not to an earlier job.
       await expect(row.getByLabel('Último trabalho')).toContainText(UPLOAD, {
         timeout: 60_000,
@@ -505,7 +510,7 @@ if (journeyEnabled())
       test.setTimeout(2 * 60_000)
       const journey = started()
       // A fresh farm page: the camera runs after every control step.
-      await journey.openFarm()
+      await inspectPrinter(journey)
       await expectCameraFrames(journey)
       expect(journey.simulatorObservation()).toMatchObject({ failure: false })
     })

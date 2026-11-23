@@ -1,0 +1,47 @@
+{
+  "vendor": "anycubic",
+  "host": "<printer-host>",
+  "port": 9883,
+  "timestamp": "2026-11-23T21:34:31.198Z",
+  "identity": {
+    "vendor": "Anycubic",
+    "model": null,
+    "firmware": null,
+    "serial": "<device-id>"
+  },
+  "telemetry": {
+    "observed": false,
+    "fields": [],
+    "reason": "Broker TLS validation failed with CERT_HAS_EXPIRED before MQTT authentication. No independently verified broker certificate pin was available."
+  },
+  "camera": {
+    "reachable": false,
+    "kind": null,
+    "detail": "Camera qualification not supported on Anycubic LAN transport"
+  },
+  "files": {
+    "listable": false,
+    "count": 0,
+    "files": [],
+    "reason": "File listing is not supported on Anycubic LAN transport"
+  },
+  "catalog": {
+    "matchedCatalogId": null,
+    "matchedCatalogBrand": null,
+    "matchedCatalogModel": null,
+    "currentCapabilities": null,
+    "provenCapabilities": {
+      "telemetry": false,
+      "camera": false,
+      "files": false
+    },
+    "canPromoteToHardwareProven": false,
+    "promotionNotes": [
+      "No exact match in current compatibility catalog; candidate for catalog addition"
+    ]
+  },
+  "qualification": {
+    "status": "unreachable",
+    "summary": "Broker TLS validation failed with CERT_HAS_EXPIRED before MQTT authentication. No independently verified broker certificate pin was available."
+  }
+}

@@ -1,0 +1,133 @@
+{
+  "vendor": "moonraker",
+  "host": "<printer-host>",
+  "port": 7125,
+  "timestamp": "2026-11-23T21:26:48.213Z",
+  "identity": {
+    "vendor": "Klipper",
+    "model": "Snapmaker U1",
+    "firmware": "Klipper 2.0.0-paxx12-24; Moonraker 2.0.0",
+    "hostname": "<printer-hostname>"
+  },
+  "telemetry": {
+    "observed": true,
+    "fields": [
+      "klippyConnected",
+      "klippyState",
+      "activeTool",
+      "toolTemperatures"
+    ],
+    "sample": {
+      "klippyConnected": true,
+      "klippyState": "ready",
+      "moonrakerVersion": "2.0.0",
+      "activeTool": "extruder3",
+      "tools": [
+        {
+          "index": 0,
+          "object": "extruder",
+          "active": false,
+          "celsius": 34,
+          "targetCelsius": 0
+        },
+        {
+          "index": 1,
+          "object": "extruder1",
+          "active": false,
+          "celsius": 34,
+          "targetCelsius": 0
+        },
+        {
+          "index": 2,
+          "object": "extruder2",
+          "active": false,
+          "celsius": 34,
+          "targetCelsius": 0
+        },
+        {
+          "index": 3,
+          "object": "extruder3",
+          "active": true,
+          "celsius": 35,
+          "targetCelsius": 0
+        }
+      ]
+    }
+  },
+  "camera": {
+    "reachable": true,
+    "kind": "webcam",
+    "url": "<camera-url>",
+    "webcams": [
+      {
+        "name": "<camera-1>",
+        "enabled": true,
+        "reachable": true,
+        "url": "<camera-url>",
+        "detail": "HTTP 200"
+      },
+      {
+        "name": "<camera-2>",
+        "enabled": true,
+        "reachable": false,
+        "url": "<camera-url>",
+        "detail": "HTTP 404"
+      }
+    ],
+    "detail": "<camera-1>: HTTP 200"
+  },
+  "files": {
+    "listable": true,
+    "count": 3,
+    "files": [
+      {
+        "name": "<redacted-1>.gcode",
+        "size": 25053674,
+        "modified": 1795452158.844936,
+        "estimatedTime": 13280
+      },
+      {
+        "name": "<redacted-2>.gcode",
+        "size": 27500773,
+        "modified": 1795360971.7475028,
+        "estimatedTime": 16946
+      },
+      {
+        "name": "<redacted-3>.gcode",
+        "size": 138768329,
+        "modified": 1795306137.9380283,
+        "estimatedTime": 46139
+      }
+    ]
+  },
+  "catalog": {
+    "matchedCatalogId": "klipper-generic-moonraker",
+    "matchedCatalogBrand": "Klipper",
+    "matchedCatalogModel": "Klipper + Moonraker gen\u00e9rico",
+    "currentCapabilities": {
+      "telemetry": "hardware",
+      "files": "unknown",
+      "camera": "simulated",
+      "materials": "simulated",
+      "pause": "simulated",
+      "resume": "simulated",
+      "cancel": "simulated"
+    },
+    "provenCapabilities": {
+      "telemetry": true,
+      "camera": true,
+      "files": true
+    },
+    "canPromoteToHardwareProven": true,
+    "promotionNotes": [
+      "Identified catalog entry: klipper-generic-moonraker (Klipper Klipper + Moonraker gen\u00e9rico)",
+      "Telemetry observed with 4 active field(s) [klippyConnected, klippyState, activeTool, toolTemperatures]",
+      "Camera verified reachable via webcam",
+      "File listing verified with 3 file(s) listed"
+    ]
+  },
+  "qualification": {
+    "status": "qualified",
+    "summary": "Printer successfully qualified with active telemetry (4 fields) and camera + files verified."
+  }
+}

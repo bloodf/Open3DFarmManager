@@ -1,25 +1,11 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 
-/** Scopes exactly as declared in docs/api/openapi-v1.yaml (and the DB check). */
-export const INTEGRATION_SCOPES = [
-  'printers:read',
-  'files:read',
-  'inventory:read',
-  'jobs:read',
-  'jobs:start',
-  'control:basic',
-  'control:extended',
-  'events:subscribe',
-  'jobs:write',
-  'library:read',
-  'library:write',
-  // Appended last: token scope masks use each scope's index in this list.
-  'environment:read',
-  'plates:confirm',
-  'alerts:write',
-  'camera:view',
-] as const
-export type IntegrationScope = (typeof INTEGRATION_SCOPES)[number]
+export { INTEGRATION_SCOPES } from '../../app/utils/integration-scopes.ts'
+import {
+  INTEGRATION_SCOPES,
+  type IntegrationScope,
+} from '../../app/utils/integration-scopes.ts'
+export type { IntegrationScope } from '../../app/utils/integration-scopes.ts'
 
 export function validScopes(value: unknown): value is IntegrationScope[] {
   return (

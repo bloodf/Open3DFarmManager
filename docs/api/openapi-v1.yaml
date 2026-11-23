@@ -641,14 +641,19 @@ paths:
       tags: [Actions]
       summary: Send a printer action
       description: |
-        `pause`, `resume` and `cancel` require `control:basic`; every other
+        `pause`, `resume` and `cancel` require `control:basic`.
+        `confirm_collection` requires `plates:confirm` and the current plate
+        attempt id (`plate.attemptId` on the printer status, or the job plate
+        read). Confirming the current attempt again is safe. Every other
         action requires `control:extended`. An action the printer does not
-        advertise answers 422 `unsupported` and is never delivered. Otherwise the action is delivered to the Connector or,
-        when the grant requires approval, held. A retry with the same
-        `Idempotency-Key` and body returns the same action.
+        advertise answers 422 `unsupported` and is never delivered. Otherwise
+        the action is delivered to the Connector or, when the grant requires
+        approval, held. A retry with the same `Idempotency-Key` and body
+        returns the same action.
       security:
         - clientCredentials: ['control:basic']
         - clientCredentials: ['control:extended']
+        - clientCredentials: ['plates:confirm']
       parameters:
         - $ref: '#/components/parameters/PrinterId'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -657,7 +662,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PrinterActionRequest'
+              $ref: '#/components/schemas/ActionRequest'
       responses:
         '202':
           description: Action accepted (new or replayed).
@@ -3580,6 +3585,24 @@ components:
           type: string
           description: '`unknown` when nothing publishable has been observed.'
           enum: [idle, printing, paused, error, offline, unknown]
+        plate:
+          type: object
+          description: >-
+            Present while a completed run still occupies the bed. `state`
+            reuses the job plate vocabulary. `attemptId` is the id
+            `confirm_collection` must name. Absent when the bed is clear or
+            the plate state is not known from the advertised controls.
+          required: [state]
+          additionalProperties: false
+          properties:
+            state:
+              type: string
+              description: Plate occupancy. `awaiting-collection` means the next start is held.
+              enum: [awaiting-collection, operator-confirmed, unknown]
+            attemptId:
+              type: string
+              pattern: '^(?:0|[1-9][0-9]{0,15})$'
+              description: End time of the held run, in Unix milliseconds.
         statusReason:
           type: string
           enum:

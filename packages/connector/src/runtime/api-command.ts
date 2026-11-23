@@ -304,6 +304,10 @@ export function createApiCommandRunner(config: {
   ): [ApiEnvelopeRefusalCode, string] | null {
     if (envelope.kind === 'job') {
       const target = jobTarget(binding)
+      const advertised = config.driver.controls?.(binding) ?? []
+      // A held start is still this printer's start. The state check names the hold.
+      const heldForCollection =
+        config.driver.plateStartRefusal?.(binding) === 'awaiting-collection'
       if (envelope.job && resinArtifactFormatFor(envelope.job.display_name))
         return ['unsupported', 'resin-artifact-requires-library-version']
       if (
@@ -311,7 +315,7 @@ export function createApiCommandRunner(config: {
         !envelope.job ||
         !supportsFileUpload(target, envelope.job.display_name) ||
         !config.driver.execute ||
-        !(config.driver.controls?.(binding) ?? []).includes('start_print')
+        (!advertised.includes('start_print') && !heldForCollection)
       )
         return ['unsupported', 'job delivery is not supported by this printer']
       return null
@@ -341,12 +345,15 @@ export function createApiCommandRunner(config: {
     }
     // A library start runs the driver's ordinary `start_print` after the file is in place.
     const libraryStart = action === 'start_library_print'
+    const advertised = config.driver.controls?.(binding) ?? []
+    const heldForCollection =
+      (action === 'start_print' || libraryStart) &&
+      config.driver.plateStartRefusal?.(binding) === 'awaiting-collection'
     if (
       !config.driver.execute ||
       (libraryStart && (!config.libraryPrint || !jobTarget(binding))) ||
-      !(config.driver.controls?.(binding) ?? []).includes(
-        libraryStart ? 'start_print' : action,
-      ) ||
+      (!advertised.includes(libraryStart ? 'start_print' : action) &&
+        !heldForCollection) ||
       !controlWithinLimits(action, args, config.controlLimits) ||
       (action === 'run_macro' &&
         !config.driver

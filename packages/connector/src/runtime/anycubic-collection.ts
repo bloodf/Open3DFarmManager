@@ -154,7 +154,11 @@ export function createAnycubicCollection(input: {
               : value
         times[key as keyof PrinterState] = now
       }
-      if (!values.state) return
+      if (
+        !values.state ||
+        (values.state !== 'offline' && values.progress === undefined)
+      )
+        return
       const parsed = PrinterState.safeParse({
         ...values,
         ...(lastJob ? { lastJob } : {}),

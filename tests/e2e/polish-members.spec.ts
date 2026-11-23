@@ -352,7 +352,8 @@ async function open(
   await page.setViewportSize(viewport)
   await setPolishTheme(page, theme)
   const mock = await mockFor(page, screen)
-  await page.goto(`/${screen.page}`)
+  const scope = screen.scenario === 'populated' ? `?farm=${farmA}` : ''
+  await page.goto(`/${screen.page}${scope}`)
   await page.getByRole('heading', { level: 1, name: h1[screen.page] }).waitFor()
   await act(page, screen)
   await settle(page, screen)

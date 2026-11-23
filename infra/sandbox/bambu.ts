@@ -8,6 +8,7 @@ const simulator = await startBambuSimulator({
   port: 9999,
   ftpsPort: 9998,
   accessCode,
+  credentials: { username: 'bblp', password: accessCode },
   initialState: 'IDLE',
   // Fixed synthetic identity: scripts/sandbox-seed.ts pins its fingerprint.
   tls: syntheticBambuTls,

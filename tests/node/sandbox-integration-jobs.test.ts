@@ -11,6 +11,7 @@ import { once } from 'node:events'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
+import { connect as tlsConnect } from 'node:tls'
 import { seedSandbox } from '../../scripts/sandbox-seed.ts'
 import {
   loadMigrationCatalog,
@@ -22,7 +23,10 @@ import {
   getFreePort,
 } from '../helpers/disposable-postgres.ts'
 import { startMoonrakerMock } from '../../packages/sim-tools/src/mocks/moonraker-mock.ts'
-import { startBambuSimulator } from '../../packages/sim-tools/src/bambu-simulator.ts'
+import {
+  packet,
+  startBambuSimulator,
+} from '../../packages/sim-tools/src/bambu-simulator.ts'
 import { syntheticBambuTls } from '../../infra/sandbox/bambu-synthetic-identity.ts'
 
 let missing = ''
@@ -130,8 +134,61 @@ test(
       bambu = await startBambuSimulator({
         tls: syntheticBambuTls,
         accessCode,
+        credentials: { username: 'bblp', password: accessCode },
         initialState: 'IDLE',
       })
+      // A TLS connection alone does not prove that the broker enforces the
+      // synthetic access code. Check the MQTT CONNACK for both credentials.
+      const mqttConnack = async (password: string) => {
+        const socket = tlsConnect({
+          host: '127.0.0.1',
+          port: bambu!.port,
+          ca: syntheticBambuTls.cert,
+        })
+        socket.setTimeout(5000, () =>
+          socket.destroy(new Error('MQTT handshake timed out')),
+        )
+        try {
+          await once(socket, 'secureConnect')
+          const field = (value: string) => {
+            const bytes = Buffer.from(value)
+            const length = Buffer.alloc(2)
+            length.writeUInt16BE(bytes.length)
+            return Buffer.concat([length, bytes])
+          }
+          const reply = (async () => {
+            let received = Buffer.alloc(0)
+            for await (const chunk of socket) {
+              received = Buffer.concat([received, chunk as Buffer])
+              if (received.length >= 4) return received.subarray(0, 4)
+            }
+            throw new Error('MQTT connection closed before CONNACK')
+          })()
+          socket.write(
+            packet(
+              0x10,
+              Buffer.concat([
+                field('MQTT'),
+                Buffer.from([4, 0xc2, 0, 10]),
+                field('sandbox-auth-check'),
+                field('bblp'),
+                field(password),
+              ]),
+            ),
+          )
+          return await reply
+        } finally {
+          socket.destroy()
+        }
+      }
+      assert.deepEqual(
+        await mqttConnack(`${accessCode}-wrong`),
+        Buffer.from([0x20, 2, 0, 5]),
+      )
+      assert.deepEqual(
+        await mqttConnack(accessCode),
+        Buffer.from([0x20, 2, 0, 0]),
+      )
       const bambuConfig = runtime.collection.bambu.printers[0]
       bambuConfig.port = bambu.port
       bambuConfig.ftpsPort = bambu.ftpsPort

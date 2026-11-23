@@ -394,6 +394,16 @@ onMounted(async () => {
 })
 
 watch(
+  () => route.query.q,
+  (query) => {
+    const next = typeof query === 'string' ? query : ''
+    if (next === filters.q) return
+    filters.q = next
+    void loadSpools()
+  },
+)
+
+watch(
   farmId,
   (next, prev) => {
     if (next === prev) return

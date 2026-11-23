@@ -8,6 +8,8 @@ import { BrowserDeviceUuid } from '../../../farm-protocol/src/browser-device-pro
 import { canonicalize } from '../../../farm-protocol/src/canonical.ts'
 import {
   API_ENVELOPE_CLOCK_SKEW_MS,
+  API_RUN_CONTROLS,
+  ApiRunAction,
   ApiEnvelopeV1,
 } from '../../../farm-protocol/src/api-envelope.ts'
 
@@ -81,6 +83,7 @@ const holdsPrinterWhenUnconfirmed = new Set([
   'emergency_stop',
   'firmware_restart',
 ])
+const actionlessCommands = new Set(['confirm_collection'])
 const time = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
 const printerKey = z
   .string()
@@ -693,6 +696,7 @@ export function claimApiCommand(
   const parsed = ApiClaimInput.safeParse(input)
   if (!parsed.success) return { ok: false, reason: 'storage-unavailable' }
   const envelope = parsed.data.envelope
+  const run = ApiRunAction.safeParse(envelope.action)
   return claimRow(
     handle,
     {
@@ -705,7 +709,12 @@ export function claimApiCommand(
       account_id: envelope.app_id,
       transport_id: 'api-envelope',
       capability_id: envelope.grant_id,
-      action: envelope.kind === 'job' ? 'start_print' : envelope.action!.action,
+      action:
+        envelope.kind === 'job'
+          ? 'start_print'
+          : run.success
+            ? API_RUN_CONTROLS[run.data.action]
+            : envelope.action!.action,
       not_before: Math.max(0, envelope.issued_at - API_ENVELOPE_CLOCK_SKEW_MS),
       expires_at: envelope.expires_at,
     },
@@ -762,9 +771,9 @@ function claimRow(
         const recent = state.database
           .prepare(
             `SELECT count(*) AS n FROM pause_commands
-             JOIN control_command_actions USING (cmd_id)
+             LEFT JOIN control_command_actions USING (cmd_id)
              WHERE farm_id=? AND printer_key=?
-               AND (action='exclude_object')=?
+               AND (COALESCE(action,'')='exclude_object')=?
                AND CASE WHEN action='exclude_object' THEN write_started_at ELSE claimed_at END>?`,
           )
           .get(
@@ -810,9 +819,13 @@ function claimRow(
             'DELETE FROM control_command_actions WHERE cmd_id NOT IN (SELECT cmd_id FROM pause_commands)',
           )
           .run()
-        state.database
-          .prepare('INSERT INTO control_command_actions VALUES(?,?)')
-          .run(command.cmd_id, command.action)
+        // A plate confirmation is a local collection-journal write with no
+        // printer effect. The v17 action table predates it, so its row keeps
+        // replay protection, exclusion and the rate limit without an action.
+        if (!actionlessCommands.has(command.action))
+          state.database
+            .prepare('INSERT INTO control_command_actions VALUES(?,?)')
+            .run(command.cmd_id, command.action)
         return { ok: true }
       },
     )

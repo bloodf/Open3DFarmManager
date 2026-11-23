@@ -54,6 +54,12 @@ export interface ExtendedControlDriver extends PreparedPauseDriver {
 }
 
 /** Trusted local composition. No command, endpoint or capability comes from the wire. */
+type PrepareInput = Parameters<PreparedPauseDriver['prepare']>[0] & {
+  observeRun?: (
+    evidence: import('./api-job-lifecycle.ts').ApiRunEvidence,
+  ) => void
+}
+
 export function createPauseDriverRouter(config: {
   kobraLinkFetch?: KobraLinkFetch
   allowedOrigins: readonly string[]
@@ -72,7 +78,9 @@ export function createPauseDriverRouter(config: {
     binding: PrinterBinding,
     observation: ControlObservation | null,
   ): boolean
-}): ExtendedControlDriver {
+}): Omit<ExtendedControlDriver, 'prepare'> & {
+  prepare(input: PrepareInput): ReturnType<PreparedPauseDriver['prepare']>
+} {
   type Attempt = {
     driver: Pick<
       ReturnType<typeof openFixedMoonrakerPause>,
@@ -151,10 +159,7 @@ export function createPauseDriverRouter(config: {
       }
       return controls(binding)
     },
-    async prepare({
-      binding,
-      signal,
-    }: Parameters<PreparedPauseDriver['prepare']>[0]) {
+    async prepare({ binding, signal, observeRun }: PrepareInput) {
       if (
         !readPrinterBinding(binding) ||
         (readBambuPrinterBinding(binding) !== null &&
@@ -200,6 +205,7 @@ export function createPauseDriverRouter(config: {
           objects: moonrakerObjects.get(binding),
           gcodeConsole: config.gcodeConsole?.(binding) === true,
           clock: config.clock,
+          observeRun,
           signal: owner.signal,
           publish(observation) {
             if (

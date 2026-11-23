@@ -24,6 +24,8 @@ import {
 } from './queue-collection.ts'
 
 const identifier = z.string().min(1).max(256)
+/** An uninitialized printer can be cleared after an explicit operator check. */
+export const INITIAL_COLLECTION_ATTEMPT = '0'
 /** Oldest attempts beyond this many collected ones are dropped from the file. */
 const KEEP_COLLECTED = 100
 function trim(state: CollectionState): CollectionState {
@@ -128,6 +130,17 @@ export function openQueueCollectionJournal(path: string) {
       const next = observeFinishedRun(current, endedAt)
       if (next !== current) save({ ...printers, [printer]: next })
     },
+    confirmInitial(printer: string): void {
+      const current = read(printer)
+      if (current.dispatchedAt !== undefined || current.attempts.length !== 0)
+        throw new Error('Initial plate state no longer current')
+      save({
+        ...printers,
+        [printer]: {
+          attempts: [{ id: INITIAL_COLLECTION_ATTEMPT, status: 'collected' }],
+        },
+      })
+    },
     /** Idempotent: confirming an already collected attempt changes nothing. */
     confirm(printer: string, attempt: string): void {
       identifier.parse(attempt)
@@ -168,6 +181,7 @@ export function unavailableQueueCollectionJournal(): QueueCollectionJournal {
     dispatched: fail,
     finished: fail,
     confirm: fail,
+    confirmInitial: fail,
     confirmThrough: fail,
   }
 }

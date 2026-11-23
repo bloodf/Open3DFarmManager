@@ -568,7 +568,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ActionRequest'
+              $ref: '#/components/schemas/PrinterActionRequest'
       responses:
         '202':
           description: Action accepted (new or replayed).
@@ -1032,6 +1032,212 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /jobs/{jobId}/actions:
+    post:
+      operationId: submitJobAction
+      tags: [Actions]
+      summary: Confirm an observed plate or control an API job run
+      description: |
+        Pause, resume and cancel require `control:basic` and are bound to the
+        API job's original start envelope. The Connector refuses with
+        `already-ended` or `run-mismatch` when it cannot verify the active run.
+        `confirm_collection` requires `plates:confirm` and the current plate
+        attempt ID. An uninitialized stopped Moonraker printer reports attempt
+        ID `0` for initial operator clearance. Stale attempts are refused.
+        The same idempotency key and body retrieve the original action.
+      security:
+        - clientCredentials: ['control:basic']
+        - clientCredentials: ['plates:confirm']
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobActionRequest'
+      responses:
+        '202':
+          description: Action accepted (new or replayed).
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Action'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /jobs/{jobId}/eligibility:
+    get:
+      operationId: getJobEligibility
+      tags: [Jobs]
+      summary: Check dispatch eligibility for a submitted job
+      security:
+        - clientCredentials: ['jobs:read']
+        - clientCredentials: ['jobs:start']
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: printerId
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '200':
+          description: Connector observation for the job's assigned printer.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [jobId, printerId, plate, eligible, reasons]
+                properties:
+                  jobId:
+                    $ref: '#/components/schemas/Uuid'
+                  printerId:
+                    $ref: '#/components/schemas/Uuid'
+                  plate:
+                    type: object
+                    required: [state, observedAt]
+                    properties:
+                      state:
+                        type: string
+                        enum: [awaiting-collection, operator-confirmed, unknown]
+                      observedAt:
+                        type: integer
+                        description: Connector observation time in Unix milliseconds.
+                      attemptId:
+                        type: string
+                  eligible:
+                    type: boolean
+                    description: Advisory result. The Connector rechecks at execution.
+                  reasons:
+                    type: array
+                    items:
+                      type: string
+                      enum:
+                        [
+                          job-not-pending,
+                          printer-busy,
+                          printer-not-ready,
+                          awaiting-collection,
+                          plate-state-uncertain,
+                        ]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+  /jobs/{jobId}/plate:
+    get:
+      operationId: getJobPlate
+      tags: [Jobs]
+      summary: Read the Connector’s plate observation
+      security:
+        - clientCredentials: ['jobs:read']
+        - clientCredentials: ['jobs:start']
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: printerId
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      responses:
+        '200':
+          description: Connector observation for the job's assigned printer.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [jobId, printerId, plate]
+                properties:
+                  jobId:
+                    $ref: '#/components/schemas/Uuid'
+                  printerId:
+                    $ref: '#/components/schemas/Uuid'
+                  plate:
+                    type: object
+                    required: [state, observedAt]
+                    properties:
+                      state:
+                        type: string
+                        enum: [awaiting-collection, operator-confirmed, unknown]
+                      observedAt:
+                        type: integer
+                        description: Connector observation time in Unix milliseconds.
+                      attemptId:
+                        type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
   /actions/{actionId}:
     get:
       operationId: getAction
@@ -1043,6 +1249,7 @@ paths:
       security:
         - clientCredentials: ['control:basic']
         - clientCredentials: ['control:extended']
+        - clientCredentials: ['plates:confirm']
       parameters:
         - name: actionId
           in: path
@@ -1559,7 +1766,7 @@ components:
             library:read: Read library files and the storage mode.
             library:write: Upload library files and set the storage mode.
             environment:read: Read enclosure and room environment and power measurements.
-            plates:confirm: Confirm that a printer's build plate is clear. Reserved; no endpoint uses it yet.
+            plates:confirm: Confirm that a printer's build plate is clear.
             alerts:write: Raise integration alerts for a farm. Reserved; no endpoint uses it yet.
             camera:view: View printer camera snapshots. Reserved; no endpoint uses it yet.
   parameters:
@@ -2955,7 +3162,42 @@ components:
         - run_macro
         - load_filament
         - unload_filament
+        - confirm_collection
+    JobActionRequest:
+      allOf:
+        - $ref: '#/components/schemas/ActionRequest'
+      oneOf:
+        - type: object
+          required: [action, args]
+          additionalProperties: false
+          properties:
+            action:
+              enum: [pause, resume, cancel]
+            args:
+              type: object
+              additionalProperties: false
+        - $ref: '#/components/schemas/PlateConfirmationRequest'
+    PlateConfirmationRequest:
+      type: object
+      required: [action, args]
+      additionalProperties: false
+      properties:
+        action:
+          const: confirm_collection
+        args:
+          type: object
+          required: [attempt]
+          additionalProperties: false
+          properties:
+            attempt:
+              type: string
+              pattern: '^(?:0|[1-9][0-9]{0,15})$'
     ActionRequest:
+      description: Accepted action names and arguments across the printer and job action routes.
+      oneOf:
+        - $ref: '#/components/schemas/PrinterActionRequest'
+        - $ref: '#/components/schemas/PlateConfirmationRequest'
+    PrinterActionRequest:
       description: One action and its arguments; `args` is required and `{}` for actions without arguments.
       oneOf:
         - type: object

@@ -42,6 +42,8 @@ export type RawMoonrakerObservation = Readonly<{
     progress: number
   }>
   receivedAtMonoMs: number
+  /** Source time of the duration sample, when it was in this status update. */
+  durationSourceTime?: number
   temperatureObservation?: Readonly<{
     fields: TemperatureFields
     observedAtMonoMs: number
@@ -267,6 +269,7 @@ export function createMoonrakerSubscription(input: {
       function publish(
         value: z.infer<typeof Snapshot>,
         temperatureObservation?: RawMoonrakerObservation['temperatureObservation'],
+        durationSourceTime?: number,
       ) {
         if (signal.aborted) return
         const firstObservation = !hasObservedStatus
@@ -313,6 +316,9 @@ export function createMoonrakerSubscription(input: {
                 }),
                 fieldObservedAtMonoMs: Object.freeze({ ...observedTimes }),
                 receivedAtMonoMs: performance.now(),
+                ...(durationSourceTime === undefined
+                  ? {}
+                  : { durationSourceTime }),
                 ...(temperatureObservation
                   ? {
                       temperatureObservation: Object.freeze({
@@ -476,10 +482,14 @@ export function createMoonrakerSubscription(input: {
                     printState: stamp,
                     progress: stamp,
                   }
-                  publish(value, {
-                    fields: parseTemperatureFields(complete.status),
-                    observedAtMonoMs: stamp,
-                  })
+                  publish(
+                    value,
+                    {
+                      fields: parseTemperatureFields(complete.status),
+                      observedAtMonoMs: stamp,
+                    },
+                    value.eventtime,
+                  )
                 },
               }
             : {}),
@@ -539,7 +549,13 @@ export function createMoonrakerSubscription(input: {
                     : now,
               }
             }
-            publish({ eventtime, status })
+            publish(
+              { eventtime, status },
+              undefined,
+              delta.print_stats?.total_duration === undefined
+                ? undefined
+                : eventtime,
+            )
           },
         })
         const raw = await client.snapshot

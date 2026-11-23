@@ -188,6 +188,13 @@ export interface KobraXMockOptions {
   httpPort?: number | undefined
   mqttPort?: number | undefined
   camera?: boolean | undefined
+  /**
+   * Opt-in capture-gated HTTP-FLV. The stream is dark until MQTT
+   * `video/startCapture`, which answers `data.urls.rtspUrl` with a distinct
+   * synthetic token. `video/stopCapture` invalidates it and closes open FLV
+   * responses. Default off: the always-live URL stays unchanged.
+   */
+  captureGatedFlv?: boolean | undefined
   strictCtrlQuery?: boolean | undefined
   requireMqttAuth?: boolean | undefined
   requireExactClientCert?: boolean | undefined
@@ -227,7 +234,10 @@ export interface KobraXMockInstance {
   }
   camera:
     | {
-        flvUrl: string
+        /** Always-live URL; undefined in capture-gated mode. */
+        flvUrl: string | undefined
+        flvBase: string
+        capture: Awaited<ReturnType<typeof startCameraMock>>['capture']
         rtspUrl: string
         cameraUrl: string
         state: { stall: boolean; disconnect: boolean }
@@ -511,10 +521,24 @@ export async function startKobraXMock(
   // 2. Camera mock (HTTP-FLV from E16.7)
   let cameraMock: Awaited<ReturnType<typeof startCameraMock>> | undefined
   if (options.camera !== false) {
-    cameraMock = await startCameraMock({ token })
+    cameraMock = await startCameraMock({
+      token,
+      captureGated: options.captureGatedFlv === true,
+    })
   }
   const flvUrl = cameraMock?.flvUrl
-  const flvPort = flvUrl ? Number(new URL(flvUrl).port) : undefined
+  const flvPort = cameraMock
+    ? Number(new URL(cameraMock.flvBase).port)
+    : undefined
+  /** URL announced to clients: always-live, or the active capture session's. */
+  const announcedFlvUrl = (): string | undefined => {
+    if (!cameraMock) return undefined
+    if (!cameraMock.capture.gated) return flvUrl
+    const captureToken = cameraMock.capture.token()
+    return captureToken === undefined
+      ? undefined
+      : `${cameraMock.flvBase}/live/${captureToken}`
+  }
 
   // 3. HTTP 18910 (/info, /ctrl, /gcode_upload)
   let httpPort = 0
@@ -789,7 +813,7 @@ export async function startKobraXMock(
         camera_timelapse_support: true,
       },
       urls: {
-        ...(flvUrl ? { rtspUrl: flvUrl } : {}),
+        ...(announcedFlvUrl() ? { rtspUrl: announcedFlvUrl() } : {}),
       },
       temp: { ...tempState },
       fan_speed_pct: fanSpeedPct,
@@ -1497,6 +1521,26 @@ export async function startKobraXMock(
           } else if (action === 'stopCapture') {
             videoCapturing = false
           }
+          if (cameraMock?.capture.gated) {
+            let rtspUrl: string | undefined
+            if (action === 'startCapture') {
+              rtspUrl = cameraMock.capture.start().url
+            } else if (action === 'stopCapture') {
+              cameraMock.capture.stop()
+            } else {
+              rtspUrl = announcedFlvUrl()
+            }
+            publishTypedReport(
+              'video',
+              action || 'startCapture',
+              {
+                urls: { ...(rtspUrl ? { rtspUrl } : {}) },
+                active: cameraMock.capture.active(),
+              },
+              { clientKind },
+            )
+            break
+          }
           publishTypedReport(
             'video',
             action || 'startCapture',
@@ -1712,6 +1756,8 @@ export async function startKobraXMock(
     camera: cameraMock
       ? {
           flvUrl: cameraMock.flvUrl,
+          flvBase: cameraMock.flvBase,
+          capture: cameraMock.capture,
           rtspUrl: cameraMock.rtspUrl,
           cameraUrl: cameraMock.cameraUrl,
           state: cameraMock.state,

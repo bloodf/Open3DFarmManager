@@ -208,6 +208,23 @@ function displayLocalOrigin(row: FarmRow) {
 }
 const inspector = ref<HTMLDialogElement | null>(null)
 const inspectedId = ref<string | null>(null)
+const inspectedMode = ref<'in-service' | 'maintenance' | null>(null)
+watch(inspectedId, async (id, _old, onCleanup) => {
+  inspectedMode.value = null
+  if (!id || !ready.value?.scope) return
+  let active = true
+  onCleanup(() => {
+    active = false
+  })
+  try {
+    const mode = await $fetch<{ mode: 'in-service' | 'maintenance' }>(
+      `/api/farms/${encodeURIComponent(ready.value.scope.farmId)}/printers/${encodeURIComponent(id)}/mode`,
+    )
+    if (active) inspectedMode.value = mode.mode
+  } catch {
+    // Leave availability unknown when the server cannot confirm it.
+  }
+})
 const inspectedRow = computed(
   () =>
     renderedRows.value.find(
@@ -513,6 +530,16 @@ function cancelPause(event: Event) {
       >
         Fechar inspeção
       </button>
+      <p v-if="inspectedRow">
+        Disponibilidade:
+        {{
+          inspectedMode === 'maintenance'
+            ? 'Em manutenção'
+            : inspectedMode === 'in-service'
+              ? 'Em serviço'
+              : 'Indisponível'
+        }}
+      </p>
       <ul class="inspector-list">
         <FarmPrinterCard
           v-if="inspectedRow"

@@ -307,6 +307,8 @@ export type IntegrationJobsOptions = Readonly<{
       outcome: 'accepted' | 'held'
     }): Promise<void>
   }
+  /** Read current operational availability before accepting a job. */
+  fleetMode?: (printerId: string) => Promise<'in-service' | 'maintenance'>
   /** Absent when no envelope signer is configured: only held jobs can be accepted. */
   envelopes?: JobEnvelopes
   maxFileBytes?: number
@@ -424,6 +426,13 @@ export class IntegrationJobsService {
       return {
         ok: false,
         problem: libraryRequest ? 'insufficient-scope' : 'not-found',
+      }
+
+    if ((await this.o.fleetMode?.(printer)) === 'maintenance')
+      return {
+        ok: false,
+        problem: 'validation-failed',
+        reason: { pointer: '/printerId', detail: 'maintenance' },
       }
 
     let file = parsed

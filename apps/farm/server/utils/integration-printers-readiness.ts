@@ -4,6 +4,7 @@ import {
   type IntegrationPrinterRow,
   uuidPattern,
 } from './integration-auth.ts'
+import { observationIsStale } from './integration-environment.ts'
 import type { IntegrationPrinterReader } from './integration-printers.ts'
 import {
   printerDegradedReason,
@@ -21,7 +22,7 @@ export interface PrinterReadiness {
   paired: boolean
   eligible: boolean
   observedAt: number | null
-  degradedReason: PrinterDegradedReason | null
+  degradedReason: PrinterDegradedReason | 'stale' | null
   setupPath: string
 }
 
@@ -97,14 +98,19 @@ export function printerSetupPath(printerKey: string, farmId: string) {
   return `/impressoras/${encodeURIComponent(printerKey)}?farm=${encodeURIComponent(farmId.toLowerCase())}`
 }
 
-export function printerReadiness(row: IntegrationPrinterRow): PrinterReadiness {
+export function printerReadiness(
+  row: IntegrationPrinterRow,
+  now = Date.now(),
+): PrinterReadiness {
   const parsed = PrinterState.safeParse(row.state)
   const qualification = qualifyPrinterState(row.state)
   const observedAt =
     row.observedAt ?? (parsed.success ? parsed.data.observedAt : null)
-  const degradedReason = parsed.success
-    ? printerDegradedReason(parsed.data)
-    : null
+  const degradedReason =
+    (parsed.success ? printerDegradedReason(parsed.data) : null) ??
+    (observedAt !== null && observationIsStale(observedAt, now)
+      ? 'stale'
+      : null)
   return {
     printerId: row.id,
     farmId: row.farmId,
@@ -156,7 +162,7 @@ export async function listIntegrationPrinterReadiness(
   const hasMore = rows.length > limit
   const page = rows.slice(0, limit)
   return {
-    data: page.map(printerReadiness),
+    data: page.map((row) => printerReadiness(row)),
     nextCursor: hasMore
       ? encodedCursor(page[page.length - 1]!.id, snapshotAt)
       : null,

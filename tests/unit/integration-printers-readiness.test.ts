@@ -32,6 +32,7 @@ import {
 } from '../../apps/farm/server/utils/integration-capabilities.ts'
 import {
   listIntegrationPrinterReadiness,
+  printerReadiness,
   type PrinterReadiness,
 } from '../../apps/farm/server/utils/integration-printers-readiness.ts'
 import type { IntegrationPrinterReader } from '../../apps/farm/server/utils/integration-printers.ts'
@@ -98,7 +99,7 @@ function observed(
 ) {
   const shared = {
     printerKey,
-    observedAt: Date.parse('2026-11-21T04:43:19.068Z'),
+    observedAt: Date.now(),
     identity: { ...identity, firmware },
   }
   const state =
@@ -165,6 +166,17 @@ function readinessFor(
 }
 
 describe('printer readiness and qualified capabilities', () => {
+  it('rejects a qualified Moonraker observation older than 60 seconds', () => {
+    const state = observed('sv06', sv06Report.identity, 'idle')
+    state.observedAt = Date.now() - 72 * 60 * 60 * 1000
+    const result = printerReadiness(row(printerSv06, 'sv06', state))
+    expect(result).toMatchObject({
+      eligible: false,
+      degradedReason: 'stale',
+      observedAt: state.observedAt,
+    })
+  })
+
   it('keeps recorded SV06 and U1 firmware as the qualified set', () => {
     expect(qualifiedFirmwareByCatalogId['klipper-generic-moonraker']).toEqual([
       sv06Report.identity.firmware,
@@ -220,7 +232,7 @@ describe('printer readiness and qualified capabilities', () => {
         paired: true,
         eligible: true,
         degradedReason: null,
-        observedAt: Date.parse('2026-11-21T04:43:19.068Z'),
+        observedAt: rows[0]!.observedAt,
         setupPath: `/impressoras/sv06?farm=${farmA}`,
       })
       expect(readyU1).toMatchObject({

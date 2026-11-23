@@ -64,7 +64,12 @@ export async function submitIntegrationJobRequest(
   }
   try {
     const result = await service.submit(principal, printerId, key, body)
-    if (!result.ok) return integrationProblem(result.problem, headers)
+    if (!result.ok)
+      return integrationProblem(
+        result.problem,
+        headers,
+        result.reason ? [result.reason] : undefined,
+      )
     const responseHeaders = new Headers(headers)
     responseHeaders.set('cache-control', 'no-store')
     responseHeaders.set('location', `${integrationBase}/jobs/${result.job.id}`)

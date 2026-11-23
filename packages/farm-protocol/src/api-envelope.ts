@@ -70,7 +70,22 @@ export const ApiPlateAction = z.strictObject({
   action: z.literal('confirm_collection'),
   args: CollectionArguments,
 })
+export const ApiResinReplay = z.strictObject({
+  action: z.literal('start_library_print'),
+  args: z.strictObject({
+    sha256,
+    versionId: uuid,
+    filename: z
+      .string()
+      .min(1)
+      .max(255)
+      .regex(/^[^\/\\\x00-\x1f\x7f]+$/),
+    profile: z.string().min(1).max(100),
+    plate: z.literal(1),
+  }),
+})
 export const ApiEnvelopeAction = z.union([
+  ApiResinReplay,
   ApiRunAction,
   ApiPlateAction,
   ControlArguments.refine((value) =>
@@ -78,6 +93,61 @@ export const ApiEnvelopeAction = z.union([
   ),
 ])
 export type ApiEnvelopeAction = z.infer<typeof ApiEnvelopeAction>
+
+/**
+ * Environment controls an API app may request under `environment:control`
+ * (#693). They never reuse an ordinary printer action, so the scope a signed
+ * envelope needs is unambiguous. The Connector maps each one to a qualified
+ * driver capability, enforces its own safety interlocks and refuses
+ * `unsupported` where no qualified capability exists. Drying programs have no
+ * qualified Connector capability yet and are always refused as unsupported.
+ */
+export const API_ENVIRONMENT_ACTIONS = [
+  'extraction_set',
+  'plug_switch',
+  'drying_start',
+  'drying_stop',
+] as const
+export const ApiEnvironmentDeviceName = z
+  .string()
+  .regex(/^[A-Za-z0-9][A-Za-z0-9 _.-]{0,63}$/)
+export const ApiEnvironmentAction = z.discriminatedUnion('action', [
+  z.strictObject({
+    action: z.literal('extraction_set'),
+    args: z.strictObject({ percent: z.number().int().min(0).max(100) }),
+  }),
+  z.strictObject({
+    action: z.literal('plug_switch'),
+    args: z.strictObject({ device: ApiEnvironmentDeviceName, on: z.boolean() }),
+  }),
+  z.strictObject({
+    action: z.literal('drying_start'),
+    args: z.strictObject({
+      targetCelsius: z.number().int().min(35).max(90),
+      durationMinutes: z.number().int().min(1).max(1440),
+    }),
+  }),
+  z.strictObject({
+    action: z.literal('drying_stop'),
+    args: z.strictObject({}),
+  }),
+])
+export type ApiEnvironmentAction = z.infer<typeof ApiEnvironmentAction>
+/** Every action a signed envelope may carry. */
+export const ApiEnvelopeCommandAction = z.union([
+  ApiEnvelopeAction,
+  ApiEnvironmentAction,
+])
+export type ApiEnvelopeCommandAction = z.infer<typeof ApiEnvelopeCommandAction>
+
+export function isApiEnvironmentAction(
+  action: { action: string } | undefined,
+): action is ApiEnvironmentAction {
+  return (
+    action !== undefined &&
+    (API_ENVIRONMENT_ACTIONS as readonly string[]).includes(action.action)
+  )
+}
 
 export const API_RUN_CONTROLS = {
   job_pause: 'pause',
@@ -91,6 +161,7 @@ export const ApiEnvelopeScope = z.enum([
   'control:basic',
   'control:extended',
   'plates:confirm',
+  'environment:control',
 ])
 
 export function scopeForApiAction(action: ApiEnvelopeAction['action']) {
@@ -109,6 +180,15 @@ export function scopeForApiAction(action: ApiEnvelopeAction['action']) {
     default:
       return 'control:extended'
   }
+}
+
+/** The scope for any envelope action, environment controls included. */
+export function scopeForApiCommand(
+  action: ApiEnvelopeCommandAction['action'],
+): z.infer<typeof ApiEnvelopeScope> {
+  return (API_ENVIRONMENT_ACTIONS as readonly string[]).includes(action)
+    ? 'environment:control'
+    : scopeForApiAction(action as ApiEnvelopeAction['action'])
 }
 
 export const ApiEnvelopeJob = z.strictObject({
@@ -154,7 +234,7 @@ const claimsFields = {
   ...common,
   kind: z.enum(['job', 'action']),
   job: ApiEnvelopeJob.optional(),
-  action: ApiEnvelopeAction.optional(),
+  action: ApiEnvelopeCommandAction.optional(),
 }
 /** Exactly one of `job` and `action`, matching `kind`. */
 const kindMatches = (value: {

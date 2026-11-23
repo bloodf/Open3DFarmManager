@@ -55,6 +55,8 @@ export async function sendWithoutSession(): Promise<ReplayResult> {
 
 /** The replay dialog's view of a stored library version. */
 export function libraryReplaySource(version: LibraryVersion): ReplaySource {
+  if (version.kind === 'resin')
+    throw new Error('Impressão de resina indisponível nesta tela.')
   return {
     versionId: version.id,
     sha256: version.sha256,

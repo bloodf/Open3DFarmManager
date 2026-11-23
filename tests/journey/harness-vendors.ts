@@ -5,7 +5,7 @@
 // loopback discovery probe. Nothing here touches a physical printer.
 import { X509Certificate, createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -21,7 +21,8 @@ import { createCrealitySimulator } from '../../packages/sim-tools/src/creality-s
 import { startFormlabsJourneyFixture } from './formlabs-fixture.ts'
 import { startSdcpFixture } from './sdcp-fixture.ts'
 import { startPrusaLinkJourneyFixture } from './prusa-link-fixture.ts'
-import { createJourneyCameraEncoder } from './camera-encoder.ts'
+import { createJourneyCameraEncoder, realFfmpeg } from './camera-encoder.ts'
+import { startBambuCameraFixture } from './bambu-camera-fixture.ts'
 import { startKobraBridgeSimulator } from './harness-kobralink-bridge.ts'
 
 export type VendorName =
@@ -43,12 +44,15 @@ export type VendorControls = Readonly<{
   failPrint(): void
 }>
 
+export type BambuCameraScenario = 'jpeg' | 'rtsps' | 'unmapped'
+
 export type VendorOptions = Readonly<{
   printerKey: string
   /** Optional unique device suffix when sharing a Connector with siblings. */
   deviceId?: string
   /** Bambu only: opt the binding in to control commands (default false). */
   control?: boolean
+  bambuCamera?: BambuCameraScenario
   /** Bambu simulator FTPS port; zero selects an ephemeral loopback port. */
   ftpsPort?: number
   /** Bambu simulator address for its browser onboarding journey. */
@@ -73,7 +77,7 @@ export type VendorRuntime = Readonly<{
    * slot free for the inboxes of a simulator that reports every second.
    */
   telemetryIdleMs?: number
-  /** Opt-in camera section of the runtime file (vendor MJPEG source). */
+  /** Opt-in camera section of the runtime file. */
   camera?: (assignmentId: string) => Record<string, unknown>
 }>
 
@@ -87,7 +91,7 @@ export type VendorDiscovery = Readonly<{
   >
 }>
 
-/** Loopback MJPEG camera the Connector reads (`/?action=stream`). */
+/** Loopback camera the Connector reads. */
 export type VendorCamera = Readonly<{
   host: string
   port: number
@@ -95,6 +99,7 @@ export type VendorCamera = Readonly<{
   helper: string
   /** Stream requests the simulated camera served. */
   requests(): number
+  activeConnections?(): number
 }>
 
 export type VendorSimulator = Readonly<{
@@ -402,6 +407,47 @@ export async function startVendorSimulator(
         finishPrint: () => sim.finishPrint(),
         failPrint: () => sim.failPrint(),
       }
+      const model =
+        options.bambuCamera === 'jpeg'
+          ? 'A1'
+          : options.bambuCamera === 'unmapped'
+            ? 'A2L'
+            : 'X1C'
+      if (options.bambuCamera) {
+        const encoder = await realFfmpeg()
+        const ffmpeg = join(directory, 'bambu-ffmpeg')
+        await copyFile(encoder.path, ffmpeg)
+        await chmod(ffmpeg, 0o700)
+        // The unmapped model points at a reachable fixture to prove that it
+        // stays unavailable regardless of whether an endpoint can serve frames.
+        const fixture = await startBambuCameraFixture({
+          directory,
+          accessCode: BAMBU_ACCESS_CODE,
+        })
+        undo.push(fixture.close)
+        camera = { ...fixture, helper: ffmpeg }
+        cameraSection = (assignmentId) => ({
+          helper: {
+            path: join(directory, 'unconfigured-rtsp-ingest'),
+            sha256: '0'.repeat(64),
+          },
+          cameras: [
+            {
+              cameraId: 'journey-camera',
+              assignmentId,
+              source: {
+                kind: 'bambu-lan',
+                model,
+                ffmpeg: { path: ffmpeg, sha256: encoder.sha256 },
+                address: fixture.host,
+                port: fixture.port,
+                caFile: fixture.caFile,
+                credentialFile: join(directory, 'bambu-credential.json'),
+              },
+            },
+          ],
+        })
+      }
       runtime = async (scope) => {
         const credentialFile = join(directory, 'bambu-credential.json')
         await privateJson(credentialFile, { accessCode: BAMBU_ACCESS_CODE })
@@ -410,6 +456,7 @@ export async function startVendorSimulator(
           // Uploads and signalling inboxes share one credential proof
           // slot on the server; spaced uploads leave it free for commands.
           telemetryIdleMs: 5000,
+          ...(cameraSection ? { camera: cameraSection } : {}),
           collection: {
             version: 3,
             allowedOrigins: [],
@@ -424,7 +471,7 @@ export async function startVendorSimulator(
                   ftpsPort: sim.ftpsPort,
                   control: options.control === true,
                   // Locally provisioned model: opts into extended actions.
-                  model: 'X1C',
+                  model,
                   credentialFile,
                   pinSha256: pinOf(sim.syntheticTrust),
                   allowedEndpoints: [{ host: sim.host, port: sim.port }],

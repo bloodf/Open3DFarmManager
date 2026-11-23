@@ -142,7 +142,10 @@ async function applyConfirmCollectionConstraint(admin: Sql): Promise<string[]> {
   const redefinition = latest.up.match(
     /ALTER TABLE farm\.pause_authority_challenges DROP CONSTRAINT control_capability_actions;\s*ALTER TABLE farm\.pause_authority_challenges ADD CONSTRAINT control_capability_actions CHECK \([\s\S]*?\);/,
   )
-  assert.ok(redefinition, 'latest catalogued constraint redefinition is present')
+  assert.ok(
+    redefinition,
+    'latest catalogued constraint redefinition is present',
+  )
   await admin.begin(async (tx) => {
     await tx.unsafe(redefinition[0]).simple()
   })

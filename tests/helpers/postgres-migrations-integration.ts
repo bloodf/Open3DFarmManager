@@ -7,14 +7,19 @@ import {
 } from '../../scripts/db/migrations.ts'
 
 /** Destructive fixture: caller provides a fresh isolated disposable fixture database. */
-export async function testPostgresMigrations(sql: Sql) {
+export async function testPostgresMigrations(sql: Sql, through?: string) {
   const baseline =
     await sql`SELECT current_database() AS db, current_user AS actor, to_regclass('public.open3dfarm_migrations') AS journal, EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = 'farm') AS farm`
   assert.equal(baseline[0]?.db, 'fixture')
   assert.equal(baseline[0]?.actor, 'fixture')
   assert.equal(baseline[0]?.journal, null)
   assert.equal(baseline[0]?.farm, false)
-  const catalog = await loadMigrationCatalog()
+  const fullCatalog = await loadMigrationCatalog()
+  const index = through
+    ? fullCatalog.findIndex((entry) => entry.id === through)
+    : -1
+  if (through) assert.ok(index >= 0, 'Unknown migration prefix')
+  const catalog = through ? fullCatalog.slice(0, index + 1) : fullCatalog
   const firstMigration = catalog[0]
   assert.ok(firstMigration)
   const sources = catalog.flatMap((entry) => [
@@ -77,6 +82,49 @@ export async function testPostgresMigrations(sql: Sql) {
   await assert.rejects(
     runMigrations(sql, catalog, { kind: 'down', expectedLastId: 'wrong' }),
   )
+  // Physical rollback walks the whole catalog down unless a migration retains
+  // committed history and refuses by design; the durable floor stays applied
+  // and everything above it still rolls down and back up.
+  const durableIndex = catalog.findIndex(
+    (entry) => entry.id === '0026_configuration',
+  )
+  if (durableIndex >= 0) {
+    const rollbackIds = [...catalog]
+      .slice(durableIndex + 1)
+      .reverse()
+      .map((entry) => entry.id)
+    assert.ok(rollbackIds.length > 0)
+    for (const id of rollbackIds)
+      await runMigrations(sql, catalog, { kind: 'down', expectedLastId: id })
+    const durable = catalog[durableIndex]
+    assert.ok(durable)
+    await assert.rejects(
+      runMigrations(sql, catalog, {
+        kind: 'down',
+        expectedLastId: durable.id,
+      }),
+      /rollback refused/,
+    )
+    assert.deepEqual(await snapshot(), before.slice(0, durableIndex + 1))
+    checks.push('durable-configuration-history-rollback-refused')
+    assert.equal(
+      (await runMigrations(sql, catalog, { kind: 'up' })).length,
+      rollbackIds.length,
+    )
+    checks.push('migrations-above-durable-floor-down-and-up')
+    for (const id of rollbackIds)
+      await runMigrations(sql, catalog, { kind: 'down', expectedLastId: id })
+    await assert.rejects(
+      runMigrations(sql, catalog, {
+        kind: 'down',
+        expectedLastId: durable.id,
+      }),
+      /rollback refused/,
+    )
+    assert.equal((await snapshot()).length, durableIndex + 1)
+    checks.push('durable-floor-remains-for-cluster-cleanup')
+    return checks
+  }
   for (const entry of [...catalog].reverse())
     await runMigrations(sql, catalog, {
       kind: 'down',

@@ -1,3 +1,8 @@
+import { recordNetworkTelemetry } from './postgres-farm-network.ts'
+import {
+  latestStateTableExists,
+  recordLatestStates,
+} from './postgres-printer-latest-state.ts'
 import { readAcceptanceCredentialRecords } from './postgres-connector-credential-record.ts'
 import { createHash, createPublicKey, randomBytes, verify } from 'node:crypto'
 import type { Sql, TransactionSql } from 'postgres'
@@ -619,9 +624,10 @@ export class PostgresConnectorCredentialAcceptance {
               if (operation.kind === 'telemetry') {
                 const printerKeys = [
                   ...new Set(
-                    operation.records.map((record) =>
-                      telemetryPrinterKey(record),
-                    ),
+                    operation.records.flatMap((record) => {
+                      const key = telemetryPrinterKey(record)
+                      return key === null ? [] : [key]
+                    }),
                   ),
                 ].sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)))
                 for (const key of printerKeys) {
@@ -660,6 +666,26 @@ export class PostgresConnectorCredentialAcceptance {
                   stored.some((row) => row.matches !== true)
                 )
                   throw new TelemetryConflict()
+                if (
+                  sorted.some((event) => event.kind === 'printer-state') &&
+                  (await latestStateTableExists(save))
+                )
+                  await recordLatestStates(
+                    save,
+                    { farmId: request.farmId, agentId: request.agentId },
+                    sorted,
+                  )
+                await recordNetworkTelemetry(
+                  save,
+                  { farmId: request.farmId, agentId: request.agentId },
+                  sorted,
+                )
+                for (const event of operation.inventorySnapshots) {
+                  await save`INSERT INTO farm.connector_inventory_snapshots (farm_id, agent_id, observed_at, snapshot)
+                    VALUES (${request.farmId}::uuid, ${request.agentId}::uuid, ${event.inventory.observedAt}, ${save.json(event.inventory)}::jsonb)
+                    ON CONFLICT (farm_id, agent_id) DO UPDATE SET observed_at=EXCLUDED.observed_at, snapshot=EXCLUDED.snapshot
+                    WHERE farm.connector_inventory_snapshots.observed_at < EXCLUDED.observed_at`
+                }
                 // Finished jobs carried by the snapshots are recorded in the
                 // same transaction as their events; repeats are a no-op.
                 await recordJobs(

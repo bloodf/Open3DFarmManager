@@ -1,0 +1,35 @@
+{
+  "version": 3,
+  "collection": {
+    "version": 3,
+    "allowedOrigins": [],
+    "printers": [],
+    "limits": {
+      "maxMessageBytes": 262144,
+      "connectTimeoutMs": 5000,
+      "requestTimeoutMs": 5000,
+      "staleAfterMs": 30000,
+      "reconnectMinMs": 1000,
+      "reconnectMaxMs": 30000
+    },
+    "bambu": {
+      "printers": [
+        {
+          "printerKey": "bambu-a",
+          "host": "192.168.1.50",
+          "port": 8883,
+          "serial": "01P00A000000001",
+          "control": false,
+          "credentialFile": "/run/open3dfarmmanager/private/credentials/bambu.json",
+          "pinSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+          "allowedEndpoints": [
+            {
+              "host": "192.168.1.50",
+              "port": 8883
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -12,11 +12,20 @@ import {
   type MoonrakerLimits,
 } from '../config/moonraker.ts'
 import { supportedMoonrakerActions } from './commands.ts'
+import {
+  SNAPMAKER_U1_MARKER,
+  isDeclaredSnapmakerU1,
+  snapmakerU1CommandSupport,
+} from './u1-tools.ts'
+import { POWER_MARKER, readPowerDevices } from './control-power.ts'
+import { queueMarkers } from './control-job-queue.ts'
+import { readMacroParams, type MacroParamMap } from './control-macros.ts'
+import { timelapseMarkers } from './control-timelapse.ts'
 import { decodeMoonrakerFrame, Reply } from './frame.ts'
 import { createMoonrakerSocket } from './socket.ts'
 
 const MAX_OBJECTS = 512
-const ObjectList = z.strictObject({
+export const MoonrakerObjectList = z.strictObject({
   objects: z.array(z.string().min(1).max(128)).max(MAX_OBJECTS),
 })
 
@@ -29,6 +38,13 @@ export function moonrakerControls(
   objects: readonly string[] | undefined,
 ): readonly ExtendedControlAction[] {
   if (!objects) return MOONRAKER_CONTROLS
+  // A declared Snapmaker U1 advertises only its qualified command set.
+  if (objects.includes(SNAPMAKER_U1_MARKER))
+    return Object.freeze(
+      ExtendedControlAction.options.filter((action) =>
+        snapmakerU1CommandSupport(objects).supported.includes(action),
+      ),
+    )
   // The command builder treats "no objects" as "unknown, assume present".
   // A detected printer must not inherit that guess, so name a neutral object.
   const detected = objects.length ? objects : ['gcode']
@@ -39,16 +55,22 @@ export function moonrakerControls(
   )
 }
 
-/**
- * One read-only printer.objects.list on its own short connection to the
- * locally bound, allowlisted origin. Sends nothing else and never retries.
- */
-export function detectMoonrakerObjects(input: {
+type DetectInput = {
   binding: PrinterBinding
   allowedOrigins: readonly string[]
   limits: MoonrakerLimits
   signal: AbortSignal
-}): Promise<readonly string[]> {
+}
+
+/**
+ * One read-only request on its own short connection to the locally bound,
+ * allowlisted origin. Sends nothing else and never retries.
+ */
+function readOnlyOnce<T>(
+  input: DetectInput,
+  request: { method: string; params?: unknown },
+  parse: (result: unknown) => T,
+): Promise<T> {
   const mapping = readPrinterBinding(input.binding)
   if (!mapping || !mapping.moonraker_origin || input.signal.aborted)
     return Promise.reject(new Error('Moonraker support detection unavailable'))
@@ -60,17 +82,17 @@ export function detectMoonrakerObjects(input: {
     allowedOrigins: input.allowedOrigins,
     limits: input.limits,
   })
-  return new Promise<readonly string[]>((resolve, reject) => {
+  return new Promise<T>((resolve, reject) => {
     const socket = createMoonrakerSocket(selected.origin, selected.limits)
     let settled = false
-    const finish = (objects?: readonly string[]) => {
+    const finish = (parsed?: { value: T }) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
       input.signal.removeEventListener('abort', abort)
       socket.terminate()
-      if (objects && readPrinterBinding(input.binding) === mapping)
-        resolve(objects)
+      if (parsed && readPrinterBinding(input.binding) === mapping)
+        resolve(parsed.value)
       else reject(new Error('Moonraker support detection unavailable'))
     }
     const abort = () => finish()
@@ -87,11 +109,7 @@ export function detectMoonrakerObjects(input: {
     socket.on('open', () => {
       if (settled) return
       socket.send(
-        JSON.stringify({
-          jsonrpc: '2.0',
-          id: 1,
-          method: 'printer.objects.list',
-        }),
+        JSON.stringify({ jsonrpc: '2.0', id: 1, ...request }),
         { binary: false, compress: false },
         (error) => {
           if (error) abort()
@@ -104,10 +122,76 @@ export function detectMoonrakerObjects(input: {
           decodeMoonrakerFrame(data, binary, selected.limits.maxMessageBytes),
         )
         if (reply.id !== 1) throw new Error('Unexpected reply')
-        finish(Object.freeze([...ObjectList.parse(reply.result).objects]))
+        finish({ value: parse(reply.result) })
       } catch {
         abort()
       }
     })
   })
+}
+
+/** One read-only printer.objects.list. */
+export function detectMoonrakerObjects(
+  input: DetectInput,
+): Promise<readonly string[]> {
+  const printerKey = readPrinterBinding(input.binding)?.printer_key
+  return readOnlyOnce(input, { method: 'printer.objects.list' }, (result) =>
+    Object.freeze([
+      ...MoonrakerObjectList.parse(result).objects,
+      ...(printerKey !== undefined && isDeclaredSnapmakerU1(printerKey)
+        ? [SNAPMAKER_U1_MARKER]
+        : []),
+    ]),
+  )
+}
+
+/**
+ * One read-only configfile query: the parameters each advertised macro reads.
+ * A failure rejects; the caller keeps "no parameters" rather than guessing.
+ */
+export function detectMoonrakerMacroParams(
+  input: DetectInput,
+  macros: readonly string[],
+): Promise<MacroParamMap> {
+  return readOnlyOnce(
+    input,
+    {
+      method: 'printer.objects.query',
+      params: { objects: { configfile: ['config'] } },
+    },
+    (result) => readMacroParams(result, macros),
+  )
+}
+
+const PowerComponent = z.object({
+  components: z.array(z.string()).max(512),
+})
+
+/** True only when a `server.info` reply lists the power component. */
+const powerListed = (result: unknown) => {
+  const info = PowerComponent.safeParse(result)
+  return info.success && info.data.components.includes('power')
+}
+
+/**
+ * Read the Moonraker components, then the power device catalogue only when
+ * `server.info` lists the power component. Advertise each capability only
+ * when its probe succeeds.
+ */
+export async function detectMoonrakerComponents(
+  input: DetectInput,
+): Promise<readonly string[]> {
+  const info = await readOnlyOnce(
+    input,
+    { method: 'server.info' },
+    (result) => ({
+      markers: [...queueMarkers(result), ...timelapseMarkers(result)],
+      power: powerListed(result),
+    }),
+  ).catch(() => ({ markers: [], power: false }))
+  if (!info.power) return info.markers
+  const devices = await readPowerDevices((method) =>
+    readOnlyOnce(input, { method }, (result) => result),
+  ).catch(() => [])
+  return [...info.markers, ...(devices.length ? [POWER_MARKER] : [])]
 }

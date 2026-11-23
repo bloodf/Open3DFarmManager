@@ -25,6 +25,7 @@ export function summarizeSpoolman(snapshot: SpoolmanSnapshot) {
   )
   const spools = items.slice(0, MAX_INVENTORY_SPOOLS).map((item) =>
     SpoolSummary.parse({
+      spoolId: item.id,
       name: clip(item.filament.name, 32),
       material: clip(item.filament.material, 16),
       colorHex: item.filament.color_hex?.slice(0, 6).toLowerCase() ?? null,

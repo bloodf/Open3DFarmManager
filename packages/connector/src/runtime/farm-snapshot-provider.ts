@@ -1,5 +1,8 @@
+import { PRINTER_STRING_MAX_UNITS } from '@open3dfarmmanager/farm-protocol'
+import type { MacroParamMap } from '../moonraker/control-macros.ts'
 import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
 import { moonrakerLastJob } from '../moonraker/normalize.ts'
+import { moonrakerFilamentUsage } from './job-filament-usage.ts'
 import type {
   RawMoonrakerObservation,
   RawMoonrakerUnavailable,
@@ -46,18 +49,31 @@ export type RawPrinterObservation = Omit<
           creality: Readonly<Partial<Record<keyof PrinterState, number>>>
         }>
       | Readonly<{
+          prusaLink: Readonly<Partial<Record<keyof PrinterState, number>>>
+        }>
+      | Readonly<{
+          formlabs: Readonly<Partial<Record<keyof PrinterState, number>>>
+        }>
+      | Readonly<{
+          sdcp: Readonly<Partial<Record<keyof PrinterState, number>>>
+        }>
+      | Readonly<{
           anycubic: Readonly<Partial<Record<keyof PrinterState, number>>>
         }>
   }
 
 function fieldTimes(timing: RawPrinterObservation['fieldObservedAtMonoMs']) {
-  return 'anycubic' in timing
-    ? timing.anycubic
-    : 'bambu' in timing
-      ? timing.bambu
-      : 'creality' in timing
-        ? timing.creality
-        : timing
+  if ('prusaLink' in timing) return timing.prusaLink
+  if ('formlabs' in timing) return timing.formlabs
+  return 'sdcp' in timing
+    ? timing.sdcp
+    : 'anycubic' in timing
+      ? timing.anycubic
+      : 'bambu' in timing
+        ? timing.bambu
+        : 'creality' in timing
+          ? timing.creality
+          : timing
 }
 
 const FRAME_LIMIT = 'Application frame limit'
@@ -65,11 +81,14 @@ const FRAME_LIMIT = 'Application frame limit'
 /** Display evidence only. No enrollment, command permission, or wall-clock authority. */
 export function createFarmSnapshotSource(input: {
   assignmentRefs: readonly AssignmentRef[]
+  linkHealthFor?: (printerKey: string) => PrinterState['linkHealth']
   nowMono?: () => number
   macrosFor?: (assignmentId: string) => readonly string[] | undefined
+  macroParamsFor?: (assignmentId: string) => MacroParamMap | undefined
   controlsFor?: (
     assignmentId: string,
   ) => readonly ExtendedControlAction[] | undefined
+  localWebUiOriginFor?: (assignmentId: string) => string | undefined
 }) {
   if (input.assignmentRefs.length < 1 || input.assignmentRefs.length > 16)
     throw Error('Configured assignment bound')
@@ -113,15 +132,35 @@ export function createFarmSnapshotSource(input: {
   function snapshot(
     now: number,
     deadline: number,
-  ): CompleteFarmSnapshot | undefined {
+  ): { wakeAt: number; value: CompleteFarmSnapshot } | undefined {
     let captured = Infinity,
-      until = deadline
+      until = deadline,
+      wakeAt = deadline
     const printers = []
     for (const ref of refs) {
       const entry = entries.get(ref.printerKey)
       if (!entry) return
       const timing = fieldTimes(entry.fieldObservedAtMonoMs)
-      const independent = ['fans', 'light', 'materials']
+      const optional =
+        'anycubic' in entry.fieldObservedAtMonoMs
+          ? ([
+              'identity',
+              'statusReason',
+              'filename',
+              'currentLayer',
+              'totalLayer',
+              'estimatedRemainingSeconds',
+              'toolTemperatureCelsius',
+              'bedTemperatureCelsius',
+            ] as const)
+          : []
+      const independent: readonly string[] = [
+        'alarms',
+        'fans',
+        'light',
+        'materials',
+        ...optional,
+      ]
       const times = Object.entries(timing)
         .filter(([key]) => !independent.includes(key))
         .map(([, time]) => time)
@@ -136,25 +175,51 @@ export function createFarmSnapshotSource(input: {
         until = Math.min(until, temperature.observedAtMonoMs + 5000)
       }
       const macros = input.macrosFor?.(ref.assignmentId)
+      const macroParams = macros?.length
+        ? input.macroParamsFor?.(ref.assignmentId)
+        : undefined
       const controls = input.controlsFor?.(ref.assignmentId)
       const advertisedControls =
         controls !== undefined ? { controls: [...controls] } : {}
       const {
         controls: _untrustedControls,
         macros: _untrustedMacros,
+        macroParams: _untrustedMacroParams,
         firmware: _untrustedFirmware,
+        // Machine profiles travel by telemetry; the live frame is size-capped.
+        machine: _machine,
         lastJob: _observedLastJob,
+        linkHealth: _observedLinkHealth,
         ...observedPrinter
       } = entry.printer
       const printer: PrinterState = { ...observedPrinter }
+      const linkHealth = input.linkHealthFor?.(ref.printerKey)
+      if (linkHealth) printer.linkHealth = linkHealth
+      const localWebUiOrigin = input.localWebUiOriginFor?.(ref.assignmentId)
+      if (
+        localWebUiOrigin &&
+        localWebUiOrigin.length <= PRINTER_STRING_MAX_UNITS
+      )
+        printer.localWebUiOrigin = localWebUiOrigin
       const lastJob = lastJobs.get(ref.printerKey)
       if (lastJob) printer.lastJob = lastJob
-      for (const field of ['fans', 'light', 'materials'] as const) {
+      for (const field of [
+        'alarms',
+        'fans',
+        'light',
+        'materials',
+        ...optional,
+      ] as const) {
         if (field in timing) {
           const stamp = Object.entries(timing).find(
             ([key]) => key === field,
           )![1]
           if (stamp + 5000 <= now) delete printer[field]
+          else if (
+            field === 'alarms' ||
+            'anycubic' in entry.fieldObservedAtMonoMs
+          )
+            wakeAt = Math.min(wakeAt, stamp + 5000)
           else until = Math.min(until, stamp + 5000)
         }
       }
@@ -173,6 +238,9 @@ export function createFarmSnapshotSource(input: {
           ...printer,
           ...advertisedControls,
           ...(macros !== undefined ? { macros: [...macros] } : {}),
+          ...(macroParams && Object.keys(macroParams).length
+            ? { macroParams }
+            : {}),
           ...(tool?.kind === 'reading'
             ? { toolTemperatureCelsius: tool.celsius }
             : {}),
@@ -185,10 +253,22 @@ export function createFarmSnapshotSource(input: {
     if (until <= now) return
     // Include worst-case sequence width, JSON escaping and UTF8 framing in cap.
     // Fit as many spools as the frame cap allows; the total stays truthful.
-    let message = validatedStatusMessage(
-      { t: 'snapshot', seq: 1024, printers },
-      refs,
-    )
+    let message
+    try {
+      message = validatedStatusMessage(
+        { t: 'snapshot', seq: 1024, printers },
+        refs,
+      )
+    } catch (error) {
+      if (!(error instanceof Error && error.message === FRAME_LIMIT))
+        throw error
+      if (!printers.some((printer) => printer.linkHealth)) throw error
+      for (const printer of printers) delete printer.linkHealth
+      message = validatedStatusMessage(
+        { t: 'snapshot', seq: 1024, printers },
+        refs,
+      )
+    }
     if (spoolState) {
       const elapsed = now - spoolState.receivedMono
       for (let n = spoolState.value.spools.length; n >= 0; n--) {
@@ -210,14 +290,17 @@ export function createFarmSnapshotSource(input: {
         }
       }
     }
-    return Object.freeze({
-      assignmentRefs: refs,
-      complete: true,
-      printers: message.printers,
-      ...(message.inventory ? { inventory: message.inventory } : {}),
-      capturedAtMonoMs: captured,
-      validUntilMonoMs: until,
-    })
+    return {
+      wakeAt,
+      value: Object.freeze({
+        assignmentRefs: refs,
+        complete: true,
+        printers: message.printers,
+        ...(message.inventory ? { inventory: message.inventory } : {}),
+        capturedAtMonoMs: captured,
+        validUntilMonoMs: until,
+      }),
+    }
   }
   function invalidate(event: RawMoonrakerUnavailable) {
     if (closed || !refs.some((ref) => ref.printerKey === event.printerKey))
@@ -257,7 +340,12 @@ export function createFarmSnapshotSource(input: {
     }
     const timing = value.fieldObservedAtMonoMs
     const fieldStamped =
-      'anycubic' in timing || 'bambu' in timing || 'creality' in timing
+      'prusaLink' in timing ||
+      'formlabs' in timing ||
+      'sdcp' in timing ||
+      'anycubic' in timing ||
+      'bambu' in timing ||
+      'creality' in timing
     const times = fieldTimes(timing)
     const connectionOnly = 'connection' in times
     const previousTiming = previous?.fieldObservedAtMonoMs
@@ -270,6 +358,9 @@ export function createFarmSnapshotSource(input: {
           ...(
             [
               'identity',
+              'statusReason',
+              'preformStatus',
+              'alarms',
               'progress',
               'filename',
               'materials',
@@ -303,7 +394,10 @@ export function createFarmSnapshotSource(input: {
           previousTimes &&
           ('connection' in previousTimes !== connectionOnly ||
             (!!previousTiming &&
-              ('anycubic' in previousTiming ||
+              ('prusaLink' in previousTiming ||
+                'formlabs' in previousTiming ||
+                'sdcp' in previousTiming ||
+                'anycubic' in previousTiming ||
                 'bambu' in previousTiming ||
                 'creality' in previousTiming)) !== fieldStamped)
             ? Math.max(...Object.values(previousTimes))
@@ -374,11 +468,24 @@ export function createFarmSnapshotSource(input: {
       lastJobs.delete(value.printerKey)
       rearmed.add(value.printerKey)
     }
-    const finished =
+    const observedFinished =
       parsedPrinter.data.lastJob ??
       (!fieldStamped && !connectionOnly && value.status
         ? moonrakerLastJob(value.status, parsedPrinter.data.observedAt)
         : undefined)
+    const finished =
+      observedFinished?.filamentUsedMillimetres !== undefined &&
+      observedFinished.filamentUsage === undefined
+        ? {
+            ...observedFinished,
+            filamentUsage: [
+              moonrakerFilamentUsage(
+                observedFinished.filamentUsedMillimetres,
+                value.materialsObservation?.materials,
+              ),
+            ],
+          }
+        : observedFinished
     if (finished && !active) {
       const known = lastJobs.get(value.printerKey)
       // The same terminal state is re-observed every poll; keep its first endedAt.
@@ -397,12 +504,28 @@ export function createFarmSnapshotSource(input: {
     // Bambu and Creality fields carry their own stamps; Moonraker temperatures use separate evidence.
     const printer = PrinterState.parse({
       ...(fieldStamped
-        ? (({ lastJob: _lastJob, ...rest }) => rest)(parsedPrinter.data)
+        ? (({ lastJob: _lastJob, machine: _machine, ...rest }) => rest)(
+            parsedPrinter.data,
+          )
         : {}),
       printerKey: parsedPrinter.data.printerKey,
       state: parsedPrinter.data.state,
+      ...(parsedPrinter.data.preformStatus
+        ? { preformStatus: parsedPrinter.data.preformStatus }
+        : {}),
+      ...(parsedPrinter.data.statusReason
+        ? { statusReason: parsedPrinter.data.statusReason }
+        : {}),
       ...(parsedPrinter.data.fans ? { fans: parsedPrinter.data.fans } : {}),
       ...(parsedPrinter.data.light ? { light: parsedPrinter.data.light } : {}),
+      // The raw chamber reading is live evidence and stays current even when
+      // durable telemetry records are rate limited.
+      ...(parsedPrinter.data.chamberTemperatureCelsius === undefined
+        ? {}
+        : {
+            chamberTemperatureCelsius:
+              parsedPrinter.data.chamberTemperatureCelsius,
+          }),
       ...(parsedPrinter.data.progress === undefined
         ? {}
         : { progress: parsedPrinter.data.progress }),
@@ -512,8 +635,14 @@ export function createFarmSnapshotSource(input: {
           stop(true)
           return
         }
-        timer = setTimeout(update, Math.max(1, value.validUntilMonoMs - now))
-        runSynchronous(() => options.onComplete(value))
+        timer = setTimeout(
+          update,
+          Math.max(
+            1,
+            Math.min(value.wakeAt, value.value.validUntilMonoMs) - now,
+          ),
+        )
+        runSynchronous(() => options.onComplete(value.value))
       } catch {
         stop(true)
       }

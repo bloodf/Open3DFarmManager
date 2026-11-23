@@ -1,3 +1,4 @@
+import { credentialKeyring } from '../sealed-credential-key.ts'
 import { createHash } from 'node:crypto'
 import postgres from 'postgres'
 import { createError, useRuntimeConfig, type SessionConfig } from 'nuxt/server'
@@ -5,6 +6,16 @@ import type { SessionRepository } from './session-contract.ts'
 import { PostgresSessionRepository } from '../../storage/postgres-session.ts'
 import { PostgresCredentials } from '../../storage/postgres-credentials.ts'
 import { PostgresRegistration } from '../../storage/postgres-registration.ts'
+import { PostgresMembers } from '../../storage/postgres-members.ts'
+import { PostgresPasswordReset } from '../../storage/postgres-password-reset.ts'
+import { PostgresOidc } from '../../storage/postgres-oidc.ts'
+import { PostgresIdentities } from '../../storage/postgres-identities.ts'
+import { PostgresSignInRules } from '../../storage/sign-in-rules.ts'
+import {
+  PostgresSignInProviderStore,
+  type SignInProviderStore,
+} from '../../storage/sign-in-provider.ts'
+import type { MembersStore } from '../../services/members.ts'
 import {
   configuredAuthOrigin,
   SESSION_COOKIE_ATTRIBUTES,
@@ -15,11 +26,23 @@ export interface AuthRuntime {
   origin: string
   cookie: SessionConfig
   sessions: SessionRepository
-  credentials: Pick<PostgresCredentials, 'consumeLimit' | 'find' | 'issue'>
+  credentials: Pick<PostgresCredentials, 'consumeLimit' | 'find' | 'issue'> &
+    Partial<Pick<PostgresCredentials, 'findByAccount' | 'replacePassword'>>
   registration?: Pick<
     PostgresRegistration,
     'bootstrap' | 'createInvite' | 'register'
   >
+  /** Owner-only member, role and invite management. */
+  members?: MembersStore
+  /** Reset tokens; exposed only when the password-reset plugin is enabled. */
+  passwordReset?: PostgresPasswordReset
+  /** OIDC subject links. Present whenever the auth pool exists; the feature flag is separate. */
+  oidc?: PostgresOidc
+  /** Link and unlink flows for signed-in members. */
+  identities?: PostgresIdentities
+  signInRules?: PostgresSignInRules
+  /** Installation-level Google (and future) provider settings. */
+  signInProviders?: SignInProviderStore
   /** SHA-256 of the first-owner bootstrap secret; undefined disables bootstrap. */
   bootstrapTokenDigest?: Buffer | undefined
   idleTimeoutMs: number
@@ -72,6 +95,15 @@ export function authRuntime(): AuthRuntime {
       sessions: new PostgresSessionRepository(sql),
       credentials: new PostgresCredentials(sql),
       registration: new PostgresRegistration(sql),
+      members: new PostgresMembers(sql),
+      passwordReset: new PostgresPasswordReset(sql),
+      oidc: new PostgresOidc(sql),
+      identities: new PostgresIdentities(sql),
+      signInRules: new PostgresSignInRules(sql),
+      signInProviders: new PostgresSignInProviderStore(
+        sql,
+        credentialKeyring(config),
+      ),
       bootstrapTokenDigest:
         'bootstrapToken' in config &&
         typeof config.bootstrapToken === 'string' &&

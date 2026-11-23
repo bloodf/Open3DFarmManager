@@ -5,11 +5,13 @@ import { gzipSync } from 'node:zlib'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { chromium, type Page } from '@playwright/test'
+import { type Page } from '@playwright/test'
+import { launchBrowser } from '../helpers/browser.ts'
 import { registrationAdmission } from '../helpers/kobralink-rtc/admission.ts'
 import {
   captureBodies,
   uniqueMatch,
+  type CapturedBody,
 } from '../helpers/kobralink-rtc/cdp-body.ts'
 import { instrumentPage } from '../helpers/kobralink-rtc/observe.ts'
 
@@ -440,11 +442,10 @@ async function observeSessionBodies(
   // can differ by more than the capture's 0.05 ms matching tolerance, even
   // for the same request. This test covers body completeness: claim from
   // the capture session's own events, without changing matching tolerance.
-  const sessionFactory = t.mock.method(
-    context,
-    'newCDPSession',
-    async () => session,
-  )
+  // Only the capture's event session is shared; its durable body store
+  // stays a separate session.
+  const sessionFactory = t.mock.method(context, 'newCDPSession')
+  sessionFactory.mock.mockImplementationOnce(async () => session)
   const network = await captureBodies(page, origin)
   sessionFactory.mock.restore()
   const starts = new Map<
@@ -503,9 +504,14 @@ test('network capture reads only complete undrained bodies, never a prefix', asy
     res.write('x'.repeat(1_100_000))
     res.end(SECRET)
   }).listen(0, '127.0.0.1')
+  t.after(async () => {
+    server.closeAllConnections()
+    if (server.listening)
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+  })
   await new Promise((resolve) => server.once('listening', resolve))
   const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
-  const browser = await chromium.launch({ headless: true })
+  const browser = await launchBrowser()
   try {
     const page = await browser.newPage()
     await page.goto(origin + '/')
@@ -525,20 +531,36 @@ test('network capture reads only complete undrained bodies, never a prefix', asy
       void page
         .evaluate(async (u) => (await fetch(u)).status, origin + path)
         .catch(() => 0)
-    await new Promise((resolve) => setTimeout(resolve, 2500))
-    const read = async (path: string) => (await takes.get(path))!.read()
-    const done = await read('/api/complete')
+    // A loaded host announces responses and their bytes late: read each
+    // capture only once the network event it depends on was observed.
+    const read = async (
+      path: string,
+      observed: (capture: CapturedBody) => boolean,
+    ) => {
+      const deadline = Date.now() + 60_000
+      for (;;) {
+        const take = takes.get(path)
+        const capture = take && (await take).read()
+        if (capture && observed(capture)) return capture
+        assert.ok(Date.now() < deadline, `${path} was never observed`)
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+    }
+    await read('/api/complete', () => true)
+    await (await takes.get('/api/complete'))!.finished
+    const done = await read('/api/complete', () => true)
     assert.equal(done.body, '{"denied":"complete"}')
-    const encoded = await read('/api/encoded')
+    const arrived = (capture: CapturedBody) => capture.facts.receivedBytes > 0
+    const encoded = await read('/api/encoded', arrived)
     assert.equal(encoded.facts.encoded, true)
     assert.equal(encoded.facts.finished, false)
     assert.equal(encoded.body, null)
-    const short = await read('/api/short')
+    const short = await read('/api/short', arrived)
     assert.equal(short.body, null)
     assert.equal(short.facts.declaredLength, 100)
     assert.ok(short.facts.receivedBytes > 0)
     assert.ok(short.facts.receivedBytes < 100)
-    const overflow = await read('/api/overflow')
+    const overflow = await read('/api/overflow', (c) => c.facts.finished)
     assert.equal(overflow.body, null)
     assert.equal(overflow.facts.truncated, true)
     // The same request is never claimed a second time.
@@ -556,9 +578,14 @@ test('network capture keeps a finished body the page navigated away from', async
     res.setHeader('content-type', 'application/json')
     res.end('{"me":"finished-then-navigated"}')
   }).listen(0, '127.0.0.1')
+  t.after(async () => {
+    server.closeAllConnections()
+    if (server.listening)
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+  })
   await new Promise((resolve) => server.once('listening', resolve))
   const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
-  const browser = await chromium.launch({ headless: true })
+  const browser = await launchBrowser()
   try {
     const page = await browser.newPage()
     await page.goto(origin + '/page')
@@ -587,7 +614,7 @@ test('network capture keeps a finished body the page navigated away from', async
   }
 })
 
-test('a body read in the same tick as a reload is still captured whole', async () => {
+test('a body read in the same tick as a reload is still captured whole', async (t) => {
   // Run b83850cd: /api/auth/me finished, the page reloaded at once and
   // Chromium had dropped the body before `getResponseBody` reached it.
   const server = createServer((req, res) => {
@@ -595,10 +622,16 @@ test('a body read in the same tick as a reload is still captured whole', async (
     res.setHeader('content-type', 'application/json')
     res.end('{"me":"read-then-reloaded"}')
   }).listen(0, '127.0.0.1')
+  t.after(async () => {
+    server.closeAllConnections()
+    if (server.listening)
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+  })
   await new Promise((resolve) => server.once('listening', resolve))
   const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
   const evidence = await mkdtemp(join(tmpdir(), 'kobralink-observe-'))
-  const browser = await chromium.launch({ headless: true })
+  t.after(() => rm(evidence, { recursive: true, force: true }))
+  const browser = await launchBrowser()
   try {
     for (let round = 0; round < 5; round++) {
       const page = await browser.newPage()
@@ -661,12 +694,19 @@ test('single-UI result is derived only from manifest-matching run files', async 
     return buildSingleUiResult({ manifest, files })
   }
   const all = SINGLE_UI_REQUIRED.map((check) => line(check))
-  const passing = build([
-    ...all,
-    line('browser_secrets_absent/browser-inspection-complete', false),
-  ])
+  const passing = build(all)
   assert.equal(passing.status, 'pass')
   assert.deepEqual(verifySingleUi(passing), [])
+  const incomplete = build([
+    ...all.filter((entry) => !entry.includes('browser-inspection-complete')),
+    line('browser_secrets_absent/browser-inspection-complete', false),
+  ])
+  assert.equal(incomplete.status, 'fail')
+  assert.ok(
+    verifySingleUi(incomplete).some((problem) =>
+      problem.includes('browser-inspection-complete'),
+    ),
+  )
   // A failed repetition, a missing check or a failed world never passes.
   const failed = build([...all, line(SINGLE_UI_REQUIRED[7], false)])
   assert.equal(failed.status, 'fail')

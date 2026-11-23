@@ -7,6 +7,7 @@ import {
   discoveryTargetHash,
 } from '../../packages/farm-protocol/src/configuration-discovery.ts'
 import { BrowserChannelMessage } from '../../packages/connector/src/webrtc/configuration-channel.ts'
+import { probePrinterHost } from '../../packages/connector/src/discovery/probe.ts'
 import { scanConfigurationDiscovery } from '../../packages/connector/src/runtime/configuration-discovery.ts'
 import type { ConfigurationAuthority } from '../../packages/connector/src/runtime/configuration-authority.ts'
 
@@ -42,9 +43,12 @@ test('loopback probe returns only public fields and shares the discovery lease',
   })
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
-    server.listen(7125, '127.0.0.1', resolve)
+    server.listen(0, '127.0.0.1', resolve)
   })
   try {
+    const address = server.address()
+    assert.ok(address && typeof address !== 'string')
+    const port = address.port
     const authority = {} as ConfigurationAuthority
     const id = randomUUID()
     const pending = scanConfigurationDiscovery(
@@ -52,6 +56,11 @@ test('loopback probe returns only public fields and shares the discovery lease',
       id,
       undefined,
       '127.0.0.1',
+      undefined,
+      (host) =>
+        probePrinterHost(host, {
+          ports: { 7125: port },
+        }),
     )
     const busyId = randomUUID()
     assert.deepEqual(await scanConfigurationDiscovery(authority, busyId), {
@@ -63,7 +72,7 @@ test('loopback probe returns only public fields and shares the discovery lease',
     assert.deepEqual(result, {
       request_id: id,
       ok: true,
-      printers: [{ vendor: 'moonraker', host: '127.0.0.1', port: 7125 }],
+      printers: [{ vendor: 'moonraker', host: '127.0.0.1', port }],
     })
   } finally {
     await new Promise<void>((resolve, reject) =>

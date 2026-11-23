@@ -1,8 +1,6 @@
 import { defineConfig } from '@playwright/test'
+import { browserOptions } from './tests/helpers/browser.ts'
 import { e2ePort } from './tests/helpers/e2e-port.ts'
-
-if (process.env.FARM_VIEW_E2E !== 'true')
-  throw new Error('Set FARM_VIEW_E2E=true for the isolated farm view UI checks')
 
 // Override the loopback port with FARM_VIEW_PORT when 3101 is taken.
 const port = e2ePort('FARM_VIEW_PORT', 3101)
@@ -12,17 +10,20 @@ export default defineConfig({
   testMatch: [
     'farm-view.spec.ts',
     'farm-controls.spec.ts',
+    'kobra-x-controls.spec.ts',
     'files-page.spec.ts',
   ],
   workers: 1,
-  use: { baseURL: `http://127.0.0.1:${port}` },
+  use: {
+    baseURL: `http://127.0.0.1:${port}`,
+    ...browserOptions(),
+  },
   webServer: {
     command: 'node apps/farm/.output/server/index.mjs',
     url: `http://127.0.0.1:${port}/healthz`,
     env: {
       NITRO_HOST: '127.0.0.1',
       NITRO_PORT: port,
-      NUXT_PUBLIC_FLAGS_FARM_VIEW: 'true',
     },
     reuseExistingServer: false,
   },

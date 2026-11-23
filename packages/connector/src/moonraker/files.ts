@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { PrinterGcodePath } from '../../../farm-protocol/src/control-actions.ts'
 import {
   moonrakerSession,
   moonrakerAuthHeaders,
@@ -8,7 +9,11 @@ import {
 export type MoonrakerFilesClient = {
   /** Fetch a Connector-local gcodes path; never a browser URL. */
   downloadThumbnail?(path: string): Promise<Response>
-  request(method: string, params: object): Promise<unknown>
+  request(
+    method: string,
+    params: object,
+    signal?: AbortSignal,
+  ): Promise<unknown>
 }
 
 const File = z.object({
@@ -19,21 +24,66 @@ const File = z.object({
 
 export async function listMoonrakerFiles(
   client: MoonrakerFilesClient,
-  { limit }: { limit: number },
+  {
+    limit,
+    metadata = true,
+    directory,
+  }: { limit: number; metadata?: boolean; directory?: string | undefined },
 ): Promise<
   Array<{
     name: string
     size: number
     modified: number
+    directory?: true
     estimatedTime?: number
     thumbnail?: string
   }>
 > {
-  const result = await client.request('server.files.list', { root: 'gcodes' })
-  if (!Array.isArray(result)) throw new Error('Invalid Moonraker file list')
   const count = Number.isFinite(limit)
     ? Math.max(0, Math.min(200, Math.floor(limit)))
     : 0
+  const prefix = directory ? `${PrinterGcodePath.parse(directory)}/` : ''
+  const listing =
+    directory === undefined
+      ? undefined
+      : z
+          .object({
+            dirs: z.array(
+              File.omit({ path: true }).extend({ dirname: z.string() }),
+            ),
+            files: z.array(
+              File.omit({ path: true }).extend({ filename: z.string() }),
+            ),
+          })
+          .parse(
+            await client.request('server.files.get_directory', {
+              path: `gcodes${directory ? '/' + directory : ''}`,
+            }),
+          )
+  const folders =
+    listing?.dirs
+      .filter(
+        ({ dirname }) =>
+          !dirname.includes('/') &&
+          PrinterGcodePath.safeParse(prefix + dirname).success,
+      )
+      .slice(0, count)
+      .map(({ dirname, size, modified }) => ({
+        name: prefix + dirname,
+        size,
+        modified,
+        directory: true as const,
+      })) ?? []
+  const result = listing
+    ? listing.files
+        .filter(
+          ({ filename }) =>
+            !filename.includes('/') &&
+            PrinterGcodePath.safeParse(prefix + filename).success,
+        )
+        .map(({ filename, ...file }) => ({ ...file, path: prefix + filename }))
+    : await client.request('server.files.list', { root: 'gcodes' })
+  if (!Array.isArray(result)) throw new Error('Invalid Moonraker file list')
   const files = result
     .flatMap((entry: unknown) => {
       const parsed = File.safeParse(entry)
@@ -53,59 +103,68 @@ export async function listMoonrakerFiles(
         : []
     })
     .sort((a, b) => b.modified - a.modified)
-    .slice(0, count)
-  return Promise.all(
-    files.map(async ({ path, ...file }, index) => {
-      try {
-        const metadata = z
-          .object({
-            estimated_time: z.number().finite().nonnegative().optional(),
-            thumbnails: z
-              .array(
-                z.object({
-                  relative_path: z.string(),
-                  size: z.number().int().positive(),
-                }),
-              )
-              .optional(),
-          })
-          .safeParse(
-            await client.request('server.files.metadata', { filename: path }),
-          )
-        if (!metadata.success) return file
-        const result: typeof file & {
-          estimatedTime?: number
-          thumbnail?: string
-        } = { ...file }
-        if (metadata.data.estimated_time !== undefined)
-          result.estimatedTime = metadata.data.estimated_time
-        if (index < 50 && client.downloadThumbnail) {
-          const candidate = metadata.data.thumbnails
-            ?.filter(
-              (item) => item.size <= 65536 && safeRelative(item.relative_path),
+    .slice(0, Math.max(0, count - folders.length))
+  if (!metadata)
+    return [
+      ...folders,
+      ...files.map(({ name, size, modified }) => ({ name, size, modified })),
+    ]
+  return [
+    ...folders,
+    ...(await Promise.all(
+      files.map(async ({ path, ...file }, index) => {
+        try {
+          const metadata = z
+            .object({
+              estimated_time: z.number().finite().nonnegative().optional(),
+              thumbnails: z
+                .array(
+                  z.object({
+                    relative_path: z.string(),
+                    size: z.number().int().positive(),
+                  }),
+                )
+                .optional(),
+            })
+            .safeParse(
+              await client.request('server.files.metadata', { filename: path }),
             )
-            .sort((a, b) => b.size - a.size)[0]
-          if (candidate && safeRelative(path)) {
-            const directory = path.includes('/')
-              ? path.slice(0, path.lastIndexOf('/') + 1)
-              : ''
-            try {
-              const response = await client.downloadThumbnail(
-                `gcodes/${directory}${candidate.relative_path}`,
+          if (!metadata.success) return file
+          const result: typeof file & {
+            estimatedTime?: number
+            thumbnail?: string
+          } = { ...file }
+          if (metadata.data.estimated_time !== undefined)
+            result.estimatedTime = metadata.data.estimated_time
+          if (index < 50 && client.downloadThumbnail) {
+            const candidate = metadata.data.thumbnails
+              ?.filter(
+                (item) =>
+                  item.size <= 65536 && safeRelative(item.relative_path),
               )
-              const thumbnail = await readThumbnail(response)
-              if (thumbnail) result.thumbnail = thumbnail
-            } catch {
-              /* Optional preview must not hide the file. */
+              .sort((a, b) => b.size - a.size)[0]
+            if (candidate && safeRelative(path)) {
+              const directory = path.includes('/')
+                ? path.slice(0, path.lastIndexOf('/') + 1)
+                : ''
+              try {
+                const response = await client.downloadThumbnail(
+                  `gcodes/${directory}${candidate.relative_path}`,
+                )
+                const thumbnail = await readThumbnail(response)
+                if (thumbnail) result.thumbnail = thumbnail
+              } catch {
+                /* Optional preview must not hide the file. */
+              }
             }
           }
+          return result
+        } catch {
+          return file
         }
-        return result
-      } catch {
-        return file
-      }
-    }),
-  )
+      }),
+    )),
+  ]
 }
 
 function safeRelative(path: string): boolean {
@@ -151,7 +210,10 @@ export function createThumbnailDownload(input: {
   signal: AbortSignal
 }): (path: string) => Promise<Response> {
   return async (path) => {
-    if (!path.startsWith('gcodes/') || !safeRelative(path))
+    if (
+      !(path.startsWith('gcodes/') || path.startsWith('timelapse/')) ||
+      !safeRelative(path)
+    )
       throw Error('Invalid thumbnail path')
     const origin = new URL(input.origin)
     if (

@@ -56,6 +56,8 @@ Pending: independent source review; official fresh PostgreSQL runtime-role/read-
 
 ## Renewed Connector credentials
 
+### Signalling successor credentials (migration 0030)
+
 A Connector that renews (#117, #132) restarts with a successor credential. Signalling previously resolved only the root credential, so the successor was refused and the farm view lost its live connection after the first renewal. Telemetry already adopted successors (0022).
 
 - **Connector side:** `readConnectorCurrent` resolves the exact presented jti, root or successor, of the same root binding (`farm_id`, fingerprint and thumbprint come from the root row). The credential must be inside its own issued/expiry window; revocation is checked for the agent, the root jti and the presented jti.

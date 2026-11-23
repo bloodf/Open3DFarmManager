@@ -4,6 +4,11 @@ import {
   SIGNALLING_PENDING_BYTE_LIMIT,
   SIGNALLING_PREAUTH_LIMIT,
 } from './signalling-websocket-boundary.ts'
+import {
+  SIGNALLING_MESSAGE_BUCKET_CAPACITY,
+  SIGNALLING_MESSAGE_REFILL_PER_SECOND,
+  SIGNALLING_RATE_LIMIT_CLOSE_CODE,
+} from '../../../../packages/farm-protocol/src/signalling-socket.ts'
 
 export interface SignallingResourceClock {
   now(): number
@@ -13,6 +18,42 @@ export interface SignallingSocketPort {
   bufferedAmount(): number
   send(text: string): void
   terminate(): void
+  close?(code: number, reason: string): void
+}
+export interface SignallingMessageBucket {
+  tokens: number
+  updatedAt: number
+}
+export function consumeSignallingMessageToken(
+  bucket: SignallingMessageBucket,
+  now: number,
+): boolean {
+  if (!Number.isFinite(now) || now < bucket.updatedAt) return false
+  bucket.tokens = Math.min(
+    SIGNALLING_MESSAGE_BUCKET_CAPACITY,
+    bucket.tokens +
+      ((now - bucket.updatedAt) / 1000) * SIGNALLING_MESSAGE_REFILL_PER_SECOND,
+  )
+  bucket.updatedAt = now
+  if (bucket.tokens < 1) return false
+  bucket.tokens--
+  return true
+}
+export function acceptSignallingMessage(
+  bucket: SignallingMessageBucket,
+  now: number,
+  port: SignallingSocketPort,
+  onLimit?: () => void,
+): boolean {
+  if (consumeSignallingMessageToken(bucket, now)) return true
+  if (onLimit) onLimit()
+  else if (port.close)
+    port.close(
+      SIGNALLING_RATE_LIMIT_CLOSE_CODE,
+      'Signalling message rate limit exceeded',
+    )
+  else port.terminate()
+  return false
 }
 interface Slot {
   readonly port: SignallingSocketPort
@@ -168,7 +209,10 @@ export class SignallingWebSocketResources {
     }
   }
 
-  close(handle: SignallingResourceHandle): void {
+  close(
+    handle: SignallingResourceHandle,
+    closeCode?: { code: number; reason: string },
+  ): void {
     const slot = this.#slots.get(handle)
     if (!slot) return
     slot.closed = true
@@ -178,7 +222,9 @@ export class SignallingWebSocketResources {
     slot.cancelLifetime()
     for (const text of slot.frames) slot.bytes -= Buffer.byteLength(text)
     slot.frames = []
-    slot.port.terminate()
+    if (closeCode && slot.port.close)
+      slot.port.close(closeCode.code, closeCode.reason)
+    else slot.port.terminate()
   }
 
   dispose(): void {

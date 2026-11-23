@@ -19,6 +19,7 @@ export const KobraLinkRuntimeBinding = z.strictObject({
   printerKey: z.string().min(1).max(128),
   revision: z.number().int().positive(),
   credentialFile: z.string().min(1).max(4096),
+  clientCertFile: z.string().min(1).max(4096).optional(),
 })
 export type KobraLinkRuntimeBinding = z.infer<typeof KobraLinkRuntimeBinding>
 

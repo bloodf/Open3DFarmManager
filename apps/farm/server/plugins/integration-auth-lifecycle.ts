@@ -1,0 +1,45 @@
+import { useRuntimeConfig } from 'nuxt/server'
+import {
+  closeIntegrationAuthRuntime,
+  integrationAuthPool,
+} from '../utils/integration-auth-runtime.ts'
+import { PostgresAlertNotifications } from '../storage/alert-rules-notifications-postgres.ts'
+import { PostgresWebhooks } from '../storage/webhook-postgres.ts'
+import { deliverNextWebhook } from '../services/webhook-worker.ts'
+import { credentialKeyring } from '../utils/sealed-credential-key.ts'
+
+export default defineNitroPlugin((nitro) => {
+  let stopped = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let active = Promise.resolve()
+  function schedule(delay: number) {
+    timer = setTimeout(() => {
+      active = tick()
+    }, delay)
+    timer.unref()
+  }
+  async function tick() {
+    let worked = false
+    try {
+      const sql = integrationAuthPool()
+      const keyring = credentialKeyring(useRuntimeConfig().auth)
+      const results = await Promise.allSettled([
+        deliverNextWebhook(new PostgresWebhooks(sql, keyring)),
+        deliverNextWebhook(new PostgresAlertNotifications(sql, keyring)),
+      ])
+      worked = results.some(
+        (result) => result.status === 'fulfilled' && result.value,
+      )
+    } catch {
+      // The lease makes an interrupted delivery available again.
+    }
+    if (!stopped) schedule(worked ? 0 : 1000)
+  }
+  if (useRuntimeConfig().integrationAuth.enabled === true) schedule(1000)
+  nitro.hooks.hook('close', async () => {
+    stopped = true
+    clearTimeout(timer)
+    await active
+    await closeIntegrationAuthRuntime()
+  })
+})

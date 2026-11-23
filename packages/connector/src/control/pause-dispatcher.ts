@@ -1,16 +1,31 @@
 import {
+  temperatureJournalAction,
+  toolTemperatureRefusal,
+} from './control-driver.ts'
+import { ToolHeaters } from '../../../farm-protocol/src/state.ts'
+import { authorityConfirmation } from '../auth/offline-authority.ts'
+import {
   controlWithinLimits,
   type ControlLimits,
 } from '../runtime/control-limits.ts'
 import {
+  speedModeAllowed,
+  controlPrinterBusy,
   controlSourceState,
   controlRoleAllowed,
   controlTargetState,
   ControlResultCode,
+  ToolIndex,
+  ToolTemperatureArgs,
   type ControlAction,
   type ExtendedControlAction,
+  type SpeedMode,
 } from '../../../farm-protocol/src/control-actions.ts'
 import { createHash } from 'node:crypto'
+import {
+  macroParamsAllowed,
+  type MacroParamMap,
+} from '../moonraker/control-macros.ts'
 import { z } from 'zod'
 import {
   decodeCommandV2,
@@ -57,6 +72,7 @@ const Observation = z.strictObject({
   readyObservedMono: mono,
   printStateObservedMono: mono,
   receivedMono: mono,
+  toolHeaters: ToolHeaters.optional(),
   effect: z
     .discriminatedUnion('kind', [
       z.strictObject({
@@ -71,9 +87,20 @@ const Observation = z.strictObject({
         observedMono: mono,
       }),
       z.strictObject({
+        kind: z.literal('tool-temperature'),
+        tool: ToolIndex,
+        target_c: z.number().int().nonnegative(),
+        observedMono: mono,
+      }),
+      z.strictObject({
         kind: z.literal('fan'),
         fan: z.enum(['part', 'aux', 'chamber']),
         percent: z.number().finite().min(0).max(100),
+        observedMono: mono,
+      }),
+      z.strictObject({
+        kind: z.literal('excluded-object'),
+        name: z.string(),
         observedMono: mono,
       }),
       z.strictObject({
@@ -108,6 +135,19 @@ export function controlEffectMatches(
         (observation.printState === 'printing' ||
           observation.printState === 'paused')
       )
+    // The driver wrapper only returns an effect naming the file it uploaded.
+    case 'start_library_print':
+      return (
+        effect.kind === 'file' &&
+        (observation.printState === 'printing' ||
+          observation.printState === 'paused')
+      )
+    case 'set_tool_temperature':
+      return (
+        effect.kind === 'tool-temperature' &&
+        effect.tool === args.tool &&
+        effect.target_c === args.target_c
+      )
     case 'set_temperature':
       return (
         effect.kind === 'temperature' &&
@@ -121,6 +161,8 @@ export function controlEffectMatches(
         typeof args.percent === 'number' &&
         Math.abs(effect.percent - args.percent) <= 1
       )
+    case 'exclude_object':
+      return effect.kind === 'excluded-object' && effect.name === args.name
     case 'set_light':
       return effect.kind === 'light' && effect.on === args.on
     default:
@@ -145,11 +187,15 @@ export interface PauseDriver {
     input: {
       binding: PrinterBinding
       beforeSend(): boolean
+      transportId?: string
+      stillAuthorized?(): boolean
       signal: AbortSignal
     },
   ): Promise<PauseRpcResult>
   macros?(binding: PrinterBinding): readonly string[] | undefined
+  macroParams?(binding: PrinterBinding): MacroParamMap | undefined
   controls?(binding: PrinterBinding): readonly ExtendedControlAction[]
+  speedModes?(binding: PrinterBinding): readonly SpeedMode[] | undefined
   pauseOnce(input: {
     args?: Record<string, unknown>
     action?: ControlAction
@@ -211,6 +257,8 @@ export function createPauseDispatcher(config: {
   driver: PreparedPauseDriver
   controlLimits?: ControlLimits
   resultTimeoutMs?: number
+  /** True refuses every command with `storage` before the journal is touched. */
+  storageDegraded?: () => boolean
 }) {
   const verifier = createPauseCapabilityVerifier({
     ...config.authority,
@@ -225,11 +273,14 @@ export function createPauseDispatcher(config: {
     throw new Error('Invalid pause result deadline')
   const wallNow = config.clock.wallNow.bind(config.clock),
     monotonicNow = config.clock.monotonicNow.bind(config.clock)
+  const freshness = config.authority.freshness
   const journal = config.journal
   const driver = Object.freeze({
     execute: config.driver.execute?.bind(config.driver),
     controls: config.driver.controls?.bind(config.driver),
+    speedModes: config.driver.speedModes?.bind(config.driver),
     macros: config.driver.macros?.bind(config.driver),
+    macroParams: config.driver.macroParams?.bind(config.driver),
     prepare: config.driver.prepare.bind(config.driver),
     closeAttempt: config.driver.closeAttempt.bind(config.driver),
     pauseOnce: config.driver.pauseOnce.bind(config.driver),
@@ -237,6 +288,8 @@ export function createPauseDispatcher(config: {
   })
   let closed = false,
     clockBroken = false
+  let skewBroken = false
+  let confirmation: Sample | null | undefined
   let previous: Sample | undefined, baseline: Sample | undefined
   const observations = new WeakMap<PrinterBinding, ControlObservation>()
   const observationVersions = new WeakMap<PrinterBinding, object>()
@@ -261,15 +314,33 @@ export function createPauseDispatcher(config: {
         !Number.isFinite(now.mono) ||
         now.mono < 0 ||
         now.mono > Number.MAX_SAFE_INTEGER - 30_000 ||
-        (previous && (now.wall < previous.wall || now.mono < previous.mono)) ||
-        (baseline &&
-          Math.abs(now.wall - baseline.wall - (now.mono - baseline.mono)) >
-            1000)
+        (previous && (now.wall < previous.wall || now.mono < previous.mono))
       )
         throw new Error('Invalid local clock')
+      const confirmed = authorityConfirmation(freshness)
+      if (confirmed && confirmed !== confirmation) {
+        if (
+          !Number.isSafeInteger(confirmed.wall) ||
+          confirmed.wall < 0 ||
+          !Number.isFinite(confirmed.mono) ||
+          confirmed.mono < 0 ||
+          confirmed.wall > now.wall ||
+          confirmed.mono > now.mono ||
+          (previous &&
+            (confirmed.wall < previous.wall || confirmed.mono < previous.mono))
+        )
+          throw new Error('Invalid confirmation clock')
+        confirmation = confirmed
+        baseline = confirmed
+        skewBroken = false
+      }
       previous = now
       baseline ??= now
-      return now
+      if (
+        Math.abs(now.wall - baseline.wall - (now.mono - baseline.mono)) > 1000
+      )
+        skewBroken = true
+      return skewBroken ? null : now
     } catch {
       clockBroken = true
       return null
@@ -357,6 +428,15 @@ export function createPauseDispatcher(config: {
       if (closed) return Promise.resolve({ kind: 'rejected', reason: 'closed' })
       if (signal?.aborted)
         return Promise.resolve({ kind: 'rejected', reason: 'aborted' })
+      // Fail closed: a gate that throws counts as degraded storage.
+      let degraded = true
+      try {
+        degraded = config.storageDegraded?.() ?? false
+      } catch {
+        // Keeps the refusal.
+      }
+      if (degraded)
+        return Promise.resolve({ kind: 'rejected', reason: 'storage' })
       let command: SignedCommandV2
       try {
         command = decodeCommandV2(input.wire)
@@ -367,6 +447,10 @@ export function createPauseDispatcher(config: {
         !controlWithinLimits(command.action, command.args, config.controlLimits)
       )
         return Promise.resolve({ kind: 'rejected', reason: 'invalid-command' })
+      const toolArgs =
+        command.action === 'set_tool_temperature'
+          ? ToolTemperatureArgs.parse(command.args)
+          : undefined
       const candidateMapping = readPrinterBinding(printerBinding)
       if (!candidateMapping)
         return Promise.resolve({ kind: 'rejected', reason: 'scope' })
@@ -516,9 +600,22 @@ export function createPauseDispatcher(config: {
         )
           return 'scope'
         if (
+          command.action === 'set_speed' &&
+          !speedModeAllowed(
+            driver.speedModes?.(printerBinding),
+            command.args.level,
+          )
+        )
+          return 'unsupported-action'
+        if (
           command.action === 'run_macro' &&
           (typeof command.args.name !== 'string' ||
-            !driver.macros?.(printerBinding)?.includes(command.args.name))
+            !driver.macros?.(printerBinding)?.includes(command.args.name) ||
+            !macroParamsAllowed(
+              driver.macroParams?.(printerBinding),
+              command.args.name,
+              command.args.params,
+            ))
         )
           return 'unsupported-action'
         if (
@@ -558,6 +655,7 @@ export function createPauseDispatcher(config: {
           !terminal &&
           !contractBroken &&
           !clockBroken &&
+          !skewBroken &&
           observationVersions.get(printerBinding) === observationVersion &&
           !!capability &&
           readPrinterBinding(printerBinding) === mapping &&
@@ -568,12 +666,20 @@ export function createPauseDispatcher(config: {
           observation.connectionGeneration === connectionGeneration
         )
       }
+      /** Set by eligible() when the shared idle-only rule refused the command. */
+      let refusedBusy = false
       function eligible(): ControlObservation | null {
         if (!capability) return null
         const now = sample()
         if (!now) return null
         const current = readObservation(printerBinding, capability, now)
+        if (toolArgs) resultCode = toolTemperatureRefusal(current, toolArgs)
+        refusedBusy =
+          !!current &&
+          current.ready &&
+          controlPrinterBusy(command.action, current.printState)
         if (
+          (toolArgs && resultCode) ||
           !current ||
           !current.ready ||
           !controlSourceState(command.action, current.printState) ||
@@ -606,7 +712,10 @@ export function createPauseDispatcher(config: {
           capability,
           now,
         )
+        if (toolArgs)
+          resultCode = toolTemperatureRefusal(finalObservation, toolArgs)
         if (
+          (toolArgs && resultCode) ||
           !finalObservation ||
           !finalObservation.ready ||
           !controlSourceState(command.action, finalObservation.printState) ||
@@ -667,7 +776,12 @@ export function createPauseDispatcher(config: {
           try {
             claiming = true
             claim = claimCommand(journal, {
-              command,
+              command: toolArgs
+                ? {
+                    ...command,
+                    ...temperatureJournalAction(toolArgs.target_c),
+                  }
+                : command,
               printerKey: mapping.printer_key,
               wireSha256: createHash('sha256')
                 .update(encodeCommandV2(command))
@@ -719,7 +833,7 @@ export function createPauseDispatcher(config: {
             !current ||
             current.connectionGeneration !== connectionGeneration
           ) {
-            finalize('not-sent', 'state', 'guard-denied')
+            finalize('not-sent', refusedBusy ? 'busy' : 'state', 'guard-denied')
             return
           }
           observationVersion = observationVersions.get(printerBinding)
@@ -739,6 +853,10 @@ export function createPauseDispatcher(config: {
             ? driver.execute(command.action, command.args, {
                 binding: printerBinding,
                 beforeSend,
+                transportId: command.transport_id,
+                stillAuthorized: () =>
+                  !live() &&
+                  (command.action !== 'start_library_print' || !!eligible()),
                 signal: controller.signal,
               })
             : driver.pauseOnce({
@@ -777,6 +895,28 @@ export function createPauseDispatcher(config: {
           const now = sample()
           if (!now || now.mono >= resultDeadline) {
             interrupted('deadline')
+            return
+          }
+          // Local writes have no printer effect to observe.
+          if (
+            command.action === 'config_write' ||
+            command.action === 'confirm_collection'
+          ) {
+            if (command.action === 'config_write') {
+              finalize('applied', 'applied', 'applied', now.wall)
+              return
+            }
+            cleanup()
+            const completedAt = sample()
+            if (!completedAt || completedAt.mono >= resultDeadline) {
+              finalize(
+                'outcome-unknown',
+                'state-unconfirmed',
+                'state-unconfirmed',
+              )
+              return
+            }
+            finalize('applied', 'applied', 'applied', completedAt.wall)
             return
           }
           const paused = await driver.waitForPaused({
@@ -844,7 +984,19 @@ export function createPauseDispatcher(config: {
             (error as { resultCode?: unknown } | null)?.resultCode,
           )
           if (carried.success) resultCode = carried.data
-          if (!terminal)
+          // A typed refusal means the driver wrote nothing and says why.
+          const refusal = (error as { refusal?: unknown } | null)?.refusal
+          if (
+            !terminal &&
+            !permitted &&
+            !guardCalled &&
+            receipt &&
+            (refusal === 'state' ||
+              refusal === 'unsupported-action' ||
+              refusal === 'invalid-command')
+          )
+            finalize('not-sent', refusal, 'guard-denied')
+          else if (!terminal)
             finalize(
               permitted || contractBroken || (driverCalled && !guardCalled)
                 ? 'outcome-unknown'

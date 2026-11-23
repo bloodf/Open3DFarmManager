@@ -8,6 +8,7 @@ import {
   openCommandJournal,
   closeCommandJournal,
   readCommandAction,
+  readCommandOutcome,
 } from '../../packages/connector/src/control/command-journal.ts'
 import {
   createPauseDispatcher,
@@ -15,6 +16,7 @@ import {
 } from '../../packages/connector/src/control/pause-dispatcher.ts'
 import {
   createPrinterBindingRegistry,
+  provisionAnycubicPrinter,
   provisionBambuPrinter,
   provisionReadonlyPrinter,
   type PrinterBinding,
@@ -23,13 +25,17 @@ import {
   signCommandV2,
   encodeCommandV2,
 } from '../../packages/farm-protocol/src/command-v2.ts'
-import { ExtendedControlAction } from '../../packages/farm-protocol/src/control-actions.ts'
+import {
+  ExtendedControlAction,
+  controlRoleAllowed,
+} from '../../packages/farm-protocol/src/control-actions.ts'
 import { createPauseDriverRouter } from '../../packages/connector/src/runtime/pause-driver-router.ts'
 import type { ControlLimits } from '../../packages/connector/src/runtime/control-limits.ts'
 import { pauseFixture } from '../../packages/connector/test/moonraker-pause-fixture.ts'
+import { startAnycubicSimulator } from '../../packages/sim-tools/src/anycubic-simulator.ts'
 import { startBambuSimulator } from '../../packages/sim-tools/src/bambu-simulator.ts'
 
-// Loopback fixtures only: the Moonraker fixture and the Bambu simulator. The
+// Loopback fixtures only: the Moonraker fixture and the Bambu and Anycubic simulators. The
 // authority, capability and command are synthetic, exactly as in
 // control-actions.test.ts; nothing here reaches a physical printer.
 type Action = ExtendedControlAction
@@ -44,6 +50,8 @@ const MOONRAKER_ALL = [
   'home',
   'set_light',
   'set_speed',
+  'extrude',
+  'set_pin',
 ]
 const BAMBU_ALL = [
   ...LIFECYCLE,
@@ -180,9 +188,10 @@ async function authorityFixture(action: Action, args: Args) {
     admission_nonce: admissionNonce,
     actions: [...ExtendedControlAction.options],
   }
-  // An operator is never granted run_macro: only owners and admins are.
-  capability.actions = capability.actions.filter(
-    (granted) => granted !== 'run_macro',
+  // An operator is never granted run_macro or service: owners (and admins
+  // for macros) only. Keep the operator role and grant what it is allowed.
+  capability.actions = capability.actions.filter((granted) =>
+    controlRoleAllowed(capability.role, granted),
   )
   const challenge = {
     v: 1 as const,
@@ -216,6 +225,7 @@ async function authorityFixture(action: Action, args: Args) {
 
 type Backend =
   | { kind: 'moonraker'; mode?: Parameters<typeof pauseFixture>[0] }
+  | { kind: 'anycubic' }
   | {
       kind: 'bambu'
       model?: string
@@ -256,6 +266,7 @@ async function world(
   }
   let printerBinding: PrinterBinding
   let moonraker: Awaited<ReturnType<typeof pauseFixture>> | undefined
+  let anycubic: Awaited<ReturnType<typeof startAnycubicSimulator>> | undefined
   let bambu: Awaited<ReturnType<typeof startBambuSimulator>> | undefined
   if (backend.kind === 'moonraker') {
     const remote = await pauseFixture({
@@ -267,6 +278,27 @@ async function world(
     printerBinding = createPrinterBindingRegistry({
       allowedOrigins: [remote.origin],
     }).provision({ ...scope, moonraker_origin: remote.origin })
+  } else if (backend.kind === 'anycubic') {
+    const remote = await startAnycubicSimulator({
+      serial: '20024/SYNTHETIC',
+      initialState: 'IDLE',
+    })
+    anycubic = remote
+    cleanup.push(() => remote.close())
+    const passwordFile = join(directory, 'password')
+    const caFile = join(directory, 'ca')
+    writeFileSync(passwordFile, JSON.stringify(SECRET), { mode: 0o600 })
+    writeFileSync(caFile, remote.syntheticTrust)
+    printerBinding = provisionAnycubicPrinter(scope, {
+      printerKey: scope.printer_key,
+      modelId: '20024',
+      deviceId: 'SYNTHETIC',
+      host: remote.host,
+      port: remote.port,
+      username: 'synthetic',
+      passwordFile,
+      caFile,
+    })
   } else {
     const remote = await startBambuSimulator({
       initialState:
@@ -384,6 +416,7 @@ async function world(
     journal,
     moonraker,
     bambu,
+    anycubic,
     driver,
     dispatcher: active,
     printerBinding,
@@ -394,6 +427,25 @@ async function world(
         capability: accepted.handle,
         printerBinding,
       }),
+    async dispatchFollowup(followup: { action: Action; args: Args }) {
+      const now = Date.now()
+      const next = await signCommandV2(
+        {
+          ...f.command,
+          ...followup,
+          cmd_id: randomUUID(),
+          nonce: randomBytes(16).toString('base64url'),
+          issued_at: now,
+          expires_at: now + 5000,
+        },
+        f.pair.privateKey,
+      )
+      return active.dispatch({
+        wire: encodeCommandV2(next),
+        capability: accepted.handle,
+        printerBinding,
+      })
+    },
     /**
      * The dispatcher's own driver sequence on the router: prepare, one guarded
      * execute, then the post-send observation. Used for the extended actions,
@@ -437,6 +489,40 @@ async function world(
     },
   }
 }
+
+test('Anycubic refuses a package start before sending and leaves later commands available', async (t) => {
+  const file = 'part.gcode.3mf'
+  const f = await world(t, { kind: 'anycubic' }, 'start_print', { file })
+  assert.ok(f.anycubic)
+  const refusal = await f.dispatch()
+  assert.deepEqual(f.anycubic.calls.all, [])
+  const next = await f.dispatchFollowup({
+    action: 'set_light',
+    args: { on: true },
+  })
+  assert.deepEqual(
+    {
+      refusal,
+      journal: readCommandOutcome(f.journal, f.signed.cmd_id)?.status,
+      next: next.kind,
+      settings: f.anycubic.settings,
+    },
+    {
+      refusal: {
+        kind: 'not-sent',
+        reason: 'invalid-command',
+        cmdId: f.signed.cmd_id,
+      },
+      journal: 'not-sent',
+      next: 'applied',
+      settings: { light: { type: 3, status: 1 } },
+    },
+  )
+  assert.deepEqual(
+    f.anycubic.calls.all.map(({ topic }) => topic),
+    ['anycubic/anycubicCloud/v1/printer/public/20024/SYNTHETIC/light/request'],
+  )
+})
 
 async function assertExecuted(f: Awaited<ReturnType<typeof world>>) {
   const { acknowledgement, observation, after } = await f.execute()
@@ -527,10 +613,10 @@ for (const c of moonrakerCases) {
         c.action === 'emergency_stop' ? 'error' : 'printing',
       )
     }
-    // One detection read at provisioning, then exactly one command.
+    // Two detection reads at provisioning (objects, components), then exactly one command.
     assert.deepEqual(
       commands(f).map((request) => request.method),
-      ['printer.objects.list', c.method],
+      ['printer.objects.list', 'server.info', c.method],
     )
     assert.deepEqual(f.moonraker?.gcodeScripts, c.script ? [c.script] : [])
   })
@@ -551,6 +637,10 @@ test('Moonraker advertises exactly the actions its detected objects support', as
     'set_fan',
     'home',
     'set_speed',
+    'jog',
+    'motors_off',
+    'z_babystep',
+    'set_factor',
   ])
   assert.deepEqual(await bare.dispatch(), {
     kind: 'rejected',
@@ -558,7 +648,7 @@ test('Moonraker advertises exactly the actions its detected objects support', as
   })
   assert.deepEqual(
     commands(bare).map((request) => request.method),
-    ['printer.objects.list'],
+    ['printer.objects.list', 'server.info'],
   )
 })
 
@@ -593,7 +683,7 @@ for (const action of ['start_print', 'firmware_restart'] as const) {
     })
     assert.deepEqual(
       commands(f).map((request) => request.method),
-      ['printer.objects.list'],
+      ['printer.objects.list', 'server.info'],
     )
   })
 }
@@ -713,7 +803,11 @@ const bambuCases: Array<{
     action: 'start_print',
     args: { file: 'cube.3mf' },
     command: 'project_file',
-    state: { file: 'file:///sdcard/cube.3mf' },
+    state: {
+      file: 'file:///sdcard/cube.3mf',
+      subtask_name: 'cube.3mf',
+      gcode_file: 'cube.3mf',
+    },
     initialState: 'IDLE',
   },
 ]
@@ -734,6 +828,9 @@ for (const c of bambuCases) {
         c.args,
       )
       assert.deepEqual(f.driver.controls(f.printerBinding), BAMBU_ALL)
+      // The simulator always reports baseline telemetry (temperatures, AMS);
+      // the command must change exactly the expected fields on top of it.
+      const baseline = f.bambu?.extendedState
       if (lifecycle) {
         assert.deepEqual(await f.dispatch(), {
           kind: 'applied',
@@ -743,10 +840,18 @@ for (const c of bambuCases) {
         assert.equal(readCommandAction(f.journal, f.signed.cmd_id), c.action)
         assert.equal((await f.dispatch()).kind, 'rejected')
       } else await assertExecuted(f)
+      // The first report after the send settles the dispatch, and baseline
+      // reports can arrive while the QoS 0 publish is still in flight inside
+      // the broker; wait (bounded) until the simulator has recorded it.
+      for (let i = 0; i < 100 && !f.bambu?.requests.length; i++)
+        await new Promise((resolve) => setTimeout(resolve, 20))
       assert.deepEqual(f.bambu?.requests, [
         { command: c.command, sequence_id: '1' },
       ])
-      assert.deepEqual(f.bambu?.extendedState, c.state ?? {})
+      assert.deepEqual(f.bambu?.extendedState, {
+        ...baseline,
+        ...c.state,
+      })
       if (c.action === 'start_print')
         assert.equal(f.bambu?.gcodeState, 'RUNNING')
     },

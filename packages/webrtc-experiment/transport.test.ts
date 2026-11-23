@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
 import { createServer } from 'node:http'
 import { build } from 'esbuild'
-import { chromium, type Browser } from '@playwright/test'
+import { launchBrowser, type Browser } from '../../tests/helpers/browser.ts'
 import { once } from 'node:events'
 import type { Scenario } from './fixture'
 
@@ -74,7 +74,7 @@ test('native encrypted DataChannel verifies synthetic identity and fails closed'
   }
   let browser: Browser | undefined
   try {
-    browser = await chromium.launch({ headless: true })
+    browser = await launchBrowser()
     console.info(JSON.stringify({ chromium: browser.version() }))
     const page = await browser.newPage()
     await page.goto(`http://127.0.0.1:${port}`)

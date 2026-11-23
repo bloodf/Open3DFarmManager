@@ -10,8 +10,7 @@ import type { PauseIssuer } from '../auth/pause-capability.ts'
 
 /**
  * Trusted issuer keyring bound. A larger keyring is refused, never truncated.
- * The bound stays far below the verifier bound because a production Connector
- * trusts a small, explicitly provisioned set of issuers.
+ * The verifier and the persisted set use the same bound.
  */
 export const MAX_PAUSE_ISSUER_KEYRING = 8
 
@@ -38,10 +37,32 @@ export const PauseRuntimeConfigSchema = z.strictObject({
   issuers: z.array(IssuerEntry).min(1).max(MAX_PAUSE_ISSUER_KEYRING),
   /**
    * Explicit opt-in for the pause control path. Absent keeps pause disabled:
-   * no journal, socket or driver is created. The single named assignment is
-   * the only one this Connector will accept a pause for.
+   * no journal, socket or driver is created. Only explicitly named, locally provisioned assignments accept commands.
    */
-  control: z.strictObject({ assignmentId: BrowserDeviceUuid }).optional(),
+  control: z
+    .strictObject({
+      assignmentIds: z
+        .array(BrowserDeviceUuid)
+        .min(1)
+        .max(16)
+        .refine(
+          (ids) => new Set(ids).size === ids.length,
+          'Duplicate control assignment',
+        ),
+      /**
+       * Per-printer admin switch of the G-code console. Absent or not listed
+       * means off.
+       */
+      consoleAssignmentIds: z
+        .array(BrowserDeviceUuid)
+        .max(16)
+        .refine(
+          (ids) => new Set(ids).size === ids.length,
+          'Duplicate console assignment',
+        )
+        .optional(),
+    })
+    .optional(),
   signalling: z
     .strictObject({
       endpoint: z.string().max(2048),
@@ -69,7 +90,12 @@ export type PauseIssuerEntry = Readonly<{
 export type PauseRuntimeConfig = Readonly<{
   version: 1
   issuers: readonly PauseIssuerEntry[]
-  control?: Readonly<{ assignmentId: string }> | undefined
+  control?:
+    | Readonly<{
+        assignmentIds: readonly string[]
+        consoleAssignmentIds?: readonly string[] | undefined
+      }>
+    | undefined
   signalling: Readonly<z.infer<typeof PauseRuntimeConfigSchema>['signalling']>
 }>
 
@@ -144,8 +170,21 @@ export async function loadPauseIssuerKeys(
   if (!config) return Object.freeze([])
   // Parse and copy the whole configuration before any await can change it.
   const snapshot = parsePauseRuntimeConfig(config)
+  return importPauseIssuerEntries(snapshot.issuers)
+}
+
+/** Shared bounded importer for configured and signed persisted issuer entries. */
+export async function importPauseIssuerEntries(
+  entries: readonly PauseIssuerEntry[],
+): Promise<readonly PauseIssuer[]> {
+  const parsed = z
+    .array(IssuerEntry)
+    .min(1)
+    .max(MAX_PAUSE_ISSUER_KEYRING)
+    .parse(entries)
+  validateIssuerEntries(parsed)
   const issuers: PauseIssuer[] = []
-  for (const entry of snapshot.issuers) {
+  for (const entry of parsed) {
     const bytes = new Uint8Array(decodeEd25519Spki(entry.publicKeySpki))
     const publicKey = await crypto.subtle.importKey(
       'spki',

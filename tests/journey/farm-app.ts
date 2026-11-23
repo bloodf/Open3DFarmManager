@@ -11,7 +11,6 @@ import {
   mkdir,
   mkdtemp,
   readFile,
-  realpath,
   rm,
   symlink,
   writeFile,
@@ -21,6 +20,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { signallingHttpsProxy } from '../helpers/signalling-https-proxy.ts'
 import { CAPABILITIES, type JourneyDatabase } from './database.ts'
+import { resolveNuxtInstall } from './nuxt-install.ts'
 
 const checkout = new URL('../..', import.meta.url).pathname.replace(/\/$/, '')
 export const AUDIENCE = 'open3dfarmmanager:signalling'
@@ -83,7 +83,9 @@ async function run(
   try {
     const [code] = (await once(child, 'close')) as [number | null]
     if (code !== 0)
-      throw new Error(`${command} ${args[0] ?? ''} failed (${code})\n${tail}`)
+      throw new Error(
+        `${[command, ...args].join(' ')} failed (${code})\n${tail}`,
+      )
   } finally {
     clearTimeout(timer)
   }
@@ -107,7 +109,7 @@ async function stopChild(child: ChildProcess | undefined) {
  */
 export async function startFarmApp(
   database: JourneyDatabase,
-  options: { farmView?: boolean; history?: boolean } = {},
+  options: { history?: boolean } = {},
 ): Promise<FarmApp> {
   const directory = await mkdtemp(join(tmpdir(), 'o3dfm-journey-'))
   await chmod(directory, 0o700)
@@ -125,14 +127,16 @@ export async function startFarmApp(
     const layer = join(directory, 'layer')
     const built = join(layer, 'output')
     await mkdir(layer, { mode: 0o700 })
-    await symlink(
-      await realpath(join(farm, 'node_modules')),
-      join(layer, 'node_modules'),
-      'dir',
-    )
+    // npm workspaces may hoist nuxt to the root; use whichever install the
+    // farm workspace resolves instead of assuming apps/farm/node_modules.
+    const nuxt = await resolveNuxtInstall(farm)
+    await symlink(nuxt.nodeModules, join(layer, 'node_modules'), 'dir')
+    // The account plugin makes the client entry async. On loopback it can
+    // run before Nuxt's inline runtime config, so keep the default deferred
+    // entry in the journey build.
     await writeFile(
       join(layer, 'nuxt.config.ts'),
-      `export default defineNuxtConfig({ extends: ${JSON.stringify(farm)}, srcDir: ${JSON.stringify(join(farm, 'app'))}, runtimeConfig: { connectorSignalling: { enabled: true } }, nitro: { preset: 'node-server', output: { dir: ${JSON.stringify(built)} } } })\n`,
+      `export default defineNuxtConfig({ extends: ${JSON.stringify(farm)}, srcDir: ${JSON.stringify(join(farm, 'app'))}, runtimeConfig: { connectorSignalling: { enabled: true } }, nitro: { preset: 'node-server', ignore: ['plugins/pre-hydration.ts'], experimental: { websocket: true }, output: { dir: ${JSON.stringify(built)} } } })\n`,
       { mode: 0o600 },
     )
     const buildEnv = {
@@ -141,14 +145,14 @@ export async function startFarmApp(
       NODE_ENV: 'production',
     }
     await run(
-      join(farm, 'node_modules/.bin/nuxt'),
-      ['prepare'],
+      process.execPath,
+      [nuxt.cli, 'prepare'],
       { cwd: farm, env: buildEnv },
       300_000,
     )
     await run(
-      join(layer, 'node_modules/.bin/nuxt'),
-      ['build'],
+      process.execPath,
+      [nuxt.cli, 'build'],
       { cwd: layer, env: buildEnv },
       900_000,
     )
@@ -233,9 +237,49 @@ export async function startFarmApp(
       }),
       { mode: 0o600, flag: 'wx' },
     )
+    const apiEnvelopeKeys =
+      process.env.OPENFARM_JOURNEY_INTEGRATION_API === '1'
+        ? generateKeyPairSync('ed25519')
+        : undefined
+    if (apiEnvelopeKeys) {
+      process.env.SIGNALLING_HTTPS_API_ENVELOPE_PUBLIC_KEY =
+        apiEnvelopeKeys.publicKey
+          .export({ format: 'der', type: 'spki' })
+          .toString('base64url')
+      process.env.SIGNALLING_HTTPS_API_ENVELOPE_KID = 'integration-journey'
+      process.env.OPENFARM_JOURNEY_CERT = cert
+      process.env.OPENFARM_JOURNEY_CERT_KEY = tlsKey
+    } else {
+      delete process.env.SIGNALLING_HTTPS_API_ENVELOPE_PUBLIC_KEY
+      delete process.env.SIGNALLING_HTTPS_API_ENVELOPE_KID
+      delete process.env.OPENFARM_JOURNEY_CERT
+      delete process.env.OPENFARM_JOURNEY_CERT_KEY
+    }
+    const integrationNuxtEnv: NodeJS.ProcessEnv = apiEnvelopeKeys
+      ? {
+          NUXT_INTEGRATION_AUTH_ENABLED: 'true',
+          NUXT_INTEGRATION_AUTH_DATABASE_URL: database.url(
+            'farm_integration_apps',
+          ),
+          NUXT_INTEGRATION_AUTH_SIGNING_KEY:
+            randomBytes(32).toString('base64url'),
+          NUXT_INTEGRATION_JOBS_ENABLED: 'true',
+          NUXT_INTEGRATION_JOBS_DATABASE_URL: database.url(
+            'farm_integration_jobs',
+          ),
+          NUXT_INTEGRATION_JOBS_ENVELOPE_SIGNING_KEY: apiEnvelopeKeys.privateKey
+            .export({ format: 'der', type: 'pkcs8' })
+            .toString('base64url'),
+          NUXT_INTEGRATION_JOBS_ENVELOPE_KID: 'integration-journey',
+        }
+      : {}
     // No renewal is configured: with telemetry flowing for the whole journey
     // the credential must outlive it.
-    const tokenTtlSeconds = liveHistory ? '3600' : '300'
+    // Control journeys too: at expiry the Connector stops opening control
+    // inboxes for good (diagnostic `credential-expired`), and each control
+    // session waits out its reconnect backoff (up to 30 s), so a signed-control
+    // journey on a slow host runs past a short lifetime.
+    const tokenTtlSeconds = '3600'
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       OPEN3DFARM_CONFIGURATION: JSON.stringify({
@@ -264,10 +308,9 @@ export async function startFarmApp(
       NUXT_AUTH_ENABLED: 'true',
       NUXT_AUTH_ORIGIN: origin,
       NUXT_AUTH_SESSION_SECRET: randomBytes(32).toString('hex'),
-      NUXT_AUTH_DATABASE_URL: url(0),
+      NUXT_AUTH_DATABASE_URL: database.url('farm_account_registration'),
       NUXT_PRINTER_ASSIGNMENTS_ENABLED: 'true',
       NUXT_PRINTER_ASSIGNMENTS_DATABASE_URL: url(8),
-      NUXT_PUBLIC_FLAGS_FARM_VIEW: String(options.farmView ?? true),
       NUXT_CONNECTOR_INVENTORY_ENABLED: 'true',
       NUXT_CONNECTOR_INVENTORY_DATABASE_URL: url(1),
       NUXT_BROWSER_DEVICES_ENABLED: 'true',
@@ -321,6 +364,22 @@ export async function startFarmApp(
       NUXT_CONNECTOR_TELEMETRY_BODY_TIMEOUT_MS: '5000',
       NUXT_JOB_HISTORY_ENABLED: 'true',
       NUXT_JOB_HISTORY_DATABASE_URL: database.url('farm_job_history_reader'),
+      NUXT_LIBRARY_ENABLED: 'true',
+      NUXT_LIBRARY_DATABASE_URL: database.url('farm_library'),
+      NUXT_SPOOL_LIBRARY_ENABLED: 'true',
+      NUXT_SPOOL_LIBRARY_DATABASE_URL: database.url('farm_spool_library'),
+      NUXT_SPOOL_LIBRARY_IMPORT_ENABLED: 'true',
+      NUXT_SPOOL_LIBRARY_IMPORT_DATABASE_URL: database.url('farm_spool_import'),
+      NUXT_SPOOL_FEATURES_ENABLED: 'true',
+      NUXT_SPOOL_FEATURES_DATABASE_URL: database.url('farm_spool_features'),
+      NUXT_SPOOL_USAGE_ENABLED: 'true',
+      NUXT_SPOOL_USAGE_DATABASE_URL: database.url('farm_spool_usage'),
+      NUXT_LIBRARY_DIRECTORY: join(directory, 'library'),
+      NUXT_PRINTER_STATES_ENABLED: 'true',
+      NUXT_PRINTER_STATES_DATABASE_URL: database.url(
+        'farm_printer_state_reader',
+      ),
+      ...integrationNuxtEnv,
     }
     delete env.NODE_TLS_REJECT_UNAUTHORIZED
     app = spawn(process.execPath, [join(built, 'server/index.mjs')], {
@@ -346,6 +405,23 @@ export async function startFarmApp(
       }
       if (Date.now() >= deadline)
         throw new Error('Farm app startup timed out\n' + output)
+      await pause(100)
+    }
+    // The sign-in page reads provider status on every visit and hides a
+    // failure: check it answers from the database with Google off and no
+    // identity provider contacted.
+    // 503 means the database gate is still preparing; anything else is final.
+    for (;;) {
+      const google = await fetch(
+        `http://127.0.0.1:${appPort}/api/auth/google`,
+        { signal: AbortSignal.timeout(5000) },
+      )
+      const body = await google.text()
+      if (google.status === 200 && JSON.parse(body)?.enabled === false) break
+      if (google.status !== 503 || Date.now() >= deadline)
+        throw new Error(
+          `Sign-in provider status failed: ${google.status} ${body.slice(0, 200)}\n${output}`,
+        )
       await pause(100)
     }
     const owned = app

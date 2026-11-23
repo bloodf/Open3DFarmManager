@@ -1,7 +1,6 @@
-FROM node:24.22.3-alpine AS build
-RUN npm install -g pnpm@12.18.0
+FROM node:24.22.3-alpine@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5 AS build
 WORKDIR /app
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY package.json package-lock.json .npmrc ./
 COPY apps/farm/package.json apps/farm/package.json
 COPY packages/connector/package.json packages/connector/package.json
 COPY packages/farm-protocol/package.json packages/farm-protocol/package.json
@@ -9,11 +8,11 @@ COPY packages/shared/package.json packages/shared/package.json
 COPY packages/sim-tools/package.json packages/sim-tools/package.json
 COPY packages/sim-cams/package.json packages/sim-cams/package.json
 COPY packages/webrtc-experiment/package.json packages/webrtc-experiment/package.json
-RUN pnpm install --frozen-lockfile --ignore-scripts
+RUN npm ci --ignore-scripts
 COPY . .
-RUN pnpm --dir apps/farm build
+RUN npm run build -w @open3dfarmmanager/farm
 
-FROM node:24.22.3-alpine AS runtime
+FROM node:24.22.3-alpine@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5 AS runtime
 WORKDIR /app
 ENV NODE_ENV=production NITRO_HOST=0.0.0.0 NITRO_PORT=3000 NUXT_DATABASE_MIGRATIONS_DIR=/app/migrations
 COPY --from=build --chown=10001:10001 /app/apps/farm/.output ./

@@ -9,33 +9,30 @@ import {
 } from '../../../farm-protocol/src/configuration-discovery.ts'
 import type { ConfigurationAuthority } from './configuration-authority.ts'
 
-export type DiscoveryScanner = typeof discoverPrinters
-const active = new WeakSet<ConfigurationAuthority>()
+import { startDiscoveryScan } from './background-discovery.ts'
 
-/** Shared authority belongs to one Connector, across all its RTC sessions.
- * Signed sessions always supply the runtime network policy.
- */
+export type DiscoveryScanner = typeof discoverPrinters
+
+/** Signed sessions always supply the runtime network policy. */
 export async function scanConfigurationDiscovery(
-  authority: ConfigurationAuthority,
+  _authority: ConfigurationAuthority,
   requestId: string,
   scan: DiscoveryScanner = discoverPrinters,
   host?: string,
   policy?: PrinterNetworkPolicy,
+  probe: typeof probePrinterHost = probePrinterHost,
 ): Promise<DiscoveryResult> {
-  if (active.has(authority))
-    return { request_id: requestId, ok: false, reason: 'busy' }
   if (host !== undefined && policy !== undefined && !policy.allows(host))
     return { request_id: requestId, ok: false, reason: 'failed' }
-  active.add(authority)
   let timer: ReturnType<typeof setTimeout> | undefined
   // Leave room for socket setup and cleanup inside the five-second deadline.
-  const work = Promise.resolve().then(async () =>
+  const work = startDiscoveryScan(async () =>
     host === undefined
       ? scan({ timeout: DISCOVERY_TIMEOUT_MS - 500 })
-      : probePrinterHost(host).then((printer) => (printer ? [printer] : [])),
+      : probe(host).then((printer) => (printer ? [printer] : [])),
   )
   // Keep the lease until the scanner settles, even if it ignores its timeout.
-  void work.finally(() => active.delete(authority)).catch(() => {})
+  if (!work) return { request_id: requestId, ok: false, reason: 'busy' }
   try {
     const results = await Promise.race([
       work,

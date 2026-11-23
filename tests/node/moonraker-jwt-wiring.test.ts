@@ -15,7 +15,7 @@ import {
 } from '../../packages/connector/src/moonraker/client.ts'
 import { createMoonrakerSocket } from '../../packages/connector/src/moonraker/socket.ts'
 import { createRequire } from 'node:module'
-import type * as Ws from '../../packages/connector/node_modules/@types/ws/index.d.ts'
+import type * as Ws from 'ws'
 const { WebSocketServer } = createRequire(
   new URL('../../packages/connector/package.json', import.meta.url),
 )('ws') as typeof Ws
@@ -83,6 +83,16 @@ test('private JWT authenticates HTTP, refresh and oneshot websocket collection',
     assert.equal(req.headers.authorization, undefined)
     peer.on('message', (data) => {
       const request = JSON.parse(data.toString())
+      if (request.method === 'server.connection.identify') {
+        peer.send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: request.id,
+            result: { connection_id: 1 },
+          }),
+        )
+        return
+      }
       assert.equal(request.method, 'printer.objects.subscribe')
       peer.send(
         JSON.stringify({

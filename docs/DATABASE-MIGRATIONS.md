@@ -1,12 +1,23 @@
 # Disposable database migration runner
 
-This opt-in local tool applies reviewed SQL to a fresh synthetic PostgreSQL database. The same runner is used by application startup (below) when enabled; the `bun scripts/migrate-disposable-db.ts` CLI itself remains a disposable-fixture tool and is not a production migration procedure.
+This opt-in local tool applies reviewed SQL to a fresh synthetic PostgreSQL database. The same runner is used by application startup (below) when enabled; the `node scripts/migrate-disposable-db.ts` CLI itself remains a disposable-fixture tool and is not a production migration procedure.
 
 Set `MIGRATION_SYNTHETIC_TEST_DISPOSABLE=yes` and `MIGRATION_SYNTHETIC_TEST_PORT` to the loopback-published port of a task-owned disposable PostgreSQL instance. Both database and user must be `fixture`; the host is fixed to `127.0.0.1`. No `DATABASE_URL` is read. The operator must verify resource ownership before invoking this destructive tool; the flag and fixture name cannot prove a database is disposable.
 
-Run `node scripts/migrate-disposable-db.ts up`. To reverse exactly one migration, run `node scripts/migrate-disposable-db.ts down 0004_account_sessions`, substituting the actual last applied ID. Rollback may destroy data and is never automatic. Existing schemas created by older manual test scripts cannot be adopted automatically: use a fresh disposable database.
+Run `node scripts/migrate-disposable-db.ts up`. A `.down.sql` file is required for catalog pairing, but that does not mean every migration can be reversed: some intentionally refuse destructive rollback to preserve durable data or invariants. Migration `0026_configuration` is a rollback floor and refuses reversal. For a reversible migration, run `node scripts/migrate-disposable-db.ts down <last-applied-id>`; rollback may destroy data and is never automatic. Existing schemas created by older manual test scripts cannot be adopted automatically: use a fresh disposable database.
 
 Files must be contiguous numbered pairs, starting at `0001`, named `NNNN_lowercase_name.up.sql` and `.down.sql`. Every directory entry must be a regular SQL file. The runner hashes the ID and exact contents of both directions. Changing an already applied file, removing it, or finding unknown/out-of-order history prevents further migration SQL from executing. Restore the reviewed source or investigate the fixture; do not rewrite the journal to hide drift.
+
+### Run-time shim for shipped migrations
+
+Shipped migration files never change. The catalog checksum covers each migration's exact `up` and `down` text, and deployed databases store that checksum in the migration journal. `validateMigrationHistory` refuses a mismatch before running migration SQL.
+
+At execution time, `scripts/db/migrations.ts` uses `executableMigrationSql` to adjust two known shipped migrations without changing their files or catalog checksums:
+
+- Migration `0080` up: its check-constraint lookups match `LIKE '%… IN%'`. PostgreSQL represents these `IN (...)` checks in `pg_get_constraintdef` as `= ANY (ARRAY[...])`, so the shim makes each lookup match either spelling. It throws if any expected shipped lookup is missing.
+- Migration `0090` down: the shipped rollback uses `network_deleted` without declaring it. The shim adds the integer declaration at execution time and checks the complete shipped down SQL against its pinned SHA-256 before rewriting it.
+
+`tests/node/migration-shipped-checksums.test.ts` pins the SHA-256 of migration `0080` up and the catalog checksum of `0090`, and checks the `0080` lookup rewrites and `0090` rollback declaration. Update this test, not the migration files, when extending the shim. For a future defect, use a forward migration when the resulting schema is wrong; use the run-time shim only when shipped SQL cannot run.
 
 A transaction-scoped advisory lock serializes cooperating runners. History validation, pending migrations and journal updates share one transaction, so an error rolls back the entire attempt. The journal is `public.open3dfarm_migrations`, outside `farm`, allowing migration 0001 to remove the farm schema without erasing history. Unrelated processes executing SQL directly do not participate in this lock. Run with an isolated migration owner, never the restricted application roles.
 
@@ -20,7 +31,7 @@ The coordinator ran this helper successfully against a disposable native ARM64 P
 
 To prevent data loss and support zero-downtime rolling upgrades, all migrations are subject to structural and expand/contract safety rules validated by `scripts/db/migration-rules.ts` prior to execution:
 
-1. **Paired files**: Every `NNNN_name.up.sql` must have a corresponding, non-empty `NNNN_name.down.sql` rollback file.
+1. **Paired files**: Every `NNNN_name.up.sql` must have a corresponding, non-empty `NNNN_name.down.sql` file. A down file may deliberately reject rollback when reversing would discard durable data or violate an invariant.
 2. **Contiguous numbering**: Migration numbers must be contiguous four-digit sequences starting strictly at `0001`.
 3. **Expand/contract safety**: Forward migration files (`.up.sql`) numbered above `0027` are prohibited from containing destructive operations that break rolling deployments or cause data loss:
    - `DROP TABLE`

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   existsSync,
   mkdtempSync,
@@ -76,6 +76,9 @@ import {
  * runtime, session, authority, engine, journal and runtime reader.
  * No network, no printer, no shared engine.
  */
+// These acceptance tests exercise durable journal writes, including fsync.
+vi.setConfig({ testTimeout: 30_000 })
+
 const FARM_ORIGIN = 'https://farm.example.com'
 const AUDIENCE = 'open3dfarm/connector'
 const BRIDGE = 'http://127.0.0.1:7100'
@@ -360,6 +363,7 @@ async function world(
     browser: Browser,
     over: Record<string, unknown> = {},
     expectedOver: Record<string, unknown> = {},
+    observedFingerprint?: string,
   ) {
     const issued = await binding(browser, over)
     const b = issued.value
@@ -395,7 +399,7 @@ async function world(
     await session.activate(
       b,
       { localSdp: issued.offer, remoteSdp: issued.answer },
-      b.browser_dtls as string,
+      observedFingerprint ?? (b.browser_dtls as string),
     )
     const connectorProof = await next()
     if (connectorProof?.t === 'proof') {
@@ -901,6 +905,9 @@ describe('configuration-connector: authority, replay and recovery', () => {
       },
     )
     expect(replayNonce.session.state).toBe('closed')
+    const wrongPin = await w.connect(runtime, browser, {}, {}, dtlsOf(99))
+    expect(wrongPin.session.state).toBe('closed')
+    expect(wrongPin.session.terminalReason).toBe('binding-rejected')
     expect(runtime.diagnostics().openTransports).toBe(0)
   })
 

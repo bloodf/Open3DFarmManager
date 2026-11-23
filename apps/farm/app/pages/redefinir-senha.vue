@@ -1,54 +1,81 @@
 <script setup lang="ts">
+import AuthAlert from '../components/auth/AuthAlert.vue'
+import AuthField from '../components/auth/AuthField.vue'
+import AuthHeader from '../components/auth/AuthHeader.vue'
+import AuthPanel from '../components/auth/AuthPanel.vue'
+import AuthStatus from '../components/auth/AuthStatus.vue'
+import AuthSubmit from '../components/auth/AuthSubmit.vue'
+
 const hydrated = ref(false)
-onMounted(() => {
-  hydrated.value = true
-})
 const username = ref('')
 const password = ref('')
 const token = ref('')
 const pending = ref(false)
 const message = ref('')
-async function submit(complete: boolean) {
+const failure = ref('')
+const errorSummary = ref<{ focus: () => void } | null>(null)
+const formStatus = computed(() =>
+  !hydrated.value
+    ? 'Preparando o formulário'
+    : pending.value
+      ? 'Processando solicitação.'
+      : message.value,
+)
+onMounted(() => {
+  // The owner-issued link carries user and code in the fragment, never sent to the server.
+  const fragment = new URLSearchParams(window.location.hash.slice(1))
+  username.value = fragment.get('usuario') ?? ''
+  token.value = fragment.get('codigo') ?? ''
+  if (window.location.hash)
+    history.replaceState(
+      history.state,
+      '',
+      window.location.pathname + window.location.search,
+    )
+  hydrated.value = true
+})
+async function submit() {
   if (pending.value) return
   pending.value = true
   message.value = ''
+  failure.value = ''
   try {
     const result = await $fetch<{ message: string }>(
-      complete
-        ? '/api/auth/password-reset-complete'
-        : '/api/auth/password-reset-request',
+      '/api/auth/password-reset-complete',
       {
         method: 'POST',
-        headers: complete ? { 'x-password-reset-token': token.value } : {},
-        body: {
-          username: username.value,
-          password: complete ? password.value : 'reset-request',
-        },
+        headers: { 'x-password-reset-token': token.value },
+        body: { username: username.value, password: password.value },
       },
     )
     message.value = result.message
+    token.value = ''
   } catch {
-    message.value =
-      'Não foi possível concluir a solicitação. Verifique o código ou tente novamente mais tarde.'
+    failure.value =
+      'Não foi possível redefinir a senha. O link pode ter expirado ou já ter sido usado. Peça um novo link ao proprietário da farm.'
   } finally {
     password.value = ''
-    token.value = ''
     pending.value = false
+    if (failure.value) {
+      await nextTick()
+      errorSummary.value?.focus()
+    }
   }
 }
 </script>
 
 <template>
-  <main id="conteudo">
-    <h1>Redefinir senha</h1>
-    <p>
-      Solicite instruções pelo canal cadastrado ou informe o código recebido.
-    </p>
-    <form :aria-busy="pending" @submit.prevent="submit(true)">
-      <label for="reset-username">Usuário</label>
-      <input
+  <main id="conteudo" class="auth-page">
+    <AuthHeader title="Redefinir senha">
+      Esqueceu a senha? Peça ao proprietário da farm um link de redefinição. O
+      link vale por 15 minutos e pode ser usado uma única vez. Ao redefinir,
+      todas as sessões abertas da conta são encerradas.
+    </AuthHeader>
+    <AuthPanel tag="form" :aria-busy="pending" @submit.prevent="submit()">
+      <AuthField
         id="reset-username"
         v-model="username"
+        label="Usuário"
         autocomplete="username"
         autocapitalize="none"
         :spellcheck="false"
@@ -58,17 +85,11 @@ async function submit(complete: boolean) {
         pattern="[a-z0-9_\-]{3,64}"
         :disabled="pending"
       />
-      <button
-        type="button"
-        :disabled="pending || !username"
-        @click="submit(false)"
-      >
-        Solicitar instruções
-      </button>
-      <label for="reset-token">Código de redefinição</label>
-      <input
+      <AuthField
         id="reset-token"
         v-model="token"
+        label="Código de redefinição"
+        hint="Preenchido automaticamente ao abrir o link recebido."
         autocomplete="off"
         autocapitalize="none"
         :spellcheck="false"
@@ -77,50 +98,44 @@ async function submit(complete: boolean) {
         maxlength="43"
         :disabled="pending"
       />
-      <label for="reset-password">Nova senha</label>
-      <input
+      <AuthField
         id="reset-password"
         v-model="password"
+        label="Nova senha"
+        hint="Use 12 caracteres ou mais."
         type="password"
         autocomplete="new-password"
         required
+        minlength="12"
         :disabled="pending"
       />
-      <button type="submit" :disabled="pending || !hydrated">
+      <AuthAlert ref="errorSummary" :message="failure" />
+      <AuthSubmit :disabled="pending || !hydrated">
         Redefinir senha
-      </button>
-      <p v-if="!hydrated" role="status">Preparando o formulário</p>
-      <p role="status" aria-live="polite">
-        {{ pending ? 'Processando solicitação.' : message }}
-      </p>
-    </form>
-    <NuxtLink to="/entrar">Voltar para entrar</NuxtLink>
+      </AuthSubmit>
+      <AuthStatus
+        :message="formStatus"
+        :tone="message && !pending ? 'success' : undefined"
+        aria-live="polite"
+      />
+    </AuthPanel>
+    <p class="links"><NuxtLink to="/entrar">Voltar para entrar</NuxtLink></p>
   </main>
 </template>
 
 <style scoped>
-form {
-  max-width: 26rem;
+.auth-page {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+  max-width: 30rem;
 }
-label {
-  display: block;
-  margin-top: 1rem;
-  font-weight: 600;
+.links {
+  margin: 0;
 }
-input {
-  display: block;
-  width: 100%;
-  padding: 0.75rem;
-  font: inherit;
-}
-button {
+.links a {
+  display: inline-flex;
+  align-items: center;
   min-height: 2.75rem;
-  margin-top: 0.75rem;
-  font: inherit;
-}
-input:focus-visible,
-button:focus-visible {
-  outline: 3px solid currentColor;
-  outline-offset: 3px;
 }
 </style>

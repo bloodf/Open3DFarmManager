@@ -1,3 +1,9 @@
+import {
+  API_DISPATCH_QUERY_SUPPORT_HEADER,
+  API_QUERY_SUPPORT_HEADER,
+  type ApiQueryReply,
+  type ApiQueryRequest,
+} from '../../../farm-protocol/src/api-query.ts'
 import { MAX_PAUSE_SIGNALLING_WIRE_BYTES } from '../../../farm-protocol/src/pause-signalling.ts'
 import { assignmentSetDigest } from '../../../farm-protocol/src/rtc-assignment-set.ts'
 import {
@@ -53,6 +59,7 @@ type WsOptions = {
   maxFragments: number
   maxBufferedChunks: number
   autoPong: false
+  headers?: Record<string, string>
 }
 type WsConstructor = new (
   url: URL,
@@ -65,6 +72,7 @@ type WsConstructor = new (
 export function connectorSocket(
   url: string,
   load: () => Promise<{ WebSocket: WsConstructor }> = () => import('ws'),
+  supportsApiQueries = false,
 ): Promise<SocketPort> {
   return fixedConnectorSocket(
     url,
@@ -72,6 +80,7 @@ export function connectorSocket(
     'open3dfarm.signalling.v1',
     MAX_SIGNALLING_SOCKET_BYTES,
     load,
+    supportsApiQueries,
   )
 }
 export function pauseConnectorSocket(
@@ -92,6 +101,7 @@ async function fixedConnectorSocket(
   protocol: 'open3dfarm.signalling.v1' | 'open3dfarm.pause-signalling.v1',
   maxPayload: number,
   load: () => Promise<{ WebSocket: WsConstructor }>,
+  supportsApiQueries = false,
 ): Promise<SocketPort> {
   if (
     process.env.WS_NO_BUFFER_UTIL !== '1' ||
@@ -119,6 +129,14 @@ async function fixedConnectorSocket(
     maxFragments: 16,
     maxBufferedChunks: 16,
     autoPong: false,
+    ...(supportsApiQueries
+      ? {
+          headers: {
+            [API_QUERY_SUPPORT_HEADER]: '1',
+            [API_DISPATCH_QUERY_SUPPORT_HEADER]: '1',
+          },
+        }
+      : {}),
   })
   const socket = new module.WebSocket(target, protocol, options)
   const ignore = () => {}
@@ -156,7 +174,12 @@ async function fixedConnectorSocket(
   }
 }
 type Peer = Pick<ReadonlyConnectorPeer, 'offer' | 'answer' | 'close'> &
-  Partial<Pick<ReadonlyConnectorPeer, 'sendStatus' | 'diagnostics'>>
+  Partial<
+    Pick<
+      ReadonlyConnectorPeer,
+      'sendStatus' | 'diagnostics' | 'bufferedStatusAmount'
+    >
+  >
 type PeerOptions = ConstructorParameters<typeof ReadonlyConnectorPeer>[0]
 type Scope = {
   url: string
@@ -184,6 +207,14 @@ type Options = {
   onAuthorityConfirm?: (serverSeq: number) => void
   /** Server reread failed: cached authority must go stale immediately. */
   onAuthorityRevoked?: (serverSeq: number) => void
+  onApiQuery?: (
+    frame: ApiQueryRequest,
+    report: (reply: ApiQueryReply) => void,
+  ) => void
+  onApiCommand?: (
+    frame: Extract<SignallingServerFrame, { t: 'connector.api-command' }>,
+    report: (wire: string) => void,
+  ) => void
   socketFactory?: () => SocketPort | Promise<SocketPort>
   peerFactory?: (input: PeerOptions) => Peer | Promise<Peer>
   /** Opt-in camera media per peer; violations close this session. */
@@ -339,7 +370,13 @@ export class AuthenticatedConnectorSignallingClient {
       return this.#completion
     }
     this.#channel.connect(
-      this.#options.socketFactory ?? (() => connectorSocket(this.#scope.url)),
+      this.#options.socketFactory ??
+        (() =>
+          connectorSocket(
+            this.#scope.url,
+            undefined,
+            this.#options.onApiQuery !== undefined,
+          )),
     )
     return this.#completion
   }
@@ -388,6 +425,32 @@ export class AuthenticatedConnectorSignallingClient {
   }
   private async frame(frame: SignallingServerFrame) {
     if (!this.#channel.current()) return
+    if (frame.t === 'connector.api-query') {
+      if (
+        this.#phase === 'open' ||
+        this.#phase === 'inbox-challenge' ||
+        this.#phase === 'inbox-ready'
+      )
+        throw Error('Unexpected API query')
+      runSynchronous(() =>
+        this.#options.onApiQuery?.(frame, (reply) => this.#channel.send(reply)),
+      )
+      return
+    }
+    if (frame.t === 'connector.api-command') {
+      if (
+        this.#phase === 'open' ||
+        this.#phase === 'inbox-challenge' ||
+        this.#phase === 'inbox-ready'
+      )
+        throw Error('Unexpected API command')
+      runSynchronous(() =>
+        this.#options.onApiCommand?.(frame, (wire) => {
+          this.#channel.send({ v: 1, t: 'connector.api-result', wire })
+        }),
+      )
+      return
+    }
     if (
       frame.t === 'connector.authority-confirm' ||
       frame.t === 'connector.authority-revoked'
@@ -713,6 +776,9 @@ export class AuthenticatedConnectorSignallingClient {
       this.#channel.current() &&
       (this.#peer?.sendStatus?.(input) ?? false)
     )
+  }
+  bufferedAmount() {
+    return this.#peer?.bufferedStatusAmount?.() ?? 0
   }
   close(reason = 'closed') {
     this.#channel.close(reason)

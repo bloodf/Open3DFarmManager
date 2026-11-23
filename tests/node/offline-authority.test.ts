@@ -160,3 +160,17 @@ test('revoke without a sequence still blocks replay of the last confirm', () => 
   assert.equal(fresh(at(2)), false)
   assert.equal(authority.confirm(at(3), 4), true)
 })
+
+test('a backward confirmation is refused and makes cached authority stale', () => {
+  for (const now of [
+    { wall: T0.wall - 1, mono: T0.mono + 1 },
+    { wall: T0.wall + 1, mono: T0.mono - 1 },
+  ]) {
+    const { authority, fresh } = tracker()
+    assert.equal(authority.confirm(T0, 1), true)
+    assert.equal(authority.confirm(now, 2), false)
+    assert.equal(fresh(T0), false)
+    assert.equal(authority.confirm(at(1), 2), true)
+    assert.equal(fresh(at(1)), true)
+  }
+})

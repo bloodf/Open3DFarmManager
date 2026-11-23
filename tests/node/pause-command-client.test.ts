@@ -182,6 +182,9 @@ async function clientFixture(
             )
           })
         }
+        // One clock reading: two reads straddling a millisecond boundary give
+        // an 8001 ms lifetime that the challenge schema rejects.
+        const issuedAt = Date.now()
         return {
           v: 1 as const,
           purpose: 'pause-admission' as const,
@@ -197,8 +200,8 @@ async function clientFixture(
           audience: binding.audience,
           control_binding_sha256: bindingHash,
           admission_nonce: admissionNonce,
-          issued_at: Date.now(),
-          expires_at: Date.now() + 8000,
+          issued_at: issuedAt,
+          expires_at: issuedAt + 8000,
         }
       },
       async capability() {
@@ -272,14 +275,15 @@ async function clientFixture(
       })
     },
     nonceFrame() {
+      const issuedAt = Date.now()
       return {
         v: 1 as const,
         transport_id: transportId,
         seq: 1,
         t: 'control.admission-nonce' as const,
         admission_nonce: nonce,
-        issued_at: Date.now(),
-        expires_at: Date.now() + 8000,
+        issued_at: issuedAt,
+        expires_at: issuedAt + 8000,
       }
     },
     resultFrame(commandId: string, outcome: 'applied' | 'rejected') {
@@ -525,14 +529,15 @@ test('a client without a transport never sends a phase', async (t) => {
     privateKey: browser.privateKey,
     issuer,
   })
+  const issuedAt = Date.now()
   client.phase({
     v: 1,
     transport_id: randomUUID(),
     seq: 1,
     t: 'control.admission-nonce',
     admission_nonce: digest(),
-    issued_at: Date.now(),
-    expires_at: Date.now() + 8000,
+    issued_at: issuedAt,
+    expires_at: issuedAt + 8000,
   })
   await waitFor(t.signal, () => !client.state.pending)
   assert.equal(client.state.admitted, false)
@@ -552,6 +557,9 @@ test('an issuer that answers outside the control scope never reaches the transpo
     ).privateKey,
     issuer: {
       async challenge({ admissionNonce }) {
+        // One clock reading: two reads straddling a millisecond boundary give
+        // an 8001 ms lifetime that the challenge schema rejects.
+        const issuedAt = Date.now()
         return {
           v: 1 as const,
           purpose: 'pause-admission' as const,
@@ -567,8 +575,8 @@ test('an issuer that answers outside the control scope never reaches the transpo
           audience: f.binding.audience,
           control_binding_sha256: digest(),
           admission_nonce: admissionNonce,
-          issued_at: Date.now(),
-          expires_at: Date.now() + 8000,
+          issued_at: issuedAt,
+          expires_at: issuedAt + 8000,
         }
       },
       async capability() {

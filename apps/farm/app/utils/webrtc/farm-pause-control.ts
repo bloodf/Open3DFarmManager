@@ -1,3 +1,4 @@
+import type { FileListExtra } from '../../../../../packages/farm-protocol/src/file-list.ts'
 import type {
   ControlResultCode,
   ExtendedControlAction,
@@ -218,14 +219,19 @@ export function openFarmPauseControl(input: FarmPauseControlInput) {
   return Object.freeze({
     /** Sends the single signed pause. Only valid in the `ready` state. */
     issueControlCommand,
-    async listFiles(printerKey: string) {
+    async listFiles(
+      printerKey: string,
+      directory?: string,
+      download?: string,
+      config?: FileListExtra,
+    ) {
       if (
         state.kind !== 'ready' ||
         controller.signal.aborted ||
         !signalling?.listFiles
       )
         throw Error('File list unavailable')
-      return signalling.listFiles(printerKey)
+      return signalling.listFiles(printerKey, directory, download, config)
     },
     async sendFile(
       ...args: Parameters<PauseBrowserSignallingClient['sendFile']>

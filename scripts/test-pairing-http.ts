@@ -190,7 +190,7 @@ try {
   if (!expiredSessionId)
     throw new Error('Synthetic expired session unavailable')
   const nuxtPackage = await realpath(
-    new URL('../apps/farm/node_modules/nuxt/package.json', import.meta.url),
+    createRequire(import.meta.url).resolve('nuxt/package.json'),
   )
   const nuxtRequire = createRequire(nuxtPackage)
   const iron = await import(

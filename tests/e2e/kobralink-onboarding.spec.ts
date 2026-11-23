@@ -1,8 +1,11 @@
 import { expect, test } from '@playwright/test'
+import { mockShellApi } from '../helpers/shell-api.ts'
+import { mkdir } from 'node:fs/promises'
+import AxeBuilder from '@axe-core/playwright'
 import { randomUUID } from 'node:crypto'
 
 // Synthetic HTTP registry only. These cases do not claim RTC or hardware proof.
-for (const width of [1280, 375]) {
+for (const width of [320, 375, 768, 1024, 1280]) {
   test(`missing approved browser key refuses configuration at ${width}px`, async ({
     page,
   }) => {
@@ -50,13 +53,14 @@ for (const width of [1280, 375]) {
         json: { message: 'Synthetic fixture: unavailable' },
       })
     })
+    await mockShellApi(page, farmId)
     await page.goto('/impressoras')
     await page.getByLabel('Farm', { exact: true }).selectOption(farmId)
     await expect(
-      page.getByRole('heading', { name: 'Adicionar Anycubic Kobra X' }),
+      page.getByRole('heading', { name: 'Adicionar impressora' }),
     ).toBeVisible()
     await page
-      .getByLabel('Connector aprovado para a Kobra X')
+      .getByLabel('Connector aprovado para a impressora')
       .selectOption(agentId)
     await expect(
       page.getByText('Nenhuma chave local aprovada', { exact: false }),
@@ -70,13 +74,25 @@ for (const width of [1280, 375]) {
         () => document.documentElement.scrollWidth <= innerWidth,
       ),
     ).toBe(true)
-    await page.getByLabel('Connector aprovado para a Kobra X').focus()
+    const setupColumns = await page
+      .locator('.setup-columns')
+      .evaluate((element) => getComputedStyle(element).gridTemplateColumns)
+    expect(setupColumns.split(' ').length).toBe(width >= 768 ? 2 : 1)
+    const accessibility = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
+      .analyze()
+    expect(accessibility.violations).toEqual([])
+    await page.getByLabel('Connector aprovado para a impressora').focus()
     await expect(
-      page.getByLabel('Connector aprovado para a Kobra X'),
+      page.getByLabel('Connector aprovado para a impressora'),
     ).toBeFocused()
     await page.keyboard.press('Tab')
+    const evidenceDir = process.env.KOBRALINK_UI_EVIDENCE
+    if (evidenceDir) await mkdir(evidenceDir, { recursive: true })
     await page.screenshot({
-      path: `${process.env.KOBRALINK_UI_EVIDENCE ?? '/tmp'}/kobra-missing-key-${width}.png`,
+      path: evidenceDir
+        ? `${evidenceDir}/kobra-missing-key-${width}.png`
+        : test.info().outputPath(`kobra-missing-key-${width}.png`),
       fullPage: true,
     })
   })

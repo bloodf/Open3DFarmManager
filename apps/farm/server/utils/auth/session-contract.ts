@@ -44,6 +44,11 @@ export interface SessionRepository {
   revokeSession(sessionId: string, now: number): Promise<void>
   /** Atomically increment the account version; never reuse or decrement it. */
   revokeAccountSessions(accountId: string): Promise<void>
+  revokeOtherSessions?(
+    accountId: string,
+    keepSessionId: string,
+    now: number,
+  ): Promise<void>
 }
 
 const integer = (value: unknown): value is number =>

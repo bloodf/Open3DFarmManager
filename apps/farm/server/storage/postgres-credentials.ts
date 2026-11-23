@@ -49,6 +49,26 @@ export class PostgresCredentials {
       sessionVersion: row.sessionVersion,
     }
   }
+
+  async findByAccount(accountId: string): Promise<CredentialSnapshot | null> {
+    const rows = await this
+      .sql`SELECT c.account_id AS "accountId", c.password_hash AS "passwordHash", c.credential_version::text AS "credentialVersion", a.session_version::text AS "sessionVersion" FROM farm.password_credentials c JOIN farm.session_accounts a ON a.id = c.account_id WHERE c.account_id = ${accountId}`
+    const row = rows[0]
+    if (!row) return null
+    if (
+      typeof row.accountId !== 'string' ||
+      typeof row.passwordHash !== 'string' ||
+      typeof row.credentialVersion !== 'string' ||
+      typeof row.sessionVersion !== 'string'
+    )
+      throw new Error('Invalid credential state')
+    return {
+      accountId: row.accountId,
+      passwordHash: row.passwordHash,
+      credentialVersion: row.credentialVersion,
+      sessionVersion: row.sessionVersion,
+    }
+  }
   async issue(
     snapshot: CredentialSnapshot,
     now: number,
@@ -83,6 +103,20 @@ export class PostgresCredentials {
       const id = randomUUID()
       await tx`INSERT INTO farm.account_sessions (id, account_id, account_version, created_at, last_seen_at, absolute_expires_at) VALUES (${id}, ${snapshot.accountId}, ${snapshot.sessionVersion}, ${now}, ${now}, ${now + lifetimeMs})`
       return id
+    })
+  }
+
+  async replacePassword(
+    snapshot: CredentialSnapshot,
+    passwordHash: string,
+  ): Promise<boolean> {
+    return await this.sql.begin(async (tx) => {
+      await tx`SET LOCAL statement_timeout = '2000ms'`
+      await tx`SET LOCAL lock_timeout = '1000ms'`
+      await tx`SELECT id FROM farm.session_accounts WHERE id = ${snapshot.accountId} FOR UPDATE`
+      const rows =
+        await tx`UPDATE farm.password_credentials SET password_hash = ${passwordHash}, credential_version = credential_version + 1 WHERE account_id = ${snapshot.accountId} AND credential_version::text = ${snapshot.credentialVersion} AND password_hash = ${snapshot.passwordHash} RETURNING account_id`
+      return rows.length === 1
     })
   }
 }

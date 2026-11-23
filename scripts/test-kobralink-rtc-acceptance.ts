@@ -1,3 +1,4 @@
+import { isMockSim } from '../packages/sim-tools/src/mocks/env.ts'
 import assert from 'node:assert/strict'
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
@@ -110,6 +111,24 @@ if (process.argv[2] === '--verify-single-ui') {
   for (const problem of problems) console.error(problem)
   console.log(JSON.stringify({ verified: problems.length === 0, head }))
   process.exit(problems.length ? 1 : 0)
+}
+if (isMockSim()) {
+  execFileSync(
+    process.execPath,
+    [
+      'node_modules/@playwright/test/cli.js',
+      'test',
+      '-c',
+      'playwright.journey.config.ts',
+      'kobralink.spec.ts',
+    ],
+    {
+      cwd: checkout,
+      env: { ...process.env, OPENFARM_JOURNEY: '1' },
+      stdio: 'inherit',
+    },
+  )
+  process.exit(0)
 }
 const options = registrationAdmission(process.env, checkout)
 assert.equal(process.argv.length, 2)
@@ -394,7 +413,7 @@ try {
   await run(
     root,
     'prepare-app',
-    join(checkout, 'apps/farm/node_modules/.bin/nuxt'),
+    join(checkout, 'node_modules/.bin/nuxt'),
     ['prepare'],
     env,
     300000,

@@ -144,7 +144,7 @@ async function authorityFixture(action: Action, args: Args) {
     issued_at: now,
     expires_at: now + 30000,
     account_id: command.account_id,
-    role: 'admin' as const,
+    role: 'owner' as const,
     farm_id: binding.farm_id,
     agent_id: binding.agent_id,
     key_id: binding.key_id,
@@ -384,6 +384,8 @@ for (const [action, args, script] of [
       {
         kind: 'moonraker',
         mode: {
+          // Idle-only actions (#605) are dispatched from a stopped printer.
+          initialState: 'standby' as never,
           objects: [
             'gcode_macro CLEAN',
             'gcode_macro LOAD_FILAMENT',
@@ -411,11 +413,25 @@ for (const action of ['load_filament', 'unload_filament'] as const) {
       action,
       action === 'load_filament' ? { tray: 15 } : {},
     )
+    // The simulator always reports baseline telemetry (temperatures, AMS);
+    // the command must change exactly the expected fields on top of it.
+    const baseline = f.bambu?.extendedState
     const result = await f.dispatch()
     assert.equal(result.kind, 'outcome-unknown')
     assert.equal(result.reason, 'state-unconfirmed')
+    // Any later baseline report settles the dispatch, so the QoS 0 publish
+    // can still be in flight inside the broker; wait until it lands.
+    for (let i = 0; i < 100 && !f.bambu?.requests.length; i++)
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    assert.deepEqual(f.bambu?.requests, [
+      { command: 'ams_change_filament', sequence_id: '1' },
+    ])
     assert.deepEqual(f.bambu?.extendedState.ams, {
       tray_now: action === 'load_filament' ? '15' : '255',
+    })
+    assert.deepEqual(f.bambu?.extendedState, {
+      ...baseline,
+      ams: f.bambu?.extendedState.ams,
     })
   })
 }

@@ -1,10 +1,15 @@
 // SPDX-License-Identifier: MIT
-import { test } from 'node:test'
+import { after, test } from 'node:test'
 import type { CameraAccessUnit } from '../../packages/connector/src/camera/session.ts'
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import type { HelperExecutable } from '../../tools/rtsp-ingest/supervisor/process.ts'
+import {
+  createFakeEncoder,
+  ffmpegFixtures,
+  ffmpegQualificationSkip,
+  qualificationEncoder,
+  syntheticFlv,
+} from '../helpers/camera-encoder.ts'
 import {
   selectAnycubicCamera,
   selectAnycubicStream,
@@ -17,6 +22,13 @@ import { startAnycubicCameraSim } from '../../packages/sim-tools/src/anycubic-ca
 
 const jpeg = Buffer.from([0xff, 0xd8, 1, 2, 0xff, 0xd9])
 const auth = { username: 'local', password: 'secret:@password' }
+// Offline stand-in for FFmpeg; it exits non-zero if any credential reaches argv.
+const encoder = createFakeEncoder([
+  auth.password,
+  'secret-session-credentials',
+  'synthetic-session',
+])
+after(() => encoder.dispose())
 const stock: AnycubicCameraSource = {
   kind: 'stock',
   host: '192.168.1.9',
@@ -135,93 +147,74 @@ test('opaque selection is bound to farm, agent and printer; no credentials enter
   assert.equal(registry.resolve({ cameraId: 'secret', scope }), undefined)
 })
 
-test(
-  'Rinkhals and stock FLV feed real H264 encoder; capture stops and restarts on reconnect',
-  { timeout: 15000 },
-  async () => {
-    const path = execFileSync('which', ['ffmpeg'], { encoding: 'utf8' }).trim()
-    const ffmpeg = {
-      path,
-      sha256: createHash('sha256').update(readFileSync(path)).digest('hex'),
-    }
-    const image = execFileSync(path, [
-      '-hide_banner',
-      '-loglevel',
-      'error',
-      '-f',
-      'lavfi',
-      '-i',
-      'color=c=blue:s=32x32',
-      '-frames:v',
-      '1',
-      '-f',
-      'image2pipe',
-      '-vcodec',
-      'mjpeg',
-      'pipe:1',
-    ])
-    const flv = execFileSync(path, [
-      '-hide_banner',
-      '-loglevel',
-      'error',
-      '-f',
-      'lavfi',
-      '-i',
-      'color=c=blue:s=32x32:r=10',
-      '-frames:v',
-      '4',
-      '-c:v',
-      'libx264',
-      '-preset',
-      'ultrafast',
-      '-tune',
-      'zerolatency',
-      '-f',
-      'flv',
-      'pipe:1',
-    ])
-    for (const kind of ['rinkhals', 'stock'] as const) {
-      const sim = await startAnycubicCameraSim({ jpeg: image, flv, auth })
-      const controller = new AbortController()
-      const source: AnycubicCameraSource =
-        kind === 'rinkhals'
-          ? { kind, host: sim.host, port: sim.port, auth }
-          : {
-              kind,
-              host: sim.host,
-              port: sim.port,
-              startCapture: sim.startCapture,
-              stopCapture: sim.stopCapture,
-            }
-      let iterator: AsyncIterator<CameraAccessUnit> | undefined
+async function assertFlvCapture(
+  ffmpeg: HelperExecutable,
+  image: Buffer,
+  flv: Buffer,
+) {
+  for (const kind of ['rinkhals', 'stock'] as const) {
+    const sim = await startAnycubicCameraSim({ jpeg: image, flv, auth })
+    const controller = new AbortController()
+    const source: AnycubicCameraSource =
+      kind === 'rinkhals'
+        ? { kind, host: sim.host, port: sim.port, auth }
+        : {
+            kind,
+            host: sim.host,
+            port: sim.port,
+            startCapture: sim.startCapture,
+            stopCapture: sim.stopCapture,
+          }
+    let iterator: AsyncIterator<CameraAccessUnit> | undefined
+    try {
+      const media = await openAnycubicCameraSource({
+        source,
+        ffmpeg,
+        signal: controller.signal,
+        isCurrent: () => true,
+      })
+      iterator = media[Symbol.asyncIterator]()
+      const first = await iterator.next()
+      assert.equal(first.done, false)
+      assert.ok(first.value?.keyframe)
+      assert.ok(first.value.data.length > 20)
+      let previous = first.value.timestampUs
+      for (let i = 0; i < (kind === 'stock' ? 5 : 1); i++) {
+        const next: IteratorResult<CameraAccessUnit> = await iterator.next()
+        assert.equal(next.done, false)
+        assert.ok(next.value.timestampUs > previous)
+        previous = next.value.timestampUs
+      }
+      assert.ok(sim.authenticated >= 1)
+      if (kind === 'stock') assert.equal(sim.captures, 2)
+    } finally {
+      controller.abort()
       try {
-        const media = await openAnycubicCameraSource({
-          source,
-          ffmpeg,
-          signal: controller.signal,
-          isCurrent: () => true,
-        })
-        iterator = media[Symbol.asyncIterator]()
-        const first = await iterator.next()
-        assert.equal(first.done, false)
-        assert.ok(first.value?.keyframe)
-        assert.ok(first.value.data.length > 20)
-        let previous = first.value.timestampUs
-        for (let i = 0; i < (kind === 'stock' ? 5 : 1); i++) {
-          const next: IteratorResult<CameraAccessUnit> = await iterator.next()
-          assert.equal(next.done, false)
-          assert.ok(next.value.timestampUs > previous)
-          previous = next.value.timestampUs
-        }
-        assert.ok(sim.authenticated >= 1)
-        if (kind === 'stock') assert.equal(sim.captures, 2)
-      } finally {
-        controller.abort()
         await iterator?.return?.()
-        if (kind === 'stock') assert.equal(sim.stops, sim.captures)
-        await sim.close()
+      } finally {
+        try {
+          if (kind === 'stock') assert.equal(sim.stops, sim.captures)
+        } finally {
+          await sim.close()
+        }
       }
     }
+  }
+}
+
+test(
+  'Rinkhals and stock FLV feed the pinned H264 encoder contract; capture stops and restarts on reconnect',
+  { timeout: 15000 },
+  () => assertFlvCapture(encoder.ffmpeg, jpeg, syntheticFlv()),
+)
+
+test(
+  'qualification: Rinkhals and stock FLV feed real FFmpeg H264 encoder',
+  { timeout: 15000, skip: ffmpegQualificationSkip },
+  () => {
+    const ffmpeg = qualificationEncoder()
+    const fixtures = ffmpegFixtures(ffmpeg.path)
+    return assertFlvCapture(ffmpeg, fixtures.jpeg, fixtures.flv)
   },
 )
 
@@ -238,11 +231,7 @@ test('untrusted encoder and failed capture never expose credentials', async () =
 })
 
 test('failed activation and invalid reported destinations are redacted and release each capture', async () => {
-  const path = execFileSync('which', ['ffmpeg'], { encoding: 'utf8' }).trim()
-  const ffmpeg = {
-    path,
-    sha256: createHash('sha256').update(readFileSync(path)).digest('hex'),
-  }
+  const ffmpeg = encoder.ffmpeg
   for (const failure of ['activation', 'destination', 'cleanup']) {
     let starts = 0
     let stops = 0
@@ -277,11 +266,7 @@ test('failed activation and invalid reported destinations are redacted and relea
 })
 
 test('aborted and revoked admissions never activate stock capture', async () => {
-  const path = execFileSync('which', ['ffmpeg'], { encoding: 'utf8' }).trim()
-  const ffmpeg = {
-    path,
-    sha256: createHash('sha256').update(readFileSync(path)).digest('hex'),
-  }
+  const ffmpeg = encoder.ffmpeg
   for (const aborted of [false, true]) {
     let starts = 0
     const controller = new AbortController()

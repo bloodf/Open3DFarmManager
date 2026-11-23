@@ -54,6 +54,16 @@ for (const { wire, outcome, state } of cases) {
       upgrade: () => true,
       onMessage(socket, raw) {
         const request = JSON.parse(raw)
+        if (request.method === 'server.connection.identify') {
+          socket.send(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              id: request.id,
+              result: { connection_id: 1 },
+            }),
+          )
+          return
+        }
         push = (delta) =>
           socket.send(
             JSON.stringify({

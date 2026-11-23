@@ -10,7 +10,8 @@ import { once } from 'node:events'
 import { createServer } from 'node:http'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
-import { chromium, type Browser, type Page } from '@playwright/test'
+import { type Browser, type Page } from '@playwright/test'
+import { launchBrowser } from '../../../tests/helpers/browser.ts'
 import { browserBundle } from '../../../tests/helpers/browser-bundle.ts'
 import {
   RtcSessionBinding,
@@ -50,9 +51,11 @@ async function connect(
   const hello = record(await child.request({ kind: 'hello' }))
   const agent = randomUUID(),
     farm = randomUUID(),
-    assignment = randomUUID()
+    assignment = randomUUID(),
+    firstAssignment = randomUUID()
   const refs = [
-    { assignmentId: assignment, agentId: agent, printerKey: 'sim-1' },
+    { assignmentId: firstAssignment, agentId: agent, printerKey: 'sim-1' },
+    { assignmentId: assignment, agentId: agent, printerKey: 'sim-2' },
   ]
   const offer = String(
     record(
@@ -61,6 +64,7 @@ async function connect(
         agent,
         farm,
         assignment,
+        firstAssignment,
         helperPath: helper.path,
         helperSha256: helper.sha256,
         rtspPort: helper.port,
@@ -116,6 +120,7 @@ async function connect(
     answer_sha256: await rtcSdpHash(answer),
     browser_dtls: rtcDtlsFingerprint(answer),
     connector_dtls: rtcDtlsFingerprint(offer),
+    camera_printer_id: assignment,
     assignment_count: set.count,
     assignment_digest: set.digest,
   })
@@ -160,7 +165,7 @@ test(
       await once(server, 'listening')
       const address = server.address()
       assert.ok(address && typeof address === 'object')
-      browser = await chromium.launch({ headless: true, timeout: 10000 })
+      browser = await launchBrowser({ timeout: 10000 })
       const page = await browser.newPage()
       await page.goto('http://127.0.0.1:' + address.port, { timeout: 5000 })
       child = new FixtureProcess(process.execPath, './camera-rtsp-child.ts')
@@ -204,6 +209,7 @@ test(
           value.distinctFrames >= 5,
       )
       assert.equal(live.printerId, assignment)
+      assert.equal(live.cameraId, 'sim-camera-b')
       assert.equal(live.width, 320)
       assert.equal(live.height, 240)
       assert.equal(live.peer?.state, 'verified')

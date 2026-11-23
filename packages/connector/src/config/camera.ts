@@ -2,6 +2,7 @@
 import { isAbsolute } from 'node:path'
 import { BlockList, isIP } from 'node:net'
 import { z } from 'zod'
+import { isKobraXFlvPath, isKobraXFlvPort } from '../kobra-x/camera.ts'
 import { BrowserDeviceUuid } from '../../../farm-protocol/src/browser-device-proof.ts'
 
 const textId = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/)
@@ -45,18 +46,59 @@ const Source = z.strictObject({
     .max(1024)
     .regex(/^\/(?!\/)[^?#@\\\s]*$/),
 })
+// Vendor MJPEG cameras (`/?action=stream`): literal local address and port
+// only; the path is fixed by the vendor adapter and never configurable.
+const MjpegSource = (kind: 'creality-mjpeg' | 'anycubic-rinkhals') =>
+  z.strictObject({
+    kind: z.literal(kind),
+    address: z.string().refine(localAddress),
+    port: z.number().int().min(1).max(65535),
+    path: z.literal('/?action=stream').default('/?action=stream'),
+  })
+const Executable = z.strictObject({
+  path: z.string().refine(isAbsolute),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+})
+const BambuSource = z.strictObject({
+  kind: z.literal('bambu-lan'),
+  model: z.string().min(1).max(64),
+  address: z.string().refine(localAddress),
+  port: z.number().int().min(1).max(65535).optional(),
+  ffmpeg: Executable,
+  credentialFile: z.string().refine(isAbsolute),
+  caFile: z.string().refine(isAbsolute).optional(),
+  pinSha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
+})
 const CameraRuntime = z.strictObject({
-  helper: z.strictObject({
-    path: z.string().refine(isAbsolute),
-    sha256: z.string().regex(/^[a-f0-9]{64}$/),
-  }),
+  helper: Executable,
   maxSessions: z.number().int().min(1).max(4).default(1),
   cameras: z
     .array(
       z.strictObject({
         cameraId: textId,
         assignmentId: BrowserDeviceUuid,
-        source: Source,
+        source: z.union([
+          Source,
+          Source.extend({
+            kind: z.literal('moonraker-snapshot'),
+            ffmpeg: Executable,
+            path: z
+              .string()
+              .max(2048)
+              .regex(/^\/(?!\/)[^#@\\\s]*$/),
+          }),
+          BambuSource,
+          MjpegSource('creality-mjpeg'),
+          MjpegSource('anycubic-rinkhals'),
+          Source.extend({
+            kind: z.literal('kobra-x-flv'),
+            address: z.ipv4().refine(localAddress),
+            path: z.string().refine(isKobraXFlvPath),
+          }).refine(({ address, port }) => isKobraXFlvPort(address, port)),
+        ]),
       }),
     )
     .min(1)

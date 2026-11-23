@@ -19,6 +19,10 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:http'
+import https, { type RequestOptions } from 'node:https'
+import { EventEmitter } from 'node:events'
+import { syncBuiltinESMExports } from 'node:module'
+import { LIBRARY_RELAY_POLL_PATH } from '../../packages/farm-protocol/src/library-relay.ts'
 import {
   ConnectorIdentity,
   loadOrCreateIdentity,
@@ -60,6 +64,48 @@ const b64 = (value: object) =>
   Buffer.from(JSON.stringify(value)).toString('base64url')
 function token(claims: Record<string, unknown>) {
   return `${b64({ alg: 'EdDSA', typ: 'JWT', kid: 'k' })}.${b64(claims)}.${randomBytes(64).toString('base64url')}`
+}
+
+/**
+ * Serves `node:https` requests to ORIGIN in memory. The agent's library relay
+ * long-polls the farm with `https.request`, not `fetch`; this double holds each
+ * poll open with no operation until the agent aborts it, as an idle server
+ * does, so nothing leaves the process. Other hosts keep the real (guarded)
+ * implementation. Returns the authorization of each poll and a restore hook.
+ */
+function interceptRelayHttps() {
+  const original = https.request
+  const polls: string[] = []
+  const origin = new URL(ORIGIN)
+  const stub = function relayRequest(...args: unknown[]) {
+    const [target, init] = args as [unknown, RequestOptions | undefined]
+    if (!(target instanceof URL) || target.host !== origin.host)
+      return (original as (...a: unknown[]) => unknown)(...args)
+    assert.equal(target.protocol, 'https:')
+    assert.equal(init?.method, 'POST')
+    assert.equal(target.pathname, LIBRARY_RELAY_POLL_PATH)
+    const headers = (init?.headers ?? {}) as Record<string, string>
+    polls.push(headers.authorization ?? '')
+    const req = Object.assign(new EventEmitter(), {
+      end: () => req,
+      destroy: () => req,
+    })
+    const signal = init?.signal
+    assert.ok(signal, 'relay poll must be abortable')
+    const abort = () => req.emit('error', signal.reason)
+    if (signal.aborted) process.nextTick(abort)
+    else signal.addEventListener('abort', abort, { once: true })
+    return req
+  } as typeof https.request
+  https.request = stub
+  syncBuiltinESMExports()
+  return {
+    polls,
+    restore() {
+      https.request = original
+      syncBuiltinESMExports()
+    },
+  }
 }
 
 /** In-memory server double that enforces the same signed challenge contract. */
@@ -479,6 +525,8 @@ test(
     const f = fixture(wall, { identity, rootRemainingMs: 4000 })
     Object.defineProperty(f.clock, 'now', { get: () => wall, set() {} })
     const originalFetch = globalThis.fetch
+    const relay = interceptRelayHttps()
+    t.after(relay.restore)
     const closed = createServer()
     await new Promise<void>((resolve) => closed.listen(0, '127.0.0.1', resolve))
     const moonPort = (closed.address() as { port: number }).port
@@ -604,6 +652,12 @@ test(
     assert.ok(kinds.includes('credential-renewed'))
     // One summary per agent run: the original and the restarted one.
     assert.equal(kinds.filter((k) => k === 'agent-summary').length, 2)
+    // Each run's library relay polled the in-memory farm with that run's
+    // credential: the root first, the successor after the restart.
+    const relayJtis = relay.polls.map((auth) =>
+      credentialLookupId(auth.replace(/^Bearer /, '')),
+    )
+    assert.deepEqual(relayJtis, [rootJti, successorJti])
   },
 )
 

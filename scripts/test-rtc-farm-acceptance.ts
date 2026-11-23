@@ -1,3 +1,8 @@
+import { getFreePort } from '../tests/helpers/disposable-postgres.ts'
+import { startLocalPostgres } from '../tests/helpers/connector-outage-local-postgres.ts'
+import { isDockerSim } from '../packages/sim-tools/src/mocks/env.ts'
+import { mkdtemp } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 // One-command real-RTC farm-page acceptance (issues #8/#9; Phase 0 base).
 // Disposable digest-pinned PostgreSQL 17 (never pulled), throwaway TLS CA and
 // keys in a private work directory, sealed built farm server over HTTPS, real
@@ -12,7 +17,7 @@ import {
   spawn,
   type ChildProcess,
 } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { appendFileSync, existsSync, rmSync } from 'node:fs'
 import { copyFile, mkdir, readFile, rm, statfs } from 'node:fs/promises'
@@ -27,28 +32,40 @@ import {
   validateMigrationHistory,
 } from './db/migrations.ts'
 import { selectRtcFarmScenarios } from '../tests/helpers/rtc-farm-acceptance-scenarios.ts'
+import { startSnapshotCamera } from '../tests/helpers/rtc-farm-snapshot-camera.ts'
 import { startRtspCamera } from '../tests/helpers/rtc-farm-rtsp-camera.ts'
+import { runAllAcceptance } from './rtc-farm-all-mode.ts'
 
 const exec = promisify(execFile)
 const env = process.env
 const checkout = new URL('..', import.meta.url).pathname.replace(/\/$/, '')
+if (process.argv.length === 3 && process.argv[2] === '--all')
+  process.exit(await runAllAcceptance(checkout))
+if (process.argv.length === 3 && process.argv[2] === '--network-fault')
+  process.exit(await runAllAcceptance(checkout, { networkFaultOnly: true }))
+const pgDocker = env.OPENFARM_PG === 'docker'
 const image = env.RTC_FARM_TEST_IMAGE
-const dbPort = Number(env.RTC_FARM_TEST_DB_PORT)
-const workRoot = env.RTC_FARM_TEST_WORK_ROOT
+const dbPort =
+  env.RTC_FARM_TEST_DB_PORT || pgDocker
+    ? Number(env.RTC_FARM_TEST_DB_PORT)
+    : await getFreePort()
+const requestedRoot = env.RTC_FARM_TEST_WORK_ROOT
 const runs = Number(env.RTC_FARM_TEST_REPEAT ?? '1')
 if (
   process.argv.length !== 2 ||
-  env.RTC_FARM_TEST_ADMITTED !== 'yes' ||
-  !image ||
-  !/^postgres:17(?:\.[0-9]+)?(?:-[a-z0-9.-]+)?@sha256:[a-f0-9]{64}$/.test(
-    image,
-  ) ||
+  (pgDocker &&
+    (env.RTC_FARM_TEST_ADMITTED !== 'yes' ||
+      !image ||
+      !/^postgres:17(?:\.[0-9]+)?(?:-[a-z0-9.-]+)?@sha256:[a-f0-9]{64}$/.test(
+        image,
+      ))) ||
   !Number.isInteger(dbPort) ||
   dbPort < 1024 ||
   dbPort > 65535 ||
-  !workRoot ||
-  !isAbsolute(workRoot) ||
-  !relative(checkout, workRoot).startsWith('..') ||
+  (pgDocker && !requestedRoot) ||
+  (requestedRoot !== undefined &&
+    (!isAbsolute(requestedRoot) ||
+      !relative(checkout, requestedRoot).startsWith('..'))) ||
   !Number.isInteger(runs) ||
   runs < 1 ||
   runs > 5
@@ -59,19 +76,26 @@ if (
 const scenarios = selectRtcFarmScenarios(env.RTC_FARM_TEST_SCENARIOS)
 // Camera rows need a prebuilt ingest helper (its hash is pinned in tracked
 // code) and a loopback RTSP port.
+const snapshotCamera = env.RTC_FARM_TEST_CAMERA_SOURCE === 'moonraker-snapshot'
 const camera = scenarios.some((row) => row.resources?.includes('rtsp-camera'))
   ? {
       helper: env.RTC_FARM_TEST_RTSP_HELPER ?? '',
-      port: Number(env.RTC_FARM_TEST_RTSP_PORT),
+      port:
+        env.RTC_FARM_TEST_RTSP_PORT || isDockerSim()
+          ? Number(env.RTC_FARM_TEST_RTSP_PORT)
+          : await getFreePort(),
     }
   : undefined
 if (
   camera &&
-  (!isAbsolute(camera.helper) ||
-    !Number.isInteger(camera.port) ||
-    camera.port < 1024 ||
-    camera.port > 65535 ||
-    camera.port === dbPort)
+  ((!camera.helper && isDockerSim()) ||
+    (camera.helper && !isAbsolute(camera.helper)) ||
+    (snapshotCamera && !camera.helper) ||
+    (!snapshotCamera &&
+      (!Number.isInteger(camera.port) ||
+        camera.port < 1024 ||
+        camera.port > 65535 ||
+        camera.port === dbPort)))
 )
   throw new Error(
     'Camera rows need RTC_FARM_TEST_RTSP_HELPER (absolute) and RTC_FARM_TEST_RTSP_PORT',
@@ -82,6 +106,8 @@ if (!/^o3dfm-[a-z0-9-]{1,40}$/.test(prefix))
 const id = randomUUID()
 const name = prefix + '-' + id
 const label = 'org.open3dfarmmanager.rtc-farm-test=' + id
+const workRoot =
+  requestedRoot ?? (await mkdtemp(join(tmpdir(), 'openfarm-rtc-farm-')))
 const workDir = join(workRoot, id)
 const evidence = join(homedir(), '.local/state/o3dfm/rtc-farm-tests', id)
 const ledgerPath = join(evidence, 'resources.jsonl')
@@ -95,7 +121,11 @@ const ledger = (value: object) => {
 
 const docker = async (...args: string[]) =>
   (
-    await exec('docker', args, { timeout: 60000, maxBuffer: 1024 * 1024 })
+    await exec('docker', args, {
+      timeout: 60000,
+      maxBuffer: 1024 * 1024,
+      env: { ...process.env, POSTGRES_PASSWORD: dbPassword },
+    })
   ).stdout.trim()
 
 // Children get an allowlisted environment, never the caller's secrets.
@@ -107,12 +137,17 @@ const ALLOWED_ENV = [
   'LC_ALL',
   'TZ',
   'PLAYWRIGHT_BROWSERS_PATH',
+  'OPENFARM_BROWSER',
+  'OPENFARM_CHROME_PATH',
+  'LD_LIBRARY_PATH',
+  'FONTCONFIG_FILE',
   'XDG_CACHE_HOME',
 ]
 const childEnv: NodeJS.ProcessEnv = Object.fromEntries(
   ALLOWED_ENV.flatMap((key) => (env[key] ? [[key, env[key]]] : [])),
 )
 childEnv.TMPDIR = workDir
+childEnv.OPENFARM_SIM = isDockerSim() ? 'docker' : 'mock'
 
 const KILL_GRACE_MS = 5000
 const LOG_LIMIT_BYTES = 8 * 1024 * 1024
@@ -133,17 +168,20 @@ const stopGroup = (child: ChildProcess | undefined) => {
 // First signal: stop the current group and let finally clean up. Second
 // signal: best-effort synchronous cleanup of exactly this run, then exit.
 let interrupted = false
+let localDb: Awaited<ReturnType<typeof startLocalPostgres>> | undefined
+let dbPassword = randomBytes(32).toString('hex')
 const interrupt = () => {
   if (interrupted) {
     signalGroup(current, 'SIGKILL')
     try {
-      execFileSync('docker', ['rm', '--force', name], { timeout: 15000 })
+      if (pgDocker)
+        execFileSync('docker', ['rm', '--force', name], { timeout: 15000 })
     } catch {
       /* not created or already removed */
     }
     try {
       // Exact compose project of this run's RTSP simulator, if one was started.
-      if (camera)
+      if (camera && isDockerSim() && !snapshotCamera)
         execFileSync(
           'docker',
           [
@@ -165,7 +203,8 @@ const interrupt = () => {
     } catch {
       /* not started or already removed */
     }
-    rmSync(workDir, { recursive: true, force: true })
+    localDb?.stopSync()
+    rmSync(requestedRoot ? workDir : workRoot, { recursive: true, force: true })
     process.exit(130)
   }
   interrupted = true
@@ -247,37 +286,42 @@ try {
     '',
     'The sealed build requires a clean checkout',
   )
-  // Fails rather than pulling: image ownership and deletion remain with its owner.
-  await docker('image', 'inspect', image)
-  ledger({ resource: 'container', name, label, image })
-  createAttempted = true
-  await docker(
-    ...['create', '--name', name, '--label', label, '--pull', 'never'],
-    ...['--cpus', '4', '--memory', '4g', '--read-only', '--cap-drop', 'ALL'],
-    ...['--security-opt', 'no-new-privileges', '--user', 'postgres'],
-    ...['--tmpfs', '/var/lib/postgresql/data:rw,mode=1777'],
-    ...['--tmpfs', '/var/run/postgresql:rw,mode=1777'],
-    ...['--tmpfs', '/tmp:rw,mode=1777'],
-    ...['-p', `127.0.0.1:${dbPort}:5432`],
-    ...['-e', 'POSTGRES_USER=fixture', '-e', 'POSTGRES_DB=fixture'],
-    ...['-e', 'POSTGRES_HOST_AUTH_METHOD=trust'],
-    ...['-e', 'PGDATA=/var/lib/postgresql/data/pgdata'],
-    image,
-  )
-  container = await docker('inspect', '--format', '{{.Id}}', name)
-  assert.match(container, /^[a-f0-9]{64}$/)
-  ledger({ resource: 'container-id', id: container })
-  await docker('start', container)
-  await docker(
-    ...['exec', container, 'sh', '-c'],
-    'n=0; until pg_isready -U fixture -d fixture >/dev/null; do n=$((n+1)); [ "$n" -lt 30 ] || exit 1; sleep 1; done',
-  )
+  if (pgDocker && image) {
+    // Fails rather than pulling: image ownership and deletion remain with its owner.
+    await docker('image', 'inspect', image)
+    ledger({ resource: 'container', name, label, image })
+    createAttempted = true
+    await docker(
+      ...['create', '--name', name, '--label', label, '--pull', 'never'],
+      ...['--cpus', '4', '--memory', '4g', '--read-only', '--cap-drop', 'ALL'],
+      ...['--security-opt', 'no-new-privileges', '--user', 'postgres'],
+      ...['--tmpfs', '/var/lib/postgresql/data:rw,mode=1777'],
+      ...['--tmpfs', '/var/run/postgresql:rw,mode=1777'],
+      ...['--tmpfs', '/tmp:rw,mode=1777'],
+      ...['-p', `127.0.0.1:${dbPort}:5432`],
+      ...['-e', 'POSTGRES_USER=fixture', '-e', 'POSTGRES_DB=fixture'],
+      ...['-e', 'POSTGRES_PASSWORD'],
+      ...['-e', 'PGDATA=/var/lib/postgresql/data/pgdata'],
+      image,
+    )
+    container = await docker('inspect', '--format', '{{.Id}}', name)
+    assert.match(container, /^[a-f0-9]{64}$/)
+    ledger({ resource: 'container-id', id: container })
+    await docker('start', container)
+    await docker(
+      ...['exec', container, 'sh', '-c'],
+      'n=0; until pg_isready -U fixture -d fixture >/dev/null; do n=$((n+1)); [ "$n" -lt 30 ] || exit 1; sleep 1; done',
+    )
+  } else {
+    localDb = await startLocalPostgres({ workDir, port: dbPort, ledger })
+    dbPassword = localDb.password
+  }
   sql = postgres({
     host: '127.0.0.1',
     port: dbPort,
     database: 'fixture',
     username: 'fixture',
-    password: '',
+    password: dbPassword,
     ssl: false,
     max: 2,
     connect_timeout: 3,
@@ -299,6 +343,25 @@ try {
   )
   await sql.end({ timeout: 3 })
   sql = undefined
+
+  if (
+    scenarios.some(({ env }) => env.SIGNALLING_HTTPS_RTC_PACKAGED === 'yes')
+  ) {
+    assert.equal(
+      await run(
+        'build-connector',
+        'npm',
+        ['run', 'build', '-w', '@open3dfarmmanager/connector'],
+        {
+          cwd: checkout,
+          env: childEnv,
+          timeoutMs: 120000,
+        },
+      ),
+      0,
+      'Connector build failed',
+    )
+  }
 
   // Sealed signalling build layer, entirely inside the private work directory.
   const layer = join(workDir, 'layer')
@@ -322,7 +385,7 @@ try {
   assert.equal(
     await run(
       'prepare-app',
-      join(checkout, 'apps/farm/node_modules/.bin/nuxt'),
+      join(checkout, 'node_modules/.bin/nuxt'),
       ['prepare'],
       { cwd: join(checkout, 'apps/farm'), env: nodeEnv, timeoutMs: 300000 },
     ),
@@ -352,15 +415,52 @@ try {
     'Layer seal failed',
   )
 
-  if (camera)
-    rtsp = await startRtspCamera({
-      checkout,
-      workDir,
-      project: name + '-rtsp',
-      port: camera.port,
-      helper: camera.helper,
-      ledger,
-    })
+  if (camera) {
+    let builtHelperSha256: string | undefined
+    if (!camera.helper) {
+      camera.helper = join(workDir, 'built-rtsp-ingest')
+      assert.equal(
+        await run(
+          'build-rtsp-helper',
+          'go',
+          [
+            'build',
+            '-mod=readonly',
+            '-trimpath',
+            '-buildvcs=false',
+            '-o',
+            camera.helper,
+            './cmd/rtsp-ingest',
+          ],
+          {
+            cwd: join(checkout, 'tools/rtsp-ingest'),
+            env: { ...env, CGO_ENABLED: '0' },
+            timeoutMs: 300000,
+          },
+        ),
+        0,
+        'RTSP helper build failed',
+      )
+      builtHelperSha256 = createHash('sha256')
+        .update(await readFile(camera.helper))
+        .digest('hex')
+    }
+    rtsp = snapshotCamera
+      ? await startSnapshotCamera({
+          workDir,
+          helper: camera.helper,
+          ledger,
+        })
+      : await startRtspCamera({
+          checkout,
+          workDir,
+          project: name + '-rtsp',
+          port: camera.port,
+          helper: camera.helper,
+          builtHelperSha256,
+          ledger,
+        })
+  }
   for (let attempt = 1; attempt <= runs; attempt++)
     for (const scenario of scenarios) {
       const rowLedger = join(workDir, `${attempt}-${scenario.name}.ledger`)
@@ -376,21 +476,25 @@ try {
             ...(scenario.resources?.includes('rtsp-camera') ? rtsp?.env : {}),
             SIGNALLING_HTTPS_DISPOSABLE: 'yes',
             SIGNALLING_HTTPS_PORT: String(dbPort),
+            PGPASSWORD: dbPassword,
             SIGNALLING_HTTPS_LEDGER: rowLedger,
             SIGNALLING_HTTPS_LAYER: layer,
           },
           timeoutMs: 300000,
         },
       )
-      const text = [rowLedger, rowLedger + '.rtc-resources.jsonl'].filter(
-        existsSync,
-      )
+      const text = [
+        rowLedger,
+        rowLedger + '.rtc-resources.jsonl',
+        rowLedger + '.pause-execution-rtc-resources.jsonl',
+      ].filter(existsSync)
       const combined = (
         await Promise.all(text.map((path) => readFile(path, 'utf8')))
       ).join('\n')
       for (const path of [
         rowLedger,
         rowLedger + '.rtc-resources.jsonl',
+        rowLedger + '.pause-execution-rtc-resources.jsonl',
         rowLedger + '.app-log.txt',
       ])
         if (existsSync(path))
@@ -438,12 +542,19 @@ try {
     cleanupFailure ??= error
   }
   try {
+    await localDb?.stop()
+  } catch (error) {
+    cleanupFailure ??= error
+  }
+  try {
     // Exact ownership: recover the ID by name if recording was interrupted.
     // A timed-out `docker create` is not cancelled in the daemon and can still
     // finish later, so keep looking for a bounded time after an attempt.
     let owned =
       container ??
-      (await docker('inspect', '--format', '{{.Id}}', name).catch(() => ''))
+      (pgDocker
+        ? await docker('inspect', '--format', '{{.Id}}', name).catch(() => '')
+        : '')
     for (
       let waited = 0;
       !owned && createAttempted && waited < CREATE_SETTLE_MS;
@@ -495,7 +606,10 @@ try {
   }
   try {
     // Exact path: the work directory this run created (layer, CA, keys, ledgers).
-    await rm(workDir, { recursive: true, force: true })
+    await rm(requestedRoot ? workDir : workRoot, {
+      recursive: true,
+      force: true,
+    })
     ledger({ removed: 'work-directory', path: workDir })
   } catch (error) {
     cleanupFailure ??= error

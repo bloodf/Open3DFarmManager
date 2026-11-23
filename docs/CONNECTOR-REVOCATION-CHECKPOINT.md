@@ -24,7 +24,7 @@ A lost successful claim response cannot be reconstructed: no JWT is stored. Clea
 
 Revocation changes current server state. The existing enrolled-Connector proof service rejects a revoked enrollment. A previously signed JWT can still pass the pure signature/claim verifier, so transport acceptance must check current enrollment, credential identity and revocation state and require fresh proof of private-key possession. A JWT alone never authorizes transport or commands.
 
-An offline or already connected Connector cannot immediately learn a remote revocation. This slice does not stop printers, deliver commands, erase an offline key, or promise immediate remote disconnection. Connector safety enforcement remains local. Live status, camera and signed commands remain browser-to-Connector WebRTC, with no server command fallback.
+An offline or already connected Connector cannot immediately learn a remote revocation. This slice does not stop printers, deliver commands, erase an offline key, or promise immediate remote disconnection. Connector safety enforcement remains local. Live status and camera remain browser-to-Connector WebRTC; browser commands stay WebRTC-only with no HTTP fallback, while API-originated commands require owner-granted scopes and issuer-signed envelopes enforced by the Connector.
 
 HTTP exposure remains gated on authenticated exact-target discovery, strict server-configured session/CSRF handling and runtime credential acceptance that consults current state. Inventory integration is a separate slice. No browser recovery endpoint or full onboarding flow is claimed here.
 

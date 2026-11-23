@@ -26,8 +26,9 @@ import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative } from 'node:path'
 import postgres from 'postgres'
-import { z } from '../packages/farm-protocol/node_modules/zod/index.js'
+import { z } from 'zod'
 import { hashPassword } from '../apps/farm/server/utils/auth/password.ts'
+import { assertSupportedNodeRuntime } from '../tests/helpers/node-version.ts'
 import { signallingHttpsProxy } from '../tests/helpers/signalling-https-proxy.ts'
 import { assertSignallingCatalog } from '../tests/helpers/signalling-https-catalog.ts'
 import {
@@ -239,8 +240,7 @@ function fixtureMode() {
   }
 }
 const mode = process.argv[2]
-if (process.versions.bun || !process.versions.node.startsWith('24.'))
-  throw new Error('Node 24 is required')
+assertSupportedNodeRuntime()
 if (mode === '--prepare-layer') {
   if (process.argv.length !== 4 || !process.argv[3])
     throw new Error('Provide a new private layer directory')
@@ -250,11 +250,12 @@ if (mode === '--prepare-layer') {
   const app = join(checkout, 'apps/farm')
   const output = join(layer, 'output')
   await symlink(
-    await realpath(join(app, 'node_modules')),
+    await realpath(join(checkout, 'node_modules')),
     join(layer, 'node_modules'),
     'dir',
   )
-  const config = `export default defineNuxtConfig({ extends: ${JSON.stringify(app)}, srcDir: ${JSON.stringify(join(app, 'app'))}, runtimeConfig: { connectorSignalling: { enabled: true } }, nitro: { preset: 'node-server', output: { dir: ${JSON.stringify(output)} } } })\n`
+  // Keep the fixture entry deferred so it runs after Nuxt's inline runtime config.
+  const config = `export default defineNuxtConfig({ extends: ${JSON.stringify(app)}, srcDir: ${JSON.stringify(join(app, 'app'))}, runtimeConfig: { connectorSignalling: { enabled: true } }, nitro: { preset: 'node-server', ignore: ['plugins/pre-hydration.ts'], output: { dir: ${JSON.stringify(output)} } } })\n`
   await writeFile(join(layer, 'nuxt.config.ts'), config, {
     mode: 0o600,
     flag: 'wx',
@@ -379,6 +380,7 @@ if (mode === '--prepare-layer') {
                   executionModule.createPauseExecutionRtcFixtureExtension({
                     closure: pauseExecutionClosure(),
                     testReplay: true,
+                    rejection: process.env.SIGNALLING_HTTPS_RTC_REJECTION,
                   }),
                 extensionKind: 'pause-execution-rtc' as const,
                 caPath: ca,
@@ -848,6 +850,8 @@ if (mode === '--prepare-layer') {
                 'yes'
                   ? {
                       SIGNALLING_HTTPS_PAUSE_EXECUTION_RTC_FIXTURE: 'yes',
+                      SIGNALLING_HTTPS_RTC_REJECTION:
+                        process.env.SIGNALLING_HTTPS_RTC_REJECTION,
                       SIGNALLING_HTTPS_PAUSE_EXECUTION_ROW:
                         pauseExecutionClosure(),
                     }
@@ -970,7 +974,9 @@ if (mode === '--prepare-layer') {
     if (!failed && !failures.length)
       await note(
         farmPause
-          ? 'PASS real generated Nitro HTTPS/WSS farm page signed pause over WebRTC to synthetic Moonraker'
+          ? process.env.SIGNALLING_HTTPS_SIM_PRINTING_PAUSE === 'sv06'
+            ? 'PASS real generated Nitro HTTPS/WSS farm page signed pause over WebRTC to the printing simulator'
+            : 'PASS real generated Nitro HTTPS/WSS farm page signed pause over WebRTC to synthetic Moonraker'
           : pauseRtcFixture
             ? 'PASS real generated Nitro HTTPS pause issuer and authenticated pause RTC fixture'
             : pauseFixture

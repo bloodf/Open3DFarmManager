@@ -41,12 +41,9 @@ export async function until(
 
 /** Synthetic Moonraker: subscribe baseline plus explicit notify_status_update pushes. */
 export async function startFakeMoonraker(port: number) {
-  const {
-    WebSocketServer,
-  }: typeof import('../../packages/connector/node_modules/@types/ws') =
-    createRequire(
-      new URL('../../packages/connector/package.json', import.meta.url),
-    )('ws')
+  const { WebSocketServer }: typeof import('ws') = createRequire(
+    new URL('../../packages/connector/package.json', import.meta.url),
+  )('ws')
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 4096 })
   let eventtime = 1
   let state: 'printing' | 'paused' = 'printing'
@@ -77,8 +74,38 @@ export async function startFakeMoonraker(port: number) {
           const message: unknown = JSON.parse(data.toString())
           if (!message || typeof message !== 'object' || !('id' in message))
             return
-          subscriptions++
-          baselines.push(progress)
+          const method = 'method' in message ? message.method : undefined
+          if (method === 'server.connection.identify') {
+            ws.send(
+              JSON.stringify({
+                jsonrpc: '2.0',
+                id: message.id,
+                result: { connection_id: 1 },
+              }),
+            )
+            return
+          }
+          if (method === 'printer.objects.list') {
+            ws.send(
+              JSON.stringify({
+                jsonrpc: '2.0',
+                id: message.id,
+                result: { objects: [] },
+              }),
+            )
+            return
+          }
+          if (
+            method !== 'printer.objects.subscribe' &&
+            method !== 'printer.objects.query'
+          )
+            throw new Error(
+              `Unexpected synthetic Moonraker request: ${String(method)}`,
+            )
+          if (method === 'printer.objects.subscribe') {
+            subscriptions++
+            baselines.push(progress)
+          }
           ws.send(
             JSON.stringify({
               jsonrpc: '2.0',
@@ -144,6 +171,97 @@ export type ProxyEntry = {
   eventIds?: string[]
 }
 
+export type CommitHold = {
+  eventIds: string[]
+  release: () => void
+}
+
+/** One in-flight commit hold. Close and abort reject the wait and drop a held response. */
+export function createCommitHold() {
+  let pending:
+    | {
+        resolve: (held: CommitHold) => void
+        reject: (error: Error) => void
+        timer: ReturnType<typeof setTimeout>
+        signal?: AbortSignal | undefined
+        onAbort?: (() => void) | undefined
+      }
+    | undefined
+  let heldRelease: (() => void) | undefined
+  let closed = false
+
+  const clearPending = () => {
+    const current = pending
+    pending = undefined
+    if (!current) return
+    clearTimeout(current.timer)
+    if (current.signal && current.onAbort)
+      current.signal.removeEventListener('abort', current.onAbort)
+  }
+
+  return {
+    holdNextCommit(options?: {
+      timeoutMs?: number | undefined
+      signal?: AbortSignal | undefined
+    }) {
+      if (closed) return Promise.reject(new Error('commit hold closed'))
+      if (pending)
+        return Promise.reject(new Error('commit hold already waiting'))
+      const timeoutMs = options?.timeoutMs ?? 30_000
+      if (options?.signal?.aborted)
+        return Promise.reject(new Error('commit hold aborted'))
+      return new Promise<CommitHold>((resolve, reject) => {
+        const finish = (error: Error) => {
+          clearPending()
+          reject(error)
+        }
+        const onAbort = () => finish(new Error('commit hold aborted'))
+        const timer = setTimeout(
+          () => finish(new Error('commit hold timed out')),
+          timeoutMs,
+        )
+        options?.signal?.addEventListener('abort', onAbort)
+        pending = {
+          resolve,
+          reject,
+          timer,
+          signal: options?.signal,
+          onAbort,
+        }
+      })
+    },
+    /** Holds a successful commit when a waiter exists. Otherwise the caller forwards it. */
+    intercept(eventIds: string[], release: () => void) {
+      const current = pending
+      if (!current) return false
+      clearPending()
+      if (closed) {
+        release()
+        return true
+      }
+      heldRelease = release
+      current.resolve({
+        eventIds,
+        release: () => {
+          if (heldRelease !== release) return
+          heldRelease = undefined
+          release()
+        },
+      })
+      return true
+    },
+    close() {
+      closed = true
+      const current = pending
+      clearPending()
+      current?.reject(new Error('commit hold closed'))
+      const release = heldRelease
+      heldRelease = undefined
+      release?.()
+    },
+  }
+}
+
 /** TLS front for the built app. Records every attempt and can inject faults. */
 export async function startFaultProxy(input: {
   port: number
@@ -153,8 +271,7 @@ export async function startFaultProxy(input: {
 }) {
   const log: ProxyEntry[] = []
   let mode: 'pass' | 'reset' = 'pass'
-  let hold:
-    ((held: { eventIds: string[]; release: () => void }) => void) | undefined
+  const commits = createCommitHold()
   const server = createHttpsServer(
     { cert: input.cert, key: input.key },
     (req, res) => {
@@ -199,14 +316,12 @@ export async function startFaultProxy(input: {
             response.on('data', (chunk: Buffer) => parts.push(chunk))
             response.on('end', () => {
               entry.outcome = response.statusCode ?? 502
-              if (route === 'commit' && entry.outcome === 200 && hold) {
-                const notify = hold
-                hold = undefined
+              if (
+                route === 'commit' &&
+                entry.outcome === 200 &&
+                commits.intercept(entry.eventIds ?? [], () => res.destroy())
+              ) {
                 entry.outcome = 'held'
-                notify({
-                  eventIds: entry.eventIds ?? [],
-                  release: () => res.destroy(),
-                })
                 return
               }
               res.writeHead(response.statusCode ?? 502, response.headers)
@@ -231,14 +346,14 @@ export async function startFaultProxy(input: {
       mode = next
     },
     /** Withholds the next successful commit response from the Connector. */
-    holdNextCommit() {
-      return new Promise<{ eventIds: string[]; release: () => void }>(
-        (resolveHold) => {
-          hold = resolveHold
-        },
-      )
+    holdNextCommit(options?: {
+      timeoutMs?: number | undefined
+      signal?: AbortSignal | undefined
+    }) {
+      return commits.holdNextCommit(options)
     },
     async close() {
+      commits.close()
       server.closeAllConnections()
       await new Promise<void>((done) => server.close(() => done()))
     },

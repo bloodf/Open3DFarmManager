@@ -49,6 +49,7 @@ const Scope = z.strictObject({
   farmId: BrowserDeviceUuid,
   agentId: BrowserDeviceUuid,
   keyId: BrowserDeviceUuid,
+  cameraPrinterId: BrowserDeviceUuid.optional(),
 })
 const time = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
 const Credential = z.strictObject({
@@ -88,6 +89,10 @@ export interface ConnectorCurrentSnapshot {
   identity: ConnectorCurrentIdentity
   budget: SignallingReadBudget
 }
+export type ConnectorCurrentDecision =
+  | { kind: 'authorized'; snapshot: ConnectorCurrentSnapshot }
+  | { kind: 'denied' }
+  | { kind: 'unavailable' }
 export type SignallingReadDecision =
   | { ok: true; authority: SignallingAuthority; observedAt: number }
   | { ok: false; reason: 'denied' | 'invalid-input' | 'storage-unavailable' }
@@ -133,9 +138,9 @@ export class PostgresSignallingAuthorization implements SignallingAuthoritySourc
   }
   async readConnectorCurrent(
     input: unknown,
-  ): Promise<ConnectorCurrentSnapshot | null> {
+  ): Promise<ConnectorCurrentDecision> {
     const parsed = ConnectorScope.safeParse(input)
-    if (!parsed.success) return null
+    if (!parsed.success) return { kind: 'denied' }
     try {
       const start = signallingClockSample(this.clock)
       const candidate = await this.sql.begin(async (tx) => {
@@ -160,18 +165,21 @@ export class PostgresSignallingAuthorization implements SignallingAuthoritySourc
         return { identity, observedAt }
       })
       const end = signallingClockSample(this.clock)
-      if (!candidate) return null
+      if (!candidate) return { kind: 'denied' }
       return {
-        identity: candidate.identity,
-        budget: signallingReadBudget({
-          start,
-          end,
-          observedAt: candidate.observedAt,
-          validUntil: candidate.identity.validUntil,
-        }),
+        kind: 'authorized',
+        snapshot: {
+          identity: candidate.identity,
+          budget: signallingReadBudget({
+            start,
+            end,
+            observedAt: candidate.observedAt,
+            validUntil: candidate.identity.validUntil,
+          }),
+        },
       }
     } catch {
-      return null
+      return { kind: 'unavailable' }
     }
   }
   private async databaseTime(tx: TransactionSql): Promise<number> {
@@ -306,6 +314,11 @@ export class PostgresSignallingAuthorization implements SignallingAuthoritySourc
       assignments.data.some(
         (row) => row.farm_id !== scope.farmId || row.agent_id !== scope.agentId,
       )
+    )
+      return null
+    if (
+      scope.cameraPrinterId &&
+      !assignments.data.some((row) => row.id === scope.cameraPrinterId)
     )
       return null
     const assignmentSet = await assignmentSetDigest(

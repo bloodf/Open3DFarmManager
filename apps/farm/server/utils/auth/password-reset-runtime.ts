@@ -1,44 +1,34 @@
-import type { Sql } from 'postgres'
 import { createError } from 'nuxt/server'
 import type { AuthRuntime } from './runtime.ts'
-import type { PasswordResetDelivery } from '../../services/password-reset.ts'
+import type {
+  PasswordResetDelivery,
+  PasswordResetStore,
+} from '../../services/password-reset.ts'
+import type { ResetLinkStore } from '../../services/password-reset-links.ts'
 import { PasswordResetQueue } from '../../services/password-reset-queue.ts'
-import { PostgresPasswordReset } from '../../storage/postgres-password-reset.ts'
 
-/** Server composition injects this object into event.context.passwordReset.
- * No adapter is configured by default; functions never come from runtimeConfig.
- * Composition must await runtime.close() in the application close hook before
- * closing its owned SQL pool. Delivery must honor the supplied AbortSignal.
+/** The password-reset plugin injects this object into event.context.passwordReset
+ * only when reset is enabled. Owner-issued links need no delivery. A self-service
+ * request queue exists only with a trusted delivery; none is configured by default,
+ * so the request endpoint answers 404 and cannot replace an owner-issued link.
  */
 export class PasswordResetRuntime {
-  readonly store: PostgresPasswordReset
+  readonly store: PasswordResetStore & ResetLinkStore
   readonly auth: AuthRuntime
-  readonly queue: PasswordResetQueue
+  readonly queue: PasswordResetQueue | undefined
   constructor(
     auth: AuthRuntime,
-    sql: Sql,
-    delivery: PasswordResetDelivery,
-    onClose: (close: () => Promise<void>) => void,
+    store: PasswordResetStore & ResetLinkStore,
+    delivery?: PasswordResetDelivery,
   ) {
     this.auth = auth
-    this.store = new PostgresPasswordReset(sql)
-    this.queue = new PasswordResetQueue(this.store, delivery)
-    // Composition passes close => nitro.hooks.hook('close', close).
-    onClose(() => this.close())
+    this.store = store
+    this.queue = delivery ? new PasswordResetQueue(store, delivery) : undefined
   }
-  close(): Promise<void> {
-    return this.queue.close()
+  /** Await in the application close hook before closing the owned SQL pool. */
+  async close(): Promise<void> {
+    await this.queue?.close()
   }
-}
-export function createPasswordResetRuntime(
-  auth: AuthRuntime,
-  sql: Sql,
-  onClose: (close: () => Promise<void>) => void,
-  delivery?: PasswordResetDelivery,
-): PasswordResetRuntime | undefined {
-  return delivery
-    ? new PasswordResetRuntime(auth, sql, delivery, onClose)
-    : undefined
 }
 export function passwordResetRuntime(value: unknown): PasswordResetRuntime {
   if (!(value instanceof PasswordResetRuntime))

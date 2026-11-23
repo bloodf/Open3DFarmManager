@@ -5,12 +5,35 @@ import {
 
 export { controlRoleAllowed }
 
-/** The default retains the v1 action projection for existing consumers. */
+/** Explicit action lists use the shared role policy, including both heater controls. */
 export function actionsForControlRole(
   role: string,
   actions: readonly ExtendedControlAction[] = ExtendedControlAction.options.filter(
     (action) =>
-      !['run_macro', 'load_filament', 'unload_filament'].includes(action),
+      ![
+        'set_tool_temperature',
+        'run_macro',
+        'config_write',
+        'service',
+        'power',
+        'timelapse',
+        'load_filament',
+        'unload_filament',
+        'extrude',
+        'file_op',
+        'exclude_object',
+        'set_led',
+        'set_pin',
+        'bed_mesh',
+        'gcode',
+        'jog',
+        'motors_off',
+        'z_babystep',
+        'set_factor',
+        'queue_op',
+        'start_library_print',
+        'confirm_collection',
+      ].includes(action),
   ),
 ): ExtendedControlAction[] {
   return actions.filter((action) => controlRoleAllowed(role, action))

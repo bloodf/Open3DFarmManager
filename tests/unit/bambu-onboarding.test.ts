@@ -354,7 +354,12 @@ describe('Bambu Lab form validation', () => {
   })
 })
 
-describe('Bambu Lab Connector apply', () => {
+// Every engine call here fsyncs its journal, credential and binding writes
+// (the durability the suite asserts), and these tests chain many such calls.
+// That is about 1-4 s idle but over 30 s when the os.tmpdir() disk is
+// contended, so the suite gets an explicit timeout rather than moving
+// fixtures to tmpfs.
+describe('Bambu Lab Connector apply', { timeout: 120_000 }, () => {
   it('probes read-only, writes the private binding and replays idempotently', async () => {
     const w = world()
     const log = vi.spyOn(console, 'log')
@@ -618,78 +623,97 @@ describe('Bambu Lab Connector apply', () => {
 })
 
 describe('Bambu Lab form dispatch', () => {
-  it('sends the access code only to the signed channel and persists a redacted recovery context', async () => {
-    const require = createRequire(resolve('apps/farm/package.json'))
-    const { parse, compileScript } = require('vue/compiler-sfc')
-    const source = readFileSync('apps/farm/app/pages/impressoras.vue', 'utf8')
-    expect(source).toContain('BAMBU_LAN_COMMAND_NOTE')
-    expect(source).toContain('<option value="bambu-lan">')
-    const { descriptor } = parse(source)
-    const compiled = compileScript(descriptor, { id: 'bambu-presend' })
-    const node = compiled.scriptSetupAst.find(
-      (item: { type: string; id?: { name: string } }) =>
-        item.type === 'FunctionDeclaration' &&
-        item.id?.name === 'prepareBambuPrinter',
-    )
-    const javascript = transformSync(
-      descriptor.scriptSetup.content.slice(node.start, node.end),
-      { loader: 'ts', target: 'es2022' },
-    ).code
-    const ref = <T>(value: T) => ({ value })
-    const persisted: string[] = []
-    const sent: unknown[] = []
-    const context = {
-      kobraBusy: ref(false),
-      kobraBootstrap: ref({
-        kind: 'ready',
-        data: { bootstrap: { revision: 0 } },
-      }),
-      kobraError: ref(''),
-      kobraStatus: ref(''),
-      bambuIp: ref(' 192.168.1.60 '),
-      bambuSerial: ref(SERIAL),
-      bambuAccessCode: ref(CODE),
-      bambuControl: ref(true),
-      kobraLabel: ref('X1C'),
-      kobraGeneration: 1,
-      kobraController: null,
-      kobraStage: ref('idle'),
-      kobraKeyState: ref({ kind: 'available', accountId: 'admin' }),
-      farmId: ref(randomUUID()),
-      kobraAgentId: ref(randomUUID()),
-      kobraKeyId: ref(randomUUID()),
-      kobraOperation: ref<unknown>(null),
-      validateBambuTargetInput,
-      withoutBambuAccessCode,
-      configurationTargetHash,
-      crypto,
-      AbortController,
-      persistPendingOperation: (value: unknown) => {
-        persisted.push(JSON.stringify(value))
-      },
-      ensureKobraSession: async () => ({
-        async prepare(input: { target: unknown; beforeDispatch: () => void }) {
-          sent.push(input.target)
-          input.beforeDispatch()
-          return { kind: 'prepared' }
+  // Loading vue/compiler-sfc and compiling the full impressoras.vue page is
+  // inherently heavy (about 0.5 s idle, several seconds on a loaded CI host),
+  // so this test gets an explicit timeout instead of the 5 s default.
+  it(
+    'sends the access code only to the signed channel and persists a redacted recovery context',
+    { timeout: 30_000 },
+    async () => {
+      const require = createRequire(resolve('apps/farm/package.json'))
+      const { parse, compileScript } = require('vue/compiler-sfc')
+      const source = readFileSync('apps/farm/app/pages/impressoras.vue', 'utf8')
+      // The Bambu form now lives in the extracted printer-setup components.
+      const form = ['BambuFields', 'SetupForm']
+        .map((name) =>
+          readFileSync(
+            `apps/farm/app/components/printer-setup/${name}.vue`,
+            'utf8',
+          ),
+        )
+        .join('\n')
+      expect(form).toContain('BAMBU_LAN_COMMAND_NOTE')
+      expect(form).toContain('<option value="bambu-lan">')
+      const { descriptor } = parse(source)
+      const compiled = compileScript(descriptor, { id: 'bambu-presend' })
+      const node = compiled.scriptSetupAst.find(
+        (item: { type: string; id?: { name: string } }) =>
+          item.type === 'FunctionDeclaration' &&
+          item.id?.name === 'prepareBambuPrinter',
+      )
+      const javascript = transformSync(
+        descriptor.scriptSetup.content.slice(node.start, node.end),
+        { loader: 'ts', target: 'es2022' },
+      ).code
+      const ref = <T>(value: T) => ({ value })
+      const persisted: string[] = []
+      const sent: unknown[] = []
+      const context = {
+        kobraBusy: ref(false),
+        kobraBootstrap: ref({
+          kind: 'ready',
+          data: { bootstrap: { revision: 0 } },
+        }),
+        kobraError: ref(''),
+        kobraStatus: ref(''),
+        bambuIp: ref(' 192.168.1.60 '),
+        bambuSerial: ref(SERIAL),
+        bambuAccessCode: ref(CODE),
+        bambuControl: ref(true),
+        kobraLabel: ref('X1C'),
+        kobraGeneration: 1,
+        kobraController: null,
+        kobraStage: ref('idle'),
+        kobraKeyState: ref({ kind: 'available', accountId: 'admin' }),
+        farmId: ref(randomUUID()),
+        kobraAgentId: ref(randomUUID()),
+        kobraKeyId: ref(randomUUID()),
+        kobraOperation: ref<unknown>(null),
+        validateBambuTargetInput,
+        withoutBambuAccessCode,
+        configurationTargetHash,
+        crypto,
+        AbortController,
+        persistPendingOperation: (value: unknown) => {
+          persisted.push(JSON.stringify(value))
         },
-      }),
-      applySessionOutcome: vi.fn(),
-      handleKobraException: vi.fn(),
-      nextTick: async () => {},
-      kobraErrorSummary: ref(null),
-    }
-    const prepare = new Function(
-      'context',
-      `with (context) { ${javascript}; return prepareBambuPrinter }`,
-    )(context)
-    await prepare()
-    expect(context.handleKobraException).not.toHaveBeenCalled()
-    expect(sent).toEqual([target({ control: true })])
-    expect(persisted).toHaveLength(1)
-    expect(persisted[0]).not.toContain(CODE)
-    expect(JSON.stringify(context.kobraOperation.value)).not.toContain(CODE)
-    expect(context.bambuAccessCode.value).toBe('')
-    expect(context.applySessionOutcome).toHaveBeenCalledOnce()
-  })
+        ensureKobraSession: async () => ({
+          async prepare(input: {
+            target: unknown
+            beforeDispatch: () => void
+          }) {
+            sent.push(input.target)
+            input.beforeDispatch()
+            return { kind: 'prepared' }
+          },
+        }),
+        applySessionOutcome: vi.fn(),
+        handleKobraException: vi.fn(),
+        nextTick: async () => {},
+        kobraErrorSummary: ref(null),
+      }
+      const prepare = new Function(
+        'context',
+        `with (context) { ${javascript}; return prepareBambuPrinter }`,
+      )(context)
+      await prepare()
+      expect(context.handleKobraException).not.toHaveBeenCalled()
+      expect(sent).toEqual([target({ control: true })])
+      expect(persisted).toHaveLength(1)
+      expect(persisted[0]).not.toContain(CODE)
+      expect(JSON.stringify(context.kobraOperation.value)).not.toContain(CODE)
+      expect(context.bambuAccessCode.value).toBe('')
+      expect(context.applySessionOutcome).toHaveBeenCalledOnce()
+    },
+  )
 })

@@ -11,6 +11,7 @@ import {
   readCommandOutcome,
 } from '../../packages/connector/src/control/command-journal.ts'
 import { createPauseDispatcher } from '../../packages/connector/src/control/pause-dispatcher.ts'
+import { createOfflineAuthority } from '../../packages/connector/src/auth/offline-authority.ts'
 import {
   createPrinterBindingRegistry,
   readPrinterBinding,
@@ -204,7 +205,11 @@ function waitForDriverCount(
   })
 }
 
-async function fixture(shortCapability = false, resultTimeoutMs = 1000) {
+async function fixture(
+  shortCapability = false,
+  resultTimeoutMs = 1000,
+  offline?: ReturnType<typeof createOfflineAuthority>,
+) {
   const f = await authorityFixture(),
     directory = mkdtempSync(join(tmpdir(), 'open3dfarm-pause-dispatch-'))
   let wall = 1000,
@@ -387,8 +392,10 @@ async function fixture(shortCapability = false, resultTimeoutMs = 1000) {
       }
     }
   }
+  offline?.confirm({ wall, mono }, 1)
   const dispatcher = createPauseDispatcher({
     authority: {
+      ...(offline ? { freshness: offline.freshness } : {}),
       issuers: [
         {
           issuer: f.capability.issuer,
@@ -627,6 +634,13 @@ async function fixture(shortCapability = false, resultTimeoutMs = 1000) {
       dispatcher.observe(printerBinding, value)
     },
     getState: () => state,
+    stepWall: (n: number) => {
+      wall += n
+    },
+    stepMono: (n: number) => {
+      mono += n
+    },
+    confirm: (seq: number) => offline?.confirm({ wall, mono }, seq),
     advance: (n: number) => {
       wall += n
       mono += n
@@ -661,6 +675,73 @@ test('real verified capability and P-256 command reach one guarded synthetic pau
     assert.equal(f.getWrites(), 1)
   } finally {
     f.cleanup()
+  }
+})
+
+test('bound command fields reject re-signed cross-scope substitutions and reused uniqueness fields before driver entry', async (t) => {
+  const fields = [
+    'farm_id',
+    'agent_id',
+    'account_id',
+    'key_id',
+    'transport_id',
+    'capability_id',
+    'assignment_id',
+    'cmd_id',
+    'nonce',
+  ] as const
+  for (const field of fields) {
+    await t.test(field, async () => {
+      const f = await fixture()
+      try {
+        const uniqueness = field === 'cmd_id' || field === 'nonce'
+        if (uniqueness) {
+          const accepted = await f.dispatcher.dispatch({
+            wire: f.wire,
+            capability: f.handle,
+            printerBinding: f.printerBinding,
+          })
+          assert.equal(accepted.kind, 'applied', JSON.stringify(accepted))
+          assert.equal(f.getWrites(), 1)
+          assert.equal(f.driverEntryCount(), 1)
+        }
+        const { sig: _sig, ...original } = JSON.parse(
+          f.wire,
+        ) as typeof f.f.command & { sig: string }
+        const replacement =
+          field === 'account_id'
+            ? 'other-account'
+            : field === 'nonce'
+              ? randomBytes(16).toString('base64url')
+              : randomUUID()
+        const substituted = await signCommandV2(
+          uniqueness
+            ? {
+                ...original,
+                cmd_id: field === 'cmd_id' ? original.cmd_id : randomUUID(),
+                nonce:
+                  field === 'nonce'
+                    ? original.nonce
+                    : randomBytes(16).toString('base64url'),
+              }
+            : { ...original, [field]: replacement },
+          f.f.pair.privateKey,
+        )
+        const result = await f.dispatcher.dispatch({
+          wire: encodeCommandV2(substituted),
+          capability: f.handle,
+          printerBinding: f.printerBinding,
+        })
+        assert.deepEqual(result, {
+          kind: 'rejected',
+          reason: uniqueness ? 'replay' : 'scope',
+        })
+        assert.equal(f.getWrites(), uniqueness ? 1 : 0)
+        assert.equal(f.driverEntryCount(), uniqueness ? 1 : 0)
+      } finally {
+        f.cleanup()
+      }
+    })
   }
 })
 
@@ -1442,5 +1523,65 @@ test('abort reentered from the journal claim returns a correlated not-sent resul
     )
   } finally {
     f.cleanup()
+  }
+})
+
+test('dispatcher refuses a forward step until authenticated confirmation', async () => {
+  const offline = createOfflineAuthority()
+  const f = await fixture(false, 1000, offline)
+  try {
+    const input = {
+      wire: f.wire,
+      capability: f.handle,
+      printerBinding: f.printerBinding,
+    }
+    f.stepWall(1001)
+    assert.deepEqual(await f.dispatcher.dispatch(input), {
+      kind: 'rejected',
+      reason: 'expired',
+    })
+    assert.equal(f.getWrites(), 0)
+    assert.equal(f.confirm(1), false)
+    assert.deepEqual(await f.dispatcher.dispatch(input), {
+      kind: 'rejected',
+      reason: 'expired',
+    })
+    assert.equal(f.confirm(2), true)
+    const result = await f.dispatcher.dispatch(input)
+    assert.equal(result.kind, 'applied', JSON.stringify(result))
+    assert.equal(f.getWrites(), 1)
+  } finally {
+    f.cleanup()
+  }
+})
+
+test('dispatcher continues refusing a backward clock after confirmation', async (t) => {
+  for (const clock of ['wall', 'monotonic'] as const) {
+    await t.test(clock, async () => {
+      const f = await fixture(false, 1000, createOfflineAuthority())
+      try {
+        const input = {
+          wire: f.wire,
+          capability: f.handle,
+          printerBinding: f.printerBinding,
+        }
+        if (clock === 'wall') f.stepWall(-1)
+        else f.stepMono(-1)
+        assert.deepEqual(await f.dispatcher.dispatch(input), {
+          kind: 'rejected',
+          reason: 'expired',
+        })
+        assert.equal(f.confirm(2), false)
+        f.advance(2)
+        assert.equal(f.confirm(3), true)
+        assert.deepEqual(await f.dispatcher.dispatch(input), {
+          kind: 'rejected',
+          reason: 'expired',
+        })
+        assert.equal(f.getWrites(), 0)
+      } finally {
+        f.cleanup()
+      }
+    })
   }
 })

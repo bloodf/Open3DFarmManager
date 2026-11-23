@@ -16,6 +16,8 @@ export const StatusMessage = z.strictObject({
   printers: z.array(PrinterState).max(100),
   // Optional so snapshots from Connectors without Spoolman stay valid.
   inventory: SpoolInventory.optional(),
+  // Connector queue storage refuses writes: status stays live, control is refused.
+  storage: z.literal('degraded').optional(),
 })
 export const CommandAck = z.strictObject({
   t: z.literal('ack'),

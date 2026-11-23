@@ -19,7 +19,15 @@ const sfc = createRequire(join(app, 'package.json'))('vue/compiler-sfc') as {
   ): { content: string }
 }
 
-export async function cameraDisplayBundle() {
+// Bundle once per worker; every test still mounts a fresh app in a new page.
+let bundle: Promise<{ js: string; css: string }> | undefined
+
+export function cameraDisplayBundle() {
+  bundle ??= compile()
+  return bundle
+}
+
+async function compile() {
   const { descriptor } = sfc.parse(readFileSync(file, 'utf8'), {
     filename: file,
   })
@@ -56,7 +64,7 @@ window.cameraDisplay = {
       __VUE_PROD_DEVTOOLS__: 'false',
       __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: 'false',
     },
-    nodePaths: [join(app, 'node_modules')],
+    nodePaths: [join(app, '../../node_modules')],
   })
   return {
     js: bundled.outputFiles[0]!.text,

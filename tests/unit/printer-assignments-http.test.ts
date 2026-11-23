@@ -408,7 +408,7 @@ test('storage denial, conflict and outages fail closed without leaking internal 
     ).rejects.toMatchObject({ status })
   }
   for (const [reason, status] of [
-    ['forbidden', 403],
+    ['forbidden', 404],
     ['unauthorized', 401],
     ['storage-unavailable', 503],
   ] as const) {

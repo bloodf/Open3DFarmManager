@@ -61,3 +61,12 @@ loopback: **not proven on hardware** (não comprovado em hardware).
 ## Notas por firmware no catálogo
 
 Para A2L, X2D, H2C, P2S e H2S, a versão instalada é desconhecida. O anúncio [S6] prevê controle de autorização em modelos futuros, mas não identifica a versão instalada em cada modelo nem comprova a integração. Os recursos testados continuam classificados como simulados até qualificação em hardware.
+
+## Bambu cloud (`NUXT_BAMBU_CLOUD`) — desligado e offline por padrão
+
+A importação por conta Bambu cloud (E15, #282 a #286) exige acesso externo à internet, indisponível no ambiente desktop offline. A regra de política e isolamento fica estabelecida antes da implementação do E15:
+
+- A flag de nível farm `NUXT_BAMBU_CLOUD` (configuração de runtime `bambuCloud`) tem padrão `false` (desligada).
+- Com `NUXT_BAMBU_CLOUD` desligada, nenhum caminho de código resolve DNS ou contata qualquer host da nuvem Bambu (`*.bambulab.com`, `*.bambulab.cn`, `*.bambu.com`), e a interface oculta a seção de conta Bambu cloud.
+- Os testes do E15 (#283, #284, #285 e #286) devem usar exclusivamente uma nuvem falsa em loopback no harness (`127.0.0.1`), nunca o serviço real.
+- A verificação offline `desktop:check` exige e valida que `NUXT_BAMBU_CLOUD` esteja desligada (`assertBambuCloudOff`).

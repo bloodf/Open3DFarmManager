@@ -1,0 +1,16 @@
+REVOKE UPDATE (notes, deleted_at) ON farm.library_versions FROM farm_library;
+REVOKE UPDATE (title, tags, archived) ON farm.library_items FROM farm_library;
+REVOKE UPDATE (storage_mode, quota_bytes, retention_days, updated_by, updated_at) ON farm.library_settings FROM farm_library;
+REVOKE UPDATE (id) ON farm.session_accounts FROM farm_library;
+REVOKE UPDATE (last_seen_at, revoked_at) ON farm.account_sessions FROM farm_library;
+REVOKE UPDATE (farm_id) ON farm.memberships FROM farm_library;
+REVOKE UPDATE (agent_id) ON farm.connector_enrollments FROM farm_library;
+REVOKE ALL PRIVILEGES ON farm.library_versions, farm.library_blobs, farm.library_items, farm.library_settings, farm.session_accounts, farm.account_sessions, farm.memberships, farm.connector_enrollments FROM farm_library;
+REVOKE USAGE ON SCHEMA farm FROM farm_library;
+DROP ROLE farm_library;
+DROP TABLE farm.library_versions;
+DROP TABLE farm.library_blobs;
+DROP TABLE farm.library_items;
+DROP TABLE farm.library_settings;
+DROP FUNCTION farm.library_blob_guard();
+DROP FUNCTION farm.library_version_guard();

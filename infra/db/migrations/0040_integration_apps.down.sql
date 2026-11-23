@@ -1,0 +1,14 @@
+DROP OWNED BY farm_integration_apps;
+DROP ROLE farm_integration_apps;
+DROP TRIGGER integration_farm_sandbox_guard ON farm.farms;
+DROP TRIGGER integration_app_assignment_revoked ON farm.printer_assignments;
+DROP TABLE farm.integration_app_grants;
+DROP TABLE farm.integration_app_credentials;
+DROP TABLE farm.integration_apps;
+DROP FUNCTION farm.integration_scopes_valid(text[]);
+DROP FUNCTION farm.integration_farm_sandbox_guard();
+DROP FUNCTION farm.integration_app_assignment_revoked();
+DROP FUNCTION farm.integration_app_grant_guard();
+DROP FUNCTION farm.integration_app_credential_guard();
+DROP FUNCTION farm.integration_app_guard();
+ALTER TABLE farm.farms DROP COLUMN sandbox;

@@ -1,4 +1,4 @@
-import { DatabaseSync } from 'node:sqlite'
+import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite'
 import { randomUUID } from 'node:crypto'
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync } from 'node:fs'
 import { join } from 'node:path'
@@ -6,11 +6,51 @@ import { z } from 'zod'
 import { SignedCommandV2 } from '../../../farm-protocol/src/command-v2.ts'
 import { BrowserDeviceUuid } from '../../../farm-protocol/src/browser-device-proof.ts'
 import { canonicalize } from '../../../farm-protocol/src/canonical.ts'
+import {
+  API_ENVELOPE_CLOCK_SKEW_MS,
+  API_RUN_CONTROLS,
+  ApiRunAction,
+  ApiEnvelopeV1,
+} from '../../../farm-protocol/src/api-envelope.ts'
+
+const originalEmitWarning = process.emitWarning.bind(process)
+process.emitWarning = ((warning: string | Error, ...args: unknown[]) => {
+  const message = typeof warning === 'string' ? warning : warning?.message
+  const type =
+    typeof args[0] === 'string'
+      ? args[0]
+      : typeof args[0] === 'object' && args[0] !== null && 'type' in args[0]
+        ? (args[0] as { type?: string }).type
+        : warning instanceof Error
+          ? warning.name
+          : undefined
+  if (
+    type === 'ExperimentalWarning' &&
+    typeof message === 'string' &&
+    message.includes('SQLite is an experimental feature')
+  ) {
+    return
+  }
+  return (originalEmitWarning as (...a: unknown[]) => void)(warning, ...args)
+}) as typeof process.emitWarning
+
+const { DatabaseSync } = process.getBuiltinModule(
+  'node:sqlite',
+) as typeof import('node:sqlite')
+if (
+  typeof (DatabaseSync.prototype as { enableDefensive?: unknown })
+    .enableDefensive !== 'function'
+) {
+  ;(
+    DatabaseSync.prototype as { enableDefensive?: (active: boolean) => void }
+  ).enableDefensive = () => {}
+}
 
 const RETENTION_MS = 600_000
 const MAX_CAPACITY = 10_000
 const APPLICATION_ID = 0x4f334450
-const SCHEMA_VERSION = 4
+const SCHEMA_VERSION = 17
+const MAX_CLOCK_STEP_MS = RETENTION_MS + 1_000
 const reasons = [
   'guard-denied',
   'rpc-rejected',
@@ -43,6 +83,7 @@ const holdsPrinterWhenUnconfirmed = new Set([
   'emergency_stop',
   'firmware_restart',
 ])
+const actionlessCommands = new Set(['confirm_collection'])
 const time = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
 const printerKey = z
   .string()
@@ -61,6 +102,27 @@ const ClaimInput = z.strictObject({
   printerKey,
   wireSha256: z.string().regex(/^[0-9a-f]{64}$/),
 })
+const ApiClaimInput = z.strictObject({
+  envelope: ApiEnvelopeV1,
+  printerKey,
+  wireSha256: z.string().regex(/^[0-9a-f]{64}$/),
+})
+/** One journal row, whichever signed path (browser v2 or API envelope) it came from. */
+type ClaimRow = {
+  cmd_id: string
+  key_id: string
+  nonce: string
+  farm_id: string
+  agent_id: string
+  assignment_id: string
+  account_id: string
+  transport_id: string
+  capability_id: string
+  action: string
+  /** Earliest local time the command may be claimed. */
+  not_before: number
+  expires_at: number
+}
 const OutcomeRow = z.strictObject({
   cmdId: BrowserDeviceUuid,
   assignmentId: BrowserDeviceUuid,
@@ -116,12 +178,14 @@ export type CommandClaimResult =
         | 'storage-unavailable'
     }
 type State = {
-  database: DatabaseSync
+  database: DatabaseSyncType
   directory: string
   path: string
   clock: () => number
   capacity: number
   writerId: string
+  wallBase: number
+  monotonicBase: number
   closed: boolean
 }
 type Receipt = {
@@ -139,10 +203,119 @@ const previousActionSchema = legacyActionSchema.replace(
   "'pause','resume','cancel'",
   "'pause','resume','cancel','emergency_stop','firmware_restart','set_temperature','set_fan','home','set_light','set_speed','start_print'",
 )
-const actionSchema = previousActionSchema.replace(
+const macroActionSchema = previousActionSchema.replace(
   "'firmware_restart',",
   "'firmware_restart','run_macro','load_filament','unload_filament',",
 )
+const motionActionSchema = macroActionSchema.replace(
+  "'unload_filament'",
+  "'unload_filament','extrude','jog','motors_off','z_babystep','set_factor'",
+)
+const outputActionSchema = motionActionSchema.replace(
+  "'extrude'",
+  "'extrude','set_led','set_pin'",
+)
+const fileActionSchema = motionActionSchema.replace(
+  "'set_factor'",
+  "'set_factor','file_op'",
+)
+const mergedFileActionSchema = outputActionSchema.replace(
+  "'set_factor'",
+  "'set_factor','file_op'",
+)
+const queueActionSchema = outputActionSchema.replace(
+  "'set_factor'",
+  "'set_factor','queue_op'",
+)
+const queuedFileActionSchema = queueActionSchema.replace(
+  "'set_factor'",
+  "'set_factor','file_op'",
+)
+const serviceActionSchema = queueActionSchema.replace(
+  "'queue_op'",
+  "'queue_op','service'",
+)
+const fileServiceActionSchema = queuedFileActionSchema.replace(
+  "'queue_op'",
+  "'queue_op','service'",
+)
+const excludeActionSchema = serviceActionSchema.replace(
+  "'service'",
+  "'service','exclude_object'",
+)
+const powerActionSchema = excludeActionSchema.replace(
+  "'exclude_object'",
+  "'exclude_object','power'",
+)
+const timelapseActionSchema = excludeActionSchema.replace(
+  "'exclude_object'",
+  "'exclude_object','timelapse'",
+)
+const powerTimelapseActionSchema = timelapseActionSchema.replace(
+  "'timelapse'",
+  "'timelapse','power'",
+)
+const gcodeActionSchema = powerTimelapseActionSchema.replace(
+  "'set_pin'",
+  "'set_pin','gcode'",
+)
+const fileOpActionSchema = gcodeActionSchema.replace(
+  "'set_factor'",
+  "'set_factor','file_op'",
+)
+const bedMeshActionSchema = fileOpActionSchema.replace(
+  "'file_op'",
+  "'file_op','bed_mesh'",
+)
+const configWriteActionSchema = bedMeshActionSchema.replace(
+  "'bed_mesh'",
+  "'bed_mesh','config_write'",
+)
+const actionSchema = configWriteActionSchema.replace(
+  "'config_write'",
+  "'config_write','start_library_print'",
+)
+/**
+ * Journals from the power, timelapse and console units were rebuilt from the
+ * merged schema, so their historical shapes also carry `bed_mesh` (and, for
+ * the v9/v10 power and exclude_object journals, `gcode`) without `file_op`.
+ * Each variant is an exact, enumerated schema; unknown shapes stay refused.
+ */
+const withBedMesh = (sql: string) =>
+  sql.replace("'set_factor'", "'set_factor','bed_mesh'")
+const withGcodeBedMesh = (sql: string) =>
+  withBedMesh(sql.replace("'set_pin'", "'set_pin','gcode'"))
+const servicePowerActionSchema = serviceActionSchema.replace(
+  "'service'",
+  "'service','power'",
+)
+const previousActionSchemas: Record<number, readonly string[]> = {
+  2: [legacyActionSchema],
+  3: [previousActionSchema],
+  4: [macroActionSchema],
+  5: [motionActionSchema],
+  6: [outputActionSchema, fileActionSchema],
+  7: [mergedFileActionSchema, queueActionSchema],
+  8: [queuedFileActionSchema, serviceActionSchema],
+  9: [
+    fileServiceActionSchema,
+    servicePowerActionSchema,
+    excludeActionSchema,
+    withGcodeBedMesh(servicePowerActionSchema),
+    withGcodeBedMesh(excludeActionSchema),
+  ],
+  10: [
+    powerActionSchema,
+    timelapseActionSchema,
+    withGcodeBedMesh(powerActionSchema),
+    withGcodeBedMesh(timelapseActionSchema),
+  ],
+  11: [powerTimelapseActionSchema, withBedMesh(powerTimelapseActionSchema)],
+  12: [gcodeActionSchema],
+  13: [fileOpActionSchema],
+  14: [bedMeshActionSchema],
+  15: [configWriteActionSchema],
+}
 const schema = [
   actionSchema,
   `CREATE TABLE pause_meta (id INTEGER PRIMARY KEY CHECK(id=1), high_water INTEGER NOT NULL CHECK(high_water BETWEEN 0 AND 9007199254140991)) STRICT`,
@@ -163,11 +336,17 @@ const schema = [
            AND (status<>'applied' OR write_started_at IS NOT NULL)
            AND ((status='outcome-unknown' AND retain_until IS NULL) OR (status IN ('not-sent','applied') AND retain_until=finished_at+600000))))
   ) STRICT`,
-  `CREATE UNIQUE INDEX pause_active_assignment ON pause_commands(assignment_id) WHERE status IN ('claimed','write-started','outcome-unknown')`,
-  `CREATE UNIQUE INDEX pause_active_printer ON pause_commands(farm_id,printer_key) WHERE status IN ('claimed','write-started','outcome-unknown')`,
+  `CREATE INDEX pause_active_assignment ON pause_commands(assignment_id) WHERE status IN ('claimed','write-started','outcome-unknown')`,
+  `CREATE INDEX pause_active_printer ON pause_commands(farm_id,printer_key) WHERE status IN ('claimed','write-started','outcome-unknown')`,
   `CREATE INDEX pause_recent_printer ON pause_commands(farm_id,printer_key,claimed_at)`,
   `CREATE INDEX pause_terminal_retention ON pause_commands(retain_until) WHERE status IN ('not-sent','applied')`,
 ]
+const previousSchema = schema.map((sql) =>
+  sql.replace(
+    'CREATE INDEX pause_active_',
+    'CREATE UNIQUE INDEX pause_active_',
+  ),
+)
 function privateEntry(path: string, directory: boolean) {
   const stat = lstatSync(path)
   if (
@@ -215,7 +394,14 @@ function clockStep(state: State, observedWall = sample(state)): number | null {
     row.high_water < 0
   )
     throw new Error('Invalid command journal metadata')
-  if (now < row.high_water) return null
+  if (
+    now < row.high_water ||
+    now >
+      state.wallBase +
+        (performance.now() - state.monotonicBase) +
+        MAX_CLOCK_STEP_MS
+  )
+    return null
   state.database
     .prepare('UPDATE pause_meta SET high_water=? WHERE id=1')
     .run(now)
@@ -274,6 +460,7 @@ export function openCommandJournal(input: {
     }
   }
   privateStorage({ directory: input.directory, path })
+  const writerId = randomUUID()
   const database = new DatabaseSync(path, {
     timeout: 100,
     allowExtension: false,
@@ -288,7 +475,25 @@ export function openCommandJournal(input: {
       .get()?.application_id
     if (
       !(created && initialVersion === 0 && initialApplication === 0) &&
-      (![1, 2, 3, SCHEMA_VERSION].includes(Number(initialVersion)) ||
+      (![
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        SCHEMA_VERSION,
+      ].includes(Number(initialVersion)) ||
         initialApplication !== APPLICATION_ID)
     )
       throw new Error('Unknown command journal version')
@@ -319,28 +524,70 @@ export function openCommandJournal(input: {
         database.exec(
           "INSERT INTO control_command_actions SELECT cmd_id,'pause' FROM pause_commands",
         )
+        database.exec(
+          'DROP INDEX pause_active_assignment; DROP INDEX pause_active_printer',
+        )
+        database.exec(
+          schema.find((sql) =>
+            sql.startsWith('CREATE INDEX pause_active_assignment'),
+          )!,
+        )
+        database.exec(
+          schema.find((sql) =>
+            sql.startsWith('CREATE INDEX pause_active_printer'),
+          )!,
+        )
         database.exec(`PRAGMA user_version=${SCHEMA_VERSION}`)
-      } else if ((version === 2 || version === 3) && app === APPLICATION_ID) {
+      } else if (version === 16 && app === APPLICATION_ID) {
         const definitions = database
           .prepare(
             "SELECT sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY sql",
           )
           .all()
           .map((row) => row.sql)
-        const legacySchema = schema
-          .map((sql) =>
-            sql === actionSchema
-              ? version === 2
-                ? legacyActionSchema
-                : previousActionSchema
-              : sql,
-          )
-          .sort()
         if (
-          definitions.length !== legacySchema.length ||
-          definitions.some((sql, index) => sql !== legacySchema[index])
+          definitions.length !== previousSchema.length ||
+          definitions.some(
+            (sql, index) => sql !== [...previousSchema].sort()[index],
+          )
         )
           throw new Error('Invalid command journal schema')
+        database.exec(
+          'DROP INDEX pause_active_assignment; DROP INDEX pause_active_printer',
+        )
+        database.exec(
+          schema.find((sql) =>
+            sql.startsWith('CREATE INDEX pause_active_assignment'),
+          )!,
+        )
+        database.exec(
+          schema.find((sql) =>
+            sql.startsWith('CREATE INDEX pause_active_printer'),
+          )!,
+        )
+        database.exec(`PRAGMA user_version=${SCHEMA_VERSION}`)
+      } else if (
+        Object.hasOwn(previousActionSchemas, Number(version)) &&
+        app === APPLICATION_ID
+      ) {
+        const definitions = database
+          .prepare(
+            "SELECT sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY sql",
+          )
+          .all()
+          .map((row) => row.sql)
+        const matchesLegacy = previousActionSchemas[Number(version)]?.some(
+          (previous) => {
+            const expected = previousSchema
+              .map((sql) => (sql === actionSchema ? previous : sql))
+              .sort()
+            return (
+              definitions.length === expected.length &&
+              definitions.every((sql, index) => sql === expected[index])
+            )
+          },
+        )
+        if (!matchesLegacy) throw new Error('Invalid command journal schema')
         database.exec(
           'ALTER TABLE control_command_actions RENAME TO legacy_control_command_actions',
         )
@@ -349,6 +596,19 @@ export function openCommandJournal(input: {
           'INSERT INTO control_command_actions SELECT * FROM legacy_control_command_actions',
         )
         database.exec('DROP TABLE legacy_control_command_actions')
+        database.exec(
+          'DROP INDEX pause_active_assignment; DROP INDEX pause_active_printer',
+        )
+        database.exec(
+          schema.find((sql) =>
+            sql.startsWith('CREATE INDEX pause_active_assignment'),
+          )!,
+        )
+        database.exec(
+          schema.find((sql) =>
+            sql.startsWith('CREATE INDEX pause_active_printer'),
+          )!,
+        )
         database.exec(`PRAGMA user_version=${SCHEMA_VERSION}`)
       } else if (version !== SCHEMA_VERSION || app !== APPLICATION_ID)
         throw new Error('Unknown command journal version')
@@ -368,6 +628,12 @@ export function openCommandJournal(input: {
         .get()
       if (meta?.n !== 1 || meta.id !== 1)
         throw new Error('Invalid command journal metadata')
+      // A previous writer's unfinished operation is never resumed or retried.
+      database
+        .prepare(
+          "UPDATE pause_commands SET status='outcome-unknown', reason='outcome-unknown', finished_at=COALESCE(write_started_at, claimed_at), retain_until=NULL WHERE writer_id<>? AND status IN ('claimed','write-started')",
+        )
+        .run(writerId)
       database.exec('COMMIT')
     } catch (error) {
       try {
@@ -388,7 +654,9 @@ export function openCommandJournal(input: {
       path,
       clock: input.clock,
       capacity,
-      writerId: randomUUID(),
+      writerId,
+      wallBase: validateWall(input.clock()),
+      monotonicBase: performance.now(),
       closed: false,
     })
     return handle
@@ -402,18 +670,76 @@ export function claimCommand(
   handle: CommandJournalHandle,
   input: { command: SignedCommandV2; printerKey: string; wireSha256: string },
 ): CommandClaimResult {
-  const state = stateOf(handle)
-  if (!state) return { ok: false, reason: 'storage-unavailable' }
   const parsed = ClaimInput.safeParse(input)
   if (!parsed.success) return { ok: false, reason: 'storage-unavailable' }
+  const command = parsed.data.command
+  return claimRow(
+    handle,
+    {
+      ...command,
+      not_before: command.issued_at,
+    },
+    parsed.data.printerKey,
+    parsed.data.wireSha256,
+  )
+}
+/**
+ * Claims a verified API envelope in the same table as browser commands, so it
+ * shares replay protection (`cmd_id` and `(key_id, nonce)`), the single active
+ * command per assignment and printer, the rate limit and the no-retry rule.
+ * The issuer kid is the key id, the app the account and the grant the capability.
+ */
+export function claimApiCommand(
+  handle: CommandJournalHandle,
+  input: { envelope: ApiEnvelopeV1; printerKey: string; wireSha256: string },
+): CommandClaimResult {
+  const parsed = ApiClaimInput.safeParse(input)
+  if (!parsed.success) return { ok: false, reason: 'storage-unavailable' }
+  const envelope = parsed.data.envelope
+  const run = ApiRunAction.safeParse(envelope.action)
+  return claimRow(
+    handle,
+    {
+      cmd_id: envelope.cmd_id,
+      key_id: envelope.kid,
+      nonce: envelope.nonce,
+      farm_id: envelope.farm_id,
+      agent_id: envelope.agent_id,
+      assignment_id: envelope.assignment_id,
+      account_id: envelope.app_id,
+      transport_id: 'api-envelope',
+      capability_id: envelope.grant_id,
+      action:
+        envelope.kind === 'job'
+          ? 'start_print'
+          : run.success
+            ? API_RUN_CONTROLS[run.data.action]
+            : envelope.action!.action,
+      not_before: Math.max(0, envelope.issued_at - API_ENVELOPE_CLOCK_SKEW_MS),
+      expires_at: envelope.expires_at,
+    },
+    parsed.data.printerKey,
+    parsed.data.wireSha256,
+  )
+}
+function claimRow(
+  handle: CommandJournalHandle,
+  command: ClaimRow,
+  printerKey: string,
+  wireSha256: string,
+): CommandClaimResult {
+  const state = stateOf(handle)
+  if (!state) return { ok: false, reason: 'storage-unavailable' }
   try {
     const result = transaction(
       state,
       (): { ok: true } | Exclude<CommandClaimResult, { ok: true }> => {
-        const now = clockStep(state)
+        const observed = sample(state)
+        if (observed >= command.expires_at)
+          return { ok: false, reason: 'storage-unavailable' }
+        const now = clockStep(state, observed)
         if (now === null) return { ok: false, reason: 'clock-regressed' }
-        const command = parsed.data.command
-        if (now < command.issued_at || now >= command.expires_at)
+        if (now < command.not_before || now >= command.expires_at)
           return { ok: false, reason: 'storage-unavailable' }
         state.database
           .prepare(
@@ -429,11 +755,12 @@ export function claimCommand(
         )
           return { ok: false, reason: 'replay' }
         if (
+          command.action !== 'emergency_stop' &&
           state.database
             .prepare(
               "SELECT 1 FROM pause_commands WHERE status IN ('claimed','write-started','outcome-unknown') AND (assignment_id=? OR (farm_id=? AND printer_key=?)) LIMIT 1",
             )
-            .get(command.assignment_id, command.farm_id, parsed.data.printerKey)
+            .get(command.assignment_id, command.farm_id, printerKey)
         )
           return { ok: false, reason: 'assignment-busy' }
         const count = state.database
@@ -443,11 +770,31 @@ export function claimCommand(
         if (count >= state.capacity) return { ok: false, reason: 'capacity' }
         const recent = state.database
           .prepare(
-            'SELECT count(*) AS n FROM pause_commands WHERE farm_id=? AND printer_key=? AND claimed_at>?',
+            `SELECT count(*) AS n FROM pause_commands
+             LEFT JOIN control_command_actions USING (cmd_id)
+             WHERE farm_id=? AND printer_key=?
+               AND (COALESCE(action,'')='exclude_object')=?
+               AND CASE WHEN action='exclude_object' THEN write_started_at ELSE claimed_at END>?`,
           )
-          .get(command.farm_id, parsed.data.printerKey, now - 60000)?.n
+          .get(
+            command.farm_id,
+            printerKey,
+            Number(command.action === 'exclude_object'),
+            now - 60000,
+          )?.n
         if (typeof recent !== 'number') throw new Error('Invalid rate count')
-        if (recent >= 10) return { ok: false, reason: 'rate-limited' }
+        if (command.action !== 'emergency_stop' && recent >= 10)
+          return { ok: false, reason: 'rate-limited' }
+        // Bed mesh is its own class: one accepted dispatch per printer a minute.
+        if (command.action === 'bed_mesh') {
+          const meshes = state.database
+            .prepare(
+              "SELECT count(*) AS n FROM pause_commands p JOIN control_command_actions a ON a.cmd_id=p.cmd_id WHERE p.farm_id=? AND p.printer_key=? AND a.action='bed_mesh' AND p.claimed_at>?",
+            )
+            .get(command.farm_id, printerKey, now - 60000)?.n
+          if (typeof meshes !== 'number') throw new Error('Invalid mesh count')
+          if (meshes >= 1) return { ok: false, reason: 'rate-limited' }
+        }
         state.database
           .prepare(
             "INSERT INTO pause_commands(cmd_id,key_id,nonce,farm_id,agent_id,assignment_id,account_id,transport_id,capability_id,printer_key,wire_sha256,writer_id,claimed_at,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'claimed')",
@@ -462,8 +809,8 @@ export function claimCommand(
             command.account_id,
             command.transport_id,
             command.capability_id,
-            parsed.data.printerKey,
-            parsed.data.wireSha256,
+            printerKey,
+            wireSha256,
             state.writerId,
             now,
           )
@@ -472,9 +819,13 @@ export function claimCommand(
             'DELETE FROM control_command_actions WHERE cmd_id NOT IN (SELECT cmd_id FROM pause_commands)',
           )
           .run()
-        state.database
-          .prepare('INSERT INTO control_command_actions VALUES(?,?)')
-          .run(command.cmd_id, command.action)
+        // A plate confirmation is a local collection-journal write with no
+        // printer effect. The v17 action table predates it, so its row keeps
+        // replay protection, exclusion and the rate limit without an action.
+        if (!actionlessCommands.has(command.action))
+          state.database
+            .prepare('INSERT INTO control_command_actions VALUES(?,?)')
+            .run(command.cmd_id, command.action)
         return { ok: true }
       },
     )
@@ -482,7 +833,7 @@ export function claimCommand(
     const receipt = new ClaimHandle()
     receipts.set(receipt, {
       journal: state,
-      cmdId: parsed.data.command.cmd_id,
+      cmdId: command.cmd_id,
       markAttempted: false,
       marked: false,
       finishAttempted: false,

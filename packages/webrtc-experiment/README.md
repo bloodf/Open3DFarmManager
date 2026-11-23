@@ -4,26 +4,15 @@ A prova original deste pacote privado MIT comprova um RTCDataChannel real e crip
 
 ## Interoperabilidade real com o Connector
 
-A prova histórica em `interop.test.ts` conectou o Chromium ao adaptador isolado em `packages/connector/src/webrtc`, executado em processos Node e Bun reais com `node-datachannel` 0.33.5. Ela exige entrega sintética nos dois sentidos, comparação dos certificados efetivos com SDP e rejeição de identidade, transcrição, replay e fingerprints SDP adulterados. O código não inicia o CLI ou um serviço de produção.
-
-O harness atual usa somente Node 24.22.3, conforme o runtime do workspace. Os manifests agora fixam `node-datachannel` 0.33.6; a atualização gerada do lock pnpm, a execução nativa e a aceitação por plataforma dessa versão permanecem pendentes. A evidência acima refere-se à versão 0.33.5. Consulte a [proveniência atual](../../THIRD_PARTY.md#experimental-connector-webrtc-dependency).
-
-```sh
-pnpm --dir packages/webrtc-experiment run test:session
-node --test packages/webrtc-experiment/interop.test.ts
-```
-
-O receptor limita o payload bruto da aplicação a 32 KiB e oito frames pendentes, incluindo o ativo, com 2048 bytes UTF-8 por frame e 1024 frames admitidos por sessão. Diagnósticos têm tamanho fixo; sobrecarga e prazo encerram o peer inteiro. O prazo de oito segundos começa na construção, incluindo ofertas abandonadas, e a fixture tem vida total máxima de 30 segundos, sem conceder autorização de produção. Os testes cobrem filas antes do certificado, flood autenticado, expiração e zero provas nos dois sentidos quando o fingerprint SDP é adulterado. Os limites não abrangem alocações anteriores ao callback em SCTP, N-API ou no navegador.
-
-O [checkpoint de interoperabilidade](../../docs/WEBRTC-CONNECTOR-INTEROP-CHECKPOINT.md) descreve o backend nativo, a revisão de DTLS, o candidato descartado, limites da evidência e o contrato de integração pendente. Consulte também os avisos de dependências. O restante desta página descreve a prova original entre dois peers do Chromium, preservada como comparação.
+O harness sintético histórico foi removido. Os testes em `real-identity/` exercitam os peers mantidos do Connector. A sessão sintética portátil continua coberta por `session.test.ts`.
 
 ## Executar a prova original
 
 Na raiz, com as dependências de desenvolvimento já instaladas pelo lockfile e o Chromium correspondente ao Playwright disponível:
 
 ```sh
-pnpm --dir packages/webrtc-experiment typecheck
-pnpm --dir packages/webrtc-experiment exec vitest run transport.test.ts --config vitest.config.ts
+npm run typecheck -w @open3dfarmmanager/webrtc-experiment
+npm exec -w @open3dfarmmanager/webrtc-experiment -- vitest run transport.test.ts --config vitest.config.ts
 ```
 
 O teste original usa o Playwright 1.64.1 do workspace e as APIs nativas WebRTC e Web Crypto. Não adiciona biblioteca de RTC, dependência de execução ou lockfile. Consulte [THIRD_PARTY.md](THIRD_PARTY.md) para licenças e avisos.
@@ -56,4 +45,4 @@ Uma integração posterior deve fornecer identidades aprovadas e chaves pública
 
 A sinalização autenticada deverá vincular o identificador de sessão, o papel, a identidade esperada, a origem/audiência e os nonces aos participantes autorizados, transportar oferta/resposta e candidatos com limites de tamanho e prazo e consumir os desafios uma única vez. Cada endpoint deverá reconstruir a transcrição com suas próprias descrições SDP e verificar o fingerprint do canal efetivo antes de liberar qualquer mensagem de aplicação. Troca de certificado, renegociação ou reconexão exige uma nova sessão autenticada.
 
-Somente depois dessa verificação uma integração poderá entregar envelopes aos verificadores existentes de autorização do Connector. As regras de segurança e o despacho devem permanecer no Connector, inclusive durante falhas do servidor. Este experimento não implementa autorização de comandos, políticas offline, câmera, integração Moonraker/Spoolman, leases, persistência antirreplay, revogação ou compatibilidade com o runtime de produção do Connector. O sucesso local não prova conectividade entre redes ou NAT e não autoriza uso em produção. Ausência de P2P deve manter somente leitura, sem fallback de comandos por servidor.
+Somente depois dessa verificação uma integração poderá entregar envelopes aos verificadores existentes de autorização do Connector. As regras de segurança e o despacho devem permanecer no Connector, inclusive durante falhas do servidor. Este experimento não implementa autorização de comandos, políticas offline, câmera, integração Moonraker/Spoolman, leases, persistência antirreplay, revogação ou compatibilidade com o runtime de produção do Connector. O sucesso local não prova conectividade entre redes ou NAT e não autoriza uso em produção. Ausência de P2P deve manter o navegador em somente leitura (comandos pelo navegador permanecem exclusivamente por WebRTC, sem fallback por HTTP ou TURN; comandos por API exigem escopo concedido e envelopes assinados pelo emissor).

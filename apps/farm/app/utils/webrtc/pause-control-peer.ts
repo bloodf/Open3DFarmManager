@@ -2,6 +2,7 @@ import {
   FileListRequest,
   FileListResponse,
   MAX_FILE_LIST_WIRE_BYTES,
+  type FileListExtra,
   type FileListResult,
 } from '../../../../../packages/farm-protocol/src/file-list.ts'
 import { z } from 'zod'
@@ -18,6 +19,7 @@ const uploadReply = z.union([
     transfer_id: z.string(),
     ok: z.literal(true),
     library: z.literal(true).optional(),
+    printUnsupported: z.literal(true).optional(),
   }),
   z.strictObject({
     type: z.literal('result'),
@@ -30,6 +32,7 @@ const uploadReply = z.union([
       'timeout',
       'aborted',
       'offline',
+      'busy',
       'invalid-transfer',
     ]),
   }),
@@ -411,9 +414,17 @@ export class PauseBrowserPeer {
     if (!this.#options.onData) return false
     return this.current() && this.#session.sendCommand(command)
   }
-  async listFiles(printerKey: string): Promise<FileListResult> {
+  async listFiles(
+    printerKey: string,
+    directory?: string,
+    download?: string,
+    config?: FileListExtra,
+  ): Promise<FileListResult> {
     const request = FileListRequest.parse({
+      ...config,
       type: 'files.list',
+      directory,
+      download,
       request_id: crypto.randomUUID(),
       printer_key: printerKey,
     })
@@ -456,6 +467,15 @@ export class PauseBrowserPeer {
             result.printer_key !== printerKey
           )
             throw Error('Invalid file list correlation')
+          if (
+            result.ok &&
+            (result.download !== undefined) !==
+              (download !== undefined ||
+                (config !== undefined &&
+                  'configPath' in config &&
+                  config.configPath !== undefined))
+          )
+            throw Error('Unexpected file response')
           cleanup()
           resolve(result)
         } catch {

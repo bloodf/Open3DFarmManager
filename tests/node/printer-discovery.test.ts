@@ -9,6 +9,7 @@ import {
   moonrakerPrinters,
   parseBambu,
 } from '../../packages/connector/src/discovery/index.ts'
+import { main } from '../../scripts/discover-printers.ts'
 
 const fixture = Buffer.from(
   'NOTIFY * HTTP/1.1\r\nLocation: http://192.168.1.42:2021/\r\nUSN: uuid:ABC123\r\nDevModel.bambu.com: BL-P001\r\nDevName.bambu.com: Oficina\r\nDevConnect.bambu.com: lan\r\nDevBind.bambu.com: free\r\n\r\n',
@@ -82,41 +83,74 @@ test('discovers both protocols over loopback', async () => {
     responder.send(response, peer.port, peer.address),
   )
   const port = address.port
+  const sockets: dgram.Socket[] = []
+  const bambuReady = new Promise<dgram.Socket>((resolve, reject) => {
+    const socket = dgram.createSocket('udp4')
+    sockets.push(socket)
+    socket.once('error', reject)
+    socket.once('listening', () => resolve(socket))
+  })
+  let suppliedBambuSocket = false
   const found = discoverPrinters({
     timeout: 150,
     bindAddress: '127.0.0.1',
-    bambuPorts: [port + 1],
+    bambuPorts: [0],
     mdnsPort: 0,
     queryAddress: '127.0.0.1',
     queryPort: port,
+    createSocket: () => {
+      if (!suppliedBambuSocket) {
+        suppliedBambuSocket = true
+        return sockets[0]!
+      }
+      return dgram.createSocket('udp4')
+    },
   })
-  await new Promise((resolve) => setTimeout(resolve, 30))
-  responder.send(fixture, port + 1, '127.0.0.1')
   try {
+    const bambu = await bambuReady
+    const bambuAddress = bambu.address()
+    assert(bambuAddress && typeof bambuAddress !== 'string')
+    responder.send(fixture, bambuAddress.port, '127.0.0.1')
     assert.deepEqual((await found).map((p) => p.vendor).sort(), [
       'bambu',
       'moonraker',
     ])
   } finally {
+    for (const socket of sockets) {
+      try {
+        socket.close()
+      } catch {}
+    }
     responder.close()
   }
 })
-test('CLI help and JSON', () => {
+test('CLI help and JSON', async (t) => {
   assert.match(
     execFileSync(process.execPath, ['scripts/discover-printers.ts', '--help'], {
       encoding: 'utf8',
     }),
     /--timeout/,
   )
-  assert.ok(
-    Array.isArray(
-      JSON.parse(
-        execFileSync(
-          process.execPath,
-          ['scripts/discover-printers.ts', '--timeout', '30'],
-          { encoding: 'utf8' },
-        ),
-      ),
-    ),
+  // Real discovery binds 0.0.0.0 and sends LAN multicast; inject an in-process
+  // mock so the JSON path is exercised without leaving the process.
+  const requested: unknown[] = []
+  const written: string[] = []
+  t.mock.method(process.stdout, 'write', (chunk: string) => {
+    written.push(chunk)
+    return true
+  })
+  const status = await main(['--timeout', '30'], async (options) => {
+    requested.push(options)
+    return [{ vendor: 'moonraker', host: '127.0.0.1', port: 7125 }]
+  })
+  t.mock.restoreAll()
+  assert.equal(status, 0)
+  assert.deepEqual(requested, [{ timeout: 30 }])
+  assert.ok(Array.isArray(JSON.parse(written.join(''))))
+  assert.equal(
+    await main(['--timeout', 'abc'], () => {
+      throw Error('discovery must not run for rejected arguments')
+    }),
+    2,
   )
 })

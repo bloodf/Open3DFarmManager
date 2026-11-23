@@ -1,10 +1,25 @@
+import {
+  API_DISPATCH_QUERY_SUPPORT_HEADER,
+  API_QUERY_SUPPORT_HEADER,
+  MAX_API_QUERY_ITEMS,
+  MAX_API_QUERY_RESULT_BYTES,
+  ApiQueryResult,
+  type ApiQueryReply,
+  type ApiQueryRequest,
+} from '../../../../packages/farm-protocol/src/api-query.ts'
+import type {
+  EnvelopeInbox,
+  IntegrationDeliveryService,
+} from './integration-delivery.ts'
 import type { IncomingMessage } from 'node:http'
 import { randomUUID } from 'node:crypto'
+import { createLogger } from '@open3dfarmmanager/shared'
 import type { SessionConfig } from 'nuxt/server'
 import {
   decodeSignallingClientFrame,
   encodeSignallingServerFrame,
   SignallingServerFrame,
+  SIGNALLING_RATE_LIMIT_CLOSE_CODE,
 } from '../../../../packages/farm-protocol/src/signalling-socket.ts'
 import {
   decodePauseSignallingClientFrame,
@@ -55,12 +70,17 @@ import {
   SignallingWebSocketResources,
   type SignallingResourceHandle,
   type SignallingSocketPort,
+  acceptSignallingMessage,
+  type SignallingMessageBucket,
 } from './signalling-websocket-limits.ts'
 import {
   destroySignallingUpgrade,
   signallingNativeSocket,
   signallingMessageText,
 } from './signalling-socket.ts'
+
+class AuthorityUnavailable extends Error {}
+const signallingLog = createLogger('farm-server')
 
 type Reader = Pick<
   PostgresSignallingAuthorization,
@@ -121,13 +141,20 @@ interface Connection {
   readonly request: IncomingMessage
   readonly mode: SignallingMode
   readonly pause: PauseOwner | undefined
-  readonly resource: SignallingResourceHandle
+  resource: SignallingResourceHandle
+  resources: SignallingWebSocketResources
+  releaseAdmission: () => void
+  cancelPromotedLifetime: () => void
+  makePort: (active: () => boolean) => SignallingSocketPort
   readonly start: SignallingClockSample
   lastSample: SignallingClockSample
+  readonly supportsApiQueries: boolean
+  readonly supportsDispatchQueries: boolean
   readonly inboxId: string
   inboxGeneration: number
   state: State
   native: SignallingSocketPort | null
+  messageBucket: SignallingMessageBucket
   closed: boolean
   readonly abort: AbortController
   inboxDeadline: number
@@ -182,12 +209,166 @@ export class SignallingRuntime {
   readonly #cookie: SessionConfig
   readonly #clock: SignallingClock
   readonly #resources: SignallingWebSocketResources
+  readonly #connectorResources: SignallingWebSocketResources
+  readonly #connectorSources = new Map<string, number>()
+  #connectorPending = 0
   readonly #coordinator: SignallingCoordinator
   readonly #connections = new Map<IncomingMessage, Connection>()
   /** Strictly increasing confirmation sequence, anchored to database time. */
   #authoritySeq = 0
   readonly #inboxes = new Map<string, Connection>()
+  readonly #apiQueries = new Map<
+    string,
+    {
+      connection: Connection
+      query: ApiQueryRequest
+      finish(
+        result: ApiQueryResult | { kind: 'error'; error: 'connector-timeout' },
+      ): void
+    }
+  >()
   #closed = false
+  #apiDelivery?: Pick<
+    IntegrationDeliveryService,
+    'deliverPending' | 'recordResult'
+  >
+
+  /** The integration runtime owns the signer, database role, and delivery lifecycle. */
+  bindApiDelivery(
+    delivery: Pick<
+      IntegrationDeliveryService,
+      'deliverPending' | 'recordResult'
+    >,
+  ): void {
+    if (this.#closed || this.#apiDelivery)
+      throw Error('API delivery unavailable')
+    this.#apiDelivery = delivery
+    for (const connection of this.#inboxes.values()) {
+      const identity = this.#apiIdentity(connection)
+      if (identity) this.#deliverApiPending(identity)
+    }
+  }
+
+  #apiIdentity(connection: Connection) {
+    const state = connection.state
+    if (
+      connection.mode !== 'read-only' ||
+      connection.closed ||
+      this.#clock.monotonic() >= connection.inboxDeadline ||
+      (state.kind !== 'connector.ready' &&
+        state.kind !== 'connector.request' &&
+        state.kind !== 'connector.attach' &&
+        state.kind !== 'connector.context-proof' &&
+        state.kind !== 'connector.active')
+    )
+      return undefined
+    return state.identity.identity
+  }
+
+  #deliverApiPending(identity: Identity['identity']) {
+    void this.#apiDelivery
+      ?.deliverPending(identity.farm_id, identity.agent_id)
+      .catch(() => {})
+  }
+
+  sendToAgentInbox(
+    ...[farmId, agentId, wire, authority]: Parameters<
+      EnvelopeInbox['sendToAgentInbox']
+    >
+  ): 'sent' | 'no-inbox' {
+    const connection = this.#inboxes.get('read-only:' + agentId)
+    if (!connection || this.#apiIdentity(connection)?.farm_id !== farmId)
+      return 'no-inbox'
+    this.#send(connection, {
+      v: 1,
+      t: 'connector.api-command',
+      wire,
+      scope: authority.scope,
+      confirmed_at: authority.confirmedAt,
+    })
+    return 'sent'
+  }
+  async queryAgentInbox(
+    farmId: string,
+    agentId: string,
+    input: Pick<ApiQueryRequest, 'assignment_id' | 'kind' | 'offset' | 'limit'>,
+    signal?: AbortSignal,
+  ): Promise<ApiQueryResult | { kind: 'error'; error: 'connector-timeout' }> {
+    const connection = this.#inboxes.get('read-only:' + agentId)
+    const unavailable = {
+      kind: 'error',
+      error: 'connector-unavailable',
+    } as const
+    if (
+      !connection?.supportsApiQueries ||
+      (input.kind === 'dispatch' && !connection.supportsDispatchQueries) ||
+      this.#apiIdentity(connection)?.farm_id !== farmId ||
+      signal?.aborted ||
+      this.#apiQueries.size >= 32 ||
+      [...this.#apiQueries.values()].filter(
+        (pending) => pending.connection === connection,
+      ).length >= 4
+    )
+      return unavailable
+
+    const requestId = randomUUID()
+    const query = {
+      v: 1,
+      t: 'connector.api-query',
+      request_id: requestId,
+      ...input,
+    } as const
+    return new Promise((resolve) => {
+      const cancel = () => finish(unavailable)
+      const timeout = setTimeout(
+        () => finish({ kind: 'error', error: 'connector-timeout' }),
+        10_000,
+      )
+      const finish = (
+        result: ApiQueryResult | { kind: 'error'; error: 'connector-timeout' },
+      ) => {
+        if (!this.#apiQueries.delete(requestId)) return
+        clearTimeout(timeout)
+        connection.abort.signal.removeEventListener('abort', cancel)
+        signal?.removeEventListener('abort', cancel)
+        resolve(result)
+      }
+      this.#apiQueries.set(requestId, { connection, query, finish })
+      connection.abort.signal.addEventListener('abort', cancel, { once: true })
+      signal?.addEventListener('abort', cancel, { once: true })
+      try {
+        this.#send(connection, query)
+      } catch {
+        cancel()
+      }
+    })
+  }
+
+  #receiveApiQuery(connection: Connection, reply: ApiQueryReply) {
+    if (!this.#apiIdentity(connection)) throw Error('API query result denied')
+    const pending = this.#apiQueries.get(reply.request_id)
+    if (!pending || pending.connection !== connection) return
+    try {
+      if (Buffer.byteLength(reply.wire) > MAX_API_QUERY_RESULT_BYTES)
+        throw Error('Oversized API query result')
+      const result = ApiQueryResult.parse(JSON.parse(reply.wire))
+      const { kind, limit, offset } = pending.query
+      if (
+        result.kind !== 'error' &&
+        (result.kind !== kind ||
+          result.data.length > limit ||
+          offset + result.data.length > MAX_API_QUERY_ITEMS ||
+          (result.nextOffset !== null &&
+            (!result.data.length ||
+              result.nextOffset !== offset + result.data.length)))
+      )
+        throw Error('Mismatched API query result')
+      pending.finish(result)
+    } catch {
+      pending.finish({ kind: 'error', error: 'connector-unavailable' })
+    }
+  }
+
   readonly #pauseConfig: PauseConfiguration | undefined
   #pauseOwner: PauseOwner | undefined
   constructor(input: {
@@ -210,6 +391,10 @@ export class SignallingRuntime {
     this.#cookie = input.cookie
     this.#clock = input.clock ?? defaultClock
     this.#resources = new SignallingWebSocketResources({
+      now: () => this.#clock.monotonic(),
+      after,
+    })
+    this.#connectorResources = new SignallingWebSocketResources({
       now: () => this.#clock.monotonic(),
       after,
     })
@@ -237,7 +422,27 @@ export class SignallingRuntime {
       )
       const request = inspected.request
       const start = signallingClockSample(this.#clock)
-      const resource = this.#resources.reserve({
+      const source = request.socket.remoteAddress ?? 'unknown'
+      let releaseAdmission = () => {}
+      if (role === 'connector') {
+        const count = this.#connectorSources.get(source) ?? 0
+        if (this.#connectorPending >= 8 || count >= 2)
+          throw new Error('Capacity')
+        this.#connectorPending++
+        this.#connectorSources.set(source, count + 1)
+        let released = false
+        releaseAdmission = () => {
+          if (released) return
+          released = true
+          this.#connectorPending--
+          const remaining = (this.#connectorSources.get(source) ?? 1) - 1
+          if (remaining) this.#connectorSources.set(source, remaining)
+          else this.#connectorSources.delete(source)
+        }
+      }
+      const resources =
+        role === 'connector' ? this.#connectorResources : this.#resources
+      const makePort = (active: () => boolean): SignallingSocketPort => ({
         bufferedAmount: () => connection?.native?.bufferedAmount() ?? 0,
         send: (text) => {
           if (
@@ -249,18 +454,39 @@ export class SignallingRuntime {
           connection.native.send(text)
         },
         terminate: () => {
+          if (!active()) return
           if (connection) this.#close(connection)
           else request.socket.destroy()
         },
+        close: (code, reason) => {
+          if (active()) connection?.native?.close?.(code, reason)
+        },
       })
-      if (!resource || request.socket.destroyed) throw new Error('Capacity')
+      const resource = resources.reserve(
+        makePort(() => !connection || connection.resources === resources),
+      )
+      if (!resource || request.socket.destroyed) {
+        releaseAdmission()
+        throw new Error('Capacity')
+      }
       connection = {
         request,
         mode,
         pause,
         resource,
+        resources,
+        releaseAdmission,
+        cancelPromotedLifetime: () => {},
+        makePort,
         start,
         lastSample: start,
+        // Older Connectors reject unfamiliar frames. This hint carries no authority.
+        supportsApiQueries:
+          role === 'connector' &&
+          mode === 'read-only' &&
+          inspected.headers.get(API_QUERY_SUPPORT_HEADER) === '1',
+        supportsDispatchQueries:
+          inspected.headers.get(API_DISPATCH_QUERY_SUPPORT_HEADER) === '1',
         inboxId: randomUUID(),
         inboxGeneration: 0,
         state:
@@ -268,6 +494,7 @@ export class SignallingRuntime {
             ? { kind: 'browser.begin', sessionId: '' }
             : { kind: 'connector.begin' },
         native: null,
+        messageBucket: { tokens: 60, updatedAt: start.monotonic },
         closed: false,
         abort: new AbortController(),
         inboxDeadline: start.monotonic + 30_000,
@@ -330,9 +557,27 @@ export class SignallingRuntime {
       this.#close(connection)
       return
     }
+    if (
+      !acceptSignallingMessage(
+        connection.messageBucket,
+        this.#clock.monotonic(),
+        connection.native!,
+        () => {
+          signallingLog.warn('signalling-socket-closed', {
+            reason: 'message-rate-limit',
+            closeCode: SIGNALLING_RATE_LIMIT_CLOSE_CODE,
+          })
+          this.#close(connection, {
+            code: SIGNALLING_RATE_LIMIT_CLOSE_CODE,
+            reason: 'Signalling message rate limit exceeded',
+          })
+        },
+      )
+    )
+      return
     try {
       const text = signallingMessageText(message)
-      this.#resources.receive(connection.resource, text, async (wire) => {
+      connection.resources.receive(connection.resource, text, async (wire) => {
         this.#observeClock(connection)
         await this.#process(connection, wire)
         if (!connection.closed) this.#observeClock(connection)
@@ -370,6 +615,7 @@ export class SignallingRuntime {
     this.#pauseOwner = undefined
     for (const connection of this.#connections.values()) this.#close(connection)
     this.#resources.dispose()
+    this.#connectorResources.dispose()
     this.#inboxes.clear()
   }
   #connection(peer: unknown): Connection | undefined {
@@ -451,7 +697,7 @@ export class SignallingRuntime {
   #wire(connection: Connection, wire: string): void {
     if (
       !this.#owned(connection) ||
-      !this.#resources.send(connection.resource, wire)
+      !connection.resources.send(connection.resource, wire)
     )
       throw Error('Closed signalling send')
   }
@@ -500,6 +746,19 @@ export class SignallingRuntime {
     // The switch is explicit: an authenticated machine cannot act as a browser.
     const control = frame
     switch (control.t) {
+      case 'connector.api-query-result':
+        this.#receiveApiQuery(connection, control)
+        return
+      case 'connector.api-result': {
+        const identity = this.#apiIdentity(connection)
+        if (!identity || !this.#apiDelivery) throw Error('API result denied')
+        await this.#apiDelivery.recordResult(
+          identity.farm_id,
+          identity.agent_id,
+          control.wire,
+        )
+        return
+      }
       case 'pause.begin':
       case 'browser.begin': {
         if (connection.state.kind !== 'browser.begin')
@@ -519,7 +778,12 @@ export class SignallingRuntime {
               )
             : await openReadOnlyNegotiation(
                 this.#coordinator,
-                scope,
+                {
+                  ...scope,
+                  ...(control.camera_printer_id
+                    ? { cameraPrinterId: control.camera_printer_id }
+                    : {}),
+                },
                 this.#endpoint(connection),
               )
         if (!opened || !this.#owned(connection)) {
@@ -600,8 +864,9 @@ export class SignallingRuntime {
           farmId: control.farm_id,
           jti: control.jti,
         })
-        if (!current || connection.closed) throw new Error('Connector denied')
-        const identity = await this.#current(connection, current)
+        if (current.kind !== 'authorized' || connection.closed)
+          throw new Error('Connector denied')
+        const identity = await this.#current(connection, current.snapshot)
         if (!identity) throw new Error('Connector denied')
         connection.state = {
           kind: 'connector.issue',
@@ -657,6 +922,23 @@ export class SignallingRuntime {
           this.#inboxes.has(inboxKey(connection, current.identity.agent_id))
         )
           throw new Error('Inbox proof expired')
+        const oldResources = connection.resources
+        const oldResource = connection.resource
+        const promoted = this.#resources.reserve(
+          connection.makePort(() => connection.resources === this.#resources),
+        )
+        if (!promoted) throw new Error('Capacity')
+        connection.resources = this.#resources
+        connection.resource = promoted
+        oldResources.close(oldResource)
+        connection.releaseAdmission()
+        const remaining =
+          30_000 - (this.#clock.monotonic() - connection.start.monotonic)
+        if (!Number.isFinite(remaining) || remaining <= 0)
+          throw new Error('Expired')
+        connection.cancelPromotedLifetime = after(remaining, () =>
+          this.#close(connection),
+        )
         connection.state = { kind: 'connector.ready', identity: current }
         this.#inboxes.set(
           inboxKey(connection, current.identity.agent_id),
@@ -677,6 +959,8 @@ export class SignallingRuntime {
         })
         this.#confirmAuthority(connection, current)
         this.#revalidation(connection)
+        if (connection.mode === 'read-only')
+          this.#deliverApiPending(current.identity)
         break
       }
       case 'pause.connector-attach':
@@ -873,13 +1157,15 @@ export class SignallingRuntime {
     previous: Identity,
   ): Promise<Identity | null> {
     this.#observeClock(connection)
-    const current = await this.#reader.readConnectorCurrent({
+    const decision = await this.#reader.readConnectorCurrent({
       agentId: previous.identity.agent_id,
       farmId: previous.identity.farm_id,
       jti: previous.identity.credential_jti,
     })
+    if (decision.kind === 'unavailable') throw new AuthorityUnavailable()
+    if (decision.kind === 'denied') return null
+    const current = decision.snapshot
     if (
-      !current ||
       connection.closed ||
       identityPins(current) !== identityPins(previous) ||
       current.budget.observedAt < previous.budget.observedAt
@@ -909,8 +1195,15 @@ export class SignallingRuntime {
       connection.revalidationCancel = null
       const state = connection.state
       if (!('identity' in state) || connection.closed) return
-      void this.#resources.work(connection.resource, async () => {
-        const current = await this.#current(connection, state.identity)
+      void connection.resources.work(connection.resource, async () => {
+        let current: Identity | null
+        try {
+          current = await this.#current(connection, state.identity)
+        } catch (error) {
+          if (!(error instanceof AuthorityUnavailable)) throw error
+          if (!connection.closed) this.#revalidation(connection)
+          return
+        }
         if (!current || connection.closed) {
           this.#revokeAuthority(connection)
           this.#close(connection)
@@ -941,7 +1234,7 @@ export class SignallingRuntime {
       credential_jti: current.identity.credential_jti,
     })
   }
-  /** A failed reread revokes the Connector's cached authority before closing. */
+  /** A definitive denial revokes the Connector's cached authority before closing. */
   #revokeAuthority(connection: Connection): void {
     if (connection.mode !== 'read-only' || connection.closed) return
     try {
@@ -956,7 +1249,10 @@ export class SignallingRuntime {
       // Closing still ends the session; the offline lifetime bounds the rest.
     }
   }
-  #close(connection: Connection): void {
+  #close(
+    connection: Connection,
+    closeCode?: { code: number; reason: string },
+  ): void {
     if (connection.closed) return
     connection.closed = true
     connection.abort.abort()
@@ -982,8 +1278,12 @@ export class SignallingRuntime {
     }
     // Drop any retained JWT from preauthentication/retry state before termination.
     connection.state = { kind: 'connector.begin' }
-    this.#resources.close(connection.resource)
-    connection.native?.terminate()
-    connection.request.socket.destroy()
+    connection.releaseAdmission()
+    connection.cancelPromotedLifetime()
+    connection.resources.close(connection.resource, closeCode)
+    if (!closeCode) {
+      connection.native?.terminate()
+      connection.request.socket.destroy()
+    }
   }
 }

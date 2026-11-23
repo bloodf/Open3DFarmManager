@@ -10,7 +10,7 @@ bash scripts/test-local-ci.sh
 bash scripts/local-ci.sh code
 ```
 
-The code job requires pnpm 12.18.0, Node 24.22.3, existing workspace dependencies,
+The code job requires npm, a Node version accepted by the root `engines` range (`^22.22.3 || >=24.22.2 <25`), existing workspace dependencies,
 Chromium and its operating-system libraries. Install browser prerequisites
 separately; this runner never installs operating-system packages. Like
 `.github/workflows/ci.yml`, it uses a frozen dependency install with scripts
@@ -25,28 +25,93 @@ or failed tests do not produce a passing result.
 and the build. Other browser or E2E experiments are separate from these checks
 and may be deferred; this does not waive any required hosted checks.
 
-The code job leaves two paths out. The default Playwright run skips
-`tests/e2e/farm-view.spec.ts`, because the file calls `test.skip` unless
-`FARM_VIEW_E2E` is `true`, and the default configuration keeps the farm view
-flag off. The dedicated configuration `playwright.farm-view.config.ts` refuses
-to load without that variable, turns the flag on and serves the app on port 3101 (override with `FARM_VIEW_PORT`; the default suite's
-port 3100 is overridable with `E2E_PORT`; both accept an integer from 1 to 65535).
+The code job leaves two paths out. Run `tests/e2e/farm-view.spec.ts` with the
+dedicated configuration `playwright.farm-view.config.ts`, which serves the app
+on port 3101 (override with `FARM_VIEW_PORT`; the default suite's port 3100 is
+overridable with `E2E_PORT`; both accept an integer from 1 to 65535).
 Build the app first, then run these cases on their own:
 
 ```sh
-FARM_VIEW_E2E=true pnpm exec playwright test --config playwright.farm-view.config.ts
+npx playwright test --config playwright.farm-view.config.ts
 ```
 
 `packages/webrtc-experiment` has its own typecheck and test scripts, and neither
 `check:all` nor the workflow runs them. Run the package scripts yourself:
 
 ```sh
-pnpm --dir packages/webrtc-experiment run typecheck
-pnpm --dir packages/webrtc-experiment run test
+npm run typecheck --workspace packages/webrtc-experiment
+npm run test --workspace packages/webrtc-experiment
 ```
 
 The transport and interop cases launch Playwright's Chromium. Neither path is a
 GitHub check, so a passing code job says nothing about them.
+
+## Verificação completa com Node.js 22 no Docker
+
+Use um daemon Docker Linux amd64. Confira o espaço em disco do daemon e
+registre os recursos da execução conforme o `AGENTS.md`. Na raiz do
+repositório, gere uma imagem para a árvore que você quer verificar. Use uma
+tag e nomes de contêiner próprios se houver outras execuções na mesma máquina.
+
+Evidência / smoke (orquestra o Docker a partir do host; não usa o Node do host
+para a asserção de versão nem para o Chrome):
+
+```sh
+node scripts/test-docker-check-image.mjs
+```
+
+Esse script faz o `docker build` da imagem `open3dfarmmanager/check:node22` e,
+num único contêiner com `--network none` e `--shm-size 1g`, confirma Node.js
+22, o binário `/opt/google/chrome/chrome` e o canal Playwright `chrome` contra
+uma página estática em loopback. Sobrescreva a tag com `OPEN3D_CHECK_IMAGE_TAG`
+se precisar isolar a execução. Com `OPEN3D_CHECK_IMAGE_SKIP_BUILD=1`, reutiliza
+uma imagem já construída (somente para repetir o smoke).
+
+A imagem de verificação (`infra/check/Dockerfile`) é linux/amd64, digest-pinned,
+Debian 13 (trixie) com git ≥ 2.42, Python 3 e Chrome. Ela corre como o utilizador
+não-root `node` (dono de `/workspace`) para que rejeições por permissão de
+ficheiro sejam as mesmas que no anfitrião; o `.dockerignore` inclui
+`.env.example` (necessário ao guia self-host). Ambiente sensível (quatro suites):
+
+```sh
+node scripts/test-docker-check-env.mjs
+```
+
+Build e gate completo explícitos (equivalente ao que o smoke monta):
+
+```sh
+docker build --platform linux/amd64 \
+  --file infra/check/Dockerfile --tag open3dfarmmanager/check:node22 .
+
+docker run --rm --name o3dfm-node22-full --network none --shm-size 1g \
+  open3dfarmmanager/check:node22 npm run check:all
+```
+
+Para fixar exatamente o commit indexado, use
+`git archive HEAD | docker build --platform linux/amd64 --file infra/check/Dockerfile --tag open3dfarmmanager/check:node22 -`
+no lugar do `docker build` com contexto `.`.
+
+O build baixa as dependências, instala os workspaces Linux com
+`npm ci --ignore-scripts` e inclui o código da árvore enviada ao build. Faça o
+build novamente quando mudar o commit ou o lockfile. Use o `node_modules` da
+imagem. Cada contêiner grava `.nuxt`, `.output` e `dist` em sua própria camada
+e a descarta ao sair. A execução usa loopback dentro do contêiner, sem portas
+publicadas ou volumes do host.
+
+O teste rápido inicia o Chrome pelo canal `chrome` do Playwright e abre uma
+página servida em loopback. O comando completo executa o mesmo
+`npm run check:all` da CI Node.js 22. Em uma máquina compartilhada, a
+contenção de CPU ou disco pode fazer os testes atingirem seus prazos. Se isso
+ocorrer, registre o resultado completo e repita quando houver capacidade.
+Na execução anterior em Docker, além da falta do Chrome, houve timeouts de
+testes e hooks. A suíte `mixed-telemetry-runtime.test.ts` também registrou
+`Queue clock regressed`. Um teste rápido bem-sucedido confirma que o Chrome
+abre uma página em loopback. Registre o resultado de `check:all` em separado.
+
+Depois de verificar que nenhuma outra tarefa usa a imagem da sua execução,
+remova a tag criada para ela com `docker image rm open3dfarmmanager/check:node22`.
+
+## Optional container jobs
 
 Optional container jobs require explicit opt-in:
 

@@ -1,11 +1,14 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import {
   journeyEnabled,
+  reportedProgress,
   startJourneyHarness,
   type JourneyHarness,
 } from './harness.ts'
 import type { KobraBridgeSimulator } from './harness-kobralink-bridge.ts'
 
+// Legacy path: new Kobra X setup is native (kobra-x-native.spec.ts); this journey
+// keeps the explicit KobraLink bridge and its existing assignments covered.
 // Opt-in: OPENFARM_JOURNEY=1. One KobraLink printer walks the whole journey in
 // the browser against the loopback bridge stand-in: found by the Connector's
 // probe, set up on the printers page, live telemetry, every command the
@@ -16,7 +19,7 @@ const UPLOAD = 'journey-part.gcode'
 const GCODE = '; synthetic journey file\nG28\nG1 X10 Y10 F3000\n'
 
 if (journeyEnabled())
-  test.describe('KobraLink journey', () => {
+  test.describe('KobraLink journey (legacy bridge, explicit opt-in)', () => {
     test.describe.configure({ mode: 'serial' })
     let harness: JourneyHarness | undefined
     let found: unknown
@@ -205,9 +208,10 @@ if (journeyEnabled())
       expect(bridge().observed.signIns).toBeGreaterThan(0)
       journey().controls.setProgress(75)
       await journey().expectProgress(0.75)
-      await expect(
-        row().getByText('Progresso informado da impressão: 75%'),
-      ).toBeVisible()
+      await expect(reportedProgress(row())).toHaveAttribute(
+        'aria-valuetext',
+        '75%',
+      )
     })
 
     test('commands without a bridge route are shown as not supported', async () => {
@@ -388,6 +392,22 @@ if (journeyEnabled())
       const page = journey().ownerPage
       await journey().openFarm()
       await expect(stateOf()).toHaveText('Imprimindo', { timeout: 45_000 })
+      // A filtered run skips the earlier cancel and file-start tests.
+      if (bridge().state.filename === 'journey.gcode') {
+        bridge().setState({
+          ...bridge().state,
+          printState: 'standby',
+          kobraState: 'canceled',
+        })
+        await expect(
+          row().getByText('Cancelado', { exact: true }),
+        ).toBeVisible()
+        bridge().setState({
+          printState: 'printing',
+          progress: 0,
+          filename: UPLOAD,
+        })
+      }
       journey().controls.setProgress(60)
       await journey().expectProgress(0.6)
       journey().controls.finishPrint()
@@ -404,7 +424,7 @@ if (journeyEnabled())
       const endedAt = await ended.innerText()
       await page.waitForTimeout(3000)
       await expect(ended).toHaveText(endedAt)
-      await expect(row().getByRole('progressbar')).toHaveCount(0)
+      await expect(reportedProgress(row())).toHaveCount(0)
 
       await page.goto(journey().origin + '/historico', {
         waitUntil: 'domcontentloaded',
@@ -427,6 +447,7 @@ if (journeyEnabled())
         UPLOAD,
         /^\d{2}\/\d{2}\/\d{4}/,
         '0 h 30 min',
+        'Fora da biblioteca',
       ])
       await expect(rows.nth(1).locator('td')).toHaveText([
         PRINTER_KEY,
@@ -434,11 +455,12 @@ if (journeyEnabled())
         'journey.gcode',
         /^\d{2}\/\d{2}\/\d{4}/,
         'Não informada',
+        'Fora da biblioteca',
       ])
       await page.getByLabel('Impressora (opcional)').fill('another-printer')
       await page.getByRole('button', { name: 'Atualizar histórico' }).click()
       await expect(
-        page.getByText('Nenhum trabalho finalizado registrado.'),
+        page.getByText('Nenhum trabalho finalizado', { exact: true }),
       ).toBeVisible()
       expect(journey().simulatorObservation()).toMatchObject({ failure: false })
     })

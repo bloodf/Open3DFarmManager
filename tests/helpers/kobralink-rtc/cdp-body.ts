@@ -149,6 +149,7 @@ function newEntry(headers: Record<string, unknown>, startMs: number): Entry {
 
 function attach(
   session: CDPSession,
+  store: CDPSession,
   origin: string,
   queues: Map<string, Entry[]>,
 ) {
@@ -220,7 +221,7 @@ function attach(
     // begun, or durable storage withheld the stream): fetch the whole
     // finished body from the browser-process store. A failed fetch leaves it
     // uncaptured.
-    void session
+    void store
       .send('Network.getResponseBody', { requestId: event.requestId })
       .then((result) => {
         const whole = Buffer.from(
@@ -254,15 +255,20 @@ export async function captureBodies(page: Page, origin: string) {
   const queues = new Map<string, Entry[]>()
   try {
     const session = await page.context().newCDPSession(page)
+    await session.send('Network.enable')
     // Bodies are kept in the browser process, so a navigation of the page
     // cannot discard a finished body before it is fetched. Without durable
     // storage `getResponseBody` sent on `loadingFinished` loses that race.
-    await session.send('Network.configureDurableMessages', {
+    // Durable storage also empties `streamResourceContent`'s bufferedData,
+    // which then drops every byte received before streaming began (a loaded
+    // host answers the stream request late): keep it on its own session.
+    const store = await page.context().newCDPSession(page)
+    await store.send('Network.configureDurableMessages', {
       maxTotalBufferSize: DURABLE_BUFFER_BYTES,
       maxResourceBufferSize: MAX_CAPTURE_BYTES,
     })
-    await session.send('Network.enable')
-    attach(session, origin, queues)
+    await store.send('Network.enable')
+    attach(session, store, origin, queues)
   } catch {
     /* Without a session every body stays uncaptured, never clean. */
   }
@@ -270,18 +276,36 @@ export async function captureBodies(page: Page, origin: string) {
     /**
      * Pairs one Playwright response with its own network capture: same
      * method, URL and status and the same Chromium request start stamp.
-     * Anything but exactly one unclaimed match stays uncaptured. The capture
-     * may be announced slightly after Playwright's event. `finished` settles
-     * only once the captured body is complete.
+     * Anything but exactly one unclaimed match stays uncaptured, except a
+     * lone capture whose stamp drifted past that tolerance: two sessions do
+     * not share wallTime under load, and dropping it loses a finished body.
+     * The capture may be announced slightly after Playwright's event.
+     * `finished` settles only once the captured body is complete.
      */
     async take(method: string, url: string, status: number, startMs: number) {
       const key = keyOf(method, url, status)
       let entry: Entry | null = null
       for (let i = 0; i < 50 && !entry; i++) {
-        const match = uniqueMatch(queues.get(key) ?? [], startMs)
+        const queue = queues.get(key) ?? []
+        const match = uniqueMatch(queue, startMs)
         if (match === 'ambiguous') break
         if (match) {
           entry = match
+          entry.claimed = true
+          continue
+        }
+        // Two CDP sessions stamp wallTime further apart than 0.1 ms when the
+        // host is loaded (observed 0.11–0.37 ms). The finished body is then
+        // the only unclaimed capture within 1 ms and must still be claimed.
+        const open = queue.filter((candidate) => !candidate.claimed)
+        const only = open.length === 1 ? open[0] : undefined
+        if (
+          only &&
+          complete(only) &&
+          Math.abs(only.startMs - startMs) < 1 &&
+          (queue.length === 1 || queue.some((candidate) => candidate.claimed))
+        ) {
+          entry = only
           entry.claimed = true
         } else await new Promise((resolve) => setTimeout(resolve, 20))
       }

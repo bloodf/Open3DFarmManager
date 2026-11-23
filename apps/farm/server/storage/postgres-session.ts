@@ -105,4 +105,23 @@ export class PostgresSessionRepository implements SessionRepository {
       throw new Error('Session storage unavailable')
     }
   }
+
+  async revokeOtherSessions(
+    accountId: string,
+    keepSessionId: string,
+    now: number,
+  ): Promise<void> {
+    if (!validId(accountId) || !validId(keepSessionId) || !validTime(now))
+      throw new Error('Invalid revocation request')
+    try {
+      await this.sql.begin(async (tx) => {
+        await tx`SET LOCAL statement_timeout = '2000ms'`
+        await tx`SET LOCAL lock_timeout = '1000ms'`
+        await tx`SELECT id FROM farm.session_accounts WHERE id = ${accountId} FOR UPDATE`
+        await tx`UPDATE farm.account_sessions SET revoked_at = ${now} WHERE account_id = ${accountId} AND id <> ${keepSessionId} AND revoked_at IS NULL AND created_at <= ${now}`
+      })
+    } catch {
+      throw new Error('Session storage unavailable')
+    }
+  }
 }

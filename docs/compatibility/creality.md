@@ -3,8 +3,11 @@
 Read-only experimental support for the stock K1/K1 Max/K1C/K2/Hi LAN
 WebSocket endpoint on port 9999. **Not proven on hardware.**
 
-The client consumes unsolicited flat JSON status objects. It sends no application
-frames or printer commands; ws handles WebSocket control ping/pong automatically.
+The client consumes unsolicited flat JSON status objects and replies with the
+text frame `ok` when it receives `{"ModeCode":"heart_beat"}`. This keepalive
+comes from community protocol sources and is hardware-unqualified. The telemetry
+client sends no printer commands. The WebSocket library handles control ping
+and pong frames automatically.
 Firmware requiring an explicit status subscription is not yet qualified.
 No Cloud, HTTP fallback, RTC or collection integration is included.
 

@@ -1,3 +1,4 @@
+import type { WebcamDetailOptions } from './readonly-peer.ts'
 import { assignmentSetDigest } from '../../../../../packages/farm-protocol/src/rtc-assignment-set.ts'
 import type {
   FarmStatusFeed,
@@ -34,6 +35,7 @@ type ClientInput = {
     audience: string
     publicKey: unknown
     privateKey: CryptoKey
+    cameraPrinterId?: string
   }
   assignmentRefs: readonly Assignment[]
   onVerifiedAdmission: (value: {
@@ -42,11 +44,13 @@ type ClientInput = {
   }) => void
   onStatus: (value: unknown) => void
   onTerminal: (reason: string) => void
+  webcamDetail?: WebcamDetailOptions
   cameraMedia?: (onViolation: (reason: string) => void) => BrowserCameraHooks
 }
 export type FarmCameraEvent = Readonly<{
   assignmentId: string
   stream: MediaStream | null
+  cameraId?: string
 }>
 type Options = {
   resolveKey: (input: {
@@ -58,6 +62,8 @@ type Options = {
   /** Opt-in camera. Streams are offered only for this feed's server assignment
    * refs; null is always emitted when an attached stream is revoked. */
   onCamera?: (event: FarmCameraEvent) => void
+  cameraTarget?: () => string | null
+  webcamDetail?: WebcamDetailOptions & { onClose: () => void }
 }
 function requireSync(callback: () => void) {
   const result: unknown = callback()
@@ -69,6 +75,16 @@ function requireSync(callback: () => void) {
 let generation = 0
 
 /** Injection only. The caller supplies existing keys; current authorization remains server-owned. */
+function rateLimited(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false
+  const status =
+    'statusCode' in error
+      ? error.statusCode
+      : 'status' in error
+        ? error.status
+        : undefined
+  return status === 429
+}
 export function createAuthenticatedFarmStatusFeed(
   options: Options,
 ): FarmStatusFeed {
@@ -121,6 +137,10 @@ export function createAuthenticatedFarmStatusFeed(
           : performance.now() >= session.deadlineMonoMs ||
             Date.now() >= session.expiresAt)
       const stale = () => close(lapsed() ? 'expired' : 'rejected')
+      const webcamDetail = options.webcamDetail
+      const hasWebcamDetail =
+        webcamDetail &&
+        refs.some((ref) => ref.printerKey === webcamDetail.printerKey)
       const close = (
         reason:
           'expired' | 'revoked' | 'disconnected' | 'rejected' = 'disconnected',
@@ -132,6 +152,7 @@ export function createAuthenticatedFarmStatusFeed(
         signal.removeEventListener('abort', aborted)
         if (active.get(slot) === retire) active.delete(slot)
         controller.abort()
+        if (hasWebcamDetail) webcamDetail?.onClose()
         try {
           client?.close()
         } catch {}
@@ -268,6 +289,9 @@ export function createAuthenticatedFarmStatusFeed(
                   assignmentRefs: value.assignmentRefs,
                   onStatus: value.onStatus,
                 },
+                ...(value.webcamDetail
+                  ? { webcamDetail: value.webcamDetail }
+                  : {}),
                 onVerifiedAdmission: value.onVerifiedAdmission,
                 onTerminal: value.onTerminal,
                 ...(value.cameraMedia
@@ -275,17 +299,27 @@ export function createAuthenticatedFarmStatusFeed(
                   : {}),
               }))
           const onCamera = options.onCamera
+          const target = options.cameraTarget?.()
+          const cameraIds = refs
+            .map((ref) => ref.assignmentId)
+            .filter((id) => !options.cameraTarget || id === target)
+          const cameraPrinterId = onCamera ? cameraIds[0] : undefined
           let attached: string | undefined
           const cameraMedia =
             onCamera &&
+            cameraIds.length > 0 &&
             ((onViolation: (reason: string) => void) =>
               new BrowserCameraMedia({
                 privateKey: resolved.privateKey,
-                authorizedPrinterIds: refs.map((ref) => ref.assignmentId),
-                onStream(stream, printerId) {
+                authorizedPrinterIds: cameraIds,
+                onStream(stream, printerId, cameraId) {
                   if (stream && printerId && current() && !attached) {
                     attached = printerId
-                    onCamera({ assignmentId: printerId, stream })
+                    onCamera({
+                      assignmentId: printerId,
+                      stream,
+                      ...(cameraId ? { cameraId } : {}),
+                    })
                   } else if (!stream && attached) {
                     const assignmentId = attached
                     attached = undefined
@@ -304,8 +338,40 @@ export function createAuthenticatedFarmStatusFeed(
               audience: resolved.audience,
               publicKey: key.publicKey,
               privateKey: resolved.privateKey,
+              ...(cameraPrinterId ? { cameraPrinterId } : {}),
             },
             assignmentRefs: refs,
+            ...(hasWebcamDetail && webcamDetail
+              ? {
+                  webcamDetail: {
+                    printerKey: webcamDetail.printerKey,
+                    onUpdate(value) {
+                      if (current() && session) webcamDetail.onUpdate(value)
+                    },
+                    ...(webcamDetail.onGcodeHelp && {
+                      onGcodeHelp(commands) {
+                        if (current() && session)
+                          webcamDetail.onGcodeHelp?.(commands)
+                      },
+                    }),
+                    onGcodeResponse(frame) {
+                      if (current() && session)
+                        webcamDetail.onGcodeResponse?.(frame)
+                    },
+                    onDetail(frame) {
+                      if (current() && session) webcamDetail.onDetail?.(frame)
+                    },
+                    ...(webcamDetail.advertised && {
+                      advertised: webcamDetail.advertised,
+                    }),
+                    ...(webcamDetail.onQuery && {
+                      onQuery(frame) {
+                        if (current() && session) webcamDetail.onQuery?.(frame)
+                      },
+                    }),
+                  },
+                }
+              : {}),
             ...(cameraMedia ? { cameraMedia } : {}),
             onVerifiedAdmission(value) {
               if (session) return close('rejected')
@@ -320,6 +386,7 @@ export function createAuthenticatedFarmStatusFeed(
                   b.v !== 2 ||
                   b.assignment_count !== assignments.count ||
                   b.assignment_digest !== assignments.digest ||
+                  b.camera_printer_id !== cameraPrinterId ||
                   b.account_id !== scope.accountId ||
                   b.farm_id !== scope.farmId ||
                   b.agent_id !== agentId ||
@@ -441,8 +508,10 @@ export function createAuthenticatedFarmStatusFeed(
           if (!current()) return
           await client.start()
           if (!current()) return
-        } catch {
-          close('rejected')
+        } catch (error) {
+          // A rate-limited lookup is server pacing, not a rejected Connector:
+          // the view reopens it with backoff instead of stopping for good.
+          close(rateLimited(error) ? 'disconnected' : 'rejected')
         }
       })()
       return { close }

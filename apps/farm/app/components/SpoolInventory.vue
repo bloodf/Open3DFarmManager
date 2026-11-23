@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatWeight } from '../utils/ui-format.ts'
 import { computed } from 'vue'
 import {
   spoolInventoryStale,
@@ -34,8 +35,12 @@ const sections = computed(() =>
     }
   }),
 )
+// Spoolman can report a negative remaining weight after over-consumption;
+// show it as reported instead of hiding it behind "Indisponível".
 function grams(value: number | null) {
-  return value === null ? 'Indisponível' : `${value.toLocaleString('pt-BR')} g`
+  const magnitude = formatWeight(value === null ? null : Math.abs(value))
+  if (!magnitude) return 'Indisponível'
+  return value !== null && value < 0 ? `-${magnitude}` : magnitude
 }
 </script>
 <template>

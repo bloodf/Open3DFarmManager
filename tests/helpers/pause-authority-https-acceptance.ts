@@ -6,7 +6,7 @@ import {
 } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { request as httpsRequest } from 'node:https'
-import { z } from '../../packages/farm-protocol/node_modules/zod/index.js'
+import { z } from 'zod'
 import { ConnectorIdentity } from '../../packages/connector/src/identity/store.ts'
 import {
   BrowserDeviceProofChallenge,

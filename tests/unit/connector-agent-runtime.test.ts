@@ -17,6 +17,7 @@ import {
   renameSync,
   unlinkSync,
   chmodSync,
+  realpathSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -27,6 +28,7 @@ import { loadOrCreateIdentity } from '../../packages/connector/src/identity/stor
 import { TelemetryQueue } from '../../packages/connector/src/cloud/queue.ts'
 import { readRuntimeCredential } from '../../packages/connector/src/config/credential.ts'
 import { readAgentRuntimeConfig } from '../../packages/connector/src/config/runtime.ts'
+import { provisioningQueueDirectory } from '../../packages/connector/src/runtime/configuration-command.ts'
 import { openScopedTelemetryQueue } from '../../packages/connector/src/runtime/queue-scope.ts'
 import {
   telemetryProofPayload,
@@ -91,7 +93,7 @@ function job(args: string[], env = {}) {
       return output
     },
     get exited() {
-      return child.exitCode !== null
+      return child.exitCode !== null || child.signalCode !== null
     },
     finish,
     // Waits for the agent's own output or fixture events, never a fixed
@@ -99,7 +101,7 @@ function job(args: string[], env = {}) {
     // fails at once with the agent's output.
     async until(predicate: () => boolean) {
       while (!predicate()) {
-        if (child.exitCode !== null) {
+        if (child.exitCode !== null || child.signalCode !== null) {
           // Output written just before exit may still be in the pipe.
           await reading
           if (predicate()) return
@@ -111,11 +113,13 @@ function job(args: string[], env = {}) {
       }
     },
     async stop() {
-      if (child.exitCode === null) child.kill('SIGTERM')
+      if (child.exitCode === null && child.signalCode === null)
+        child.kill('SIGTERM')
       return finish()
     },
     async close() {
-      if (child.exitCode === null) child.kill('SIGKILL')
+      if (child.exitCode === null && child.signalCode === null)
+        child.kill('SIGKILL')
       await finish()
     },
   }
@@ -207,7 +211,18 @@ async function fixture(signalling = false) {
     onClose(socket) {
       sockets.delete(socket)
     },
-    onMessage(socket) {
+    onMessage(socket, message) {
+      const call = JSON.parse(message)
+      if (call.method === 'server.connection.identify') {
+        socket.send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: call.id,
+            result: { connection_id: 1 },
+          }),
+        )
+        return
+      }
       socket.send(
         JSON.stringify({
           jsonrpc: '2.0',
@@ -241,6 +256,9 @@ async function fixture(signalling = false) {
   const cloud = await serveWsTestServer({
     tls: { cert: readFileSync(cert), key: readFileSync(key) },
     http: async (request) => {
+      // The library relay poll (#446) is not telemetry: this fixture has no library.
+      if (new URL(request.url).pathname.startsWith('/api/connector/library/'))
+        return new Response(null, { status: 404 })
       cloudRequests++
       if (new URL(request.url).pathname === '/api/signalling/connector') {
         signallingRequests++
@@ -465,6 +483,21 @@ function seedScoped(server: Awaited<ReturnType<typeof fixture>>, now: number) {
     now,
   })
 }
+
+test('predicate waits stop after a signalled child closes', async () => {
+  const child = job(['-e', "process.kill(process.pid, 'SIGKILL')"])
+  let result: Awaited<ReturnType<typeof child.finish>> | undefined
+  try {
+    await expect(child.until(() => false)).rejects.toThrow(
+      /Agent exited before the fixture condition/,
+    )
+    result = await child.finish()
+  } finally {
+    await child.close()
+  }
+  if (!result) throw new Error('child wait did not finish')
+  expect(result.code).toBeNull()
+})
 
 test('actual run composes default WSS retries with collection and joins on SIGTERM', async () => {
   const server = await fixture(true)
@@ -1036,3 +1069,134 @@ test('SIGTERM during an authenticated request joins shutdown and never acknowled
     await server.close()
   }
 }, 20000)
+
+test('provisioningQueueDirectory isolates expanded assignment sets while enforcing strict scope receipts', () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'open3d-prov-scope-')))
+  try {
+    const data = join(dir, 'data')
+    const state = join(dir, 'state')
+    mkdirSync(state, { mode: 0o700 })
+    const identity = loadOrCreateIdentity(data)
+    const farm = randomUUID()
+    const agent = randomUUID()
+    const a1 = randomUUID()
+    const a2 = randomUUID()
+    const credentialPath = join(dir, 'credential.json')
+    writeFileSync(
+      credentialPath,
+      JSON.stringify({
+        version: 1,
+        expected_fingerprint: identity.fingerprint,
+        approval: {
+          status: 'approved',
+          agent_id: agent,
+          farm_id: farm,
+          device_token: 'aaa.bbb.ccc',
+          expires_at: Date.now() + 60_000,
+        },
+      }),
+      { mode: 0o600 },
+    )
+    const credential = readRuntimeCredential(
+      credentialPath,
+      identity.fingerprint,
+      Date.now(),
+    )
+    const baseConfig = {
+      version: 1,
+      collection: {
+        version: 1,
+        allowedOrigins: ['http://127.0.0.1:7125'],
+        printers: [{ printerKey: 'p1', origin: 'http://127.0.0.1:7125' }],
+        limits: { staleAfterMs: 5000 },
+      },
+      assignments: [
+        {
+          assignment_id: a1,
+          farm_id: farm,
+          agent_id: agent,
+          printer_key: 'p1',
+          moonraker_origin: 'http://127.0.0.1:7125',
+        },
+      ],
+      telemetry: {
+        endpoint: 'https://127.0.0.1:8443/api/connector/telemetry',
+        audience: 'agent-fixture',
+      },
+    }
+    const configPath = join(dir, 'snapshot.json')
+    writeFileSync(configPath, JSON.stringify(baseConfig), { mode: 0o600 })
+    const scope = { farm_id: farm, agent_id: agent, stateDirectory: state }
+    const queueDir1 = provisioningQueueDirectory(scope, configPath)
+    const q1 = openScopedTelemetryQueue({
+      dataDirectory: data,
+      telemetryDirectory: queueDir1,
+      config: readAgentRuntimeConfig(configPath, credential),
+      credential,
+      now: Date.now(),
+    })
+    q1.close()
+
+    // Reopening the exact same scope succeeds.
+    expect(provisioningQueueDirectory(scope, configPath)).toBe(queueDir1)
+    const q1Reopened = openScopedTelemetryQueue({
+      dataDirectory: data,
+      telemetryDirectory: queueDir1,
+      config: readAgentRuntimeConfig(configPath, credential),
+      credential,
+      now: Date.now(),
+    })
+    q1Reopened.close()
+
+    // Expanding confirmed printers via configure moves to a fresh isolated scope directory.
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        ...baseConfig,
+        collection: {
+          ...baseConfig.collection,
+          allowedOrigins: ['http://127.0.0.1:7125', 'http://127.0.0.1:7126'],
+          printers: [
+            { printerKey: 'p1', origin: 'http://127.0.0.1:7125' },
+            { printerKey: 'p2', origin: 'http://127.0.0.1:7126' },
+          ],
+        },
+        assignments: [
+          ...baseConfig.assignments,
+          {
+            assignment_id: a2,
+            farm_id: farm,
+            agent_id: agent,
+            printer_key: 'p2',
+            moonraker_origin: 'http://127.0.0.1:7126',
+          },
+        ],
+      }),
+      { mode: 0o600 },
+    )
+    const queueDir2 = provisioningQueueDirectory(scope, configPath)
+    expect(queueDir2).not.toBe(queueDir1)
+    const q2 = openScopedTelemetryQueue({
+      dataDirectory: data,
+      telemetryDirectory: queueDir2,
+      config: readAgentRuntimeConfig(configPath, credential),
+      credential,
+      now: Date.now(),
+    })
+    q2.close()
+
+    // Strict receipt verification still rejects a tampered receipt in queueDir2.
+    writeFileSync(join(queueDir2, 'scope.json'), '{}', { mode: 0o600 })
+    expect(() =>
+      openScopedTelemetryQueue({
+        dataDirectory: data,
+        telemetryDirectory: queueDir2,
+        config: readAgentRuntimeConfig(configPath, credential),
+        credential,
+        now: Date.now(),
+      }),
+    ).toThrow('Queue scope requires operator review')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

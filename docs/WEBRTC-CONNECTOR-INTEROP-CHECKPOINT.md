@@ -1,6 +1,8 @@
+> Registro histórico: o adaptador e o harness sintéticos descritos abaixo foram removidos em #609. Os testes atuais usam os peers mantidos do Connector.
+
 # Interoperabilidade WebRTC do Connector sintético
 
-O experimento conecta um Chromium real a um peer nativo executado pelo código do Connector, em processo separado. O adaptador fica em `packages/connector/src/webrtc/synthetic-peer.ts` e não é importado pelo CLI. A sessão compartilhada em `synthetic-session.ts` usa Web Crypto. A fixture do navegador importa somente essa sessão portátil. Não há impressoras, comandos executáveis, autenticação de conta ou serviço de produção.
+O experimento conecta um Chromium real a um peer nativo executado pelo código do Connector, em processo separado. O adaptador sintético usado na época foi removido. A sessão compartilhada em `synthetic-session.ts` usa Web Crypto. A fixture do navegador importa somente essa sessão portátil. Não há impressoras, comandos executáveis, autenticação de conta ou serviço de produção.
 
 ## Limite da prova
 
@@ -84,4 +86,34 @@ Werift 0.26.0 foi avaliado e removido antes de executar interoperabilidade Chrom
 
 A confiança permanece fornecida pela fixture. Uma integração real deverá fornecer identidade aprovada, vínculo conta/farm/Connector, metadados atuais, prova recente de posse, origem/audiência, desafios consumidos uma vez, sinalização autenticada e política de expiração/revogação. Uma credencial de emissão isolada não autentica o transporte. Reconexão, mudança de certificado ou renegociação exigirão nova sessão e nova verificação.
 
-Este adaptador aceita somente `synthetic-status` com valor `fixture-idle`. Não chama verificadores de comandos ou drivers. A integração futura deve continuar aplicando autorização e segurança no Connector, inclusive com falhas do servidor. Ausência de P2P mantém somente leitura; não há caminho de comandos por HTTP, servidor ou TURN. Câmera, NAT entre redes, hardware e distribuição permanecem fora desta prova.
+Este adaptador aceita somente `synthetic-status` com valor `fixture-idle`. Não chama verificadores de comandos ou drivers. A integração futura deve continuar aplicando autorização e segurança no Connector, inclusive com falhas do servidor. Ausência de P2P mantém o navegador em modo somente leitura (sem fallback por HTTP ou TURN); comandos pela API requerem escopo concedido pelo proprietário e envelopes assinados pelo emissor validados pelo Connector. Câmera, NAT entre redes, hardware e distribuição permanecem fora desta prova.
+
+## Memória RTC sob carga sustentada: execução concluída
+
+Em 2026-11-17, `OPENFARM_RTC_MEMORY=1 node scripts/test-rtc-memory.ts` completou os 600.000 ms padrão a partir do commit limpo `596551ad1f848e82d073d595a697c71804f03627`, com Node 24.22.2 e libdatachannel 0.24.6. Foram gravadas 1.471 amostras. A tabela mostra a amostra mais próxima de cada minuto; RSS inclui o processo Node e a biblioteca nativa do Connector, não o consumidor separado.
+
+| Tempo  | RSS (MiB) |
+| ------ | --------- |
+| 0 min  | 114,270   |
+| 1 min  | 139,957   |
+| 2 min  | 141,082   |
+| 3 min  | 141,082   |
+| 4 min  | 128,660   |
+| 5 min  | 130,723   |
+| 6 min  | 127,039   |
+| 7 min  | 127,414   |
+| 8 min  | 128,352   |
+| 9 min  | 128,727   |
+| 10 min | 128,727   |
+
+RSS inicial/pico/final: **114,270 / 142,020 / 128,727 MiB**; o pico ocorreu aos 218,485 s. A série caiu após o pico e terminou 14,457 MiB acima do início. Esta execução não mostrou crescimento contínuo ou sem limite; uma única execução não prova comportamento em outros hosts ou cargas.
+
+O consumidor nativo foi efetivamente suspenso por `SIGSTOP` durante as rajadas. Houve 33 gerações de peers, três peers prontos ao final, 108.141 tentativas de status suprimidas/coalescidas sob backpressure e 108.141 eventos `boundHits` do harness. Esse contador registra tentativas sem novo envio, não violações independentes do teto de 1.048.576 bytes. O pico amostrado de `bufferedAmount` foi 1.449 bytes e a fila JavaScript permaneceu em zero; o teto não foi excedido. Foram enviados 11.572 access units sintéticos de câmera. A observação final do consumidor recebeu 24.518 status e 1.943 pacotes de câmera (2.222.323 bytes).
+
+O resumo foi gravado com `dirty: false` e o commit exato acima. A observação final terminou antes do fechamento dos peers. Na limpeza, porém, o ledger registrou o consumidor encerrando com `signal: SIGSEGV`; o Connector fechou normalmente e a execução de 10 minutos já havia terminado. Esse sinal de saída não invalida as amostras concluídas, mas deixa a limpeza do processo consumidor como limitação a investigar. Não foi aberto issue de vazamento porque os dados desta execução não indicam crescimento sem limite.
+
+O harness mantém o Connector e um consumidor nativo separado, com ICE direto em loopback e portas efêmeras. Usa `ReadonlyConnectorPeer` e `FarmStatusSender` para status, `ReadonlyRtcSession` e `ConnectorCameraMedia` para câmera, e `PauseControlSession` para controle. A admissão é sintética e não testa login, WSS ou banco; controle não autoriza comandos nem usa dispatcher. A câmera envia payload Annex-B sintético pelo packetizer H.264/RTP, sem alegar decodificação de vídeo ou cobertura de RTSP/hardware.
+
+Cada linha JSONL inclui RSS, heap, filas observáveis por canal, contadores e estado dos peers. `null` indica métrica indisponível no canal privado de prova ou track RTP. Os contadores de câmera medem access units, não perda de pacotes nem frames decodificados. O arquivo da execução e o ledger de processos ficam fora do checkout. Os padrões são dez minutos e amostragem a cada cinco segundos; duração e intervalo podem ser ajustados para probes curtos.
+
+Validação desta unidade: `node --test --test-force-exit tests/node/rtc-memory-sampler.test.ts`, a busca por `RSS` neste documento e `pnpm run lint` passaram. A verificação completa `pnpm run check:all` e as integrações RTC autenticadas permanecem pendentes; não houve publicação.

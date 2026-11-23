@@ -1,9 +1,10 @@
-import { parseCollectorConfig } from './anycubic.ts'
+import { parseCollectorConfig } from '../prusa/config.ts'
 import {
   provisionBambuPrinter,
   provisionAnycubicPrinter,
   provisionCrealityPrinter,
 } from '../control/printer-binding.ts'
+import { isAbsolute } from 'node:path'
 import { z } from 'zod'
 import { PairingProofAudience } from '../../../farm-protocol/src/pairing-proof.ts'
 import {
@@ -22,6 +23,27 @@ import { RuntimeSignalling } from './signalling.ts'
 import { parseCameraRuntimeConfig } from './camera.ts'
 import { parseRtcRuntimeConfig } from './rtc.ts'
 
+const LibraryRuntime = z.strictObject({
+  /** Absolute directory of the Connector library store. */
+  directory: z
+    .string()
+    .min(1)
+    .max(4096)
+    .refine((value) => isAbsolute(value) && !value.includes('\0'))
+    .optional(),
+  quotaBytes: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional(),
+  retentionDays: z.number().int().min(1).max(3650).optional(),
+  keepVersions: z.number().int().min(1).max(1000).optional(),
+  /** Bound of the server-mode download cache. */
+  cacheMaxBytes: z
+    .number()
+    .int()
+    .min(1)
+    .max(Number.MAX_SAFE_INTEGER)
+    .optional(),
+})
+export type LibraryRuntimeConfig = z.infer<typeof LibraryRuntime>
+
 const Runtime = z.strictObject({
   version: z.union([
     z.literal(1),
@@ -29,10 +51,19 @@ const Runtime = z.strictObject({
     z.literal(3),
     z.literal(4),
     z.literal(5),
+    z.literal(6),
+    z.literal(7),
+    z.literal(8),
   ]),
   collection: z.unknown(),
   assignments: z.array(z.unknown()).min(1).max(16),
   signalling: RuntimeSignalling.optional(),
+  discovery: z
+    .strictObject({
+      enabled: z.boolean().default(true),
+      intervalMs: z.number().int().min(1).max(2147483647).default(600_000),
+    })
+    .prefault({}),
   telemetry: z
     .strictObject({
       endpoint: z.string().min(1).max(2048),
@@ -61,6 +92,9 @@ const Runtime = z.strictObject({
   camera: z.unknown().optional(),
   // Optional ICE bind address; absent keeps loopback (config/rtc.ts).
   rtc: z.unknown().optional(),
+  // Optional library store settings (#446). Absent keeps the defaults: the
+  // store lives under `<data directory>/library`, with the server's quota.
+  library: LibraryRuntime.optional(),
 })
 
 export function readAgentRuntimeConfig(
@@ -121,42 +155,102 @@ export function readAgentRuntimeConfig(
               value.printer_key === p.printerKey,
           )
         : undefined
-    const binding = bambu
-      ? provisionBambuPrinter(value, bambu)
-      : anycubic
-        ? provisionAnycubicPrinter(value, anycubic)
-        : creality
-          ? provisionCrealityPrinter(value, creality)
-          : isKobra
-            ? (() => {
-                const readonly = provisionReadonlyPrinter(value)
-                const assignment = readRuntimePrinterBinding(readonly)!
-                if (
-                  pause?.control?.assignmentId !== assignment.assignment_id ||
-                  collection.version !== 2
-                )
-                  return readonly
-                const local = collection.kobralink.printers.find(
-                  (p) => p.printerKey === assignment.printer_key,
-                )
-                if (
-                  !local ||
-                  !('backend' in assignment) ||
-                  assignment.origin !== local.origin ||
-                  assignment.bridgeInstance !== local.bridgeInstance ||
-                  assignment.deviceId !== local.deviceId ||
-                  assignment.id !== local.id ||
-                  assignment.revision !== local.revision
-                )
-                  throw new Error('KobraLink assignment mismatch')
-                const { assignment_id, farm_id, agent_id, printer_key } =
-                  assignment
-                return provisionKobraLinkPrinter(
-                  { assignment_id, farm_id, agent_id, printer_key },
-                  local,
-                )
-              })()
-            : registry?.provision(value)
+    const sdcp =
+      collection.version === 6 &&
+      typeof value === 'object' &&
+      value !== null &&
+      'printer_key' in value
+        ? collection.sdcp.printers.find(
+            (p) => p.printerKey === value.printer_key,
+          )
+        : undefined
+    const formlabs =
+      collection.version === 7 &&
+      typeof value === 'object' &&
+      value !== null &&
+      'printer_key' in value
+        ? collection.formlabs.printers.find(
+            (p) => p.printerKey === value.printer_key,
+          )
+        : undefined
+    const prusa =
+      collection.version === 8 &&
+      value &&
+      typeof value === 'object' &&
+      'printer_key' in value &&
+      collection.drivers.some((p) => p.printerKey === value.printer_key)
+    const binding = prusa
+      ? (() => {
+          if (
+            !value ||
+            typeof value !== 'object' ||
+            !('backend' in value) ||
+            value.backend !== 'prusa-link'
+          )
+            throw Error('PrusaLink assignment mismatch')
+          return provisionReadonlyPrinter(value)
+        })()
+      : formlabs
+        ? (() => {
+            if (
+              !value ||
+              typeof value !== 'object' ||
+              !('backend' in value) ||
+              value.backend !== 'formlabs'
+            )
+              throw Error('Formlabs assignment mismatch')
+            return provisionReadonlyPrinter(value)
+          })()
+        : sdcp
+          ? (() => {
+              if (
+                !value ||
+                typeof value !== 'object' ||
+                !('backend' in value) ||
+                value.backend !== 'sdcp'
+              )
+                throw Error('SDCP assignment mismatch')
+              return provisionReadonlyPrinter(value)
+            })()
+          : bambu
+            ? provisionBambuPrinter(value, bambu)
+            : anycubic
+              ? provisionAnycubicPrinter(value, anycubic)
+              : creality
+                ? provisionCrealityPrinter(value, creality)
+                : isKobra
+                  ? (() => {
+                      const readonly = provisionReadonlyPrinter(value)
+                      const assignment = readRuntimePrinterBinding(readonly)!
+                      if (
+                        !pause?.control?.assignmentIds.includes(
+                          assignment.assignment_id,
+                        ) ||
+                        collection.version !== 2
+                      )
+                        return readonly
+                      const local = collection.kobralink.printers.find(
+                        (p) => p.printerKey === assignment.printer_key,
+                      )
+                      if (
+                        !local ||
+                        !('backend' in assignment) ||
+                        assignment.backend !== 'kobralink' ||
+                        assignment.origin !== local.origin ||
+                        assignment.bridgeInstance !== local.bridgeInstance ||
+                        assignment.deviceId !== local.deviceId ||
+                        assignment.id !== local.id ||
+                        assignment.revision !== local.revision
+                      )
+                        throw new Error('KobraLink assignment mismatch')
+                      const { assignment_id, farm_id, agent_id, printer_key } =
+                        assignment
+                      return provisionKobraLinkPrinter(
+                        { assignment_id, farm_id, agent_id, printer_key },
+                        local,
+                      )
+                    })()
+                  : registry?.provision(value)
     if (!binding) throw Error('Moonraker assignment requires local allowlist')
     const assignment = readRuntimePrinterBinding(binding)
     if (
@@ -173,15 +267,21 @@ export function readAgentRuntimeConfig(
   if (
     assignments.length !==
     collection.printers.length +
-      (collection.version === 5
-        ? collection.anycubic.printers.length
-        : collection.version === 4
-          ? collection.creality.printers.length
-          : collection.version === 3
-            ? collection.bambu.printers.length
-            : collection.version === 2
-              ? collection.kobralink.printers.length
-              : 0)
+      (collection.version === 8
+        ? collection.drivers.length
+        : collection.version === 7
+          ? collection.formlabs.printers.length
+          : collection.version === 6
+            ? collection.sdcp.printers.length
+            : collection.version === 5
+              ? collection.anycubic.printers.length
+              : collection.version === 4
+                ? collection.creality.printers.length
+                : collection.version === 3
+                  ? collection.bambu.printers.length
+                  : collection.version === 2
+                    ? collection.kobralink.printers.length
+                    : 0)
   )
     throw new Error('Runtime assignment mapping is incomplete')
   for (const printer of collection.printers) {
@@ -202,11 +302,51 @@ export function readAgentRuntimeConfig(
         'Runtime assignment mapping does not match local collection',
       )
   }
+  if (collection.version === 8) {
+    for (const printer of collection.drivers) {
+      if (
+        assignments.filter(
+          (a) =>
+            a.printer_key === printer.printerKey &&
+            'backend' in a &&
+            a.backend === 'prusa-link',
+        ).length !== 1
+      )
+        throw Error('PrusaLink assignment mismatch')
+    }
+  }
+  if (collection.version === 7) {
+    for (const printer of collection.formlabs.printers) {
+      if (
+        assignments.filter(
+          (a) =>
+            a.printer_key === printer.printerKey &&
+            'backend' in a &&
+            a.backend === 'formlabs',
+        ).length !== 1
+      )
+        throw Error('Formlabs assignment mismatch')
+    }
+  }
+  if (collection.version === 6) {
+    for (const printer of collection.sdcp.printers) {
+      if (
+        assignments.filter(
+          (a) =>
+            a.printer_key === printer.printerKey &&
+            'backend' in a &&
+            a.backend === 'sdcp',
+        ).length !== 1
+      )
+        throw Error('SDCP assignment mismatch')
+    }
+  }
   if (collection.version === 2) {
     for (const printer of collection.kobralink.printers) {
       const matches = assignments.filter(
         (a) =>
           'backend' in a &&
+          a.backend === 'kobralink' &&
           a.printer_key === printer.printerKey &&
           a.origin === printer.origin &&
           a.bridgeInstance === printer.bridgeInstance &&
@@ -217,10 +357,10 @@ export function readAgentRuntimeConfig(
       if (matches.length !== 1) throw Error('KobraLink assignment mismatch')
     }
   }
-  if (pause?.control && !provisioned.has(pause.control.assignmentId))
-    throw new Error('Pause control assignment is not provisioned locally')
-  if (pause?.control) {
-    const binding = provisioned.get(pause.control.assignmentId)
+  for (const assignmentId of pause?.control?.assignmentIds ?? []) {
+    if (!provisioned.has(assignmentId))
+      throw new Error('Pause control assignment is not provisioned locally')
+    const binding = provisioned.get(assignmentId)
     if (!binding || !readPrinterBinding(binding))
       throw Error('Backend does not support pause control')
   }
@@ -229,8 +369,14 @@ export function readAgentRuntimeConfig(
       ? null
       : parseCameraRuntimeConfig(
           input.camera,
+          // Cameras attach to any local printer except KobraLink bridges.
           assignments
-            .filter((assignment) => 'moonraker_origin' in assignment)
+            .filter(
+              (assignment) =>
+                !(
+                  'backend' in assignment && assignment.backend === 'kobralink'
+                ),
+            )
             .map((assignment) => assignment.assignment_id),
         )
   // Strict: an invalid address fails startup before any task starts.
@@ -240,9 +386,11 @@ export function readAgentRuntimeConfig(
     rtc,
     collection,
     telemetry: input.telemetry,
+    discovery: input.discovery,
     renewal: input.renewal,
     assignments,
     signalling: input.signalling,
+    ...(input.library ? { library: input.library } : {}),
     pause,
     /**
      * Local provisioned mapping resolver. It returns the exact handle that was

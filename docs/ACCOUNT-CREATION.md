@@ -10,7 +10,7 @@ The specification requires accounts, registration and "no admin assignment from 
 
 Both creation endpoints reuse the login pipeline: same-origin check, per-IP and per-username rate limits (`register:` key namespace), the bounded JSON body reader, scrypt hashing with its capacity bound, and the sealed host-only session cookie (`establishSession`, extracted from `login`). Passwords need 12 or more characters. Every refusal (wrong or missing secret, closed bootstrap, malformed, spent or expired invite, taken username, short password) returns the same 400 message.
 
-OAuth/PKCE and email-based verification remain out of scope.
+Optional OpenID Connect sign-in is implemented and off by default. Email is still not a linking key, and public signup stays closed. See [OpenID Connect](#openid-connect).
 
 ## Database
 
@@ -21,6 +21,28 @@ Migration `0024_account_registration` adds `farm.account_invites` (immutable exc
 `farm_account_registration` has plain `INSERT` on `farm.session_accounts`, `farm.password_credentials`, `farm.farms` and `farm.memberships`. Anyone holding that database credential could insert an `owner` membership directly; application code never does. Follow-up: replace the grants with `SECURITY DEFINER` functions (`bootstrap_owner`, `redeem_invite`) or an insert trigger on `farm.memberships` that rejects `owner` outside bootstrap, then drop the table INSERT grants.
 
 An invite is redeemable only while its creator is still an active, non-disabled owner of the farm; revoking or disabling the owner kills their outstanding invites.
+
+## Password reset (owner-issued links)
+
+Password reset is off by default. Enable it with `NUXT_AUTH_PASSWORD_RESET=true` (runtime config `auth.passwordReset`); it also needs `NUXT_AUTH_ENABLED=true` and the auth database settings above. The `password-reset` server plugin then serves the reset endpoints; while it is off they answer 404.
+
+1. **Owner issues a link.** An active owner calls `POST /api/farms/{farmId}/members/{accountId}/reset-link` (same-origin, authenticated, rate-limited). The response carries `{ username, url, expiresAt }` exactly once, with `Cache-Control: no-store`. The link has the form `/redefinir-senha#usuario=<username>&codigo=<token>`, so the token stays in the URL fragment and out of server logs and `Referer`. Only its SHA-256 digest is stored. Non-owners, unknown farms, removed members and disabled accounts all get the same 404. Issuing again replaces any earlier link for that account.
+2. **Member sets a new password.** The page `/redefinir-senha` reads the fragment, removes it from the address bar and posts to `POST /api/auth/password-reset-complete` with the token in `x-password-reset-token`. Passwords need 12 or more characters.
+3. **Guarantees.** A link expires after 15 minutes (database cap), works once, and is void after any password change. A successful reset increments the account's session version, which ends every session of that account.
+
+The owner hands the link over out of band. No email or SMS is sent, and `POST /api/auth/password-reset-request` stays 404 because no self-service delivery is configured; this also stops anonymous requests from replacing an owner-issued link.
+
+Database: migrations `0020_password_reset` (tokens table and `farm_password_reset` role) and `0035_owner_reset_links` (read access to memberships for the owner check). The connection role used by `NUXT_AUTH_DATABASE_URL` must be a member of `farm_password_reset`; otherwise issuance fails closed with 503.
+
+## OpenID Connect
+
+OpenID Connect sign-in is off unless `NUXT_AUTH_OIDC=true`. It also needs `NUXT_AUTH_ENABLED=true` and the auth origin, session secret and database settings. One provider is configured with `NUXT_AUTH_OIDC_ISSUER` (HTTPS issuer identifier, no userinfo, query or hash) and `NUXT_AUTH_OIDC_CLIENT_ID`. `NUXT_AUTH_OIDC_CLIENT_SECRET` is optional; omit it for a public client that uses PKCE and `token_endpoint_auth_method=none`. The redirect URI is always `{NUXT_AUTH_ORIGIN}/api/auth/oidc/callback`. Register that exact URL at the provider. The issuer must publish `/.well-known/openid-configuration`.
+
+The flow is authorization code with S256 PKCE, a fresh `state` and a fresh `nonce`. The ID token signature, issuer, audience, expiry and nonce are checked with `openid-client` 6.9.0. The only identity stored is the issuer and the `sub` claim. Email, role and group claims are ignored. No account receives a membership role from provider claims.
+
+A subject that is already linked signs in to that account and does not change memberships. A subject that is not linked can be attached only by presenting a valid farm invite (`POST /api/auth/oidc/start` with `x-invite-token` and `{ "username" }`). That path consumes the invite, creates the account and sets the membership role from the invite row. A random unknown password hash is stored so the credential row stays valid; the person does not learn it. An owner reset link can set a password later. Matching an unverified email to an existing account is not implemented. Multiple providers at once are not implemented. This repository's node test uses a local fake provider on an ephemeral port. It does not prove a deployment against a production identity provider.
+
+While the flag is off, `GET /api/auth/oidc` answers 404 and the sign-in page does not offer the provider. Migration `0039_oidc_identities` adds `farm.oidc_identities` (immutable; no email or role columns). Sign-in needs `SELECT` (`farm_password_auth`). Invite linking needs `INSERT` (`farm_account_registration`) plus the registration grants from `0024`.
 
 ## Known limits
 

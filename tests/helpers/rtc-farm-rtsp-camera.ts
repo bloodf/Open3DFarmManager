@@ -1,8 +1,10 @@
+import { isMockSim } from '../../packages/sim-tools/src/mocks/env.ts'
 // Task-owned RTSP camera resources for the RTC farm acceptance runner: the
 // `rtsp` simulator profile under an exact compose project and loopback port,
 // and a verified copy of the prebuilt ingest helper (see
 // docs/CAMERA-END-TO-END-CHECKPOINT.md, "Reproducing the interop run").
 import { execFile } from 'node:child_process'
+import { startCameraMock } from '../../packages/sim-tools/src/camera-mock.ts'
 import { createHash } from 'node:crypto'
 import { chmod, copyFile, readFile, writeFile } from 'node:fs/promises'
 import { connect } from 'node:net'
@@ -53,6 +55,7 @@ export async function startRtspCamera(input: {
   project: string
   port: number
   helper: string
+  builtHelperSha256?: string | undefined
   ledger(value: object): void
 }) {
   if (
@@ -60,8 +63,9 @@ export async function startRtspCamera(input: {
     !/^o3dfm-[a-z0-9-]{1,60}$/.test(input.project)
   )
     throw new Error('Invalid RTSP camera resource request')
-  // Compared with the tracked value above, not with operator input.
-  const helperSha256 = RTSP_HELPER_SHA256_LINUX_AMD64
+  // Only the runner's own mock-mode build may supply a fresh digest.
+  const helperSha256 =
+    (isMockSim() && input.builtHelperSha256) || RTSP_HELPER_SHA256_LINUX_AMD64
   if ((await sha256(input.helper)) !== helperSha256)
     throw new Error('Ingest helper SHA-256 differs from the reviewed build')
   const helperPath = join(input.workDir, 'rtsp-ingest')
@@ -70,6 +74,25 @@ export async function startRtspCamera(input: {
   if ((await sha256(helperPath)) !== helperSha256)
     throw new Error('Ingest helper copy SHA-256 mismatch')
   input.ledger({ resource: 'rtsp-helper', path: helperPath })
+  if (isMockSim()) {
+    const mock = await startCameraMock({ rtspPort: input.port })
+    input.ledger({ resource: 'rtsp-mock', port: input.port })
+    return {
+      env: {
+        SIGNALLING_HTTPS_CAMERA: JSON.stringify({
+          helperPath,
+          helperSha256,
+          rtspPort: input.port,
+          rtspPath: RTSP_PATH,
+        }),
+      },
+      async stop() {
+        await mock.close()
+        input.ledger({ removed: 'rtsp-mock' })
+      },
+    }
+  }
+
   const override = join(input.workDir, 'rtsp-override.yml')
   await writeFile(
     override,

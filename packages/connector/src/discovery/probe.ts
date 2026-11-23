@@ -117,7 +117,7 @@ function tlsProbe(
 
 export async function probePrinterHost(
   host: string,
-  options: { timeoutMs?: number } = {},
+  options: { timeoutMs?: number; ports?: Record<number, number> } = {},
 ): Promise<PrinterProbe | undefined> {
   const timeout = options.timeoutMs ?? 3000
   if (!Number.isInteger(timeout) || timeout < 1 || timeout > 3000)
@@ -129,7 +129,7 @@ export async function probePrinterHost(
       !/^(?=.{1,253}$)[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?$/.test(host))
   )
     throw new Error('invalid host')
-  const candidates: PrinterProbe[] = [
+  const defaults: PrinterProbe[] = [
     ...[7125, 80, ...Array.from({ length: 15 }, (_, i) => 7126 + i)].map(
       (port): PrinterProbe => ({
         vendor: 'moonraker',
@@ -142,6 +142,15 @@ export async function probePrinterHost(
     { vendor: 'bambu', host, port: 8883 },
     { vendor: 'anycubic', host, port: 9883 },
   ]
+  const candidates =
+    options.ports === undefined
+      ? defaults
+      : defaults
+          .filter((candidate) => options.ports?.[candidate.port] !== undefined)
+          .map((candidate) => ({
+            ...candidate,
+            port: options.ports![candidate.port]!,
+          }))
   const matches = await Promise.all(
     candidates.map((candidate) =>
       candidate.vendor === 'moonraker'

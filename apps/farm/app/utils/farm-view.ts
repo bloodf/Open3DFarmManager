@@ -1,3 +1,4 @@
+import { readFarmMemberships, resolveFarmScope } from './farm-scope.ts'
 import { z } from 'zod'
 import {
   BrowserDeviceHttpAccountResponse,
@@ -35,6 +36,10 @@ export const FarmAssignmentPage = z
           assignmentId: BrowserDeviceUuid,
           agentId: BrowserDeviceUuid,
           printerKey: exactKey,
+          displayName: exactKey.nullish(),
+          groupName: exactKey.nullish(),
+          location: exactKey.nullish(),
+          sortOrder: z.number().int().min(0).max(9999).nullish(),
           status: z.enum(['active', 'revoked']),
           connectorStatus: z.enum(['pending', 'approved', 'revoked']),
         }),
@@ -126,6 +131,14 @@ function sameInventory(
 ) {
   return !!a && !!b && JSON.stringify(a) === JSON.stringify(b)
 }
+function withoutAgentStorage(
+  storage: Readonly<Record<string, 'degraded'>> | undefined,
+  agentId: string,
+): Readonly<Record<string, 'degraded'>> {
+  if (!storage || !(agentId in storage)) return storage ?? {}
+  const { [agentId]: _removed, ...rest } = storage
+  return rest
+}
 export function spoolInventoryStale(item: FarmSpoolObservation, now: Clock) {
   const elapsed = now.mono - item.received.mono
   return (
@@ -172,6 +185,7 @@ type Ready = {
   feedScope: 'disabled' | 'idle' | 'loading' | 'ready' | 'unavailable'
   rows: FarmRow[]
   spools: readonly FarmSpoolObservation[]
+  connectorStorage?: Readonly<Record<string, 'degraded'>>
   nextPrinter: string | null
   printerAfter: string | null
   canManage: boolean
@@ -197,6 +211,7 @@ type Read = (
 ) => Promise<unknown>
 type Dependencies = {
   read: Read
+  requestedFarm?: () => unknown
   listKeys: (scope: {
     accountId: string
     farmId: string
@@ -265,6 +280,13 @@ export function localInterfaceOrigin(input: string): string | null {
     return null
   }
 }
+
+export function resolvedLocalInterfaceOrigin(
+  manualOverride: string | null,
+  bindingOrigin: string | undefined,
+): string | null {
+  return manualOverride ?? bindingOrigin ?? null
+}
 export function observationAge(observation: FarmObservation, now: Clock) {
   const elapsed = now.mono - observation.received.mono
   const validElapsed = Number.isFinite(elapsed) && elapsed >= 0
@@ -292,6 +314,47 @@ export const printerStateLabel: Record<
   paused: 'Pausada',
   error: 'Erro',
   offline: 'Indisponível segundo o Connector',
+  unknown: 'Estado da impressora desconhecido',
+}
+
+type PrinterOperationalState = Pick<
+  PrinterState,
+  'state' | 'statusReason' | 'preformStatus' | 'statusMessage'
+>
+
+export function formatPrinterOperationalStateLabel(
+  printer: PrinterOperationalState,
+): string {
+  if (printer.state === 'error' && printer.statusReason === 'firmware-shutdown')
+    return printer.statusMessage
+      ? `Firmware desligado — ${printer.statusMessage}`
+      : 'Firmware desligado'
+  if (printer.preformStatus) return `PreForm informou: ${printer.preformStatus}`
+  if (
+    printer.state === 'offline' &&
+    printer.statusReason === 'client-certificate-missing'
+  ) {
+    return 'Certificado do cliente ausente (client certificate missing)'
+  }
+  return printerStateLabel[printer.state]
+}
+
+export function formatPrinterAlarmLabel(
+  alarms: PrinterState['alarms'],
+): string {
+  const labels: string[] = []
+  if (alarms?.printError) labels.push(`Erro de impressão: ${alarms.printError}`)
+  if (alarms?.hmsCount && alarms.hmsCode)
+    labels.push(`Alertas HMS: ${alarms.hmsCount} (${alarms.hmsCode})`)
+  return labels.join(' — ')
+}
+
+export function formatPrinterStateLabel(
+  printer: PrinterOperationalState & Pick<PrinterState, 'alarms'>,
+): string {
+  const state = formatPrinterOperationalStateLabel(printer)
+  const alarms = formatPrinterAlarmLabel(printer.alarms)
+  return alarms ? `${state} — ${alarms}` : state
 }
 
 /** Live-region copy: only stable live/unavailable changes, never transient steps. */
@@ -410,7 +473,7 @@ export function createFarmView(deps: Dependencies) {
     publish({
       kind: 'error',
       reason:
-        status === 403
+        status === 403 || status === 404
           ? 'forbidden'
           : status === 429
             ? 'rate-limit'
@@ -437,12 +500,17 @@ export function createFarmView(deps: Dependencies) {
     try {
       const accountId = await me(run.signal)
       if (!run.current()) return
-      const page = FarmDiscoveryPage.parse(
-        await deps.read('/api/farms', run.signal, {
-          limit: 20,
-          ...(after ? { after: BrowserDeviceUuid.parse(after) } : {}),
-        }),
-      )
+      const readPage = async (cursor?: string) =>
+        FarmDiscoveryPage.parse(
+          await deps.read('/api/farms', run.signal, {
+            limit: 20,
+            ...(cursor ? { after: BrowserDeviceUuid.parse(cursor) } : {}),
+          }),
+        )
+      const page =
+        deps.requestedFarm && after === null
+          ? { farms: await readFarmMemberships(readPage), nextAfter: null }
+          : await readPage(after ?? undefined)
       if (!run.current()) return
       await me(run.signal, accountId)
       if (!run.current()) return
@@ -462,14 +530,10 @@ export function createFarmView(deps: Dependencies) {
         canManage: false,
         keys: { kind: 'loading' },
       })
-      if (
-        run.current() &&
-        after === null &&
-        page.farms.length === 1 &&
-        page.nextAfter === null &&
-        page.farms[0]
-      )
-        await selectFarm(page.farms[0].farmId)
+      if (run.current() && after === null && page.nextAfter === null) {
+        const selected = resolveFarmScope(page.farms, deps.requestedFarm?.())
+        if (selected) await selectFarm(selected.farmId)
+      }
     } catch (error) {
       if (run.current()) failed(error)
     }
@@ -491,6 +555,7 @@ export function createFarmView(deps: Dependencies) {
         scope: null,
         rows: [],
         spools: [],
+        connectorStorage: {},
         inventory: 'ready',
         feedScope: deps.feed ? 'idle' : 'disabled',
         keys: { kind: 'loading' },
@@ -527,6 +592,7 @@ export function createFarmView(deps: Dependencies) {
               ...item,
               historical: true,
             })),
+            connectorStorage: {},
           }
         : {
             ...previous,
@@ -535,6 +601,7 @@ export function createFarmView(deps: Dependencies) {
             feedScope: deps.feed ? 'idle' : 'disabled',
             rows: [],
             spools: [],
+            connectorStorage: {},
             nextPrinter: null,
             printerAfter: after,
             canManage: false,
@@ -710,6 +777,7 @@ export function createFarmView(deps: Dependencies) {
         observation: null,
         localOrigin: null,
       })),
+      connectorStorage: {},
       keys: { ...keys, selected: keyId },
       feedScope: deps.feed ? 'idle' : 'disabled',
     })
@@ -1023,6 +1091,10 @@ export function createFarmView(deps: Dependencies) {
         )
           publish({
             ...state,
+            connectorStorage: withoutAgentStorage(
+              state.connectorStorage,
+              agentId,
+            ),
             spools: state.spools.map((item) =>
               item.agentId === agentId ? { ...item, historical: true } : item,
             ),
@@ -1163,8 +1235,18 @@ export function createFarmView(deps: Dependencies) {
               const inventory = sameInventory(before, message.inventory)
                 ? (before ?? null)
                 : (message.inventory ?? null)
+              const connectorStorage =
+                message.storage === 'degraded'
+                  ? state.connectorStorage?.[agentId] === 'degraded'
+                    ? state.connectorStorage
+                    : {
+                        ...state.connectorStorage,
+                        [agentId]: 'degraded' as const,
+                      }
+                  : withoutAgentStorage(state.connectorStorage, agentId)
               publish({
                 ...state,
+                connectorStorage,
                 spools: [
                   ...state.spools.filter((item) => item.agentId !== agentId),
                   {

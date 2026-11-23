@@ -815,6 +815,26 @@ test('authority is revalidated on every prepare/commit admission', async () => {
     deniedResult,
     'commit needs a prepared operation',
   )
+  assert.equal(
+    (
+      await f.challenge(session, {
+        action: 'status',
+        operationId: randomUUID(),
+        targetSha256,
+      })
+    ).ok,
+    true,
+    'printer discovery is a status request on a new operation',
+  )
+  assert.deepEqual(
+    await f.challenge(session, {
+      action: 'cancel',
+      operationId: randomUUID(),
+      targetSha256,
+    }),
+    deniedResult,
+    'cancel needs a prepared operation',
+  )
   const pinned = digest()
   assert.equal(
     (
@@ -932,6 +952,58 @@ test('binding expiry and relay rules close the configuration transport', async (
   })
 })
 
+function assertReceiptHasNoCredentials(
+  value: unknown,
+  opaqueValues: ReadonlyMap<string, unknown>,
+  path = '',
+): void {
+  const credentialWord = /password|cookie|token|secret/i
+  if (typeof value === 'string') {
+    if (value === opaqueValues.get(path)) return
+    assert.doesNotMatch(value, credentialWord, path)
+    assert.equal(value.includes(token), false, path)
+  } else if (value !== null && typeof value === 'object') {
+    for (const [name, child] of Object.entries(value)) {
+      const childPath = `${path}/${name.replaceAll('~', '~0').replaceAll('/', '~1')}`
+      assert.doesNotMatch(name, credentialWord, childPath)
+      assertReceiptHasNoCredentials(child, opaqueValues, childPath)
+    }
+  }
+}
+
+test('receipt credential checks allow known opaque values and reject nested credentials', () => {
+  const digestWithToken = `tokeN${'A'.repeat(38)}`
+  const opaqueValues = new Map([['/target/target_sha256', digestWithToken]])
+  assertReceiptHasNoCredentials(
+    { target: { target_sha256: digestWithToken } },
+    opaqueValues,
+  )
+  assert.throws(
+    () =>
+      assertReceiptHasNoCredentials(
+        { observed: [{ sessionCookie: true }] },
+        opaqueValues,
+      ),
+    /sessionCookie/,
+  )
+  assert.throws(
+    () =>
+      assertReceiptHasNoCredentials(
+        { observed: { target_sha256: digestWithToken } },
+        opaqueValues,
+      ),
+    /target_sha256/,
+  )
+  assert.throws(
+    () =>
+      assertReceiptHasNoCredentials(
+        { observed: { model: token } },
+        opaqueValues,
+      ),
+    /model/,
+  )
+})
+
 test('a committed Connector receipt registers the assignment idempotently', async () => {
   const f = await fixture()
   const session = await f.negotiate()
@@ -1002,7 +1074,16 @@ test('a committed Connector receipt registers the assignment idempotently', asyn
   const stored = f.state.receipts.get(op.operationId)
   assert.equal(stored?.printerKey, identity.printer_key)
   assert.equal(stored?.wire.includes(target.endpoint.ipv4), false)
-  assert.doesNotMatch(stored?.wire ?? '', /password|cookie|token|secret/i)
+  assert.ok(stored)
+  assertReceiptHasNoCredentials(
+    JSON.parse(stored.wire),
+    new Map([
+      ['/connector_fingerprint', op.local.connector_fingerprint],
+      ['/target/target_sha256', op.local.target.target_sha256],
+      ['/prior_receipt_sha256', op.local.prior_receipt_sha256],
+      ['/signature', op.local.signature],
+    ]),
+  )
   // A different committed receipt for the same operation conflicts.
   const other = await f.receipt(op.operationId, 'local-committed', {
     prior_receipt_sha256: op.preparedSha256,

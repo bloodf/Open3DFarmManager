@@ -12,7 +12,7 @@ import {
 import { readMoonrakerReady } from '../../packages/connector/src/moonraker/client.ts'
 import { createMoonrakerSocket } from '../../packages/connector/src/moonraker/socket.ts'
 import { createRequire } from 'node:module'
-import type * as Ws from '../../packages/connector/node_modules/@types/ws/index.d.ts'
+import type * as Ws from 'ws'
 const { WebSocketServer } = createRequire(
   new URL('../../packages/connector/package.json', import.meta.url),
 )('ws') as typeof Ws

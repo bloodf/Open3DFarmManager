@@ -36,6 +36,15 @@ const schema = endpoint.extend({
     .max(128)
     .regex(/^[A-Za-z0-9_-]+$/),
   control: z.boolean().default(false),
+  /**
+   * Locally provisioned model. Naming it opts a control-enabled printer into
+   * the extended actions that model supports; the wire never sets it.
+   */
+  model: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{1,32}$/)
+    .optional(),
+  ftpsPort: z.number().int().min(1).max(65535).default(990),
   credentialFile: path,
   caFile: path.optional(),
   pinSha256: z

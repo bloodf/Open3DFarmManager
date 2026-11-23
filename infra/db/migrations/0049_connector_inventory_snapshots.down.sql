@@ -1,0 +1,2 @@
+REVOKE ALL ON farm.connector_inventory_snapshots FROM farm_connector_telemetry_writer;
+DROP TABLE farm.connector_inventory_snapshots;

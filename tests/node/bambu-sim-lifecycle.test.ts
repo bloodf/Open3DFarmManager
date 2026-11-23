@@ -75,3 +75,86 @@ test('uploaded prints progress, complete, cancel and fail', async () => {
     await peer.close()
   }
 })
+
+test('a print already running reports its seeded layer', async () => {
+  const peer = await startBambuSimulator({
+    initialState: 'RUNNING',
+    initialLayer: 25,
+    totalLayers: 100,
+  })
+  try {
+    assert.equal(peer.extendedState.layer_num, 25)
+    assert.equal(peer.extendedState.total_layer_num, 100)
+  } finally {
+    await peer.close()
+  }
+  await assert.rejects(
+    startBambuSimulator({ initialState: 'IDLE', initialLayer: 1 }),
+    /Invalid initial layer/,
+  )
+  await assert.rejects(
+    startBambuSimulator({
+      initialState: 'RUNNING',
+      initialLayer: 11,
+      totalLayers: 10,
+    }),
+    /Invalid initial layer/,
+  )
+})
+
+test('resuming only advances a print the simulator was timing', async () => {
+  const peer = await startBambuSimulator({
+    initialState: 'RUNNING',
+    printDurationMs: 200,
+    totalLayers: 10,
+  })
+  const socket = connect({
+    host: peer.host,
+    port: peer.port,
+    ca: peer.syntheticTrust,
+  })
+  try {
+    await once(socket, 'secureConnect')
+    const connected = once(socket, 'data')
+    socket.write(
+      Buffer.from([16, 13, 0, 4, 77, 81, 84, 84, 4, 2, 0, 10, 0, 1, 120]),
+    )
+    await connected
+    const topic = Buffer.from('device/SYNTHETIC/request')
+    const size = Buffer.alloc(2)
+    size.writeUInt16BE(topic.length)
+    const send = (command: string) =>
+      socket.write(
+        packet(
+          48,
+          Buffer.concat([
+            size,
+            topic,
+            Buffer.from(
+              JSON.stringify({ print: { command, sequence_id: '1' } }),
+            ),
+          ]),
+        ),
+      )
+    const wait = async (ms: number) =>
+      new Promise((resolve) => setTimeout(resolve, ms))
+    // The print running at start-up is untimed: resuming it keeps it running.
+    send('pause')
+    await wait(50)
+    assert.equal(peer.gcodeState, 'PAUSE')
+    send('resume')
+    await wait(400)
+    assert.equal(peer.gcodeState, 'RUNNING')
+    // A journey-set progress is manual too.
+    peer.setPrintProgress(60)
+    send('pause')
+    await wait(50)
+    send('resume')
+    await wait(400)
+    assert.equal(peer.gcodeState, 'RUNNING')
+    assert.equal(peer.extendedState.mc_percent, 60)
+  } finally {
+    socket.destroy()
+    await peer.close()
+  }
+})

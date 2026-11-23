@@ -10,16 +10,16 @@ import {
 // disposable database, the farm app, a Connector configured for that vendor
 // and the loopback simulator, then the browser must reach live telemetry.
 // Without the opt-in no test is registered, so nothing starts by accident.
-const VENDORS: readonly VendorName[] = [
+const VENDORS = [
   'bambu',
   'creality',
   'anycubic',
   'kobralink',
-]
+] as const satisfies readonly VendorName[]
 
 type Raw = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
 const TERMINAL: Record<
-  VendorName,
+  (typeof VENDORS)[number],
   { finished(raw: unknown): boolean; failed(raw: unknown): boolean }
 > = {
   bambu: {
@@ -73,6 +73,7 @@ if (journeyEnabled())
         if (!journey) throw new Error('Harness did not start')
         try {
           expect(journey.simulator).toBe(vendor)
+          expect(new URL(journey.origin).hostname).toBe('127.0.0.1')
           expect(journey.vendor?.name).toBe(vendor)
           await journey.expectLiveTelemetry()
           // A scripted progress step from the simulator reaches the page.

@@ -2,11 +2,14 @@ import dgram from 'node:dgram'
 import { probeAnycubic } from './anycubic.ts'
 import { crealityQuery, isCrealityResponse, probeCreality } from './creality.ts'
 import { isIPv4 } from 'node:net'
+import { discoverSdcp } from './sdcp.ts'
+import { discoverKobraX } from '../kobra-x/discovery.ts'
 
 export type Printer = {
-  vendor: 'bambu' | 'moonraker' | 'creality' | 'anycubic'
+  vendor: 'bambu' | 'moonraker' | 'creality' | 'anycubic' | 'kobra-x' | 'sdcp'
   host: string
   port?: number
+  transport?: 'wss'
   serial?: string
   model?: string
   name?: string
@@ -17,6 +20,12 @@ const clean = (value: string | undefined) =>
   value && value.length <= 128 && /^[\x20-\x7e]+$/.test(value)
     ? value
     : undefined
+
+/** Joining the mDNS group fails this way when the host has no LAN interface. */
+function isNoMulticastInterface(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code
+  return code === 'ENODEV' || code === 'ENETUNREACH' || code === 'EADDRNOTAVAIL'
+}
 
 export function parseBambu(packet: Buffer): Printer | undefined {
   if (packet.length > 8192 || packet.length === 0) return
@@ -189,12 +198,19 @@ export function moonrakerPrinters(records: RecordData[]): Printer[] {
 type Options = {
   timeout?: number
   bindAddress?: string
+  multicastInterface?: string
   bambuPorts?: number[]
   mdnsPort?: number
   queryAddress?: string
   queryPort?: number
   anycubicPort?: number
   crealityPorts?: { https: number; http: number }
+  /**
+   * Kobra X SSDP discovery. Enabled by default on the real network; a test
+   * that injects `queryAddress` must opt in with loopback endpoints.
+   */
+  kobraX?: false | { target?: string; ssdpPort?: number; httpPort?: number }
+  sdcp?: false | { target?: string; port?: number }
   createSocket?: () => dgram.Socket
 }
 export async function discoverPrinters(
@@ -241,9 +257,13 @@ export async function discoverPrinters(
         if (mdns) {
           if (!options.queryAddress) {
             try {
-              socket.addMembership('224.0.0.251')
+              socket.addMembership('224.0.0.251', options.multicastInterface)
+              if (options.multicastInterface)
+                socket.setMulticastInterface(options.multicastInterface)
             } catch (error) {
-              reject(error)
+              // No multicast-capable interface (offline host): nobody can answer.
+              if (isNoMulticastInterface(error)) resolve()
+              else reject(error)
               return
             }
           }
@@ -264,6 +284,14 @@ export async function discoverPrinters(
         } else resolve()
       })
     })
+  const sdcpWork =
+    options.sdcp === false ||
+    (options.sdcp === undefined && options.queryAddress)
+      ? Promise.resolve([])
+      : discoverSdcp({
+          timeoutMs: Math.min(timeout, 2500),
+          ...(options.sdcp ?? {}),
+        }).catch(() => [])
   try {
     await Promise.all([
       ...(options.bambuPorts ?? [2021, 1990]).map((port) => bind(port, false)),
@@ -284,12 +312,43 @@ export async function discoverPrinters(
         ),
       )
     ).filter((printer): printer is Printer => printer !== undefined)
+    // Only the confirmed sender address and a clean display name leave this
+    // step: the printer's /info token never reaches a discovery result.
+    const kobraX: Printer[] =
+      options.kobraX === false ||
+      (options.kobraX === undefined && options.queryAddress)
+        ? []
+        : (
+            await discoverKobraX({
+              timeoutMs: Math.min(timeout, 2500),
+              ...(options.kobraX ?? {}),
+            }).catch(() => [])
+          ).map((found) => {
+            const name = clean(found.name)
+            return {
+              vendor: 'kobra-x' as const,
+              host: found.address,
+              port: 18910,
+              model: 'Anycubic Kobra X',
+              ...(name && { name }),
+            }
+          })
+    const sdcp: Printer[] = (await sdcpWork).map((found) => ({
+      vendor: 'sdcp',
+      host: found.host,
+      port: 3030,
+      serial: found.mainboardId,
+      model: found.model,
+      name: found.name,
+    }))
     const unique = new Map<string, Printer>()
     for (const printer of [
       ...printers,
       ...moonrakerPrinters(records),
       ...creality,
       ...anycubic,
+      ...kobraX,
+      ...sdcp,
     ])
       unique.set(
         `${printer.vendor}:${printer.serial ?? printer.host}:${printer.port ?? ''}`,

@@ -11,7 +11,7 @@ const hash = (value: unknown) =>
   createHash('sha256').update(JSON.stringify(value)).digest('hex')
 
 async function journal(admin: Sql) {
-  const catalog = await loadMigrationCatalog()
+  const catalog = (await loadMigrationCatalog()).slice(0, 18)
   assert.equal(catalog.length, 18)
   const rows =
     await admin`SELECT position,id,checksum FROM public.open3dfarm_migrations ORDER BY position`
@@ -31,7 +31,7 @@ export async function testPauseAuthorityCatalog(
     { ...counts[0] },
     { challenges: 0, sessions: 0, watermark: 0 },
   )
-  const catalog = await loadMigrationCatalog()
+  const catalog = (await loadMigrationCatalog()).slice(0, 18)
   await runMigrations(admin, catalog, {
     kind: 'down',
     expectedLastId: '0018_pause_authority',
@@ -156,7 +156,7 @@ export async function testPauseAuthorityRetention(
     )
   const auditBefore = await auditSnapshot()
   await assert.rejects(
-    runMigrations(admin, await loadMigrationCatalog(), {
+    runMigrations(admin, (await loadMigrationCatalog()).slice(0, 18), {
       kind: 'down',
       expectedLastId: '0018_pause_authority',
     }),

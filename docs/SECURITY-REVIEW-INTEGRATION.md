@@ -5,7 +5,7 @@ Reviewed baseline: `f32bdf1`, on the local integration branch. This is a code re
 ## Reviewed boundaries
 
 - `packages/farm-protocol/src/sign.ts`, `command.ts`, `canonical.ts`, `encoding.ts` and `json.ts`: signed payload construction, canonical serialization, bounded decoding and duplicate fields.
-- `packages/connector/src/auth/verify.ts` and `replay.ts`: scope checks, signature verification before replay admission, transactional persistence and filesystem preflight.
+- `packages/connector/src/auth/verify.ts` (removed in #609) and `replay.ts`: scope checks, signature verification before replay admission, transactional persistence and filesystem preflight.
 - `packages/connector/src/identity/store.ts`: private-key loading, permissions, publication and error handling.
 - `packages/connector/src/cloud/queue.ts`: storage ownership, append descriptors, compaction recovery and interrupted logs.
 

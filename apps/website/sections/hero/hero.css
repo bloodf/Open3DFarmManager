@@ -1,0 +1,100 @@
+.hero {
+  padding-block: var(--space-7);
+  background:
+    radial-gradient(circle, var(--rule) 1px, transparent 1.5px) 0 0 / 22px 22px,
+    var(--paper);
+}
+
+.hero__grid {
+  display: grid;
+  gap: var(--space-6);
+  align-items: start;
+}
+
+.hero__copy {
+  display: grid;
+  gap: var(--space-5);
+  justify-items: start;
+  min-width: 0;
+}
+
+.hero h1 em {
+  color: var(--copper);
+  font-style: italic;
+  font-weight: 600;
+}
+
+.hero__audience {
+  padding-inline-start: var(--space-4);
+  border-inline-start: 2px solid var(--rule-strong);
+  color: var(--ink-muted);
+}
+
+.hero__audience strong {
+  color: var(--ink);
+}
+
+.hero__side {
+  display: grid;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.hero__shot {
+  min-width: 0;
+}
+
+/* Validation status: text states the scope, the tag only reinforces it. */
+.hero__status {
+  padding: var(--space-4) var(--space-5);
+  border: var(--hairline) solid var(--rule-strong);
+  border-inline-start: 4px solid var(--copper);
+  background: var(--paper-raised);
+}
+
+.hero__status-title {
+  margin-bottom: var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--copper);
+}
+
+.hero__status-list {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.hero__status-row {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.hero__status-row + .hero__status-row {
+  padding-top: var(--space-3);
+  border-top: var(--hairline) solid var(--rule);
+}
+
+.hero__status-row dt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 600;
+}
+
+.hero__status-row dd {
+  margin: 0;
+  font-size: var(--step--1);
+  line-height: 1.5;
+  color: var(--ink-muted);
+}
+
+@media (min-width: 62rem) {
+  .hero__grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+    gap: var(--space-7);
+  }
+}

@@ -66,6 +66,10 @@ for (const auth of ['key', 'jwt'] as const) {
         },
         onRawObservation(value) {
           observations.push(value)
+          // Install failure at publication, before another read can refresh
+          // the timestamp that the assertions below deliberately latch.
+          if (value.materialsObservation)
+            fixture.reply({ result: { spool_id: '42' } })
         },
       })
       async function waitFor(predicate: () => boolean) {
@@ -78,7 +82,21 @@ for (const auth of ['key', 'jwt'] as const) {
       }
       try {
         await waitFor(() => inventory && observations.length > 0)
+        // Begin the next status update with a completed valid material read,
+        // then wait until its spool-id request has reached the fixture.
+        await waitFor(() =>
+          observations.some((value) => value.materialsObservation),
+        )
+        const initialReads = fixture.requests.filter(
+          (request) => request.path === '/server/spoolman/spool_id',
+        ).length
         fixture.update()
+        await waitFor(
+          () =>
+            fixture.requests.filter(
+              (request) => request.path === '/server/spoolman/spool_id',
+            ).length > initialReads,
+        )
         await waitFor(() =>
           observations.some((value) => value.materialsObservation),
         )

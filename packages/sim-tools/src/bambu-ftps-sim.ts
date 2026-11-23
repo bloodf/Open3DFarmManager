@@ -1,0 +1,199 @@
+// SPDX-License-Identifier: MIT
+import { createServer } from 'node:tls'
+import type { TLSSocket } from 'node:tls'
+
+type TlsServer = ReturnType<typeof createServer>
+type MlsdRejection = 500 | 502 | 504 | 550
+
+export interface BambuFtpsSimOptions {
+  host: string
+  port: number
+  accessCode: string
+  key: Buffer | string
+  cert: Buffer | string
+  uploads: Map<string, Buffer>
+  timelapse?: Map<string, Buffer>
+}
+
+/** Implicit-TLS FTPS endpoint emulating the Bambu SD-card file service. */
+export async function startBambuFtpsSim(options: BambuFtpsSimOptions) {
+  const { host, accessCode, key, cert, uploads } = options
+  const timelapse = options.timelapse ?? new Map<string, Buffer>()
+  const modifiedAt = new Date()
+  const iso = modifiedAt.toISOString()
+  const [, day, month] = modifiedAt.toUTCString().split(' ')
+  const mlsdDate = iso.slice(0, 19).replace(/[-T:]/g, '')
+  const listDate = `${month} ${Number(day)} ${iso.slice(11, 16)}`
+  /** `/timelapse/x` or `/x`: the folder map and the bare name, or nothing. */
+  const target = (path: string) => {
+    const inFolder = path.startsWith('/timelapse/')
+    const name = path.replace(/^\/(?:timelapse\/)?/, '')
+    return /^[A-Za-z0-9_][A-Za-z0-9_. -]{0,254}$/.test(name)
+      ? { files: inFolder ? timelapse : uploads, name }
+      : undefined
+  }
+  const sockets = new Set<TLSSocket>()
+  const passiveServers = new Set<TlsServer>()
+  const listingRequests: string[] = []
+  let mlsdRejection: MlsdRejection | undefined
+
+  function track(socket: TLSSocket) {
+    sockets.add(socket)
+    socket.on('error', () => {})
+    socket.on('close', () => sockets.delete(socket))
+  }
+
+  const ftps = createServer({ cert, key }, (control) => {
+    track(control)
+    control.write('220 Bambu simulator ready\r\n')
+    let buffer = ''
+    let dataServer: TlsServer | undefined
+    let dataSocket: TLSSocket | undefined
+
+    const withDataSocket = (use: (socket: TLSSocket) => void) => {
+      if (dataSocket) return use(dataSocket)
+      dataServer?.once('secureConnection', (socket: TLSSocket) => {
+        dataSocket = socket
+        track(socket)
+        use(socket)
+      })
+    }
+
+    const openPassive = () => {
+      dataServer?.close()
+      dataSocket = undefined
+      const server = createServer({ cert, key }, (socket) => {
+        track(socket)
+        dataSocket = socket
+      })
+      dataServer = server
+      passiveServers.add(server)
+      server.once('close', () => passiveServers.delete(server))
+      server.listen(0, host, () => {
+        const address = server.address()
+        if (!address || typeof address === 'string') return control.destroy()
+        const octets = host.split('.').map(Number)
+        control.write(
+          `227 Entering Passive Mode (${[...octets, address.port >> 8, address.port & 255].join(',')})\r\n`,
+        )
+      })
+    }
+
+    const handle = (line: string) => {
+      if (line === 'USER bblp') control.write('331 password required\r\n')
+      else if (line.startsWith('PASS '))
+        control.write(
+          line === `PASS ${accessCode}`
+            ? '230 logged in\r\n'
+            : '530 invalid credentials\r\n',
+        )
+      else if (line === 'PASV') openPassive()
+      else if (/^(MLSD|LIST)( \/timelapse)?$/.test(line)) {
+        listingRequests.push(line)
+        const mlsd = line.startsWith('MLSD')
+        if (mlsd && mlsdRejection !== undefined) {
+          control.write(`${mlsdRejection} Listing command rejected\r\n`)
+          return
+        }
+        control.write('150 Opening protected data connection\r\n')
+        withDataSocket((socket) => {
+          const listing = [
+            ...(line.endsWith(' /timelapse') ? timelapse : uploads),
+          ]
+            .map(([name, data]) =>
+              mlsd
+                ? `type=file;size=${data.length};modify=${mlsdDate}; ${name}\r\n`
+                : `-rw-r--r-- 1 root root ${data.length} ${listDate} ${name}\r\n`,
+            )
+            .join('')
+          socket.end(listing, () => {
+            control.write('226 Listing complete\r\n')
+            dataServer?.close()
+          })
+        })
+      } else if (line.startsWith('STOR ')) {
+        const name = line.slice(5)
+        if (!/^[A-Za-z0-9_. -]{1,255}$/.test(name)) {
+          control.write('550 Invalid name\r\n')
+          return
+        }
+        control.write('150 Opening protected data connection\r\n')
+        withDataSocket((socket) => {
+          const chunks: Buffer[] = []
+          socket.on('data', (data: Buffer) => chunks.push(data))
+          socket.on('end', () => {
+            uploads.set(name, Buffer.concat(chunks))
+            control.write('226 Transfer complete\r\n')
+            dataServer?.close()
+          })
+        })
+      } else if (line.startsWith('DELE ')) {
+        const found = target(line.slice(5))
+        if (found?.files.delete(found.name))
+          control.write('250 File deleted\r\n')
+        else control.write('550 No such file\r\n')
+      } else if (line.startsWith('RETR ')) {
+        const found = target(line.slice(5))
+        const data = found?.files.get(found.name)
+        if (!data) {
+          control.write('550 No such file\r\n')
+          return
+        }
+        control.write('150 Opening protected data connection\r\n')
+        withDataSocket((socket) =>
+          socket.end(data, () => {
+            control.write('226 Transfer complete\r\n')
+            dataServer?.close()
+          }),
+        )
+      } else if (line === 'QUIT') {
+        control.write('221 goodbye\r\n')
+        control.end()
+      } else control.write('200 ok\r\n')
+    }
+
+    control.on('data', (chunk) => {
+      buffer += chunk.toString()
+      if (buffer.length > 65536) return control.destroy()
+      let end: number
+      while ((end = buffer.indexOf('\r\n')) >= 0) {
+        const line = buffer.slice(0, end)
+        buffer = buffer.slice(end + 2)
+        handle(line)
+      }
+    })
+  })
+  ftps.on('tlsClientError', () => {})
+
+  await new Promise<void>((resolve, reject) => {
+    ftps.once('error', reject)
+    ftps.listen(options.port, host, () => {
+      ftps.removeListener('error', reject)
+      resolve()
+    })
+  })
+  const address = ftps.address()
+  if (!address || typeof address === 'string')
+    throw new Error('Missing FTPS listener')
+
+  let closing: Promise<void> | undefined
+  return {
+    port: address.port,
+    listingRequests,
+    setMlsdRejection(code: MlsdRejection) {
+      mlsdRejection = code
+    },
+    close() {
+      closing ??= (async () => {
+        for (const socket of sockets) socket.destroy()
+        await Promise.all(
+          [ftps, ...passiveServers].map(
+            (listener) =>
+              new Promise<void>((resolve) => listener.close(() => resolve())),
+          ),
+        )
+      })()
+      return closing
+    },
+  }
+}

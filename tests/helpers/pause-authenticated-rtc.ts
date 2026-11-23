@@ -4,7 +4,7 @@ import { appendFile, open, realpath } from 'node:fs/promises'
 import { isAbsolute, relative } from 'node:path'
 import { browserBundle } from './browser-bundle.ts'
 import type { JSHandle } from '@playwright/test'
-import { z } from '../../packages/farm-protocol/node_modules/zod/index.js'
+import { z } from 'zod'
 import type {
   FixtureIdentityHandles,
   ProvisionedSignallingFixture,
@@ -171,7 +171,7 @@ async function connectorChild(
     {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
-        NODE_OPTIONS: '',
+        NODE_OPTIONS: process.env.OPENFARM_NETWORK_GUARD_PRELOAD ?? '',
         NODE_EXTRA_CA_CERTS: input.caPath,
         NODE_TLS_REJECT_UNAUTHORIZED: '1',
         WS_NO_BUFFER_UTIL: '1',

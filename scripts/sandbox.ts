@@ -1,0 +1,316 @@
+import { execFileSync } from 'node:child_process'
+import { createHash, randomBytes } from 'node:crypto'
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  rmdirSync,
+  unlinkSync,
+  writeFileSync,
+  rmSync,
+  realpathSync,
+} from 'node:fs'
+import { request } from 'node:https'
+import { join } from 'node:path'
+import { setTimeout } from 'node:timers/promises'
+import postgres from 'postgres'
+import { seedSandbox } from './sandbox-seed.ts'
+import { loadMigrationCatalog, runMigrations } from './db/migrations.ts'
+import { acquireSandboxLock, sandboxState } from './sandbox-support.ts'
+
+const action = process.argv[2]
+if (process.argv.length > 3 || (action && !['stop', 'down'].includes(action))) {
+  throw new Error('Uso: node scripts/sandbox.ts [stop|down]')
+}
+const uid = process.getuid?.()
+const gid = process.getgid?.()
+if (uid === undefined || gid === undefined)
+  throw new Error('O sandbox requer Docker local em um sistema Unix.')
+const legacyProject =
+  'o3dfm-sandbox-' +
+  createHash('sha256').update(process.cwd()).digest('hex').slice(0, 12)
+const state = sandboxState(legacyProject, uid)
+mkdirSync(state, { mode: 0o700, recursive: true })
+// Bind-mounted for the Connector only; create it here so Docker does not
+// invent a root-owned directory on first start.
+mkdirSync(join(state, 'connector-data'), { mode: 0o700, recursive: true })
+// Postgres data bind volume (compose.yml); the image chowns it to its own user.
+const databaseDir = join(state, 'database')
+if (existsSync(databaseDir) && !lstatSync(databaseDir).isDirectory())
+  throw new Error(
+    'O diretório de banco do sandbox deve ser um diretório local.',
+  )
+mkdirSync(databaseDir, { mode: 0o700, recursive: true })
+const stateInfo = lstatSync(state)
+if (
+  !stateInfo.isDirectory() ||
+  stateInfo.uid !== uid ||
+  (stateInfo.mode & 0o077) !== 0
+)
+  throw new Error(
+    'O diretório local do sandbox deve ser privado e pertencer ao usuário atual.',
+  )
+const lock = join(state, 'lock')
+const releaseLock = acquireSandboxLock(lock)
+try {
+  const endpoint =
+    process.env.DOCKER_HOST ??
+    execFileSync(
+      'docker',
+      ['context', 'inspect', '--format', '{{.Endpoints.docker.Host}}'],
+      { encoding: 'utf8' },
+    ).trim()
+  if (!endpoint.startsWith('unix://'))
+    throw new Error('O sandbox requer um daemon Docker local.')
+  // A legacy project is adopted only when Docker proves its database belongs
+  // to this state directory. Otherwise each canonical state has its own name.
+  const canonicalState = realpathSync(state)
+  const scopedProject =
+    'o3dfm-sandbox-state-' +
+    createHash('sha256').update(canonicalState).digest('hex').slice(0, 12)
+  const legacyVolume = `${legacyProject}_database`
+  const volumes = execFileSync(
+    'docker',
+    ['volume', 'ls', '-q', '--filter', `name=^${legacyVolume}$`],
+    { encoding: 'utf8' },
+  )
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+  let project = scopedProject
+  if (volumes.includes(legacyVolume)) {
+    const inspected = JSON.parse(
+      execFileSync('docker', ['volume', 'inspect', legacyVolume], {
+        encoding: 'utf8',
+      }),
+    )
+    const volume = inspected[0]
+    let deviceMatches = false
+    try {
+      deviceMatches =
+        realpathSync(volume.Options.device) === join(canonicalState, 'database')
+    } catch {
+      /* Missing or invalid device cannot prove ownership. */
+    }
+    if (
+      volume.Name === legacyVolume &&
+      volume.Driver === 'local' &&
+      volume.Labels?.['com.docker.compose.project'] === legacyProject &&
+      volume.Labels?.['com.docker.compose.volume'] === 'database' &&
+      volume.Options?.type === 'none' &&
+      volume.Options?.o === 'bind' &&
+      deviceMatches
+    )
+      project = legacyProject
+  }
+  const passwordFile = join(state, 'db-password')
+  const resetMarker = join(state, 'reset-containers')
+  if (!existsSync(passwordFile)) {
+    writeFileSync(resetMarker, '', { mode: 0o600 })
+    writeFileSync(passwordFile, randomBytes(24).toString('hex'), {
+      mode: 0o600,
+    })
+  }
+  const resetContainers = existsSync(resetMarker)
+  const password = readFileSync(passwordFile, 'utf8')
+  const docker = (args: string[], capture = false) =>
+    execFileSync(
+      'docker',
+      [
+        'compose',
+        '-p',
+        project,
+        '-f',
+        'infra/sandbox/compose.yml',
+        '--profile',
+        'sandbox',
+        ...args,
+      ],
+      {
+        env: {
+          ...process.env,
+          SANDBOX_STATE: state,
+          SANDBOX_UID: String(uid),
+          SANDBOX_GID: String(gid),
+          SANDBOX_DB_PASSWORD: password,
+          SANDBOX_BAMBU_ACCESS_CODE: existsSync(
+            join(state, 'bambu-credential.json'),
+          )
+            ? JSON.parse(
+                readFileSync(join(state, 'bambu-credential.json'), 'utf8'),
+              ).accessCode
+            : '',
+        },
+        encoding: 'utf8',
+        stdio: capture ? ['ignore', 'pipe', 'inherit'] : 'inherit',
+      },
+    )
+  if (action) {
+    if (action === 'down') {
+      // The postgres image chowns its data to uid 999, so empty the bind
+      // directory from inside a container (after stopping postgres), then
+      // rmdir it (empty, but unreadable to us). Runs before `down --volumes`, which would drop the volume.
+      docker(['stop'])
+      docker([
+        'run',
+        '--rm',
+        '--no-deps',
+        '--user',
+        '0',
+        '--entrypoint',
+        'find',
+        'postgres',
+        '/var/lib/postgresql/data',
+        '-mindepth',
+        '1',
+        '-delete',
+      ])
+      docker(['down', '--volumes'])
+      rmdirSync(databaseDir)
+      rmSync(join(state, 'connector-data'), { recursive: true, force: true })
+    } else docker(['stop'])
+    if (action === 'down')
+      for (const file of ['client.json', 'seed-started']) {
+        const path = join(state, file)
+        if (existsSync(path)) unlinkSync(path)
+      }
+  } else {
+    const clientPath = join(state, 'client.json')
+    const seedMarker = join(state, 'seed-started')
+    if (existsSync(seedMarker) && !existsSync(clientPath)) {
+      throw new Error(
+        'Inicialização anterior incompleta. Execute node scripts/sandbox.ts down para recriar o sandbox.',
+      )
+    }
+    const cert = join(state, 'tls.crt')
+    if (!existsSync(clientPath)) {
+      execFileSync(
+        'openssl',
+        [
+          'req',
+          '-x509',
+          '-newkey',
+          'ec',
+          '-pkeyopt',
+          'ec_paramgen_curve:P-256',
+          '-noenc',
+          '-keyout',
+          join(state, 'tls.key'),
+          '-out',
+          cert,
+          '-days',
+          '30',
+          '-subj',
+          '/CN=app',
+          '-addext',
+          'subjectAltName=DNS:app,IP:127.0.0.1',
+        ],
+        { stdio: 'inherit' },
+      )
+    }
+    if (!existsSync('infra/sandbox/.output/server/index.mjs'))
+      execFileSync('npx', ['nuxt', 'build', 'infra/sandbox'], {
+        stdio: 'inherit',
+      })
+    if (!existsSync('packages/connector/dist/cli.js'))
+      execFileSync(
+        'npm',
+        ['run', 'build', '-w', '@open3dfarmmanager/connector'],
+        { stdio: 'inherit' },
+      )
+    // A surviving Compose volume may still point at an older temporary state path.
+    if (resetContainers) docker(['down', '--volumes'])
+    docker([
+      'up',
+      '-d',
+      '--wait',
+      resetContainers ? '--force-recreate' : '--no-recreate',
+      'postgres',
+      'klipper',
+    ])
+    if (resetContainers) unlinkSync(resetMarker)
+    const port = (service: string, internal: number) => {
+      const mapped = docker(['port', service, String(internal)], true).trim()
+      const publicPort = Number(
+        /^127\.0\.0\.1:([1-9][0-9]{0,4})$/.exec(mapped)?.[1],
+      )
+      if (!Number.isInteger(publicPort) || publicPort > 65535)
+        throw new Error(`Mapeamento local indisponível para ${service}.`)
+      return publicPort
+    }
+    const url = new URL(
+      `postgres://sandbox_bootstrap:${password}@127.0.0.1:${port('postgres', 5432)}/sandbox`,
+    )
+    const sql = postgres(url.href, { max: 1, ssl: false })
+    try {
+      try {
+        await runMigrations(sql, await loadMigrationCatalog(), { kind: 'up' })
+      } catch (error) {
+        throw new Error(
+          'Falha ao aplicar migrações do sandbox; tente iniciar novamente.',
+          { cause: error },
+        )
+      }
+      if (!existsSync(clientPath)) {
+        writeFileSync(seedMarker, '', { mode: 0o600 })
+        await seedSandbox(sql, url, state)
+      }
+    } finally {
+      await sql.end()
+    }
+    docker([
+      'up',
+      '-d',
+      '--wait',
+      '--no-deps',
+      '--force-recreate',
+      'bambu',
+      'app',
+      'connector',
+    ])
+    const baseUrl = `https://127.0.0.1:${port('app', 3000)}`
+    const ca = readFileSync(cert)
+    let ready = false
+    for (let attempt = 0; attempt < 60 && !ready; attempt++) {
+      ready = await new Promise<boolean>((resolve) => {
+        const probe = request(
+          baseUrl + '/readyz',
+          { ca, timeout: 1000 },
+          (response) => {
+            response.resume()
+            resolve(response.statusCode === 200)
+          },
+        )
+        probe.on('error', () => resolve(false))
+        probe.on('timeout', () => probe.destroy())
+        probe.end()
+      })
+      if (!ready) await setTimeout(1000)
+    }
+    if (!ready) {
+      docker(['logs', '--tail', '30', 'app', 'connector'])
+      throw new Error('O aplicativo do sandbox não ficou pronto.')
+    }
+    const credentials = JSON.parse(readFileSync(clientPath, 'utf8'))
+    console.log(
+      Object.entries({
+        OPENFARM_SANDBOX_URL: baseUrl,
+        OPENFARM_CLIENT_ID: credentials.clientId,
+        OPENFARM_CLIENT_SECRET: credentials.clientSecret,
+        OPENFARM_PRINTER_ID: credentials.printerId,
+        NODE_EXTRA_CA_CERTS: cert,
+      })
+        .map(
+          ([name, value]) =>
+            `export ${name}='${String(value).replaceAll("'", "'\\''")}'`,
+        )
+        .join('\n'),
+    )
+    console.log(
+      `# Moonraker: 127.0.0.1:${port('klipper', 7125)} | Bambu TLS: 127.0.0.1:${port('bambu', 9999)}`,
+    )
+  }
+} finally {
+  releaseLock()
+}

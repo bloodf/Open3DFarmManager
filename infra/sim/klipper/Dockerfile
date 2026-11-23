@@ -10,7 +10,7 @@
 # load after the clock sync, which Klipper reports as "Timer too close".
 # See docs/SIMULATOR-READINESS-RESULT.md.
 
-FROM ghcr.io/mainsail-crew/virtual-klipper-printer@sha256:c2ab1d20a3f6d9dda182bf69a078c5f37a066a44f1f34ffea48d49ddf7bbce47 AS simulavr
+FROM ghcr.io/mainsail-crew/virtual-klipper-printer@sha256:759f09e063d906832198b7090b7ecce1099a8a1d9ef065bab59a48a4208459cf AS simulavr
 USER root
 # Reproducible toolchain: Debian snapshot at a fixed timestamp, exact package
 # versions, and a hash-locked setuptools wheel. None of it reaches the runtime.
@@ -34,7 +34,7 @@ RUN rm -rf build \
   && cmake --build build \
   && grep -q -- '-O3' build/libsim/CMakeFiles/sim.dir/flags.make
 
-FROM ghcr.io/mainsail-crew/virtual-klipper-printer@sha256:c2ab1d20a3f6d9dda182bf69a078c5f37a066a44f1f34ffea48d49ddf7bbce47
+FROM ghcr.io/mainsail-crew/virtual-klipper-printer@sha256:759f09e063d906832198b7090b7ecce1099a8a1d9ef065bab59a48a4208459cf
 COPY --from=simulavr --chown=printer:printer /home/printer/simulavr/build /home/printer/simulavr/build
 # Real-time pacing caps emulated MCU time at this fraction of wall time. It
 # must stay below the slowest rate the emulator sustains under host load, so
@@ -45,4 +45,11 @@ RUN echo "$SIMULAVR_PACING_RATE" | grep -Eq '^(0\.[0-9]*[1-9][0-9]*|1(\.0+)?)$' 
   || { echo "SIMULAVR_PACING_RATE must be a number in (0, 1]" >&2; exit 1; }
 RUN sed -i "s|/home/printer/klipper/scripts/avrsim.py |&-r ${SIMULAVR_PACING_RATE} |" /etc/supervisor/supervisord.conf \
   && grep -q "avrsim.py -r ${SIMULAVR_PACING_RATE} " /etc/supervisor/supervisord.conf
+# Prepare upstream startup for no-new-privileges: all runtime writes belong to
+# printer, and Supervisor stores its PID in the writable temporary filesystem.
+RUN mkdir -p /home/printer/printer_data \
+ && chown printer:printer /home/printer/printer_data \
+ && ln -s /bin/service_control /bin/systemctl \
+ && sed -i 's|pidfile=/var/run/supervisord.pid|pidfile=/tmp/supervisord.pid|' /etc/supervisor/supervisord.conf \
+ && sed -i '/\[\[ ! -e \/bin\/systemctl \]\]/d; /sudo -S rm \/bin\/systemctl/d; /sudo -S ln -s \/bin\/service_control/d; s/sudo chown printer:printer "${folder}"/exit 1/' /bin/start
 USER printer

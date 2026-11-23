@@ -103,6 +103,55 @@ export function validateMigrationHistory(
 export type MigrationAction =
   { kind: 'up' } | { kind: 'down'; expectedLastId: string }
 
+const LIBRARY_UPGRADE_ID = '0080_integration_library_api'
+const RETENTION_ID = '0090_review_601_retention'
+const SHIPPED_RETENTION_DOWN_SHA256 =
+  '4718704b51280aee8d4312a136c7b376d5b4569ab1ae7b38de209cf97c3f95e1'
+const RETENTION_CLOCK_DECLARATION =
+  '  now_ms bigint := floor(extract(epoch FROM pg_catalog.clock_timestamp()) * 1000)::bigint;'
+
+// Shipped 0080 matches pg_get_constraintdef text that contains IN.
+// PostgreSQL stores that IN-list as "= ANY", so the drop misses the
+// auto-named check and ADD of the same name fails. The catalog checksum
+// stays the shipped file.
+const SHIPPED_CONSTRAINT_LOOKUPS = [
+  '%required_scope IN%',
+  '%action IN%',
+  '%resource_type IN%',
+] as const
+
+export function executableMigrationSql(
+  migration: { id: string; up: string; down: string },
+  direction: 'up' | 'down',
+): string {
+  const sql = direction === 'up' ? migration.up : migration.down
+  if (migration.id === RETENTION_ID && direction === 'down') {
+    if (
+      createHash('sha256').update(sql).digest('hex') !==
+      SHIPPED_RETENTION_DOWN_SHA256
+    )
+      throw new Error(`Shipped ${RETENTION_ID} down SQL changed`)
+    // The shipped rollback uses network_deleted without declaring it.
+    return sql.replace(
+      RETENTION_CLOCK_DECLARATION,
+      `${RETENTION_CLOCK_DECLARATION}\n  network_deleted integer;`,
+    )
+  }
+  if (migration.id !== LIBRARY_UPGRADE_ID || direction !== 'up') return sql
+  let next = sql
+  for (const pattern of SHIPPED_CONSTRAINT_LOOKUPS) {
+    const needle = `pg_get_constraintdef(c.oid) LIKE '${pattern}'`
+    const anyPattern = pattern.replace(' IN%', ' = ANY%')
+    const replacement = `pg_get_constraintdef(c.oid) LIKE ANY (ARRAY['${pattern}','${anyPattern}'])`
+    if (!next.includes(needle))
+      throw new Error(
+        `Shipped ${LIBRARY_UPGRADE_ID} constraint lookup changed: ${pattern}`,
+      )
+    next = next.replaceAll(needle, replacement)
+  }
+  return next
+}
+
 /** Trusted, reviewed local SQL only; not a SQL sandbox or production startup hook. */
 export async function runMigrations(
   sql: Sql,
@@ -136,14 +185,14 @@ export async function runMigrations(
       const last = checked[applied - 1]
       if (!last || last.id !== action.expectedLastId)
         throw new Error('Rollback requires the exact last applied migration ID')
-      await tx.unsafe(last.down).simple()
+      await tx.unsafe(executableMigrationSql(last, 'down')).simple()
       await tx`DELETE FROM public.open3dfarm_migrations WHERE position = ${applied}`
       changed.push(last.id)
     } else {
       for (let index = applied; index < checked.length; index++) {
         const migration = checked[index]
         if (!migration) throw new Error('Missing migration')
-        await tx.unsafe(migration.up).simple()
+        await tx.unsafe(executableMigrationSql(migration, 'up')).simple()
         await tx`INSERT INTO public.open3dfarm_migrations (position, id, checksum) VALUES (${index + 1}, ${migration.id}, ${migration.checksum})`
         changed.push(migration.id)
       }

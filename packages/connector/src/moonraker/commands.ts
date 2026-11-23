@@ -1,4 +1,34 @@
+import {
+  bedMeshScript,
+  bedMeshSupported,
+  BedMeshRefused,
+} from './control-bed-mesh.ts'
 import { advertisedMoonrakerMacros } from '../control/macro-support.ts'
+import { buildConsoleScript } from './control-console.ts'
+import { buildMacroScript } from './control-macros.ts'
+import {
+  buildMotionScript,
+  isMotionAction,
+  motionSupported,
+} from './control-motion.ts'
+import {
+  ControlArguments,
+  PrinterGcodePath,
+} from '../../../farm-protocol/src/control-actions.ts'
+import { POWER_MARKER, powerCommand } from './control-power.ts'
+import { serviceCommand } from './control-system-services.ts'
+import { parseTimelapseOp, timelapseSupported } from './control-timelapse.ts'
+import { parseExtrude } from './control-extrusion.ts'
+import {
+  ledNames,
+  ledScript,
+  namedFanScript,
+  OutputRefused,
+  pinNames,
+  pinScript,
+} from './control-outputs.ts'
+import { parseQueueOp, queueSupported } from './control-job-queue.ts'
+import { SNAPMAKER_U1_MARKER, SnapmakerU1CommandRefused } from './u1-marker.ts'
 /**
  * Moonraker extended command builder and capability inspection.
  * Translates extended printer actions into Moonraker JSON-RPC calls.
@@ -45,6 +75,8 @@ export function supportedMoonrakerActions(
 
   // Home is always available if kinematics are configured (toolhead / gcode)
   supported.push('home')
+  if (objects.includes('print_stats') && objects.includes('webhooks'))
+    supported.push('service')
 
   // Speed factor (M220) is supported by default in Klipper gcode
   supported.push('set_speed')
@@ -83,11 +115,30 @@ export function supportedMoonrakerActions(
     supported.push('set_light')
   }
 
+  if (objects.includes('virtual_sdcard'))
+    supported.push('file_op', 'start_print')
+  if (objects.includes('exclude_object') && objects.includes('print_stats'))
+    supported.push('exclude_object')
+  // Named LEDs and output pins need the object list; an unknown list never widens support.
+  if (ledNames(objects).length) supported.push('set_led')
+  if (pinNames(objects).length) supported.push('set_pin')
+  if (objects.includes('extruder')) supported.push('extrude')
   if (advertisedMoonrakerMacros(objects)?.length) supported.push('run_macro')
   if (objects.includes('gcode_macro LOAD_FILAMENT'))
     supported.push('load_filament')
   if (objects.includes('gcode_macro UNLOAD_FILAMENT'))
     supported.push('unload_filament')
+  // The queue is a Moonraker component; detection marks it next to the objects.
+  if (objects.includes(POWER_MARKER)) supported.push('power')
+  if (objects.includes('configfile') && objects.includes('print_stats'))
+    supported.push('config_write')
+  if (bedMeshSupported(objects)) supported.push('bed_mesh')
+  if (queueSupported(objects)) supported.push('queue_op')
+  // Timelapse is a plugin component; detection marks it next to the objects.
+  if (timelapseSupported(objects)) supported.push('timelapse')
+  // Motion actions are advertised only when the printer lists a toolhead.
+  if (motionSupported(objects))
+    supported.push('jog', 'motors_off', 'z_babystep', 'set_factor')
   return Object.freeze(supported)
 }
 
@@ -100,6 +151,8 @@ export function buildMoonrakerCommand(
   args: Record<string, unknown> = {},
   objects: readonly string[] = [],
 ): MoonrakerRpcCall {
+  if (objects.includes(SNAPMAKER_U1_MARKER))
+    throw new SnapmakerU1CommandRefused(action)
   const keys = (allowed: string[]) => {
     for (const key of Object.keys(args)) {
       if (!allowed.includes(key)) {
@@ -109,7 +162,7 @@ export function buildMoonrakerCommand(
   }
 
   if (['run_macro', 'load_filament', 'unload_filament'].includes(action)) {
-    keys(action === 'run_macro' ? ['name'] : [])
+    keys(action === 'run_macro' ? ['name', 'params'] : [])
     const name =
       action === 'run_macro'
         ? args.name
@@ -123,7 +176,81 @@ export function buildMoonrakerCommand(
         !advertisedMoonrakerMacros(objects)?.includes(name))
     )
       throw new Error('Macro unavailable')
-    return { method: 'printer.gcode.script', params: { script: name } }
+    let script: string
+    try {
+      script = buildMacroScript(
+        name,
+        action === 'run_macro' ? args.params : undefined,
+      )
+    } catch {
+      throw new Error('Invalid macro parameters')
+    }
+    return { method: 'printer.gcode.script', params: { script } }
+  }
+
+  if (isMotionAction(action)) {
+    // Arguments only; state refusals are decided by the driver before sending.
+    return {
+      method: 'printer.gcode.script',
+      params: { script: buildMotionScript(action, args) },
+    }
+  }
+
+  if (action === 'bed_mesh') {
+    if (!bedMeshSupported(objects))
+      throw new BedMeshRefused('unsupported-action')
+    return {
+      method: 'printer.gcode.script',
+      params: { script: bedMeshScript(args) },
+    }
+  }
+  if (action === 'power') return powerCommand(args, objects)
+  if (action === 'queue_op') {
+    if (!queueSupported(objects)) throw new Error('Queue unavailable')
+    return parseQueueOp(args).call
+  }
+  if (action === 'gcode') {
+    keys(['line'])
+    return {
+      method: 'printer.gcode.script',
+      params: { script: buildConsoleScript(args) },
+    }
+  }
+
+  if (action === 'extrude') {
+    return {
+      method: 'printer.gcode.script',
+      params: { script: parseExtrude(args, objects).script },
+    }
+  }
+
+  if (action === 'start_print') {
+    const parsed = ControlArguments.parse({ action, args })
+    if (parsed.action !== 'start_print' || !objects.includes('virtual_sdcard'))
+      throw Error('File printing unavailable')
+    return {
+      method: 'printer.print.start',
+      params: { filename: PrinterGcodePath.parse(parsed.args.file) },
+    }
+  }
+
+  if (action === 'set_led' || action === 'set_pin') {
+    return {
+      method: 'printer.gcode.script',
+      params: {
+        script: (action === 'set_led' ? ledScript : pinScript)(args, objects),
+      },
+    }
+  }
+
+  if (action === 'service') {
+    if (!supportedMoonrakerActions(objects).includes(action))
+      throw new Error('Service control unavailable')
+    return serviceCommand(args)
+  }
+  if (action === 'timelapse') {
+    if (!timelapseSupported(objects)) throw new Error('Timelapse unavailable')
+    return parseTimelapseOp(args).call
   }
 
   if (action === 'pause') {
@@ -340,9 +467,8 @@ export function buildMoonrakerCommand(
         `fan_generic ${fanType}_fan`,
       ]
       const found = objects.find((obj) => candidates.includes(obj))
-      if (objects.length > 0 && !found) {
-        throw new Error(`Fan '${fanType}' not found in printer objects`)
-      }
+      if (objects.length > 0 && !found)
+        throw new OutputRefused('unsupported-action')
       const fanName = found ? found.slice('fan_generic '.length) : fanType
       if (!SAFE_IDENTIFIER.test(fanName)) throw new Error('Unsafe fan name')
       return {
@@ -354,18 +480,13 @@ export function buildMoonrakerCommand(
     }
 
     if (typeof fanType === 'string' && SAFE_IDENTIFIER.test(fanType)) {
-      const match = objects.find((obj) => obj === `fan_generic ${fanType}`)
-      if (match) {
-        return {
-          method: 'printer.gcode.script',
-          params: {
-            script: `SET_FAN_SPEED FAN=${fanType} SPEED=${formatFanSpeed(speed255)}`,
-          },
-        }
+      return {
+        method: 'printer.gcode.script',
+        params: { script: namedFanScript(fanType, speed255, objects) },
       }
     }
 
-    throw new Error(`Invalid or unconfigured fan '${String(fanType)}'`)
+    throw new OutputRefused('invalid-command')
   }
 
   if (action === 'set_light') {

@@ -1,7 +1,23 @@
 import { describe, expect, it } from 'vitest'
 import { parseTemperatureFields } from '../../packages/connector/src/moonraker/temperature-observation'
+import { parseToolStatus } from '../../packages/connector/src/moonraker/discovery-parse'
 
 describe('parseTemperatureFields', () => {
+  it('keeps the farm and discovery projections aligned for the same tool status', () => {
+    const status = {
+      toolhead: { extruder: 'extruder2' },
+      extruder: { temperature: 215 },
+      extruder2: { temperature: -500 },
+    }
+
+    const observation = parseTemperatureFields(status, true)
+    const discovery = parseToolStatus(status)
+
+    expect(observation.tool).toEqual({ kind: 'invalid' })
+    expect(discovery.activeObject).toBe('extruder2')
+    expect(discovery.tools.find((tool) => tool.active)?.celsius).toBeNull()
+  })
+
   it.each([
     [
       { extruder: { temperature: 0 }, heater_bed: { temperature: 205 } },
@@ -40,6 +56,38 @@ describe('parseTemperatureFields', () => {
   ])('parses selected values only', (input, expected) => {
     expect(parseTemperatureFields(input)).toEqual(expected)
   })
+
+  it.each([
+    [
+      { toolhead: { extruder: 'extruder2' }, extruder2: { temperature: 230 } },
+      { kind: 'reading', celsius: 230 },
+    ],
+    [{ toolhead: { extruder: 'extruder' } }, { kind: 'reading', celsius: 210 }],
+    [{ toolhead: { extruder: 'extruder3' } }, { kind: 'absent' }],
+    [
+      { toolhead: { extruder: 'extruder1' }, extruder1: { temperature: null } },
+      { kind: 'invalid' },
+    ],
+    [
+      { toolhead: { extruder: 'fan' }, fan: { temperature: 80 } },
+      { kind: 'invalid' },
+    ],
+    [{}, { kind: 'invalid' }],
+  ])(
+    'reads only the selected extruder in a multi-tool query',
+    (objects, tool) => {
+      expect(
+        parseTemperatureFields(
+          {
+            extruder: { temperature: 210 },
+            heater_bed: { temperature: 60 },
+            ...objects,
+          },
+          true,
+        ),
+      ).toEqual({ tool, bed: { kind: 'reading', celsius: 60 } })
+    },
+  )
 
   it('does not mutate the source', () => {
     const input = {

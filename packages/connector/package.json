@@ -11,8 +11,8 @@
     "build": "node build.mjs"
   },
   "dependencies": {
-    "@open3dfarmmanager/farm-protocol": "workspace:*",
-    "@open3dfarmmanager/shared": "workspace:*",
+    "@open3dfarmmanager/farm-protocol": "*",
+    "@open3dfarmmanager/shared": "*",
     "effect": "4.1.4",
     "mqtt": "5.16.1",
     "node-datachannel": "0.33.6",

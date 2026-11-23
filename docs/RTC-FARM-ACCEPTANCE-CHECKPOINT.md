@@ -154,3 +154,147 @@ Notes on the non-passing results:
     - The dialog was opened before the Connector had re-admitted its pause inbox after the drop. The row now waits for that.
 
 Every pause run that reached the confirmation recorded exactly one `printer.print.pause` on the synthetic Moonraker, and none after revocation. No physical printer was contacted.
+
+### `farm-page-printing-pause` row (#195, 2026-11-17)
+
+Implementation commit: `4abf49ab`. This opt-in row uploads a uniquely named,
+movement-free, heater-free dwell print to an explicitly supplied `infra/sim`
+sv06 container. It uses the built farm page's signed pause over WebRTC, reads
+Klipper's `print_stats.state`, and reads the Connector's durable SQLite journal.
+Passing requires the UI's confirmed pause text, the live card showing `Pausada`,
+Klipper reporting `paused`, and exactly one journal entry with status and reason
+`applied`. It resumes the simulator through Moonraker as test setup/teardown,
+checks Klipper and the live card return to printing, and checks that the journal
+has no late duplicate. Resume is not claimed as a farm-page feature.
+
+The row confirms once. An uncertain response records available state, UI and
+journal evidence and fails; it never confirms again. Cleanup cancels only this
+row's uniquely named print and deletes its uploaded file. It does not stop or
+reset a shared simulator. Before sending simulator commands, the row checks that
+the supplied container is Compose service `sv06`, uses the `infra/sim` Compose
+file, and owns the exact loopback Moonraker port. Supply only a task-owned
+simulator, never a host service forwarding to hardware.
+
+Use the existing admitted runner environment (digest-pinned PostgreSQL 17,
+private external work root, unused loopback DB port), plus:
+
+```sh
+RTC_FARM_TEST_SCENARIOS=farm-page-printing-pause \
+RTC_FARM_TEST_SIM_PRINTING_PAUSE=sv06 \
+RTC_FARM_TEST_SIM_CONTAINER=<full-task-owned-sv06-container-id> \
+RTC_FARM_TEST_SIM_MOONRAKER=http://127.0.0.1:<isolated-sv06-port> \
+RTC_FARM_TEST_SIM_SPOOLMAN=http://127.0.0.1:<isolated-spoolman-port> \
+RTC_FARM_TEST_REPEAT=3 pnpm run test:rtc-farm
+```
+
+Provision sv06 and seeded Spoolman with isolated loopback port overrides; the
+host's ports 7125, 7100 and 9999 belong to unrelated services. This row stays out
+of the default scenarios even when its environment is present. Docker,
+PostgreSQL and browser execution remain opt-in and outside `test:node`.
+
+Validated source commit for every run: `147b9bf7011adb155c1fe23824843f0b636e9632`.
+The admitted runner built and sealed Nitro, then executed this row three times
+consecutively on 2026-11-17. All three processes exited successfully and their
+required agreement receipts were present.
+
+| Run | Result | Duration  | Klipper / journal / UI                               | After resume                |
+| --- | ------ | --------- | ---------------------------------------------------- | --------------------------- |
+| 1   | pass   | 28,313 ms | paused / exactly one applied entry / confirmed pause | printing; unchanged journal |
+| 2   | pass   | 29,035 ms | paused / exactly one applied entry / confirmed pause | printing; unchanged journal |
+| 3   | pass   | 28,302 ms | paused / exactly one applied entry / confirmed pause | printing; unchanged journal |
+
+Each journal entry had both status and reason `applied`. Each row emitted
+`farm-page-printing-pause-agreement-no-retry-resumed` after the UI and Klipper
+returned to printing and the journal still contained the same single command.
+Confirmation is called once, outside polling or retry loops. An uncertain
+outcome fails and records diagnostics; it never causes another confirmation.
+The service-free printing tests cover uncertainty, mismatched outcomes and late
+duplicates. No physical printer was contacted.
+
+The sealed printing artifact contained 587 files, with output manifest SHA-256
+`be2e37fa093865ca1449248797406e349df7c48e4c12a593270502c55b492019`.
+
+Earlier real attempts failed and are retained as failures in local evidence.
+They exposed stale UI selectors, an incomplete strict IPC observation schema,
+bootstrap/admission races, rejected Moonraker side notifications, and overlapping
+complete queries during frequent print-progress updates. The fixes preserve
+newer delta values, refresh only independently confirmed unchanged fields and
+query temperatures, and require matching RPC replies plus fresh paused-state
+evidence. Notifications never establish acknowledgement or freshness. The driver
+honors its configured acknowledgement timeout within the existing operation
+window. Short heater-free, movement-free dwells keep the test print responsive.
+Cleanup waits for Moonraker to release only the row's cancelled file.
+
+Both successful invocations below used the locally available PostgreSQL 17
+image `postgres:17@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b`.
+Simulator ports were isolated from unrelated host services. The runner removed
+its owned databases and private layers after completion.
+
+## Issue #196: RTC command rejection rows
+
+Validated source commit: `147b9bf7011adb155c1fe23824843f0b636e9632`.
+
+Built-stack status: **passed**. On 2026-11-17, a separate admitted invocation
+built and sealed Nitro, then ran all six rejection rows through authenticated
+signalling, the real RTC control channel and the native Connector. The runner
+exited zero, verified every required rejection receipt, and completed cleanup.
+
+| Acceptance row                      | Expected evidence                                                                                                      | Built-stack result |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| `command-rejected-tampered`         | Invalid signature; rejected; zero driver calls                                                                         | pass               |
+| `command-rejected-replayed`         | Accepted original, then duplicate over actual RTC; terminal; zero additional driver calls                              | pass               |
+| `command-rejected-expired`          | Valid signature, expired command; rejected; zero driver calls                                                          | pass               |
+| `command-rejected-wrong-farm`       | Re-signed farm substitution; rejected; zero driver calls                                                               | pass               |
+| `command-rejected-wrong-assignment` | Re-signed assignment substitution; rejected; zero driver calls                                                         | pass               |
+| `command-rejected-revoked-device`   | Received command held before dispatch, device revoked over HTTPS, Connector terminal before release; zero driver calls | pass               |
+
+Each row emitted its exact
+`rtc-command-rejected:<kind>; driver-call-delta:0; pause-delta:0` receipt only
+after checking native Connector observations. Replay resends the original signed
+command with the next RTC sequence in the disposable fixture. Its accepted
+original accounts for one driver call and one synthetic Moonraker pause; the
+rejected duplicate adds neither. Revocation uses the real browser-device revoke
+endpoint after delivery and before dispatch. The other invalid commands reach
+the Connector and settle as rejected.
+
+The sealed rejection artifact contained 587 files, with output manifest SHA-256
+`1e3659faa296210fe3dfafc2db5ec2eae780e6539a0355853de57c062b641acc`.
+The runner now retains the pause-execution resource ledger before deleting its
+private work directory, so it checks the actual rejection receipts rather than
+losing them during cleanup. The offline evidence test verifies all six table
+results, the three printing results, the signed substitutions and the rejection
+assertions. Offline tests do not substitute for these built-stack runs.
+
+The focused Node tests, the Moonraker client test file and typecheck were run.
+The whole unit suite and `check:all` were not run because this order excludes
+the whole suite. Docker, PostgreSQL and Chromium remain opt-in, outside
+`test:node`. All test listeners are loopback-only. No dependency was added, no
+physical printer was contacted, and no production service or publication was
+started. Private evidence, resource ledgers and failure diagnostics stay outside
+the repository; this checkpoint contains no credentials, sessions or private
+operational paths.
+
+## PR 751 closure check (2026-11-23)
+
+GitHub job `137540395410` reported an aggregate failure for
+`farm-page-disconnect` and `farm-page-revocation` at `5492d1fb`.
+The local comparison ran those two rows with the production build fixture,
+PostgreSQL 17.12 and Playwright 1.65.0 bundled Chromium 158.0.8127.18
+in a Linux amd64 Docker container on an internal network. Both revisions
+used the same container runtime and dependency lockfile.
+
+| Scenario               | PR head `5492d1fb`            | Merged main baseline `acff4c49` |
+| ---------------------- | ----------------------------- | ------------------------------- |
+| `farm-page-disconnect` | Owner login hydration timeout | Owner login hydration timeout   |
+| `farm-page-revocation` | Owner login hydration timeout | Owner login hydration timeout   |
+
+Each row launched Chromium and timed out after 10,000 ms waiting for Vue
+to mount at `/entrar`. The timeout preceded login submission and the
+authenticated RTC assertions. The failure reproduces on the baseline in
+this environment. The aggregate GitHub log leaves the CI failure stage
+unknown.
+
+Rerun both rows on the GitHub runner with bounded per-row application logs,
+browser page errors and failed asset requests retained. Confirm the failure
+stage there and rerun until both rows emit their required authenticated
+closure receipts.

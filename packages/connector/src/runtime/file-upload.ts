@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises'
 import { z } from 'zod'
 import { FileReceiver } from '../files/file-transfer.ts'
 import type { PauseCapabilityHandle } from '../auth/pause-capability.ts'
@@ -15,11 +16,16 @@ import type {
   createKobraLinkClient,
   PrinterBinding,
 } from '../kobralink/client.ts'
+import {
+  supportsAnycubicUpload,
+  uploadAnycubicFile,
+} from '../anycubic/files.ts'
+import type { PrinterBinding as LocalPrinterBinding } from '../control/printer-binding.ts'
 import { uploadBambuFile } from '../bambu/ftps.ts'
 
 export type FileUploadTarget =
   | { backend: 'creality'; origin: string }
-  | { backend: 'anycubic' }
+  | { backend: 'anycubic'; binding?: LocalPrinterBinding }
   | {
       backend: 'kobralink'
       client(
@@ -42,6 +48,7 @@ export type FileUploadResult =
       transfer_id: string
       ok: true
       library?: true | undefined
+      printUnsupported?: true | undefined
     }
   | {
       type: 'result'
@@ -54,11 +61,77 @@ export type FileUploadResult =
         | 'timeout'
         | 'aborted'
         | 'offline'
+        | 'busy'
         | 'invalid-transfer'
     }
+export function supportsFileUpload(
+  target: FileUploadTarget,
+  name: string,
+  standalone = false,
+): boolean {
+  if (target.backend === 'anycubic')
+    return standalone && !!target.binding && supportsAnycubicUpload(name)
+  return (
+    !(target.backend === 'creality' || target.backend === 'kobralink') ||
+    /\.gcode$/i.test(name)
+  )
+}
+
+export async function uploadFile(input: {
+  target: FileUploadTarget
+  filePath: string
+  name: string
+  signal: AbortSignal
+  authorize(): boolean
+  standalone?: boolean
+}): Promise<void> {
+  const { target, filePath, name, signal } = input
+  if (!supportsFileUpload(target, name, input.standalone))
+    throw Error('unsupported')
+  if (!input.authorize()) throw Error('unauthorized')
+  const common = { filePath, name, signal }
+  if (target.backend === 'moonraker')
+    await uploadMoonrakerFile({ ...target, ...common })
+  else if (target.backend === 'bambu')
+    await uploadBambuFile({ ...target, ...common })
+  else if (target.backend === 'creality')
+    await uploadCrealityFile({ ...target, ...common })
+  else if (target.backend === 'anycubic' && target.binding)
+    await uploadAnycubicFile({
+      ...common,
+      binding: target.binding,
+      authorized: input.authorize,
+    })
+  else if (target.backend === 'kobralink') {
+    signal.throwIfAborted()
+    const client = await target.client(signal)
+    try {
+      if (!input.authorize()) throw Error('unauthorized')
+      await client.uploadFile(target.binding, filePath, name)
+    } finally {
+      client.clearSession()
+    }
+  } else throw Error('unsupported')
+}
 const terminal = z.strictObject({ type: z.enum(['complete', 'abort']) })
 
-/** One stop-and-wait transfer per control peer. No remote destination or credential is accepted. */
+// One verified payload per admitted transport, cleared on dispatch or peer close.
+const stagedConfigs = new Map<
+  string,
+  { path: string; sha256: string; bytes: Buffer }
+>()
+export function consumeStagedConfig(
+  transport: string,
+  path: string,
+  sha256: string,
+) {
+  const staged = stagedConfigs.get(transport)
+  if (staged?.path !== path || staged.sha256 !== sha256) return undefined
+  stagedConfigs.delete(transport)
+  return staged.bytes
+}
+
+/** One stop-and-wait transfer per control peer. */
 export function createFileUpload(
   input: FileUploadOptions & {
     admittedHandle(): PauseCapabilityHandle | undefined
@@ -70,6 +143,7 @@ export function createFileUpload(
   let transfer: Awaited<ReturnType<FileReceiver['offer']>> | undefined
   let offer: ReturnType<typeof parseOffer> | undefined
   let handle: PauseCapabilityHandle | undefined
+  let stagedTransport: string | undefined
   let used = false
   let busy = false
   let work: Promise<void> = Promise.resolve()
@@ -81,7 +155,10 @@ export function createFileUpload(
       !!cap &&
       current === handle &&
       cap.printer_key === offer?.printer_key &&
-      cap.actions.includes('start_print')
+      (offer?.config
+        ? cap.actions.includes('config_write') &&
+          (cap.role === 'owner' || cap.role === 'admin')
+        : cap.actions.includes('start_print'))
     )
   }
   function send(value: object) {
@@ -90,6 +167,7 @@ export function createFileUpload(
   async function process(raw: unknown) {
     let forwarding = false
     let library = false
+    let printUnsupported = false
     try {
       if (!offer) {
         if (used || typeof raw !== 'string' || raw.length > 2048)
@@ -111,9 +189,9 @@ export function createFileUpload(
         const target = input.targetFor(offer.printer_key)
         if (!target) throw Error('offline')
         if (
-          target.backend === 'anycubic' ||
-          ((target.backend === 'creality' || target.backend === 'kobralink') &&
-            !/\.gcode$/i.test(offer.name))
+          offer.config
+            ? target.backend !== 'moonraker'
+            : !supportsFileUpload(target, offer.name, true)
         )
           throw Error('unsupported')
         transfer = await receiver.offer(offer)
@@ -144,35 +222,36 @@ export function createFileUpload(
         if (closed || !authorized()) throw Error('unauthorized')
         const target = input.targetFor(staged.offer.printer_key)
         if (!target) throw Error('offline')
-        const common = {
-          filePath,
-          name: staged.offer.name,
-          signal: controller.signal,
+        if (staged.offer.config) {
+          const bytes = await readFile(filePath, { signal: controller.signal })
+          const cap = handle?.current
+          if (!cap || closed || !authorized()) throw Error('unauthorized')
+          stagedTransport = cap.transport_id
+          stagedConfigs.set(stagedTransport, {
+            path: staged.offer.name,
+            sha256: staged.offer.sha256,
+            bytes,
+          })
+          return
         }
         forwarding = true
         library = target.backend === 'kobralink'
-        if (target.backend === 'moonraker')
-          await uploadMoonrakerFile({ ...target, ...common })
-        else if (target.backend === 'bambu')
-          await uploadBambuFile({ ...target, ...common })
-        else if (target.backend === 'creality')
-          await uploadCrealityFile({ ...target, ...common })
-        else if (target.backend === 'kobralink') {
-          controller.signal.throwIfAborted()
-          const client = await target.client(controller.signal)
-          try {
-            if (closed || !authorized()) throw Error('unauthorized')
-            await client.uploadFile(target.binding, filePath, common.name)
-          } finally {
-            client.clearSession()
-          }
-        } else throw Error('unsupported')
+        printUnsupported = target.backend === 'anycubic'
+        await uploadFile({
+          target,
+          filePath,
+          name: staged.offer.name,
+          signal: controller.signal,
+          authorize: () => !closed && authorized(),
+          standalone: true,
+        })
       })
       send({
         type: 'result',
         transfer_id: offer.transfer_id,
         ok: true,
         ...(library ? { library: true as const } : {}),
+        ...(printUnsupported ? { printUnsupported: true as const } : {}),
       } satisfies FileUploadResult)
     } catch (error) {
       await transfer?.abort()
@@ -182,9 +261,13 @@ export function createFileUpload(
         : error instanceof MoonrakerUploadError
           ? error.reason
           : error instanceof Error &&
-              ['unauthorized', 'offline', 'aborted', 'unsupported'].includes(
-                error.message,
-              )
+              [
+                'unauthorized',
+                'offline',
+                'aborted',
+                'unsupported',
+                'busy',
+              ].includes(error.message)
             ? error.message
             : forwarding
               ? 'offline'
@@ -211,8 +294,17 @@ export function createFileUpload(
           busy = false
         })
     },
-    async close() {
+    /**
+     * Ends the handler. The browser closes the file channel as soon as a
+     * transfer is done, and the staged config must outlive that: the signed
+     * `config_write` that consumes it arrives afterwards on the control
+     * channel. `keepStaged` is for that channel close; the peer's own close
+     * clears the staged payload.
+     */
+    async close(options?: { keepStaged?: boolean }) {
       closed = true
+      if (stagedTransport && !options?.keepStaged)
+        stagedConfigs.delete(stagedTransport)
       controller.abort()
       await transfer?.abort()
       transfer = undefined

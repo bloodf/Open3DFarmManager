@@ -1,4 +1,4 @@
-import { z } from '../../packages/farm-protocol/node_modules/zod/index.js'
+import { z } from 'zod'
 import { pathToFileURL } from 'node:url'
 import { BrowserDeviceUuid } from '../../packages/farm-protocol/src/browser-device-proof.ts'
 import {
@@ -12,6 +12,7 @@ import {
   PairingProofAudience,
 } from '../../packages/farm-protocol/src/pairing-proof.ts'
 import { parseBoundedJson } from '../../packages/farm-protocol/src/json.ts'
+import { PACKAGED_CONNECTOR_LIMITS } from './packaged-connector-bounds.ts'
 import type { AuthenticatedConnectorSignallingClient } from '../../packages/connector/src/cloud/authenticated-signalling-client.ts'
 import type { FarmStatusSender } from '../../packages/connector/src/webrtc/farm-status-sender.ts'
 
@@ -62,7 +63,7 @@ export const RtcFixtureReply = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('runtime-observation'),
     requests: z.number().int().min(0).max(65),
-    queued: z.number().int().min(0).max(64),
+    queued: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
     failure: z.boolean(),
     settled: z.boolean(),
     directory: z.string().min(1).max(512),
@@ -82,9 +83,13 @@ export const RtcFixtureReply = z.discriminatedUnion('kind', [
       .string()
       .regex(/^[a-f0-9]{64}$/)
       .nullable(),
-    packagedFiles: z.number().int().min(0).max(64),
+    packagedFiles: z.number().int().min(0).max(PACKAGED_CONNECTOR_LIMITS.files),
     pauses: z.number().int().min(0).max(64),
     pauseInboxReady: z.boolean(),
+    pauseInboxes: z.number().int().nonnegative(),
+    telemetryDelivered: z.number().int().nonnegative(),
+    telemetryRetained: z.number().int().nonnegative(),
+    recent: z.array(z.string().max(145)).max(24).readonly(),
   }),
   z.strictObject({
     kind: z.literal('observation'),
@@ -155,9 +160,7 @@ async function run() {
     providerClosed = false,
     admissionDeadline = 0,
     sourceDeadline = 0
-  let native:
-    | typeof import('../../packages/connector/node_modules/node-datachannel')
-    | undefined
+  let native: typeof import('node-datachannel') | undefined
   let pending = Buffer.alloc(0),
     receivedBytes = 0,
     requests = 0

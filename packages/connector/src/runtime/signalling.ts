@@ -24,21 +24,28 @@ export async function runSignallingLifecycle(input: {
   retryMinMs: number
   retryMaxMs: number
   /**
-   * `onAdmitted` reports that the server admitted this session's credential
-   * proof. The next reconnect then waits only retryMinMs, so a long-lived
-   * Connector keeps its reconnect gap below the offline authority lifetime.
+   * Reset retry pressure after 30 seconds of admitted uptime, or when a
+   * single-use session reports it served the peer it was opened for.
    */
-  createSession(onTerminal: () => void, onAdmitted: () => void): Session
+  now?: () => number
+  monotonic?: () => number
+  sleep?: (ms: number, signal: AbortSignal) => Promise<void>
+  onReconnect?: () => void
+  createSession(
+    onTerminal: () => void,
+    onAdmitted: () => void,
+    onServed: () => void,
+  ): Session
 }): Promise<void> {
+  const now = input.now ?? Date.now
+  const monotonic = input.monotonic ?? (() => performance.now())
+  const sleep = input.sleep ?? wait
   let backoff = input.retryMinMs
   let expired = false
   const deadlineMono =
-    performance.now() + Math.max(0, input.credentialExpiresAt - Date.now())
+    monotonic() + Math.max(0, input.credentialExpiresAt - now())
   const remaining = () =>
-    Math.min(
-      input.credentialExpiresAt - Date.now(),
-      deadlineMono - performance.now(),
-    )
+    Math.min(input.credentialExpiresAt - now(), deadlineMono - monotonic())
   while (!expired && !input.signal.aborted && remaining() > 0) {
     let finish = () => {}
     const terminal = new Promise<void>((resolve) => {
@@ -46,8 +53,16 @@ export async function runSignallingLifecycle(input: {
     })
     let session: Session | undefined
     let ended = false
+    let admittedAt: number | undefined
+    let served = false
     let closeFailure: { error: unknown } | undefined
     const endedSession = () => {
+      if (
+        !ended &&
+        admittedAt !== undefined &&
+        (served || monotonic() - admittedAt >= 30_000)
+      )
+        backoff = input.retryMinMs
       ended = true
       finish()
     }
@@ -71,10 +86,18 @@ export async function runSignallingLifecycle(input: {
     )
     input.signal.addEventListener('abort', stop, { once: true })
     try {
-      session = input.createSession(endedSession, () => {
-        // A late callback from an ended session never resets backoff.
-        if (!ended) backoff = input.retryMinMs
-      })
+      session = input.createSession(
+        endedSession,
+        () => {
+          // Measure the first admission only; late callbacks cannot reset pressure.
+          if (!ended && admittedAt === undefined) admittedAt = monotonic()
+        },
+        () => {
+          // Ending after its one job is done is not a failure. Only an
+          // admitted session can serve, and a late report changes nothing.
+          if (!ended && admittedAt !== undefined) served = true
+        },
+      )
       if (ended || input.signal.aborted || remaining() <= 0) stop()
       else {
         // start resolves on admission. Keep the slot until terminal AND disposal.
@@ -95,7 +118,8 @@ export async function runSignallingLifecycle(input: {
     }
     if (closeFailure) throw closeFailure.error
     if (expired) return
-    await wait(Math.min(backoff, Math.max(0, remaining())), input.signal)
+    await sleep(Math.min(backoff, Math.max(0, remaining())), input.signal)
+    if (!input.signal.aborted && remaining() > 0) input.onReconnect?.()
     backoff = Math.min(input.retryMaxMs, backoff * 2)
   }
 }

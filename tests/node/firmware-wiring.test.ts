@@ -60,6 +60,16 @@ async function moonrakerFixture() {
       socket.on('message', (data) => {
         const request = JSON.parse(data.toString())
         methods.push(request.method)
+        if (request.method === 'server.connection.identify') {
+          socket.send(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              id: request.id,
+              result: { connection_id: 1 },
+            }),
+          )
+          return
+        }
         const result =
           request.method === 'printer.objects.list'
             ? { objects: [] }
@@ -113,7 +123,7 @@ test(
             shortCircuit: true,
             source: readFileSync(new URL(url), 'utf8').replace(
               'return { observe, invalidate, setInventory, open, close }',
-              `globalThis.firmwareProbe.read = () => { const now = performance.now(); return snapshot(now, now + 5000); }; return { observe, invalidate, setInventory, open, close }`,
+              `globalThis.firmwareProbe.read = () => { const now = performance.now(); return snapshot(now, now + 5000)?.value; }; return { observe, invalidate, setInventory, open, close }`,
             ),
           }
         return next(url, context)
@@ -184,6 +194,7 @@ test(
                 assert.ok(
                   remote.methods.every((method) =>
                     [
+                      'server.connection.identify',
                       'printer.objects.list',
                       'printer.objects.subscribe',
                       'printer.objects.query',
@@ -250,16 +261,19 @@ test(
                   },
                 ],
               }
-              assertReads = () =>
-                assert.deepEqual(
-                  remote.requests.map((request) => request.command),
-                  ['get_version'],
-                )
+              assertReads = () => {
+                assert.deepEqual(remote.queries, [
+                  { command: 'pushall', sequence_id: '0' },
+                  { command: 'get_version', sequence_id: '0' },
+                ])
+                // Reading the firmware never sends a printer command.
+                assert.deepEqual(remote.requests, [])
+              }
             } else if (vendor === 'creality') {
-              const remote = await createCrealitySimulator({
-                state: 1,
-                printProgress: 25,
-              })
+              const remote = await createCrealitySimulator(
+                { state: 1, printProgress: 25 },
+                { heartbeatMs: 50 },
+              )
               cleanup.push(remote.close)
               collection = {
                 version: 4,

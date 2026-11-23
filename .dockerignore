@@ -5,6 +5,10 @@ node_modules
 **/.output
 **/dist
 .env*
+!.env.example
 .DS_Store
 playwright-report
 test-results
+# Local self-host deployment state must never enter the check image.
+infra/app/app.env
+infra/app/state/

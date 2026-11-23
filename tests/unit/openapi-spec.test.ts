@@ -1,0 +1,245 @@
+import { readFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
+import { createConfig, lint } from '@redocly/openapi-core'
+import { parse } from 'yaml'
+import { describe, expect, it } from 'vitest'
+import route from '../../apps/farm/server/api/integrations/v1/openapi.json.get.ts'
+import { openApiDocumentFromYaml } from '../../apps/farm/server/utils/integrations/openapi-spec.ts'
+
+const specPath = fileURLToPath(
+  new URL('../../docs/api/openapi-v1.yaml', import.meta.url),
+)
+const source = await readFile(specPath, 'utf8')
+const committed = parse(source) as {
+  openapi: string
+  servers: { url: string }[]
+  paths: Record<string, Record<string, OperationObject>>
+  components: {
+    securitySchemes: {
+      clientCredentials: {
+        flows: { clientCredentials: { scopes: Record<string, string> } }
+      }
+    }
+    schemas: Record<string, { enum?: string[] }>
+    headers: Record<string, unknown>
+  }
+  webhooks: Record<string, unknown>
+}
+type OperationObject = {
+  security?: Record<string, string[]>[]
+  responses: Record<string, unknown>
+  parameters?: {
+    $ref?: string
+    name?: string
+    in?: string
+    required?: boolean
+  }[]
+}
+
+const served = async () => {
+  const response = await route({
+    req: new Request(
+      'https://farm.example.invalid/api/integrations/v1/openapi.json',
+    ),
+  } as never)
+  return response
+}
+
+describe('integration API v1 OpenAPI spec', () => {
+  it('passes the Redocly recommended-strict ruleset with no problems', async () => {
+    const config = await createConfig({ extends: ['recommended-strict'] })
+    const problems = await lint({ ref: specPath, config })
+    expect(
+      problems.map(
+        (problem) =>
+          `${problem.ruleId}: ${problem.message} at ${problem.location[0]?.pointer}`,
+      ),
+    ).toEqual([])
+  })
+
+  it('serves exactly the committed file as JSON, publicly', async () => {
+    const response = await served()
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toBe(
+      'application/json; charset=utf-8',
+    )
+    const body = await response.text()
+    expect(JSON.parse(body)).toStrictEqual(committed)
+    expect(body).toBe(JSON.stringify(openApiDocumentFromYaml(source)))
+  })
+
+  it('documents the v1 base path, every scope and the plan decisions', () => {
+    expect(committed.openapi).toBe('3.1.0')
+    expect(committed.servers.map((server) => server.url)).toEqual([
+      '/api/integrations/v1',
+    ])
+    expect(
+      Object.keys(
+        committed.components.securitySchemes.clientCredentials.flows
+          .clientCredentials.scopes,
+      ),
+    ).toEqual([
+      'printers:read',
+      'files:read',
+      'inventory:read',
+      'jobs:read',
+      'jobs:start',
+      'jobs:write',
+      'control:basic',
+      'control:extended',
+      'events:subscribe',
+      'library:read',
+      'library:write',
+      'environment:read',
+      'plates:confirm',
+      'alerts:write',
+      'camera:view',
+      'inventory:write',
+      'environment:control',
+      'alerts:manage',
+    ])
+    expect(Object.keys(committed.paths).sort()).toEqual(
+      [
+        '/openapi.json',
+        '/oauth/token',
+        '/printers',
+        '/printers/mode',
+        '/printers/readiness',
+        '/printers/status',
+        '/printers/{printerId}/capabilities',
+        '/printers/{printerId}/status',
+        '/printers/{printerId}/files',
+        '/printers/{printerId}/macros',
+        '/printers/{printerId}/mode',
+        '/printers/{printerId}/jobs',
+        '/printers/{printerId}/actions',
+        '/environment/controls',
+        '/environment/controls/{printerId}/actions',
+        '/environment/controls/{printerId}/actions/{actionId}',
+        '/environment/measurements',
+        '/health/{printerId}',
+        '/telemetry/{printerId}',
+        '/inventory',
+        '/inventory/spools',
+        '/inventory/spools/physical',
+        '/inventory/spools/physical/{spoolId}',
+        '/inventory/spools/physical/{spoolId}/withdraw',
+        '/inventory/spools/search',
+        '/inventory/spools/usage',
+        '/library',
+        '/library/settings',
+        '/library/{itemId}',
+        '/jobs',
+        '/jobs/{jobId}',
+        '/jobs/{jobId}/actions',
+        '/jobs/{jobId}/eligibility',
+        '/jobs/{jobId}/plate',
+        '/actions/{actionId}',
+        '/alert-rules/{farmId}',
+        '/alert-rules/{farmId}/{kind}',
+        '/alerts/{printerId}',
+        '/alerts/{printerId}/{alertId}',
+        '/camera/{printerId}',
+        '/notification-channels/{farmId}',
+        '/notification-channels/{farmId}/test',
+        '/resin/lots',
+        '/resin/usage',
+        '/resin/vats',
+        '/webhooks',
+        '/webhooks/{webhookId}',
+        '/webhooks/{webhookId}/test',
+      ].sort(),
+    )
+    expect(committed.components.schemas.RefusalCode?.enum).toEqual([
+      'printer-busy',
+      'not-ready',
+      'wrong-state',
+      'checksum-mismatch',
+      'grant-revoked',
+      'expired',
+      'unsupported',
+    ])
+    expect(Object.keys(committed.components.headers)).toEqual(
+      expect.arrayContaining([
+        'RateLimit-Limit',
+        'RateLimit-Remaining',
+        'RateLimit-Reset',
+        'Retry-After',
+      ]),
+    )
+    expect(Object.keys(committed.webhooks)).toEqual(
+      expect.arrayContaining([
+        'job.ended',
+        'inventory.changed',
+        'printer.alert.raised',
+      ]),
+    )
+  })
+
+  it('requires farmId for both library reads', () => {
+    const parameters = (
+      committed.components as unknown as {
+        parameters: Record<
+          string,
+          { name: string; in: string; required?: boolean }
+        >
+      }
+    ).parameters
+    for (const path of ['/library', '/library/settings']) {
+      const entries = committed.paths[path]!.get!.parameters!
+      const farmId = entries
+        .map((entry) =>
+          entry.$ref ? parameters[entry.$ref.split('/').at(-1)!] : entry,
+        )
+        .find((entry) => entry?.name === 'farmId')
+      expect(farmId, path).toMatchObject({
+        name: 'farmId',
+        in: 'query',
+        required: true,
+      })
+    }
+  })
+
+  it('describes shipped integration scopes, library routes and readiness reasons', async () => {
+    const guide = await readFile(
+      new URL('../../docs/INTEGRATION-API.md', import.meta.url),
+      'utf8',
+    )
+    expect(guide).toContain('Each scope in the table authorizes')
+    expect(guide).toContain(
+      'Library storage, retention and replay are available',
+    )
+    expect(guide).toContain('Library storage and replay use the scoped routes')
+    const readiness = guide.match(/`degradedReason` is[\s\S]*?degraded\./)?.[0]
+    expect(readiness).toBeDefined()
+    for (const reason of [
+      'offline',
+      'reconnecting',
+      'error',
+      'stale',
+      'unknown-state',
+      'client-certificate-missing',
+    ])
+      expect(readiness).toContain(`\`${reason}\``)
+  })
+
+  it('keeps the spec and token endpoint public and everything else scoped', () => {
+    for (const [path, operations] of Object.entries(committed.paths)) {
+      for (const [method, operation] of Object.entries(operations)) {
+        const security = operation.security
+        if (path === '/openapi.json' || path === '/oauth/token') {
+          expect(security, `${method} ${path}`).toEqual([])
+          continue
+        }
+        // Unset security inherits the global client-credentials requirement.
+        expect(security?.length ?? 1, `${method} ${path}`).toBeGreaterThan(0)
+        expect(Object.keys(operation.responses), `${method} ${path}`).toContain(
+          '401',
+        )
+        expect(Object.keys(operation.responses), `${method} ${path}`).toContain(
+          '429',
+        )
+      }
+    }
+  })
+})

@@ -1,4 +1,8 @@
-import type { TelemetryEvent } from '@open3dfarmmanager/farm-protocol'
+import type {
+  FilamentUsage,
+  TelemetryEvent,
+} from '@open3dfarmmanager/farm-protocol'
+import { jobLibraryLink } from '../utils/job-library-links.ts'
 
 export const jobHistoryCursor = /^\d{1,16}-\d{1,18}$/
 export interface JobRecord {
@@ -7,6 +11,10 @@ export interface JobRecord {
   filename?: string
   printDurationSeconds?: number
   totalDurationSeconds?: number
+  filamentUsage?: FilamentUsage[]
+  /** Library version that was printed; absent when the job was not started from the library. */
+  librarySha256?: string
+  plate?: number
   endedAt: number
 }
 export type JobHistoryFailure = {
@@ -48,6 +56,19 @@ export function jobsFromEvents(events: readonly TelemetryEvent[]): JobRecord[] {
       ...(last.totalDuration !== undefined
         ? { totalDurationSeconds: last.totalDuration }
         : {}),
+      ...(last.filamentUsage?.length
+        ? { filamentUsage: last.filamentUsage }
+        : last.filamentUsedMillimetres !== undefined
+          ? {
+              filamentUsage: [
+                {
+                  tool: 'unknown',
+                  millimetres: last.filamentUsedMillimetres,
+                },
+              ],
+            }
+          : {}),
+      ...jobLibraryLink(last),
       endedAt: last.endedAt,
     })
   }

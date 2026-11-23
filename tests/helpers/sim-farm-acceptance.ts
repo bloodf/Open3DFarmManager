@@ -1,3 +1,5 @@
+import { isDockerSim } from '../../packages/sim-tools/src/mocks/env.ts'
+import type { mockSimulatorStack } from './sim-acceptance-mocks.ts'
 // Two-printer / four-tool / Spoolman simulator acceptance (issue #2) against
 // the real Klipper/Moonraker and Spoolman simulators, the built farm server,
 // real enrollment and the real Connector CLI. Read-only: no printer command is
@@ -40,6 +42,17 @@ export type SimPorts = {
   sv06Cam: number
   u1Cam: number
 }
+export type LiveApp = {
+  appOrigin: string
+  connectorRunning: () => boolean
+}
+type LiveHook = (live: LiveApp) => Promise<void>
+async function notifyLive(
+  hook: LiveHook | undefined,
+  live: LiveApp,
+): Promise<void> {
+  await hook?.(live)
+}
 export const simPorts = (base: number): SimPorts => ({
   db: base,
   app: base + 1,
@@ -68,6 +81,10 @@ export function simulatorStack(input: {
   workDir: string
   ledger: (value: object) => void
 }) {
+  assert.ok(
+    isDockerSim(),
+    'This container fixture requires OPENFARM_SIM=docker',
+  )
   const { ports } = input
   const override = join(input.workDir, 'ports.override.yml')
   const publish = (pairs: [number, number][]) =>
@@ -124,12 +141,18 @@ export function simulatorStack(input: {
 
 export async function runSimFarmAcceptance(input: {
   admin: Sql
+  fixtureDatabaseUrl: string
   ports: SimPorts
+  origins?: ReturnType<typeof mockSimulatorStack>['origins']
   workDir: string
   ledger: (value: object) => void
+  /** Runs while the built app and the Connector are both up (desktop:check). */
+  whileRunning?: LiveHook
 }) {
   const { admin, ports, workDir, ledger } = input
   const origin = (port: number) => `http://127.0.0.1:${port}`
+  const simOrigin = (name: keyof NonNullable<typeof input.origins>) =>
+    input.origins?.[name] ?? origin(ports[name])
   const timings: Record<string, number> = {}
   const t0 = performance.now()
   const mark = (name: string) =>
@@ -139,7 +162,7 @@ export async function runSimFarmAcceptance(input: {
   for (const printer of PRINTERS)
     await until(
       () =>
-        Effect.runPromise(probePrinter(origin(ports[printer]))).then(
+        Effect.runPromise(probePrinter(simOrigin(printer))).then(
           () => true,
           () => false,
         ),
@@ -149,7 +172,7 @@ export async function runSimFarmAcceptance(input: {
   mark('printersReady')
 
   // 2. Spoolman seed is repeatable (2 vendors, 4 filaments, 6 spools).
-  const spoolmanOrigin = origin(ports.spoolman)
+  const spoolmanOrigin = simOrigin('spoolman')
   const seeded = await seedSpoolman(spoolmanOrigin)
   assert.deepEqual(await seedSpoolman(spoolmanOrigin), seeded)
 
@@ -157,7 +180,7 @@ export async function runSimFarmAcceptance(input: {
   const discovered: Record<string, object> = {}
   for (const printer of PRINTERS) {
     const result = await discoverMoonraker({
-      origin: origin(ports[printer]),
+      origin: simOrigin(printer),
       limits: LIMITS,
       signal: AbortSignal.timeout(20000),
       client: {
@@ -186,9 +209,9 @@ export async function runSimFarmAcceptance(input: {
   assert.deepEqual((discovered.sv06 as { tools: string[] }).tools, ['extruder'])
   // One JPEG frame from each printer webcam and from the camera service.
   const snapshotBytes = {
-    sv06: await verifyCamera(origin(ports.sv06Cam)),
-    u1: await verifyCamera(origin(ports.u1Cam)),
-    camera: await verifyCamera(origin(ports.camera)),
+    sv06: await verifyCamera(simOrigin('sv06Cam')),
+    u1: await verifyCamera(simOrigin('u1Cam')),
+    camera: await verifyCamera(simOrigin('camera')),
   }
   mark('discovered')
 
@@ -225,12 +248,14 @@ export async function runSimFarmAcceptance(input: {
     { name: prefix + '_pair', group: 'farm_pairing_runtime' },
     { name: prefix + '_owner', group: 'farm_printer_ownership' },
   ]
+  const rolePassword = randomUUID().replaceAll('-', '')
   const created: string[] = []
   const pools: Sql[] = []
   const closers: Array<() => Promise<void>> = []
   try {
     for (const role of roles) {
       await admin`CREATE ROLE ${admin(role.name)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS IN ROLE ${admin(role.group)}`
+      await admin.unsafe(`ALTER ROLE "${role.name}" PASSWORD '${rolePassword}'`)
       created.push(role.name)
       ledger({ resource: 'database-role', name: role.name })
     }
@@ -241,7 +266,7 @@ export async function runSimFarmAcceptance(input: {
         port: ports.db,
         database: 'fixture',
         username,
-        password: '',
+        password: rolePassword,
         ssl: false,
         max: 2,
         connect_timeout: 3,
@@ -281,7 +306,7 @@ export async function runSimFarmAcceptance(input: {
       workDir,
       printerKeys: PRINTERS,
     })
-    const printerOrigins = PRINTERS.map((printer) => origin(ports[printer]))
+    const printerOrigins = PRINTERS.map((printer) => simOrigin(printer))
     const configPath = join(workDir, 'runtime.json'),
       credentialPath = join(workDir, 'credential.json')
     writeFileSync(
@@ -330,7 +355,7 @@ export async function runSimFarmAcceptance(input: {
       { mode: 0o600, flag: 'wx' },
     )
     const databaseUrl = (user: string) =>
-      `postgres://${encodeURIComponent(user)}:synthetic@127.0.0.1:${ports.db}/fixture`
+      `postgres://${encodeURIComponent(user)}:${rolePassword}@127.0.0.1:${ports.db}/fixture`
     const app = startFarmApp({
       env: {
         PATH: process.env.PATH ?? '/usr/bin:/bin',
@@ -338,7 +363,7 @@ export async function runSimFarmAcceptance(input: {
         NITRO_HOST: '127.0.0.1',
         NITRO_PORT: String(ports.app),
         NUXT_DATABASE_ENABLED: 'true',
-        NUXT_DATABASE_DATABASE_URL: databaseUrl('fixture'),
+        NUXT_DATABASE_DATABASE_URL: input.fixtureDatabaseUrl,
         NUXT_DATABASE_MIGRATIONS: 'verify',
         NUXT_DATABASE_MIGRATIONS_DIR: repo('infra/db/migrations/'),
         NUXT_CONNECTOR_TELEMETRY_ENABLED: 'true',
@@ -387,7 +412,7 @@ export async function runSimFarmAcceptance(input: {
     // 6. Telemetry from both genuine printers is ingested into PostgreSQL.
     const perPrinter = async () =>
       (await admin`SELECT COALESCE(payload#>>'{state,printerKey}', payload#>>'{transition,printerKey}') AS printer, count(*)::int AS n FROM farm.telemetry_events WHERE agent_id=${enrolled.agentId}::uuid AND farm_id=${enrolled.farmId}::uuid GROUP BY 1`) as unknown as {
-        printer: string
+        printer: string | null
         n: number
       }[]
     await until(
@@ -402,6 +427,10 @@ export async function runSimFarmAcceptance(input: {
       'telemetry rows for both printers',
     )
     mark('telemetryIngested')
+    await notifyLive(input.whileRunning, {
+      appOrigin: origin(ports.app),
+      connectorRunning: (): boolean => connector.running,
+    })
     // Exactly-once: let the drain settle, stop the Connector, then compare what
     // the collector queued, what the agent delivered and what was stored.
     const delivered = () =>
@@ -414,7 +443,14 @@ export async function runSimFarmAcceptance(input: {
       )[0]!.n as number
     await until(
       async () =>
-        delivered() >= connector.count('queued') &&
+        delivered() >= PRINTERS.length + 1 &&
+        delivered() >=
+          connector.count('queued') +
+            Number(
+              (
+                await admin`SELECT count(*)::int AS n FROM farm.telemetry_events WHERE agent_id=${enrolled.agentId}::uuid AND farm_id=${enrolled.farmId}::uuid AND payload ? 'inventory'`
+              )[0]!.n,
+            ) &&
         (await stored()) === delivered(),
       30000,
       'telemetry drain settled',
@@ -435,9 +471,16 @@ export async function runSimFarmAcceptance(input: {
         d: number
       }[]
     assert.equal(totals!.n, totals!.d, 'each event stored exactly once')
-    assert.equal(totals!.n, summary.queued, 'every queued record stored')
-    assert.equal(agentSummary.delivered, summary.queued, 'every record acked')
-    const rows = await perPrinter()
+    const [inventory] =
+      await admin`SELECT count(*)::int AS n FROM farm.telemetry_events WHERE agent_id=${enrolled.agentId}::uuid AND farm_id=${enrolled.farmId}::uuid AND payload ? 'inventory'`
+    // The Spoolman provider refreshes on its own timer, so a slow run stores
+    // more than one snapshot; the exact accounting below covers every one.
+    assert.ok(inventory!.n >= 1, 'seeded inventory snapshot stored')
+    // The collector summary counts printer records; delivery also carries Spoolman.
+    const queued = Number(summary.queued) + inventory!.n
+    assert.equal(totals!.n, queued, 'every queued record stored')
+    assert.equal(agentSummary.delivered, queued, 'every record acked')
+    const rows = (await perPrinter()).filter((row) => row.printer !== null)
     // Idle simulators: exactly one baseline state record per printer.
     assert.deepEqual(
       Object.fromEntries(rows.map((row) => [row.printer, row.n])),
@@ -458,7 +501,7 @@ export async function runSimFarmAcceptance(input: {
       discovered,
       snapshotBytes,
       exactlyOnce: {
-        queued: summary.queued,
+        queued,
         delivered: agentSummary.delivered,
         stored: totals!.n,
         distinct: totals!.d,

@@ -2,7 +2,7 @@
 
 These are acceptance obligations for later implementation, not claims about completed features.
 
-- An unavailable direct WebRTC connection leaves the farm read-only. The application server carries authenticated signalling and bounded persistence, never commands.
+- Browser commands stay WebRTC-only with no TURN or HTTP fallback; API-originated commands are allowed only with an owner-granted scope, delivered as issuer-signed envelopes, and enforced by the Connector, which refuses unsafe or unauthorized commands with a reason. No automatic retry of uncertain commands, and never command physical printers in automated tests. An unavailable direct WebRTC connection leaves browser farm operations read-only.
 - Bind approved browser identity and each signed command to its farm, Connector, printer, device, authenticated session, unique command identifier and nonce. Cross-farm/session substitutions must fail.
 - Persist replay protection before execution. A timeout after sending a physical command has an uncertain outcome; do not automatically retry it. Reconcile device state before another user action.
 - Verify signatures, roles, freshness and local safety at the Connector. Schema validation alone does not prove authenticity.

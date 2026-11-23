@@ -1,9 +1,14 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: MIT
 // Diagnostic output deliberately excludes raw logs, configuration and container environment.
+import { isDockerSim } from '../packages/sim-tools/src/mocks/env.ts'
 import { spawnSync } from 'node:child_process'
 import { availableParallelism, loadavg } from 'node:os'
 
+if (!isDockerSim()) {
+  console.log('Docker mode only (OPENFARM_SIM=docker)')
+  process.exit(0)
+}
 const project = process.argv[2]
 if (
   process.argv.length > 3 ||

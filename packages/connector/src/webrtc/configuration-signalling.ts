@@ -1,3 +1,8 @@
+import type { TrustedKeyStore } from '../auth/trusted-key-store.ts'
+import {
+  decodeTrustedKeySetFrame,
+  MAX_TRUSTED_KEY_SET_WIRE_BYTES,
+} from '../../../farm-protocol/src/trusted-keys.ts'
 import { createHash, createPublicKey } from 'node:crypto'
 import { canonicalize } from '../../../farm-protocol/src/canonical.ts'
 import {
@@ -18,7 +23,7 @@ import type { ConfigurationConnectorSession } from './configuration-session.ts'
 export const CONFIGURATION_SIGNALLING_PATH = '/api/signalling/config-connector'
 export const CONFIGURATION_SIGNALLING_SUBPROTOCOL =
   'open3dfarm.config-signalling.v1'
-const MAX_SOCKET_BYTES = 12_288
+const MAX_SOCKET_BYTES = MAX_TRUSTED_KEY_SET_WIRE_BYTES
 const MAX_IGNORED_CANDIDATES = 64
 /**
  * Leases are stamped by the farm (database clock) and judged here by the
@@ -86,6 +91,7 @@ export type ConfigurationPeerFactory = (input: {
 }) => ConfigurationPeerLike
 
 export interface ConfigurationSignallingOptions {
+  trustedKeys?: TrustedKeyStore
   identity: ConnectorIdentity
   farmOrigin: string
   credentialAudience: string
@@ -156,6 +162,7 @@ export function createConfigurationSignallingClient(
     let retries = 0
     let context: Context | null = null
     let leaseTimer: ReturnType<typeof setTimeout> | undefined
+    let retryTimer: ReturnType<typeof setTimeout> | undefined
     let readied = false
     let stage: FrameStage = 'frame-shape'
     let miss: WindowMiss | null = null
@@ -187,6 +194,8 @@ export function createConfigurationSignallingClient(
       if (stopped) return
       stopped = true
       clearTimeout(leaseTimer)
+      clearTimeout(retryTimer)
+      retryTimer = undefined
       if (online) options.runtime().revokeAll()
       online = false
       closeContext('signalling-closed')
@@ -315,8 +324,15 @@ export function createConfigurationSignallingClient(
       switch (frame.t) {
         case 'config.retry':
           if (phase !== 'begin' || ++retries > 2) throw new Error('Busy')
-          setTimeout(() => {
-            if (!signal.aborted) begin()
+          clearTimeout(retryTimer)
+          retryTimer = setTimeout(() => {
+            retryTimer = undefined
+            if (signal.aborted || stopped) return
+            try {
+              begin()
+            } catch {
+              stop()
+            }
           }, frame.retry_after_ms)
           return
         case 'config.connector-challenge': {
@@ -412,6 +428,22 @@ export function createConfigurationSignallingClient(
               if (typeof raw !== 'string' || raw.length > MAX_SOCKET_BYTES)
                 throw new Error('Invalid frame')
               stage = 'frame-decode'
+              let keyFrame = false
+              try {
+                decodeTrustedKeySetFrame(raw)
+                keyFrame = true
+              } catch {
+                /* Decode the signalling frame below. */
+              }
+              if (keyFrame) {
+                if (
+                  phase !== 'ready' ||
+                  !options.trustedKeys ||
+                  !(await options.trustedKeys.confirm(raw))
+                )
+                  throw new Error('Trusted key confirmation refused')
+                return
+              }
               const frame = decodeConfigurationSignallingServerFrame(raw)
               kind = frame.t
               stage = 'frame-handle'

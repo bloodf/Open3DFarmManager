@@ -1,0 +1,119 @@
+main {
+  max-width: 58rem;
+  margin: 2rem auto;
+  padding: 0 1rem;
+  line-height: 1.6;
+}
+section {
+  margin-block: 2rem;
+}
+label,
+select,
+input:not([type='checkbox']):not([type='radio']),
+button {
+  display: block;
+  margin-block: 0.6rem;
+}
+input,
+select,
+button {
+  font: inherit;
+  max-width: 100%;
+  min-height: 2.75rem;
+}
+input:not([type='checkbox']):not([type='radio']),
+select {
+  width: 100%;
+  min-width: 0;
+  padding: 0.5rem 0.65rem;
+}
+button {
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+}
+dd,
+dt,
+p,
+li {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.exact-key {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+fieldset {
+  padding: 1rem;
+  margin-block: 1rem;
+  min-width: 0;
+}
+.kobra-card,
+.capability-box {
+  border: 1px solid currentColor;
+  padding: 1rem;
+  margin-block: 1rem;
+  min-width: 0;
+}
+.kobra-mode-option {
+  display: flex;
+  gap: 0.65rem;
+  align-items: flex-start;
+  min-height: 2.75rem;
+}
+.kobra-mode-option input {
+  flex: none;
+  margin-block: 0.7rem 0;
+}
+.kobra-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: center;
+}
+.confirmation {
+  display: flex;
+  gap: 0.65rem;
+  align-items: flex-start;
+  min-height: 2.75rem;
+}
+.confirmation input[type='checkbox'] {
+  flex: 0 0 auto;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin-top: 0.25rem;
+}
+.setup-columns {
+  display: grid;
+  gap: 1.5rem;
+  min-width: 0;
+}
+.setup-columns > * {
+  min-width: 0;
+}
+:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 3px;
+}
+@media (max-width: 400px) {
+  main {
+    padding-inline: 0.75rem;
+  }
+  fieldset,
+  .kobra-card,
+  .capability-box {
+    padding: 0.75rem;
+  }
+}
+@media (min-width: 48rem) {
+  .setup-columns {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+}
+.loading {
+  display: grid;
+  gap: 0.5rem;
+}

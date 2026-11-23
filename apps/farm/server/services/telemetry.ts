@@ -1,5 +1,6 @@
 import {
   parseBoundedJson,
+  TELEMETRY_BATCH_JSON_LIMITS,
   TelemetryBatch,
   telemetryPrinterKey,
   type TelemetryEvent,
@@ -61,17 +62,17 @@ export async function ingestTelemetry(
   let records: TelemetryEvent[]
   try {
     records = TelemetryBatch.parse(
-      parseBoundedJson(body, {
-        maxBytes: 64 * 1024,
-        maxDepth: 5,
-        maxValues: 2000,
-        maxStringChars: 128,
-      }),
+      parseBoundedJson(body, TELEMETRY_BATCH_JSON_LIMITS),
     )
   } catch {
     return { ok: false, reason: 'invalid-batch' }
   }
-  if (records.some((record) => !allowed.has(telemetryPrinterKey(record))))
+  if (
+    records.some((record) => {
+      const key = telemetryPrinterKey(record)
+      return key !== null && !allowed.has(key)
+    })
+  )
     return { ok: false, reason: 'forbidden-printer' }
   const acceptedEventIds = records.map((record) => record.eventId)
   try {

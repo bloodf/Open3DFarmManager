@@ -1,71 +1,49 @@
-import { createServer } from 'node:tls'
-import type { TLSSocket } from 'node:tls'
+// SPDX-License-Identifier: MIT
+import { randomUUID } from 'node:crypto'
+import { createServer } from 'node:http'
+import {
+  encodePacket,
+  startMqttBroker,
+  type MqttMockInstance,
+} from './mocks/mqtt-broker.ts'
+import { ScenarioController, type ScenarioStep } from './mocks/scenario.ts'
+import type { ThrowawayTlsMaterial } from './mocks/tls.ts'
 
-// Public disposable synthetic identity. Never use for a real printer.
-const cert = `-----BEGIN CERTIFICATE-----
-MIIDDzCCAfegAwIBAgIUIz5W9pVEWkuHCHkhRPa1b/Gp/BAwDQYJKoZIhvcNAQEL
-BQAwHzEdMBsGA1UEAwwUU1lOVEhFVElDLUJBTUJVLU9OTFkwHhcNMjYxMTE0MDgx
-NzI0WhcNMzYxMTExMDgxNzI0WjAfMR0wGwYDVQQDDBRTWU5USEVUSUMtQkFNQlUt
-T05MWTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBANQ/B37QifJRnGYI
-xK5nNxIWux356aE+SJ4IruzP7oCHAnulW7B89ziQZsk1jCs/wkNw/yDlJUS9T2hb
-ieU7HMLSdm+A3ItVaM7umEIIdi5TvWPXjFC+tRqMuk2HiMCRzeNOzybF58rTqMcg
-FGTaP9bTXhsiISyX+mhkrbuyUovjFV8mgjGCou8nRQuiPyScug0bTs8D5JnGit/9
-bYc6v1jH9kkWpxfGc2thHEgMx0aSty9AuQ7BdAM50YHrY2Cea9Fj0xfLTNGNxNBV
-69lYRD8bEwhJEHHA+wv/6qBdl/9+cI9Pc+w4R3TejHJx1/ufietvhWOU3mwNX8z/
-a3vi35ECAwEAAaNDMEEwHQYDVR0OBBYEFEpxYUzS0fNExWC23ZsLevVAhBipMA8G
-A1UdEwEB/wQFMAMBAf8wDwYDVR0RBAgwBocEfwAAATANBgkqhkiG9w0BAQsFAAOC
-AQEAQNQVLPbrRtyh32AjJEctDcbALJRqt0Vm0Bmwdbc4xM8qPxp8fnEs75XPZfex
-e/gfD2WpYsWBbKm5Ii9yhcwd3Q0RPqH7k3w5qRSQfqR2qjPgVoHGJ2w2CPFfdT6y
-43Q2gO7TSqlijLiyVADC7s4Uo7YvjFzyUirP1zLXT3dEpx0A+qOLjAquFEmwa6zQ
-iuqR6YDi9FxrT2nMoDB/zqBJn0phcCjeFpsh2uOLnZih1MhiXH+IHgvRthu4NfVO
-97uWo29eqlhic+SMgJ+dmWeWW4JDhaRsbr4eLDkt8sq9smRf9M+Q15bMeWp5iTSI
-2Qch7i7xHkiDog0JmvgNxH6oTg==
------END CERTIFICATE-----
-`
-const key = `-----BEGIN PRIVATE KEY-----
-MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDUPwd+0InyUZxm
-CMSuZzcSFrsd+emhPkieCK7sz+6AhwJ7pVuwfPc4kGbJNYwrP8JDcP8g5SVEvU9o
-W4nlOxzC0nZvgNyLVWjO7phCCHYuU71j14xQvrUajLpNh4jAkc3jTs8mxefK06jH
-IBRk2j/W014bIiEsl/poZK27slKL4xVfJoIxgqLvJ0ULoj8knLoNG07PA+SZxorf
-/W2HOr9Yx/ZJFqcXxnNrYRxIDMdGkrcvQLkOwXQDOdGB62NgnmvRY9MXy0zRjcTQ
-VevZWEQ/GxMISRBxwPsL/+qgXZf/fnCPT3PsOEd03oxycdf7n4nrb4VjlN5sDV/M
-/2t74t+RAgMBAAECggEAAbvdlG9A7zw0MD+yVp/keub5Ypht7ImpF3Rn9GqK7t0b
-e7XZOsb8kIdadZqUwW4xCLLBvMuuayI2RbqYtOkPljZYrhbCBnfdRjJ8By8RQxXf
-SlNik67JJTVA2N0KdJNEWK7mQZF0kCs8Ods023GOe7NolYVo+rennaZz5mCBrN+b
-VWtC6c2N4/MqS/OtHgV5K3hR1wRCg1W4UP55N1AytDfRSlH0X83XTcU+j+0txsFV
-Hr/kUZA5D/nHTxDrcq7tDH45L1ZpDIi/AbKVXiocnOVpbkw4lNTzKR7p6EpbK+ez
-NFwFjdB5MyQO6JfKEPDNKN5Txy3pqAs1WaVs7tx2wQKBgQD7jXm0jum5jLE8zw17
-FmKM5TlvBuijuT/7A/8bwsML4xKHSrt9FuZZTZDBYxftP52bZDLUevAOo0+AdpTQ
-5UmrYHC2og8jC929AIPgYbgkn7YYdv/0fMgTcmpQi1BZfpyrWOsbtF/j3qcBrtEs
-7Nhb310FkuS3jrGyLsRPPmfcMQKBgQDX/6dD1PCuzo9/EMgi0WWJ41RtR0/HMooy
-CSlQYAiEsvbCbZe9J+wvGkOshRZ3MnqEiGdWdoKeAKgDiRtkWVJekyDPkKVx0rI4
-+HtJF6SIk7os+VWZc34ystUBctOF/AMhSpsi675ScATztbnQyG5P2y+JrJ1Xt/I7
-lZyPKaBBYQKBgBJHM2K1R7Jd0LsUaGxbMgn+1e+FVv4ehdGddrnzquyAMWZ3PaxX
-L6Gpiy0iICjzCGa0HyVlUXAe2bYB58pN/s5fEZGTsPng8Nm84dg6AYFXwYmBjBOd
-xYP0Ollj5hC6rHOe4GaA8r7B/OyYYUacZxQ15LJ0+/2CdtL1pvoDFNThAoGAXyJR
-yHWEYGnIF/4LOBKkNzwyFkN/ZsvixDD2yljRx6iPOIlOeNiZlRFrVxPzFiLchX0S
-jql51B+T4KLFtsgEmHUS0Xjy9ZQIPUFsA4BvTlxKdr6GriSJI8lSOeYaNfwOYN5c
-P+A3HlYKSFD0+3kb5P40DN5DGryA6y91GjUKSWECgYEAgui9u5WIC2KULU/ZOSw7
-S6up1338Pu2151983Vpj032FB3kdSM7lSSirUNbO8WBC2FEXY28zq+0ZvssHX2In
-2cp9o2RfdQe0dAysbdKUGRv8P61TT6kFzSh96Z14JqNjU5ZWLCVddOdH0jIem3fL
-2xq2f+nS9vnMvhfNWtiBonA=
------END PRIVATE KEY-----
-`
-const MAX = 65536
-export function packet(header: number, body: Buffer) {
-  const length: number[] = []
-  let n = body.length
-  do {
-    let digit = n % 128
-    n = Math.floor(n / 128)
-    if (n) digit |= 128
-    length.push(digit)
-  } while (n)
-  return Buffer.concat([Buffer.from([header, ...length]), body])
+export { encodePacket as packet }
+
+export interface AnycubicSimulatorState {
+  lifecycle: 'idle' | 'printing' | 'paused' | 'finished' | 'error'
+  progress: number
+  gcodeState?: string | undefined
+  extended: Record<string, unknown>
 }
+
+export interface AnycubicSimulatorOptions {
+  serial?: string | undefined
+  port?: number | undefined
+  lanFiles?: { firmware: string } | undefined
+  initialState?: 'RUNNING' | 'PAUSE' | 'IDLE' | undefined
+  credentials?: { username: string; password: string } | undefined
+  confirmCommands?: boolean | undefined
+  environmentReport?: unknown
+  printDurationMs?: number | undefined
+  totalLayers?: number | undefined
+  /** Period of the repeated report each subscribed client receives. */
+  reportIntervalMs?: number | undefined
+  tls?:
+    | (
+        | { key: Buffer; cert: Buffer; ca?: Buffer | undefined }
+        | ThrowawayTlsMaterial
+      )
+    | undefined
+  reuseSharedTls?: boolean | undefined
+  scenario?: ScenarioStep<AnycubicSimulatorState>[] | undefined
+}
+
 export async function startAnycubicSimulator({
   serial = 'SYNTHETIC',
   port = 0,
+  lanFiles,
   initialState,
   confirmCommands = true,
   credentials,
@@ -73,18 +51,10 @@ export async function startAnycubicSimulator({
   printDurationMs = 1000,
   totalLayers = 10,
   reportIntervalMs = 100,
-}: {
-  serial?: string
-  port?: number
-  initialState?: 'RUNNING' | 'PAUSE' | 'IDLE'
-  credentials?: { username: string; password: string }
-  confirmCommands?: boolean
-  environmentReport?: unknown
-  printDurationMs?: number
-  totalLayers?: number
-  /** Period of the repeated report each subscribed client receives. */
-  reportIntervalMs?: number
-} = {}) {
+  tls,
+  reuseSharedTls = true,
+  scenario: scenarioSteps,
+}: AnycubicSimulatorOptions = {}) {
   if (!/^[A-Za-z0-9_/-]{1,128}$/.test(serial))
     throw new Error('Invalid synthetic serial')
   if (
@@ -96,6 +66,7 @@ export async function startAnycubicSimulator({
     throw new Error('Invalid print configuration')
   if (!Number.isInteger(reportIntervalMs) || reportIntervalMs < 10)
     throw new Error('Invalid report interval')
+
   const files = new Map<string, Buffer>()
   let lifecycle: 'idle' | 'printing' | 'paused' | 'finished' | 'error' = 'idle'
   let elapsed = 0
@@ -105,65 +76,85 @@ export async function startAnycubicSimulator({
   // A progress set by the journey controls has no clock to resume from.
   let scripted = false
   let filename: string | undefined
+  let remainingMinutes: number | undefined
   // Targets and switches set by the documented `update` and `light` requests.
   const settings: Record<string, number> = {}
   let light: { type: number; status: number } | undefined
   const reportTopic = `anycubic/anycubicCloud/v1/printer/public/${serial}/info/report`
-  let gcodeState = initialState
+  const wildcardReportTopic = reportTopic.replace('/info/report', '/+/report')
+  let gcodeState: string | undefined = initialState
   const extended: Record<string, unknown> = {}
   const requests: { command: string; sequence_id: string }[] = []
-  function report(socket: TLSSocket) {
-    const topic = Buffer.from(reportTopic)
-    const length = Buffer.alloc(2)
-    length.writeUInt16BE(topic.length)
-    socket.write(
-      packet(
-        48,
-        Buffer.concat([
-          length,
-          topic,
-          Buffer.from(
-            JSON.stringify({
-              print: { gcode_state: gcodeState, mc_percent: 25, ...extended },
-              data: {
-                state: lifecycle,
-                progress,
-                curr_layer: Math.floor((progress * totalLayers) / 100),
-                total_layers: totalLayers,
-                ...(filename ? { filename } : {}),
-                // Made up: the simulated heaters reach a target at once.
-                ...(settings.target_nozzle_temp !== undefined
-                  ? { target_nozzle_temp: settings.target_nozzle_temp }
-                  : {}),
-                ...(settings.target_hotbed_temp !== undefined
-                  ? { target_hotbed_temp: settings.target_hotbed_temp }
-                  : {}),
-                ...(settings.target_nozzle_temp !== undefined
-                  ? { curr_nozzle_temp: settings.target_nozzle_temp }
-                  : {}),
-                ...(settings.target_hotbed_temp !== undefined
-                  ? { curr_hotbed_temp: settings.target_hotbed_temp }
-                  : {}),
-                ...(settings.fan_speed_pct !== undefined
-                  ? { fan_speed_pct: settings.fan_speed_pct }
-                  : {}),
-                ...(light ? { lights: [light] } : {}),
+
+  let uploadPort: number | undefined
+  const uploadToken = randomUUID()
+  let uploads = 0
+  const slicerTopic = `anycubic/anycubicCloud/v1/slicer/printer/${serial}`
+
+  let brokerRef: MqttMockInstance | undefined
+  let closed = false
+
+  function currentReportPayload() {
+    const layer = Math.floor((progress * totalLayers) / 100)
+    const job = {
+      progress,
+      curr_layer: layer,
+      total_layers: totalLayers,
+      ...(filename ? { filename } : {}),
+    }
+    const active = lifecycle === 'printing' || lifecycle === 'paused'
+    return {
+      print: { gcode_state: gcodeState, mc_percent: 25, ...extended },
+      data: {
+        ...(remainingMinutes !== undefined && active
+          ? {
+              state: 'busy',
+              project: {
+                ...job,
+                state: 'printing',
+                pause: lifecycle === 'paused' ? 1 : 0,
+                remain_time: remainingMinutes,
               },
-            }),
-          ),
-        ]),
-      ),
-    )
+            }
+          : { state: lifecycle, ...job }),
+        // Made up: the simulated heaters reach a target at once.
+        ...(settings.target_nozzle_temp !== undefined
+          ? { target_nozzle_temp: settings.target_nozzle_temp }
+          : {}),
+        ...(settings.target_hotbed_temp !== undefined
+          ? { target_hotbed_temp: settings.target_hotbed_temp }
+          : {}),
+        ...(settings.target_nozzle_temp !== undefined
+          ? { curr_nozzle_temp: settings.target_nozzle_temp }
+          : {}),
+        ...(settings.target_hotbed_temp !== undefined
+          ? { curr_hotbed_temp: settings.target_hotbed_temp }
+          : {}),
+        ...(settings.fan_speed_pct !== undefined
+          ? { fan_speed_pct: settings.fan_speed_pct }
+          : {}),
+        ...(light ? { lights: [light] } : {}),
+      },
+    }
   }
-  const sockets = new Set<TLSSocket>()
-  const subscribed = new Set<TLSSocket>()
+
+  function hasSubscribers(): boolean {
+    if (!brokerRef) return false
+    for (const topics of brokerRef.control.subscriptions.values()) {
+      if (topics.size > 0) return true
+    }
+    return false
+  }
+
+  function broadcast() {
+    brokerRef?.control.publish(reportTopic, currentReportPayload())
+  }
+
   function stopTimer() {
     if (timer) clearInterval(timer)
     timer = undefined
   }
-  function broadcast() {
-    for (const socket of subscribed) report(socket)
-  }
+
   function startTimer() {
     started = Date.now()
     timer = setInterval(
@@ -183,320 +174,404 @@ export async function startAnycubicSimulator({
       Math.min(50, printDurationMs),
     )
   }
-  const server = createServer(
-    { cert, key, handshakeTimeout: 3000 },
-    (socket) => {
-      let buffer = Buffer.alloc(0)
-      let connected = false
-      const reports = setInterval(() => {
-        if (gcodeState && subscribed.has(socket)) report(socket)
-      }, reportIntervalMs)
-      socket.once('close', () => clearInterval(reports))
-      socket.setTimeout(10000, () => socket.destroy())
-      socket.on('data', (chunk) => {
-        buffer = Buffer.concat([buffer, chunk])
-        if (buffer.length > MAX) {
-          socket.destroy()
+
+  async function emitCommandAck(topic: string, applyUpdate: () => void) {
+    const ackFault = brokerRef?.control.faults.matchFault({
+      topic,
+      method: 'ACK',
+    })
+    if (ackFault) {
+      if (ackFault.type === 'drop') {
+        await brokerRef?.control.disconnectClients()
+        return
+      }
+      if (ackFault.type === 'refuse' || ackFault.type === 'stall') {
+        return
+      }
+      if (ackFault.type === 'malformed') {
+        brokerRef?.control.publish(
+          reportTopic,
+          ackFault.payload ?? '{malformed',
+        )
+        return
+      }
+      if (ackFault.type === 'delay') {
+        await new Promise((r) => setTimeout(r, ackFault.delayMs))
+        if (closed) return
+      }
+    }
+    applyUpdate()
+    broadcast()
+  }
+
+  const broker = await startMqttBroker({
+    port,
+    handshakeTimeout: 3000,
+    socketTimeout: 10000,
+    strictConnect: true,
+    tls,
+    reuseSharedTls: tls ? false : reuseSharedTls,
+    auth: credentials,
+    authorizeSubscribe: (topic) =>
+      topic === reportTopic || topic === wildcardReportTopic,
+    onSubscribe: () => {
+      if (gcodeState) broadcast()
+      if (environmentReport !== undefined) {
+        broker.control.publish(reportTopic, environmentReport)
+      }
+    },
+    onPublish: async (msg) => {
+      const topicName = msg.topic
+      const raw = JSON.parse(msg.payload.toString('utf8'))
+      if (lanFiles && typeof raw?.msgid === 'string') {
+        if (
+          topicName === slicerTopic + '/info' &&
+          raw.type === 'info' &&
+          raw.action === 'query' &&
+          raw.data === null
+        ) {
+          broker.control.publish(reportTopic, {
+            type: 'info',
+            action: 'report',
+            msgid: raw.msgid,
+            code: 200,
+            state: 'done',
+            data: {
+              version: lanFiles.firmware,
+              state:
+                lifecycle === 'idle' || lifecycle === 'finished'
+                  ? 'free'
+                  : 'busy',
+              project: null,
+              urls: {
+                fileUploadurl: `http://127.0.0.1:${uploadPort}/gcode_upload?s=${uploadToken}`,
+              },
+            },
+          })
           return
         }
-        try {
-          while (buffer.length >= 2) {
-            let size = 0,
-              factor = 1,
-              offset = 1
-            while (true) {
-              if (offset >= buffer.length) return
-              const digit = buffer[offset++]!
-              size += (digit & 127) * factor
-              if (size > MAX || offset > 5) throw new Error('Packet limit')
-              if (!(digit & 128)) break
-              factor *= 128
-            }
-            if (buffer.length < offset + size) return
-            const header = buffer[0]!
-            const body = buffer.subarray(offset, offset + size)
-            buffer = buffer.subarray(offset + size)
-            if (!connected) {
-              if (
-                header !== 16 ||
-                body.length < 12 ||
-                body.subarray(0, 7).toString('hex') !== '00044d51545404' ||
-                (body[7] !== 2 && body[7] !== 194)
-              )
-                throw new Error('CONNECT required')
-              let cursor = 10
-              const fields = body[7] === 194 ? 3 : 1
-              const values: string[] = []
-              for (let field = 0; field < fields; field++) {
-                if (cursor + 2 > body.length)
-                  throw new Error('Missing CONNECT field')
-                const length = body.readUInt16BE(cursor)
-                cursor += 2
-                if (!length || cursor + length > body.length)
-                  throw new Error('Invalid CONNECT field')
-                values.push(body.subarray(cursor, cursor + length).toString())
-                cursor += length
-              }
-              if (cursor !== body.length)
-                throw new Error('Trailing CONNECT bytes')
-              if (
-                credentials &&
-                (values[1] !== credentials.username ||
-                  values[2] !== credentials.password)
-              )
-                throw new Error('Authentication failed')
-              connected = true
-              socket.write(Buffer.from([32, 2, 0, 0]))
-            } else if (header === 130) {
-              if (body.length < 5 || body.readUInt16BE(0) === 0)
-                throw new Error('Invalid subscription')
-              const length = body.readUInt16BE(2)
-              if (body.length !== length + 5 || body.at(-1) !== 0)
-                throw new Error('Only QoS 0 supported')
-              const accepted = [
-                reportTopic,
-                reportTopic.replace('/info/report', '/+/report'),
-              ].includes(body.subarray(4, 4 + length).toString())
-              if (accepted) subscribed.add(socket)
-              socket.write(
-                Buffer.from([144, 3, body[0]!, body[1]!, accepted ? 0 : 128]),
-              )
-              if (accepted && gcodeState) report(socket)
-              if (accepted && environmentReport !== undefined) {
-                const topic = Buffer.from(reportTopic)
-                const length = Buffer.alloc(2)
-                length.writeUInt16BE(topic.length)
-                socket.write(
-                  packet(
-                    48,
-                    Buffer.concat([
-                      length,
-                      topic,
-                      Buffer.from(JSON.stringify(environmentReport)),
-                    ]),
-                  ),
-                )
-              }
-            } else if (header === 48) {
-              if (body.length < 2) throw new Error('Invalid request')
-              const length = body.readUInt16BE(0)
-              const topicName = body.subarray(2, 2 + length).toString()
-              const raw = JSON.parse(body.subarray(2 + length).toString())
-              const isStart =
-                [
-                  `anycubic/anycubicCloud/v1/slicer/printer/20024/${serial}/print`,
-                  // A serial that already carries the model id.
-                  `anycubic/anycubicCloud/v1/slicer/printer/${serial}/print`,
-                ].includes(topicName) &&
-                raw?.type === 'print' &&
-                raw?.action === 'start'
-              const isControl =
-                topicName ===
-                  `anycubic/anycubicCloud/v1/printer/public/${serial}/print/request` &&
-                raw?.type === 'print' &&
-                ['stop', 'pause', 'resume'].includes(raw?.action)
-              const isUpdate =
-                topicName ===
-                  `anycubic/anycubicCloud/v1/printer/public/${serial}/print/request` &&
-                raw?.type === 'print' &&
-                raw?.action === 'update'
-              const isLight =
-                topicName ===
-                  `anycubic/anycubicCloud/v1/printer/public/${serial}/light/request` &&
-                raw?.type === 'light' &&
-                raw?.action === 'control'
-              if (isUpdate || isLight) {
-                if (confirmCommands) {
-                  if (isLight) {
-                    const { type, status } = raw?.data ?? {}
-                    if (
-                      !Number.isInteger(type) ||
-                      (status !== 0 && status !== 1)
-                    )
-                      throw new Error('Invalid light request')
-                    light = { type, status }
-                  } else {
-                    const entries = Object.entries(raw?.data?.settings ?? {})
-                    if (
-                      entries.length !== 1 ||
-                      entries.some(
-                        ([key, value]) =>
-                          ![
-                            'target_nozzle_temp',
-                            'target_hotbed_temp',
-                            'fan_speed_pct',
-                          ].includes(key) ||
-                          !Number.isInteger(value) ||
-                          (value as number) < 0 ||
-                          (value as number) > 300,
-                      )
-                    )
-                      throw new Error('Invalid update request')
-                    for (const [key, value] of entries)
-                      settings[key] = value as number
-                  }
-                  broadcast()
-                }
-                continue
-              }
-              if (isStart || isControl) {
-                if (confirmCommands) {
-                  if (isStart) {
-                    if (
-                      !files.has(raw?.data?.filename) ||
-                      lifecycle === 'printing' ||
-                      lifecycle === 'paused'
-                    )
-                      throw new Error('Invalid start')
-                    stopTimer()
-                    elapsed = 0
-                    progress = 0
-                    scripted = false
-                    filename = raw.data.filename
-                    lifecycle = 'printing'
-                    startTimer()
-                  } else if (
-                    raw.action === 'stop' &&
-                    (lifecycle === 'printing' || lifecycle === 'paused')
-                  ) {
-                    stopTimer()
-                    lifecycle = 'idle'
-                  } else if (
-                    raw.action === 'pause' &&
-                    lifecycle === 'printing'
-                  ) {
-                    if (!scripted) elapsed += Date.now() - started
-                    stopTimer()
-                    lifecycle = 'paused'
-                  } else if (
-                    raw.action === 'resume' &&
-                    lifecycle === 'paused'
-                  ) {
-                    lifecycle = 'printing'
-                    if (!scripted) startTimer()
-                  }
-                  broadcast()
-                }
-                continue
-              }
-              if (topicName !== `device/${serial}/request`)
-                throw new Error('Invalid request topic')
-              const value = JSON.parse(body.subarray(2 + length).toString())
-              const request = value?.print ?? value?.system
-              const command = request?.command
-              if (
+        if (
+          topicName === slicerTopic + '/file' &&
+          raw.type === 'file' &&
+          raw.action === 'listLocal' &&
+          raw.data?.path === '/'
+        ) {
+          broker.control.publish(reportTopic.replace('/info/', '/file/'), {
+            type: 'file',
+            action: 'listLocal',
+            msgid: raw.msgid,
+            state: 'done',
+            code: 200,
+            data: {
+              list_mode: 0,
+              records: [...files].map(([filename, bytes]) => ({
+                filename,
+                size: bytes.length,
+                timestamp: Date.now(),
+                is_dir: false,
+              })),
+            },
+          })
+          return
+        }
+      }
+      const isStart =
+        [
+          `anycubic/anycubicCloud/v1/slicer/printer/20024/${serial}/print`,
+          // A serial that already carries the model id.
+          `anycubic/anycubicCloud/v1/slicer/printer/${serial}/print`,
+        ].includes(topicName) &&
+        raw?.type === 'print' &&
+        raw?.action === 'start'
+      const isControl =
+        topicName ===
+          `anycubic/anycubicCloud/v1/printer/public/${serial}/print/request` &&
+        raw?.type === 'print' &&
+        ['stop', 'pause', 'resume'].includes(raw?.action)
+      const isUpdate =
+        topicName ===
+          `anycubic/anycubicCloud/v1/printer/public/${serial}/print/request` &&
+        raw?.type === 'print' &&
+        raw?.action === 'update'
+      const isLight =
+        topicName ===
+          `anycubic/anycubicCloud/v1/printer/public/${serial}/light/request` &&
+        raw?.type === 'light' &&
+        raw?.action === 'control'
+
+      if (isUpdate || isLight) {
+        if (!confirmCommands) return
+        if (isLight) {
+          const { type, status } = raw?.data ?? {}
+          if (!Number.isInteger(type) || (status !== 0 && status !== 1))
+            throw new Error('Invalid light request')
+          await emitCommandAck(topicName, () => {
+            light = { type, status }
+          })
+        } else {
+          const entries = Object.entries(raw?.data?.settings ?? {})
+          if (
+            entries.length !== 1 ||
+            entries.some(
+              ([key, value]) =>
                 ![
-                  'pause',
-                  'resume',
-                  'stop',
-                  'gcode_line',
-                  'ledctrl',
-                  'print_speed',
-                  'project_file',
-                ].includes(command) ||
-                typeof request?.sequence_id !== 'string'
-              )
-                throw new Error('Invalid request')
-              requests.push({ command, sequence_id: request.sequence_id })
-              if (confirmCommands) {
-                if (command === 'gcode_line') {
-                  const match = /^(M104|M140|M106 P[123]) S(\d+)\n$/.exec(
-                    request.param,
-                  )
-                  const home = /^G28 ([XYZ](?: [XYZ])*)\n$/.exec(request.param)
-                  if (match) extended[match[1]!] = Number(match[2])
-                  else if (home) extended.homed_axes = home[1]
-                  else throw new Error('Invalid gcode')
-                } else if (
-                  command === 'ledctrl' &&
-                  request.led_node === 'chamber_light' &&
-                  ['on', 'off'].includes(request.led_mode)
-                )
-                  extended.light = request.led_mode
-                else if (
-                  command === 'print_speed' &&
-                  /^[1-4]$/.test(request.param)
-                )
-                  extended.speed = request.param
-                else if (
-                  command === 'project_file' &&
-                  request.param === 'Metadata/plate_1.gcode' &&
-                  typeof request.url === 'string' &&
-                  request.url.startsWith('file:///sdcard/')
-                ) {
-                  extended.file = request.url
-                  gcodeState = 'RUNNING'
-                } else if (!['pause', 'resume', 'stop'].includes(command))
-                  throw new Error('Invalid request')
-                if (['pause', 'resume', 'stop'].includes(command))
-                  gcodeState =
-                    command === 'pause'
-                      ? 'PAUSE'
-                      : command === 'resume'
-                        ? 'RUNNING'
-                        : 'IDLE'
-                for (const subscriber of subscribed) report(subscriber)
-              }
-            } else if (header === 192 && !size)
-              socket.write(Buffer.from([208, 0]))
-            else if (header === 224 && !size) socket.destroy()
-            else throw new Error('Unsupported packet; commands forbidden')
+                  'target_nozzle_temp',
+                  'target_hotbed_temp',
+                  'fan_speed_pct',
+                ].includes(key) ||
+                !Number.isInteger(value) ||
+                (value as number) < 0 ||
+                (value as number) > 300,
+            )
+          )
+            throw new Error('Invalid update request')
+          await emitCommandAck(topicName, () => {
+            for (const [key, value] of entries) settings[key] = value as number
+          })
+        }
+        return
+      }
+
+      if (isStart || isControl) {
+        if (!confirmCommands) return
+        if (isStart) {
+          if (
+            !files.has(raw?.data?.filename) ||
+            lifecycle === 'printing' ||
+            lifecycle === 'paused'
+          )
+            throw new Error('Invalid start')
+        }
+        await emitCommandAck(topicName, () => {
+          if (isStart) {
+            stopTimer()
+            elapsed = 0
+            progress = 0
+            remainingMinutes = undefined
+            scripted = false
+            filename = raw.data.filename
+            lifecycle = 'printing'
+            startTimer()
+          } else if (
+            raw.action === 'stop' &&
+            (lifecycle === 'printing' || lifecycle === 'paused')
+          ) {
+            stopTimer()
+            lifecycle = 'idle'
+          } else if (raw.action === 'pause' && lifecycle === 'printing') {
+            if (!scripted) elapsed += Date.now() - started
+            stopTimer()
+            lifecycle = 'paused'
+          } else if (raw.action === 'resume' && lifecycle === 'paused') {
+            lifecycle = 'printing'
+            if (!scripted) startTimer()
           }
-        } catch {
-          socket.destroy()
+        })
+        return
+      }
+
+      if (topicName !== `device/${serial}/request`)
+        throw new Error('Invalid request topic')
+      const request = raw?.print ?? raw?.system
+      const command = request?.command
+      if (
+        ![
+          'pause',
+          'resume',
+          'stop',
+          'gcode_line',
+          'ledctrl',
+          'print_speed',
+          'project_file',
+        ].includes(command) ||
+        typeof request?.sequence_id !== 'string'
+      )
+        throw new Error('Invalid request')
+      requests.push({ command, sequence_id: request.sequence_id })
+      if (!confirmCommands) return
+
+      if (command === 'gcode_line') {
+        const match = /^(M104|M140|M106 P[123]) S(\d+)\n$/.exec(request.param)
+        const home = /^G28 ([XYZ](?: [XYZ])*)\n$/.exec(request.param)
+        if (!match && !home) throw new Error('Invalid gcode')
+      } else if (
+        command === 'ledctrl' &&
+        request.led_node === 'chamber_light' &&
+        ['on', 'off'].includes(request.led_mode)
+      ) {
+        // valid
+      } else if (command === 'print_speed' && /^[1-4]$/.test(request.param)) {
+        // valid
+      } else if (
+        command === 'project_file' &&
+        request.param === 'Metadata/plate_1.gcode' &&
+        typeof request.url === 'string' &&
+        request.url.startsWith('file:///sdcard/')
+      ) {
+        // valid
+      } else if (!['pause', 'resume', 'stop'].includes(command))
+        throw new Error('Invalid request')
+
+      await emitCommandAck(topicName, () => {
+        if (command === 'gcode_line') {
+          const match = /^(M104|M140|M106 P[123]) S(\d+)\n$/.exec(request.param)
+          const home = /^G28 ([XYZ](?: [XYZ])*)\n$/.exec(request.param)
+          if (match) extended[match[1]!] = Number(match[2])
+          else if (home) extended.homed_axes = home[1]
+        } else if (command === 'ledctrl') {
+          extended.light = request.led_mode
+        } else if (command === 'print_speed') {
+          extended.speed = request.param
+        } else if (command === 'project_file') {
+          extended.file = request.url
+          gcodeState = 'RUNNING'
+        } else if (['pause', 'resume', 'stop'].includes(command)) {
+          gcodeState =
+            command === 'pause'
+              ? 'PAUSE'
+              : command === 'resume'
+                ? 'RUNNING'
+                : 'IDLE'
         }
       })
     },
-  )
-  server.on('connection', (socket) => {
-    sockets.add(socket as TLSSocket)
-    socket.on('error', () => {})
-    socket.on('close', () => {
-      sockets.delete(socket as TLSSocket)
-      subscribed.delete(socket as TLSSocket)
-    })
   })
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject)
-    server.listen(port, '127.0.0.1', () => {
-      server.removeListener('error', reject)
-      resolve()
-    })
+  brokerRef = broker
+
+  const scenario = new ScenarioController<AnycubicSimulatorState>({
+    steps: scenarioSteps,
+    applyState: (patch) => {
+      if (patch.lifecycle) lifecycle = patch.lifecycle
+      if (patch.progress !== undefined) progress = patch.progress
+      if ('gcodeState' in patch) gcodeState = patch.gcodeState
+      if (patch.extended) Object.assign(extended, patch.extended)
+    },
+    publishReport: (value) => {
+      broker.control.publish(reportTopic, value)
+    },
+    getState: () => ({
+      lifecycle,
+      progress,
+      gcodeState,
+      extended: { ...extended },
+    }),
   })
-  const address = server.address()
-  if (!address || typeof address === 'string')
-    throw new Error('Missing listener')
-  async function disconnectClients() {
-    await Promise.all(
-      [...sockets].map(
-        (socket) =>
-          new Promise<void>((resolve) => {
-            socket.once('close', resolve)
-            socket.destroy()
-          }),
-      ),
-    )
+
+  const http = lanFiles
+    ? createServer((request, response) => {
+        if (
+          request.method !== 'POST' ||
+          request.url !== `/gcode_upload?s=${uploadToken}` ||
+          (lifecycle !== 'idle' && lifecycle !== 'finished')
+        ) {
+          response.writeHead(403).end()
+          return
+        }
+        void (async () => {
+          const chunks: Buffer[] = []
+          let total = 0
+          for await (const value of request) {
+            const chunk = Buffer.from(value)
+            total += chunk.length
+            if (total > 1024 * 1024) throw Error('Oversized synthetic upload')
+            chunks.push(chunk)
+          }
+          const form = await new Response(Buffer.concat(chunks), {
+            headers: { 'Content-Type': request.headers['content-type'] ?? '' },
+          }).formData()
+          const name = form.get('filename')
+          const gcode = form.get('gcode')
+          if (
+            [...form.keys()].length !== 2 ||
+            typeof name !== 'string' ||
+            !/^[a-zA-Z0-9 _.-]+\.gcode\.3mf$/i.test(name) ||
+            !(gcode instanceof File) ||
+            gcode.name !== name ||
+            gcode.type !== 'application/octet-stream' ||
+            !gcode.size ||
+            request.headers['x-file-length'] !== String(gcode.size)
+          )
+            throw Error('Invalid synthetic multipart upload')
+          uploads++
+          files.set(name, Buffer.from(await gcode.arrayBuffer()))
+          response.writeHead(200, { 'Content-Type': 'application/json' })
+          response.end(JSON.stringify({ code: 200, data: { gcode: name } }))
+        })().catch(() => response.writeHead(400).end())
+      })
+    : undefined
+  if (http) {
+    try {
+      uploadPort = await new Promise<number>((resolve, reject) => {
+        http.once('error', reject)
+        http.listen(0, '127.0.0.1', () => {
+          const address = http.address()
+          if (address && typeof address !== 'string') resolve(address.port)
+          else reject(Error('Synthetic upload listener unavailable'))
+        })
+      })
+    } catch (error) {
+      await broker.close()
+      throw error
+    }
   }
+
+  const periodicReports = setInterval(() => {
+    if (gcodeState && hasSubscribers()) broadcast()
+  }, reportIntervalMs)
+
+  const tlsMaterial = broker.control.tlsMaterial
+  const syntheticTrust = tlsMaterial
+    ? `${tlsMaterial.server.cert.toString('utf8')}\n${tlsMaterial.ca.cert.toString('utf8')}`
+    : tls && !('server' in tls)
+      ? `${tls.cert.toString('utf8')}${tls.ca ? `\n${tls.ca.toString('utf8')}` : ''}`
+      : ''
+
+  function publishReport(value: unknown) {
+    broker.control.publish(reportTopic, value)
+  }
+
+  function disconnectClients() {
+    return broker.control.disconnectClients()
+  }
+
   let closing: Promise<void> | undefined
+
   return {
     host: '127.0.0.1',
-    port: address.port,
-    syntheticTrust: cert,
+    port: broker.ports.default,
+    origin: broker.origin,
+    ports: broker.ports,
+    syntheticTrust,
     reportTopic,
     requests,
-    upload(filename: string, data: Buffer) {
+    uploadPort,
+    get uploadCount() {
+      return uploads
+    },
+    calls: broker.calls,
+    control: {
+      faults: broker.control.faults,
+      scenario,
+      publish: broker.control.publish,
+      publishReport,
+      disconnectClients,
+      subscriptions: broker.control.subscriptions,
+      sockets: broker.control.sockets,
+      tlsMaterial: broker.control.tlsMaterial,
+    },
+    upload(filenameInput: string, data: Buffer) {
       if (
-        !filename.endsWith('.gcode') ||
-        filename.length > 255 ||
-        /[\\\x00-\x1f\x7f%]/.test(filename) ||
-        filename
+        !filenameInput.endsWith('.gcode') ||
+        filenameInput.length > 255 ||
+        /[\\\x00-\x1f\x7f%]/.test(filenameInput) ||
+        filenameInput
           .split('/')
           .some((part) => !part || part === '.' || part === '..') ||
         !Buffer.isBuffer(data) ||
         !data.length
       )
         throw new Error('Invalid synthetic upload')
-      files.set(filename, Buffer.from(data))
+      files.set(filenameInput, Buffer.from(data))
     },
     /** Journey control: a print in progress at a fixed percentage. */
     setPrintProgress(percent: number) {
@@ -536,36 +611,36 @@ export async function startAnycubicSimulator({
     get settings() {
       return { ...settings, ...(light ? { light: { ...light } } : {}) }
     },
+    setRemainingMinutes(minutes: number | undefined) {
+      if (
+        minutes !== undefined &&
+        (!Number.isSafeInteger(minutes) || minutes < 0)
+      )
+        throw new Error('Invalid remaining minutes')
+      remainingMinutes = minutes
+      broadcast()
+    },
     get extendedState() {
       return { ...extended }
     },
     get gcodeState() {
       return gcodeState
     },
-    publishReport(value: unknown) {
-      const payload = Buffer.from(
-        typeof value === 'string' ? value : JSON.stringify(value),
-      )
-      if (payload.length > MAX - 256) throw new Error('Report too large')
-      const topic = Buffer.from(reportTopic)
-      const length = Buffer.alloc(2)
-      length.writeUInt16BE(topic.length)
-      const bytes = packet(48, Buffer.concat([length, topic, payload]))
-      for (const socket of subscribed) {
-        if (socket.writableLength > MAX) socket.destroy()
-        else socket.write(bytes)
-      }
-    },
+    publishReport,
     disconnectClients,
     close() {
+      closed = true
       stopTimer()
-      closing ??= (async () => {
-        const closed = new Promise<void>((resolve, reject) =>
-          server.close((error) => (error ? reject(error) : resolve())),
-        )
-        await disconnectClients()
-        await closed
-      })()
+      clearInterval(periodicReports)
+      scenario.stop()
+      closing ??= Promise.all([
+        broker.close(),
+        http &&
+          new Promise<void>((resolve) => {
+            http.close(() => resolve())
+            http.closeAllConnections()
+          }),
+      ]).then(() => {})
       return closing
     },
   }

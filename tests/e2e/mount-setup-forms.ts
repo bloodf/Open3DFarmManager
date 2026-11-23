@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
 import { build, type Plugin } from 'esbuild'
@@ -10,6 +10,11 @@ const sfc = createRequire(join(app, 'package.json'))('vue/compiler-sfc')
 // Mount the actual page script and form, replacing only network discovery and lifecycle.
 export async function setupFormsBundle(revision: number | null = 1) {
   const page = readFileSync(join(pages, 'impressoras.vue'), 'utf8')
+  const panelPath = join(
+    app,
+    'app/components/printer-setup/AddPrinterPanel.vue',
+  )
+  const panel = existsSync(panelPath) ? readFileSync(panelPath, 'utf8') : page
   const script = page
     .slice(0, page.indexOf('</script>'))
     .replace(
@@ -20,7 +25,13 @@ const openPrinterDiscoverySession = async () => ({
     const printers = [{ vendor: 'moonraker', host: '192.168.1.20', port: 7125, name: 'Klipper' }, { vendor: 'bambu', host: '192.168.1.21', serial: 'ABC123', name: 'Bambu' }, { vendor: 'creality', host: '192.168.1.22', name: 'Creality' }, { vendor: 'anycubic', host: '192.168.1.23', name: 'Anycubic' }]
     return { ok: true, printers: host ? printers.filter(p => p.host === host) : printers }
   }, close() {},
-})`,
+})
+// Nuxt auto-import outside Nuxt: no pending network adoption.
+const useNetworkAdoption = () => ref(null)`,
+    )
+    .replace(
+      "import AddPrinterPanel from '../components/printer-setup/AddPrinterPanel.vue'",
+      "import DiscoveryPanel from '../components/printer-setup/DiscoveryPanel.vue'\nimport SetupForm from '../components/printer-setup/SetupForm.vue'",
     )
     .replace(
       /onMounted\(\(\) => \{[\s\S]*$/,
@@ -30,10 +41,12 @@ kobraKeyState.value = { kind: 'available', accountId: 'synthetic', choices: [{ k
 kobraController = new AbortController()
 </script>`,
     )
-  const start = page.indexOf('      <div v-if="kobraStage === \'idle\'">')
-  const end = page.indexOf('      <div v-if="kobraBusy"', start)
+  const start = panel.indexOf(
+    '<div v-if="kobraStage === \'idle\'" class="setup-columns">',
+  )
+  const end = panel.indexOf('<div v-if="kobraBusy"', start)
   if (start < 0 || end < 0) throw new Error('Setup form not found')
-  const source = `${script}<template><main><p v-if="kobraError" ref="kobraErrorSummary" role="alert" tabindex="-1">{{ kobraError }}</p>${page.slice(start, end)}</main></template>`
+  const source = `${script}<template><main><p v-if="kobraError" ref="kobraErrorSummary" role="alert" tabindex="-1">{{ kobraError }}</p>${panel.slice(start, end)}</main></template>`
   const compile = (text: string, filename: string) => {
     const { descriptor, errors } = sfc.parse(text, { filename })
     if (errors.length) throw errors[0]
@@ -68,7 +81,7 @@ kobraController = new AbortController()
       __VUE_PROD_DEVTOOLS__: 'false',
       __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: 'false',
     },
-    nodePaths: [join(app, 'node_modules')],
+    nodePaths: [join(app, '../../node_modules')],
   })
   return result.outputFiles[0]!.text
 }

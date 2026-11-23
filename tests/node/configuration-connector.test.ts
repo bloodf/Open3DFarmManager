@@ -13,8 +13,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
-type Native =
-  typeof import('../../packages/connector/node_modules/node-datachannel')
+type Native = typeof import('node-datachannel')
 const native: Native = createRequire(
   new URL('../../packages/connector/package.json', import.meta.url),
 )('node-datachannel')
@@ -283,6 +282,9 @@ async function connect(s: Setup) {
   await gathering
   const answer = native.localDescription()!.sdp
   peer.answer(answer)
+  // One clock reading: two reads can straddle a millisecond and yield a
+  // 30001 ms lifetime that both peers reject as over the hard maximum.
+  const issuedAt = Date.now()
   const binding = {
     v: 1,
     purpose: 'configuration-rtc',
@@ -301,25 +303,26 @@ async function connect(s: Setup) {
     audience: AUDIENCE,
     browser_nonce: nonce(),
     connector_nonce: connectorNonce,
-    issued_at: Date.now(),
-    expires_at: Date.now() + 30_000,
+    issued_at: issuedAt,
+    expires_at: issuedAt + 30_000,
     offer_sha256: await controlSdpHash(offer),
     answer_sha256: await controlSdpHash(answer),
     browser_dtls: controlDtlsFingerprint(answer),
     connector_dtls: controlDtlsFingerprint(offer),
   }
   resolveBinding(binding)
-  const next = async (ms = 5000) => {
-    const end = Date.now() + ms
-    while (
-      inbox.length === 0 &&
-      Date.now() < end &&
-      !peer.diagnostics().terminal
-    )
-      await new Promise<void>((resolve) => {
-        wake = resolve
-        setTimeout(resolve, 20)
-      })
+  // Event driven: wait for the next frame or for the peer to end. No
+  // wall-clock budget, which a loaded host can spend before the connector
+  // answers; the binding lifetime and session deadlines bound the wait.
+  const ended = () => peer.diagnostics().terminal !== null
+  const next = async () => {
+    while (inbox.length === 0 && !ended())
+      await Promise.race([
+        new Promise<void>((resolve) => {
+          wake = resolve
+        }),
+        peer.closed,
+      ])
     return inbox.shift()
   }
   const close = () => {
@@ -364,7 +367,11 @@ test('real loopback config RTC: proofs, prepare, commit and runtime activation',
         ),
       }),
     })
-    for (let i = 0; i < 100 && c.peer.session.state !== 'authenticated'; i++)
+    // Proof verification is asynchronous; wait for it or for the session to end.
+    while (
+      c.peer.session.state !== 'authenticated' &&
+      !c.peer.diagnostics().terminal
+    )
       await new Promise((resolve) => setTimeout(resolve, 20))
     assert.equal(c.peer.session.state, 'authenticated')
 

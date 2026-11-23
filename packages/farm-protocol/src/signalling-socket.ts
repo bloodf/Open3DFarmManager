@@ -1,4 +1,9 @@
+import { ApiQueryReply, ApiQueryRequest } from './api-query.ts'
 import { z } from 'zod'
+import {
+  ApiEnvelopeScope,
+  MAX_API_ENVELOPE_WIRE_BYTES,
+} from './api-envelope.ts'
 import { parseBoundedJson } from './json.ts'
 import { BrowserDeviceUuid } from './browser-device-proof.ts'
 import { BrowserTransportProofChallenge } from './browser-transport-proof.ts'
@@ -10,12 +15,15 @@ const signallingChallenge = CredentialProofChallenge.refine(
 )
 const signature = z.string().regex(/^[A-Za-z0-9_-]{85}[AQgw]$/)
 const base = { v: z.literal(1) }
+const envelopeWire = z.string().min(1).max(MAX_API_ENVELOPE_WIRE_BYTES)
+export const ApiInboxScope = ApiEnvelopeScope
 const token = z.string().min(1).max(8192)
 const timestamp = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
 export const SignallingClientControl = z.discriminatedUnion('t', [
   z.strictObject({
     ...base,
     t: z.literal('browser.begin'),
+    camera_printer_id: BrowserDeviceUuid.optional(),
     farm_id: BrowserDeviceUuid,
     agent_id: BrowserDeviceUuid,
     key_id: BrowserDeviceUuid,
@@ -38,6 +46,12 @@ export const SignallingClientControl = z.discriminatedUnion('t', [
     signature,
   }),
   z.strictObject({ ...base, t: z.literal('connector.retry') }),
+  ApiQueryReply,
+  z.strictObject({
+    ...base,
+    t: z.literal('connector.api-result'),
+    wire: envelopeWire,
+  }),
 ])
 export type SignallingClientControl = z.infer<typeof SignallingClientControl>
 export const SignallingClientFrame = z.union([
@@ -90,6 +104,15 @@ export const SignallingServerControl = z
       t: z.literal('rtc.binding'),
       binding: RtcSessionBinding,
     }),
+    ApiQueryRequest,
+    // A fresh database claim authorizes exactly the attached signed envelope.
+    z.strictObject({
+      ...base,
+      t: z.literal('connector.api-command'),
+      wire: envelopeWire,
+      scope: ApiInboxScope,
+      confirmed_at: timestamp,
+    }),
     // Current-authority confirmation for the Connector's offline tracker. Sent
     // only on the credential-authenticated Connector inbox, after the server
     // reread enrollment, credential and revocation state. server_seq strictly
@@ -126,6 +149,11 @@ export const SignallingServerFrame = z.union([
 ])
 export type SignallingServerFrame = z.infer<typeof SignallingServerFrame>
 export const MAX_SIGNALLING_SOCKET_BYTES = 12 * 1024
+// Permit normal SDP plus trickled ICE bursts while bounding sustained floods.
+export const SIGNALLING_MESSAGE_BUCKET_CAPACITY = 60
+export const SIGNALLING_MESSAGE_REFILL_PER_SECOND = 10
+// RFC 6455 application-defined policy close code for signalling rate limits.
+export const SIGNALLING_RATE_LIMIT_CLOSE_CODE = 4429
 function parse(wire: unknown): unknown {
   if (
     typeof wire !== 'string' ||

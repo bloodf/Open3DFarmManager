@@ -66,7 +66,7 @@ export type ConnectorCameraMediaOptions = Readonly<{
 type State = 'new' | 'prepared' | 'offering' | 'offered' | 'live' | 'terminal'
 
 /** Connector side of camera-purpose V3: offer one signed statement for the
- * first configured camera in the admitted assignment set, then send H.264
+ * requested camera in the admitted assignment set, then send H.264
  * passthrough only after the browser device countersigns that exact statement. */
 export class ConnectorCameraMedia implements FixtureOnlyMediaHooks {
   #options: ConnectorCameraMediaOptions
@@ -82,6 +82,8 @@ export class ConnectorCameraMedia implements FixtureOnlyMediaHooks {
   #session: { stop(): void } | undefined
   #rtpBase = randomInt(0, 2 ** 32)
   #sent = 0
+  #unavailableReason: 'helper-unavailable' | undefined
+  #unavailableMessage: string | undefined
   constructor(options: ConnectorCameraMediaOptions) {
     this.#options = Object.freeze({
       ...options,
@@ -138,7 +140,8 @@ export class ConnectorCameraMedia implements FixtureOnlyMediaHooks {
         entry.scope.farmId === binding.farm_id &&
         entry.scope.agentId === binding.agent_id &&
         entry.scope.agentId === this.#options.expectedAgentId &&
-        assigned.has(entry.scope.printerId),
+        assigned.has(entry.scope.printerId) &&
+        entry.scope.printerId === binding.camera_printer_id,
     )
     // No camera for this assignment set: the channel stays idle (unavailable).
     if (!camera) return
@@ -203,10 +206,27 @@ export class ConnectorCameraMedia implements FixtureOnlyMediaHooks {
           signal: this.#abort.signal,
         },
         registry: this.#registry,
-        openSource: (handle, signal) =>
-          this.#options.openSource(handle, signal, this.#deadline, () =>
-            this.current(),
-          ),
+        openSource: async (handle, signal) => {
+          try {
+            return await this.#options.openSource(
+              handle,
+              signal,
+              this.#deadline,
+              () => this.current(),
+            )
+          } catch (error: unknown) {
+            if (
+              error instanceof Error &&
+              (('code' in error && error.code === 'HELPER_EXECUTABLE') ||
+                ('reason' in error && error.reason === 'helper-unavailable'))
+            ) {
+              this.#unavailableReason = 'helper-unavailable'
+              this.#unavailableMessage =
+                'RTSP camera unavailable: rtsp-ingest helper is unavailable'
+            }
+            throw error
+          }
+        },
         sink: {
           trySend: (unit) => this.send(unit),
           close: () => this.stopMedia(),
@@ -272,6 +292,31 @@ export class ConnectorCameraMedia implements FixtureOnlyMediaHooks {
       state: this.#state,
       trackOpen: this.#track?.isOpen() ?? false,
       sent: this.#sent,
+      ...(this.#unavailableReason
+        ? {
+            status: 'unavailable' as const,
+            reason: this.#unavailableReason,
+            message: this.#unavailableMessage,
+          }
+        : {}),
+    })
+  }
+  getStatus() {
+    return Object.freeze({
+      state: this.#state,
+      trackOpen: this.#track?.isOpen() ?? false,
+      sent: this.#sent,
+      available: this.#unavailableReason === undefined,
+      status:
+        this.#unavailableReason !== undefined
+          ? ('unavailable' as const)
+          : ('available' as const),
+      ...(this.#unavailableReason
+        ? {
+            reason: this.#unavailableReason,
+            message: this.#unavailableMessage,
+          }
+        : {}),
     })
   }
 }

@@ -70,8 +70,8 @@ prerequisite for generating the very peer proofs that issuance requires.
 
 The original peer lifetime remains capped at thirty seconds. Later capability
 admission has its own at-most-eight-second interval, further capped by that
-peer/binding expiry. Neither HTTP nor signalling carries command payloads;
-there is no TURN or server command fallback.
+peer/binding expiry. Browser commands stay WebRTC-only; neither signalling nor
+HTTP fallback carries browser commands, and there is no TURN fallback.
 
 ## Evidence and remaining gates
 

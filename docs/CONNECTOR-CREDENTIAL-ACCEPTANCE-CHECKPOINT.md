@@ -26,7 +26,7 @@ Each instance admits at most 32 calls. Thirty-two fixed transaction advisory slo
 
 Clock checks occur after lock waits, asynchronous JOSE work, synchronous Ed25519 verification and proof writes. Expired credential observations remain terminal through clock regression. Proof consumption is atomic and successful output waits for COMMIT. A final clock check also rejects a result whose deadline passed while COMMIT waited; that observation is retained without returning authority. A consumed proof cannot be replayed through another process or service instance. A commit failure cannot return success.
 
-The accepted result contains only exact context, identity, acceptance time and expiry. It is a point-in-time consumed-proof receipt, not a durable verified flag, transport lease or command permission. Later requests, leases and sockets require appropriate current-state rechecks. An offline Connector cannot immediately learn remote revocation. Connector safety stays local; live status, camera and commands remain browser-to-Connector WebRTC with no HTTP/server command fallback.
+The accepted result contains only exact context, identity, acceptance time and expiry. It is a point-in-time consumed-proof receipt, not a durable verified flag, transport lease or command permission. Later requests, leases and sockets require appropriate current-state rechecks. An offline Connector cannot immediately learn remote revocation. Connector safety stays local; live status and camera remain browser-to-Connector WebRTC; browser commands stay WebRTC-only with no HTTP fallback, while API commands require owner-granted scopes and issuer-signed envelopes enforced by the Connector.
 
 ## Verification
 

@@ -38,8 +38,7 @@ import type { PausePhaseFrame } from '../../packages/connector/src/webrtc/pause-
 import type { FileUploadTarget } from '../../packages/connector/src/runtime/file-upload.ts'
 import { fixture as ftpsFixture } from '../fixtures/bambu-ftps/server.ts'
 
-type Native =
-  typeof import('../../packages/connector/node_modules/node-datachannel')
+type Native = typeof import('node-datachannel')
 const native: Native = createRequire(
   new URL('../../packages/connector/package.json', import.meta.url),
 )('node-datachannel')
@@ -165,6 +164,7 @@ async function waitFor(check: () => boolean | Promise<boolean>) {
     await new Promise((r) => setTimeout(r, 5))
   }
 }
+const fixtureRoot = tmpdir()
 const nonce = () => randomBytes(32).toString('base64url')
 
 async function connect(
@@ -173,7 +173,7 @@ async function connect(
   actions: ('pause' | 'start_print')[] = ['start_print'],
   admit = true,
 ) {
-  const dir = await mkdtemp(join(tmpdir(), 'upload-wiring-'))
+  const dir = await mkdtemp(join(fixtureRoot, 'upload-wiring-'))
   const staging = join(dir, 'staging')
   const identity = new ConnectorIdentity(
     generateKeyPairSync('ed25519').privateKey,
@@ -310,6 +310,9 @@ async function connect(
   const offer = await connector.offer()
   const answer = await browser.answer(offer)
   connector.answer(answer)
+  // The binding allows at most 30,000 ms. Separate clock reads can cross a
+  // millisecond boundary under load and make both peers reject the binding.
+  const bindingIssuedAt = Date.now()
   const binding: ControlSessionBinding = {
     v: 1,
     purpose: 'pause-rtc',
@@ -328,15 +331,23 @@ async function connect(
     credential_jti: randomUUID(),
     browser_nonce: nonce(),
     connector_nonce: nonce(),
-    issued_at: Date.now(),
-    expires_at: Date.now() + 30000,
+    issued_at: bindingIssuedAt,
+    expires_at: bindingIssuedAt + 30000,
     offer_sha256: await controlSdpHash(offer),
     answer_sha256: await controlSdpHash(answer),
     browser_dtls: controlDtlsFingerprint(answer),
     connector_dtls: controlDtlsFingerprint(offer),
   }
   bindingReady.resolve(binding)
-  const phase = await challenge.promise
+  const phase = await Promise.race([
+    challenge.promise,
+    browser.closed.then(() => {
+      throw Error('Browser closed before admission challenge')
+    }),
+    connector.closed.then(() => {
+      throw Error('Connector closed before admission challenge')
+    }),
+  ])
   const issuedAt = Date.now()
   const common = {
     farm_id: binding.farm_id,

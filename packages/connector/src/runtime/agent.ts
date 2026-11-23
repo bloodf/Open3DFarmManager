@@ -1,3 +1,42 @@
+import { MAX_HEARTBEAT_HEALTH_BYTES } from '@open3dfarmmanager/farm-protocol'
+import { join, resolve } from 'node:path'
+import {
+  openQueueCollectionJournal,
+  unavailableQueueCollectionJournal,
+  type QueueCollectionJournal,
+} from '../control/queue-collection-journal.ts'
+import type { MacroParamMap } from '../moonraker/control-macros.ts'
+import { createPrinterDetailSources } from './printer-detail-session.ts'
+import {
+  discoveryBindings,
+  pause,
+  runBackgroundDiscovery,
+} from './background-discovery.ts'
+import {
+  ApiResinReplay,
+  decodeApiEnvelopeFrame,
+  encodeApiEnvelopeResultFrame,
+} from '../../../farm-protocol/src/api-envelope.ts'
+import { encodeSignallingClientFrame } from '../../../farm-protocol/src/signalling-socket.ts'
+import {
+  CLIENT_WRITE_LIMIT,
+  type SocketPort,
+} from '../webrtc/signalling-client-channel.ts'
+import { openApiJobLifecycle } from './api-job-lifecycle.ts'
+import { createRuntimeLogger } from './log.ts'
+import { openFilamentRunJournal } from '../control/filament-run-journal.ts'
+import { createFilamentRunAccounting } from '../spoolman/filament-run.ts'
+import {
+  createActiveSpoolReader,
+  createFilamentRunTracker,
+  type FilamentRunTracker,
+} from '../spoolman/filament-run-tracker.ts'
+import { createActiveSpoolAssignmentStore } from '../spoolman/active-assignments.ts'
+import { readSpoolmanAuthorization } from '../spoolman/credential.ts'
+import { declareSnapmakerU1Printers } from '../moonraker/u1-tools.ts'
+import { registerMoonrakerPendingDispatch } from '../moonraker/pending-dispatch.ts'
+import type { Logger } from '../../../shared/src/log.ts'
+import type { TrustedKeyAuthority } from '../auth/trusted-key-store.ts'
 import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
 import { openLocalStatus } from '../status/local.ts'
 import type { SpoolmanSnapshot } from './spoolman-provider.ts'
@@ -9,13 +48,38 @@ import type { Diagnostic as CollectionDiagnostic } from './collect.ts'
 import type { TelemetrySender } from '../cloud/drain.ts'
 import type { RenewalDiagnostic } from '../cloud/credential-renewal.ts'
 import { credentialLookupId } from '../config/signalling.ts'
+import { connectorVersionMetadata } from '../status/version.ts'
+import {
+  createPrinterLinkHealth,
+  startLinkHealthHeartbeat,
+} from './link-health.ts'
 import { createFarmSnapshotSource } from './farm-snapshot-provider.ts'
+import { createLibraryJobLinks } from './library-job-links.ts'
+import {
+  createConnectorLibrary,
+  createPrinterProfiles,
+} from './library-print-wiring.ts'
+import {
+  readBambuPrinterBinding,
+  readCrealityPrinterBinding,
+} from '../control/printer-binding.ts'
+import {
+  moonrakerAuthHeaders,
+  moonrakerSession,
+  moonrakerWebUiOrigin,
+  validateMoonrakerInput,
+} from '../config/moonraker.ts'
+import { crealityWebUiOrigin } from '../config/creality.ts'
 import { isLoopbackBindAddress } from '../config/rtc.ts'
 import type {
   PauseControlDiagnostic,
   PauseFailureReason,
 } from './pause-control.ts'
 import { recordAuthorityStale } from './pause-authority-audit.ts'
+import {
+  probeRtcBackend,
+  type RtcBackendStatus,
+} from '../webrtc/rtc-backend.ts'
 import {
   createOfflineAuthority,
   type OfflineAuthorityStaleReason,
@@ -24,6 +88,12 @@ import {
 type AgentDiagnostic =
   | CollectionDiagnostic
   | { kind: 'rtc-bind-non-loopback'; address: string }
+  | {
+      kind: 'rtc-backend'
+      backend: RtcBackendStatus['backend']
+      mode: RtcBackendStatus['mode']
+      reason?: NonNullable<RtcBackendStatus['reason']>
+    }
   | RenewalDiagnostic
   | PauseControlDiagnostic
   | { kind: 'pause-authority-stale'; reason: OfflineAuthorityStaleReason }
@@ -31,11 +101,20 @@ type AgentDiagnostic =
   | { kind: 'pause-audit-failed' }
   | { kind: 'pause-authority-confirm-refused' }
   | { kind: 'credential-expired' }
+  | {
+      kind: 'filament-run'
+      status: 'applied' | 'uncertain' | 'rejected' | 'unknown' | 'record-only'
+      reason: string | null
+    }
+  | { kind: 'filament-run-failed' }
   | { kind: 'readonly-admitted' }
   | { kind: 'readonly-listening' }
   | { kind: 'readonly-terminal'; reason: string }
   | { kind: 'delivery'; status: 'delivered' | 'retained'; count: number }
   | { kind: 'drain-loss'; expired: number; capacity: number }
+  | { kind: 'telemetry-entry-dropped' }
+  | { kind: 'storage-degraded'; lost: number }
+  | { kind: 'storage-recovered'; lost: number }
   | {
       kind: 'agent-summary'
       delivered: number
@@ -43,6 +122,7 @@ type AgentDiagnostic =
       expired: number
       capacity: number
       credentialExpired: boolean
+      storageLost: number
     }
 
 let bootstrapped = false
@@ -51,18 +131,6 @@ function bootstrapNetworking() {
   process.env.WS_NO_BUFFER_UTIL = '1'
   process.env.WS_NO_UTF_8_VALIDATE = '1'
   bootstrapped = true
-}
-function pause(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    function done() {
-      clearTimeout(timer)
-      signal.removeEventListener('abort', done)
-      resolve()
-    }
-    const timer = setTimeout(done, ms)
-    signal.addEventListener('abort', done, { once: true })
-    if (signal.aborted) done()
-  })
 }
 function untilAbort(signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
@@ -86,11 +154,16 @@ export type AgentClock = Readonly<{
 const systemClock: AgentClock = { now: () => Date.now() }
 
 type AgentInput = {
+  trustedKeys?: TrustedKeyAuthority
+  resinCapabilities?: Parameters<
+    typeof import('./pause-control.ts').runPauseControl
+  >[0]['resinCapabilities']
   clock?: AgentClock
   statusPort?: number
   configPath: string
   credentialPath: string
   dataDirectory: string
+  telemetryDirectory?: string
   signal: AbortSignal
   onInventory?: (value: SpoolmanSnapshot) => void
   onDiagnostic: (value: AgentDiagnostic) => void
@@ -98,8 +171,17 @@ type AgentInput = {
 
 /** Restarts the agent after each persisted, server-confirmed credential renewal. */
 export async function runConnectorAgent(input: AgentInput): Promise<void> {
-  while ((await runConnectorAgentOnce(input)) && !input.signal.aborted) {
-    // Every run re-reads identity, credential and config from disk.
+  const logger = createRuntimeLogger(input.dataDirectory)
+  logger.info('start')
+  try {
+    while (
+      (await runConnectorAgentOnce(input, logger)) &&
+      !input.signal.aborted
+    ) {
+      // Every run re-reads identity, credential and config from disk.
+    }
+  } finally {
+    logger.info('stop')
   }
 }
 
@@ -107,7 +189,11 @@ export async function runConnectorAgent(input: AgentInput): Promise<void> {
  * One scoped queue, one maintained authenticated sender, one serial drain loop.
  * Resolves true when a renewed credential was persisted and a restart is due.
  */
-async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
+async function runConnectorAgentOnce(
+  input: AgentInput,
+  logger: Logger,
+): Promise<boolean> {
+  const startedAt = performance.now()
   const identity = loadExistingIdentity(input.dataDirectory)
   // Config scope only needs agent/farm, which an expired envelope still binds.
   const config = readAgentRuntimeConfig(
@@ -164,6 +250,9 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
   if (input.signal.aborted) return false
   const queue = openScopedTelemetryQueue({
     dataDirectory: input.dataDirectory,
+    ...(input.telemetryDirectory
+      ? { telemetryDirectory: input.telemetryDirectory }
+      : {}),
     config,
     credential,
     now: clock.now(),
@@ -181,6 +270,13 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
     credentialExpired: false,
   }
   function diagnostic(value: AgentDiagnostic) {
+    if (value.kind === 'drain-loss') {
+      logger.warn('queue-loss', { ...value })
+    } else if (value.kind === 'storage-degraded') {
+      logger.warn('storage-degraded', { lost: value.lost })
+    } else if (value.kind === 'telemetry-entry-dropped') {
+      logger.warn('telemetry-entry-dropped')
+    }
     if (value.kind === 'summary' || diagnosticBudget-- > 0)
       input.onDiagnostic(value)
   }
@@ -195,12 +291,192 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
     printerKey: assignment.printer_key,
   }))
   let localStatus: Awaited<ReturnType<typeof openLocalStatus>> | undefined
+  let macroParamsFor:
+    ((assignmentId: string) => MacroParamMap | undefined) | undefined
   let macrosFor:
     ((assignmentId: string) => readonly string[] | undefined) | undefined
   let controlsFor:
     ((assignmentId: string) => readonly ExtendedControlAction[]) | undefined
+  let refreshControls: (() => void) | undefined
+  const printerSpeedModes = new Map<
+    string,
+    NonNullable<
+      import('../../../farm-protocol/src/state.ts').PrinterState['speedModes']
+    >
+  >()
+  const detailSources = createPrinterDetailSources(config)
+  // Library prints (#384): download from the server or read the local copy,
+  // checked against what each printer itself reported. Never stops the agent.
+  const printerProfiles = createPrinterProfiles()
+  const jobLinks = createLibraryJobLinks()
+  // Bed-collection hold (durable): a run OpenFarm started is held when it
+  // finishes until an operator confirms the plate is clear. An unreadable
+  // journal refuses every OpenFarm start.
+  let collection: QueueCollectionJournal
+  try {
+    collection = openQueueCollectionJournal(
+      join(input.dataDirectory, 'queue-collection.json'),
+    )
+  } catch (error) {
+    logger.warn('queue-collection-unavailable', { error })
+    collection = unavailableQueueCollectionJournal()
+  }
+  // Locally declared Snapmaker U1 printers get the U1 tool mapping and
+  // command capability set; withdrawn when this run ends.
+  const moonrakerPrinters =
+    'printers' in config.collection ? config.collection.printers : []
+  const withdrawU1 = declareSnapmakerU1Printers(moonrakerPrinters)
+  // A job already finished on connect is reported only when OpenFarm has a
+  // pending dispatch on that printer; otherwise the history import owns it.
+  const apiJobs = openApiJobLifecycle({
+    path: resolve(
+      input.dataDirectory,
+      `api-jobs-${credential.farm_id}-${credential.agent_id}.json`,
+    ),
+    onError: (error) => logger.warn('api-job-journal', { error }),
+  })
+  const rememberedStarts = new Map<string, number>()
+  const withdrawPendingDispatch = registerMoonrakerPendingDispatch(
+    (printerKey) =>
+      apiJobs.hasRunning(printerKey) ||
+      rememberedStarts.has(printerKey) ||
+      collection.read(printerKey).dispatchedAt !== undefined,
+  )
+  // Filament run accounting (#664): only with a configured Spoolman. Every
+  // run this process watched finish is journaled once; debits are never
+  // retried. An unreadable journal disables accounting, never collection.
+  let filamentRuns: FilamentRunTracker | undefined
+  const spoolman =
+    'spoolman' in config.collection ? config.collection.spoolman : undefined
+  if (spoolman)
+    try {
+      const journal = openFilamentRunJournal({
+        path: join(input.dataDirectory, 'filament-runs.json'),
+      })
+      const authorization = readSpoolmanAuthorization(
+        spoolman.credentialFile,
+        spoolman.origin,
+      )
+      const accounting = createFilamentRunAccounting({
+        journal,
+        origin: spoolman.origin,
+        ...(authorization ? { authorization } : {}),
+      })
+      const moonraker = new Map(
+        moonrakerPrinters.map((printer) => {
+          const selected = validateMoonrakerInput({
+            assignment: printer,
+            allowedOrigins: config.collection.allowedOrigins,
+            limits: config.collection.limits,
+          })
+          return [
+            selected.printerKey,
+            {
+              origin: selected.origin,
+              async headers() {
+                const session = moonrakerSession(
+                  selected.origin,
+                  selected.limits,
+                )
+                return session
+                  ? await session.getAuthHeaders()
+                  : moonrakerAuthHeaders(selected.origin, selected.limits)
+              },
+            },
+          ] as const
+        }),
+      )
+      filamentRuns = createFilamentRunTracker({
+        accounting,
+        readSpools: createActiveSpoolReader({
+          moonraker,
+          assignments: createActiveSpoolAssignmentStore(
+            spoolman.assignmentsFile ??
+              join(input.dataDirectory, 'active-spool-assignments.json'),
+          ),
+        }),
+        signal,
+        onOutcome(printerKey, outcomes) {
+          for (const outcome of outcomes) {
+            logger.info('filament-run', {
+              printerKey,
+              tool: outcome.tool,
+              status: outcome.status,
+              reason: outcome.reason,
+              duplicate: outcome.duplicate,
+            })
+            if (outcome.status !== 'pending' && !outcome.duplicate)
+              diagnostic({
+                kind: 'filament-run',
+                status: outcome.status,
+                reason: outcome.reason,
+              })
+          }
+        },
+        onError(printerKey, error) {
+          logger.warn('filament-run-failed', { printerKey, error })
+          diagnostic({ kind: 'filament-run-failed' })
+        },
+      })
+    } catch (error) {
+      logger.warn('filament-run-unavailable', { error })
+    }
+  const libraryLinks = {
+    remember(...args: Parameters<typeof jobLinks.remember>) {
+      rememberedStarts.delete(args[0])
+      rememberedStarts.set(args[0], args[2] ?? Date.now())
+      while (rememberedStarts.size > 64)
+        rememberedStarts.delete(rememberedStarts.keys().next().value!)
+      jobLinks.remember(...args)
+    },
+    attach(printer: Parameters<typeof jobLinks.attach>[0]) {
+      printerProfiles.observe(printer)
+      try {
+        filamentRuns?.observe(printer)
+      } catch {
+        // Accounting never stops collection.
+      }
+      if (
+        printer.lastJob &&
+        printer.state !== 'printing' &&
+        printer.state !== 'paused'
+      ) {
+        // A previous job's repeated end never consumes a newer start.
+        if (
+          printer.lastJob.endedAt >=
+          (rememberedStarts.get(printer.printerKey) ?? Infinity)
+        )
+          rememberedStarts.delete(printer.printerKey)
+        try {
+          collection.finished(printer.printerKey, printer.lastJob.endedAt)
+        } catch {
+          // The journal fails closed: starts are refused until it recovers.
+        }
+      }
+      return jobLinks.attach(printer)
+    },
+  }
+  const library = await createConnectorLibrary({
+    endpoint: config.telemetry.endpoint,
+    credential,
+    identity,
+    dataDirectory: input.dataDirectory,
+    library: config.library,
+  }).catch((error: unknown) => {
+    logger.warn('library-print-unavailable', { error })
+    return undefined
+  })
   let snapshots: ReturnType<typeof createFarmSnapshotSource> | undefined
   try {
+    // One startup probe of the native RTC module. Without it the agent keeps
+    // collecting and reporting but offers no browser RTC session.
+    const rtcBackend = await probeRtcBackend()
+    diagnostic({
+      kind: 'rtc-backend',
+      backend: rtcBackend.backend,
+      mode: rtcBackend.mode,
+      ...(rtcBackend.reason ? { reason: rtcBackend.reason } : {}),
+    })
     if (input.statusPort !== undefined) {
       localStatus = await openLocalStatus({
         port: input.statusPort,
@@ -210,16 +486,136 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
           retries: totals.retries,
           credentialExpired:
             totals.credentialExpired || clock.now() >= credential.expires_at,
+          storageDegraded: queue.storageDegraded,
+          storageLost: queue.storageLost,
+          rtc: rtcBackend,
         }),
         onError: fail,
       })
     }
     if (signal.aborted) return false
+    const cameraMedia =
+      config.camera &&
+      config.signalling &&
+      lookupId &&
+      rtcBackend.mode === 'direct'
+        ? await (
+            await import('../camera/camera-runtime.ts')
+          ).createCameraMediaFactory({
+            config: config.camera,
+            identity,
+            agentId: credential.agent_id,
+            farmId: credential.farm_id,
+            assignmentRefs: refs,
+          })
+        : undefined
+    const links = new Map(
+      config.collection.printers.map(({ printerKey }) => [
+        printerKey,
+        createPrinterLinkHealth(printerKey),
+      ]),
+    )
+    const readHeartbeat = () =>
+      ({
+        connector: {
+          version: connectorVersionMetadata.connectorVersion,
+          uptimeMs: Math.floor(performance.now() - startedAt),
+          queueBacklog: queue.depth,
+          storage: queue.storageDegraded ? 'degraded' : 'healthy',
+          rtcScope:
+            !lookupId || rtcBackend.mode !== 'direct'
+              ? 'disabled'
+              : isLoopbackBindAddress(config.rtc.bindAddress)
+                ? 'loopback'
+                : 'lan',
+        },
+        ...(cameraMedia
+          ? { cameraAssignments: cameraMedia.assignmentIds }
+          : {}),
+        printers: Array.from(links.values(), (link) => link.read()),
+      }) satisfies import('../../../farm-protocol/src/telemetry.ts').HeartbeatHealth
+    const enqueueHeartbeat = (health: ReturnType<typeof readHeartbeat>) => {
+      const printers = health.printers.slice(0, 100)
+      while (
+        Buffer.byteLength(JSON.stringify({ ...health, printers })) >
+        MAX_HEARTBEAT_HEALTH_BYTES
+      )
+        printers.pop()
+      const { loss } = queue.enqueueHeartbeat(
+        { ...health, printers },
+        clock.now(),
+      )
+      if (loss.expired || loss.capacity) logger.warn('queue-loss', { ...loss })
+    }
+    startLinkHealthHeartbeat(
+      () => {
+        const health = readHeartbeat()
+        try {
+          enqueueHeartbeat(health)
+        } catch (error) {
+          fail(error)
+        }
+        return health
+      },
+      (frames) => {
+        for (const frame of frames)
+          logger.info('link-health-heartbeat', JSON.parse(frame))
+      },
+      signal,
+    )
     snapshots = config.signalling
       ? createFarmSnapshotSource({
           assignmentRefs: refs,
-          controlsFor: (id) => controlsFor?.(id),
+          linkHealthFor(printerKey) {
+            const health = links.get(printerKey)
+            if (!health) return
+            const { printerKey: _printerKey, ...status } = health.read()
+            return status
+          },
+          controlsFor: (id) => {
+            const assignment = config.assignments.find(
+              (item) => item.assignment_id === id,
+            )
+            if (
+              assignment &&
+              'backend' in assignment &&
+              assignment.backend === 'prusa-link'
+            )
+              return []
+            const ref = refs.find((item) => item.assignmentId === id)
+            if (
+              config.collection.version === 7 &&
+              config.collection.formlabs.printers.some(
+                (printer) => printer.printerKey === ref?.printerKey,
+              )
+            )
+              return []
+            if (
+              config.collection.version === 6 &&
+              config.collection.sdcp.printers.some(
+                (printer) => printer.printerKey === ref?.printerKey,
+              )
+            )
+              return []
+            return controlsFor?.(id)
+          },
           macrosFor: (id) => macrosFor?.(id),
+          macroParamsFor: (id) => macroParamsFor?.(id),
+          localWebUiOriginFor: (id) => {
+            const assignment = config.assignments.find(
+              (item) => item.assignment_id === id,
+            )
+            if (!assignment) return
+            if ('moonraker_origin' in assignment && assignment.moonraker_origin)
+              return moonrakerWebUiOrigin(assignment.moonraker_origin)
+            const binding = config.bindingFor(id)
+            if (!binding) return
+            const bambu = readBambuPrinterBinding(binding)
+            if (bambu) return `http://${bambu.host}`
+            const creality = readCrealityPrinterBinding(binding)
+            if (creality) return crealityWebUiOrigin(creality)
+            return
+          },
         })
       : undefined
     const { collectIntoQueue } = await import('./collect.ts')
@@ -253,6 +649,7 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
     const offline = config.pause?.control
       ? createOfflineAuthority({
           onStale(reason) {
+            logger.warn('authority-stale', { reason })
             pauseDiagnostic({ kind: 'pause-authority-stale', reason })
             // The fsynced write runs on a later turn, never inside the caller's
             // freshness check or its microtask queue.
@@ -266,32 +663,48 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
           },
         })
       : undefined
-    if (config.signalling && lookupId && snapshots) {
-      const { AuthenticatedConnectorSignallingClient } =
+    const apiHandlers: NonNullable<
+      Parameters<
+        typeof import('./pause-control.ts').runPauseControl
+      >[0]['apiHandlers']
+    > = new Map()
+    if (
+      config.signalling &&
+      lookupId &&
+      snapshots &&
+      rtcBackend.mode === 'direct'
+    ) {
+      const { AuthenticatedConnectorSignallingClient, connectorSocket } =
         await import('../cloud/authenticated-signalling-client.ts')
       const { FarmStatusSender } =
         await import('../webrtc/farm-status-sender.ts')
       const { runSignallingLifecycle } = await import('./signalling.ts')
+      const { answerApiQuery, createApiQueryReader } =
+        await import('./api-query.ts')
       const signalling = config.signalling
+      const readApiQuery = createApiQueryReader(
+        config,
+        input.dataDirectory,
+        collection,
+      )
       const source = snapshots
-      const cameraMedia = config.camera
-        ? await (
-            await import('../camera/camera-runtime.ts')
-          ).createCameraMediaFactory({
-            config: config.camera,
-            identity,
-            agentId: credential.agent_id,
-            farmId: credential.farm_id,
-            assignmentRefs: refs,
-          })
-        : undefined
+      const detailSourceFor = detailSources.sourceFor
       tasks.push(
         runSignallingLifecycle({
           signal,
           credentialExpiresAt: credential.expires_at,
           retryMinMs: signalling.retryMinMs,
           retryMaxMs: signalling.retryMaxMs,
+          onReconnect: () => logger.info('reconnect'),
           createSession(onTerminal, onAdmitted) {
+            const inbox = new AbortController()
+            let pendingQueries = 0
+            let socket: SocketPort | undefined
+            let detachJobReports: (() => void) | undefined
+            const closeInbox = () => {
+              inbox.abort()
+              detachJobReports?.()
+            }
             const client = new AuthenticatedConnectorSignallingClient(
               {
                 url: signalling.endpoint,
@@ -305,31 +718,138 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
                 identity,
               },
               {
-                genuineStatus: { assignmentRefs: refs },
+                genuineStatus: { assignmentRefs: refs, detailSourceFor },
                 ...(cameraMedia ? { cameraMedia } : {}),
+                async socketFactory() {
+                  socket = await connectorSocket(
+                    signalling.endpoint,
+                    undefined,
+                    true,
+                  )
+                  return socket
+                },
                 onInboxReady() {
+                  // The command callback belongs to its original session.
+                  // Reports reuse this admitted socket with one bounded write in flight.
+                  if (inbox.signal.aborted || signal.aborted) return
+                  detachJobReports = apiJobs.attach(
+                    (wire) =>
+                      new Promise<void>((resolve, reject) => {
+                        const message = encodeSignallingClientFrame({
+                          v: 1,
+                          t: 'connector.api-result',
+                          wire,
+                        })
+                        if (
+                          signal.aborted ||
+                          inbox.signal.aborted ||
+                          !socket?.isOpen() ||
+                          socket.bufferedBytes() + Buffer.byteLength(message) >
+                            CLIENT_WRITE_LIMIT
+                        ) {
+                          reject(new Error('API job report inbox unavailable'))
+                          if (!signal.aborted && !inbox.signal.aborted)
+                            client.close('api-job-report-write')
+                          return
+                        }
+                        socket.send(message, (error) => {
+                          if (!error) resolve()
+                          else {
+                            reject(error)
+                            if (!inbox.signal.aborted)
+                              client.close('api-job-report-write')
+                          }
+                        })
+                      }),
+                  )
                   onAdmitted()
                   diagnostic({ kind: 'readonly-listening' })
                 },
                 // Callbacks must return nothing; a refused confirm stays stale.
                 onAuthorityConfirm(serverSeq) {
-                  if (
-                    offline &&
-                    !offline.confirm(
-                      { wall: clock.now(), mono: performance.now() },
-                      serverSeq,
-                    )
-                  )
-                    pauseRareDiagnostic({
-                      kind: 'pause-authority-confirm-refused',
+                  if (offline) {
+                    if (
+                      offline.confirm(
+                        { wall: clock.now(), mono: performance.now() },
+                        serverSeq,
+                      )
+                    ) {
+                      logger.info('authority-confirmed')
+                    } else {
+                      pauseRareDiagnostic({
+                        kind: 'pause-authority-confirm-refused',
+                      })
+                    }
+                  }
+                },
+                onApiQuery(frame, report) {
+                  if (inbox.signal.aborted || pendingQueries >= 4) return
+                  pendingQueries++
+                  const querySignal = AbortSignal.any([
+                    inbox.signal,
+                    signal,
+                    AbortSignal.timeout(8000),
+                  ])
+                  void answerApiQuery(frame, readApiQuery, querySignal)
+                    .then((reply) => {
+                      if (!inbox.signal.aborted && !signal.aborted)
+                        report(reply)
+                    })
+                    .catch(() => {})
+                    .finally(() => {
+                      pendingQueries--
                     })
                 },
+                onApiCommand(frame, report) {
+                  if (inbox.signal.aborted) return
+                  const { envelope } = decodeApiEnvelopeFrame(frame.wire)
+                  const assignedHandler = apiHandlers.get(
+                    envelope.assignment_id,
+                  )
+                  if (
+                    !assignedHandler &&
+                    ApiResinReplay.safeParse(envelope.action).success
+                  ) {
+                    // This inbox is credential-authenticated. An assignment
+                    // without a control handler can only report a refusal.
+                    if (
+                      envelope.farm_id === credential.farm_id &&
+                      envelope.agent_id === credential.agent_id &&
+                      refs.some(
+                        (ref) => ref.assignmentId === envelope.assignment_id,
+                      )
+                    )
+                      report(
+                        encodeApiEnvelopeResultFrame({
+                          v: 1,
+                          t: 'api-envelope.result',
+                          cmd_id: envelope.cmd_id,
+                          outcome: 'refused',
+                          refusal_code: 'unsupported',
+                          detail: 'resin-artifact-dispatch-unavailable',
+                          at: clock.now(),
+                        }),
+                      )
+                    return
+                  }
+                  if (!offline) return
+                  const handler =
+                    assignedHandler ?? apiHandlers.values().next().value
+                  handler?.(frame, {
+                    report,
+                    apiJobs,
+                    signal: inbox.signal,
+                    freshness: offline.freshness,
+                  })
+                },
                 onAuthorityRevoked(serverSeq) {
+                  closeInbox()
                   offline?.revoke(serverSeq)
                 },
                 onVerifiedAdmission: () =>
                   diagnostic({ kind: 'readonly-admitted' }),
                 onTerminal(reason) {
+                  closeInbox()
                   try {
                     diagnostic({
                       kind: 'readonly-terminal',
@@ -351,6 +871,7 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
                 assignmentRefs: refs,
                 openSnapshots: source.open,
                 signal,
+                storageDegraded: () => queue.storageDegraded,
               })
             } catch (error) {
               client.close('runtime-setup-failed')
@@ -416,12 +937,35 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
           dataDirectory: input.dataDirectory,
           signal,
           freshness: offline.freshness,
+          apiHandlers,
+          libraryLinks,
+          collection,
+          speedModesFor(printerKey) {
+            return printerSpeedModes.get(printerKey)
+          },
+          libraryPrint(assignmentId) {
+            const key = refs.find(
+              (ref) => ref.assignmentId === assignmentId,
+            )?.printerKey
+            return library?.starterFor(async () =>
+              key ? printerProfiles.read(key) : undefined,
+            )
+          },
+          ...(input.trustedKeys ? { trustedKeys: input.trustedKeys } : {}),
+          ...(input.resinCapabilities
+            ? { resinCapabilities: input.resinCapabilities }
+            : {}),
+          storageDegraded: () => queue.storageDegraded,
           onDiagnostic: pauseDiagnostic,
+          onMacroParams(read) {
+            macroParamsFor = read
+          },
           onMacros(read) {
             macrosFor = read
           },
           onControls(read) {
             controlsFor = read
+            refreshControls?.()
           },
         }).catch((error: unknown) => {
           // A pause-path failure never stops read-only telemetry or status.
@@ -435,7 +979,29 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
     async function drainLoop() {
       let backoff = config.telemetry.retryMinMs
       let notBefore = 0
+      let storageReported = false
+      let storageBackoff = config.telemetry.retryMinMs
       while (!signal.aborted) {
+        // Degraded storage: collection, RTC status and local status keep
+        // running; uploads wait for a bounded, backed-off storage retry.
+        if (queue.storageDegraded) {
+          if (!storageReported) {
+            storageReported = true
+            diagnostic({ kind: 'storage-degraded', lost: queue.storageLost })
+          }
+          await pause(storageBackoff, signal)
+          if (signal.aborted) return
+          storageBackoff = Math.min(
+            config.telemetry.retryMaxMs,
+            storageBackoff * 2,
+          )
+          if (queue.retryStorage()) {
+            storageReported = false
+            storageBackoff = config.telemetry.retryMinMs
+            diagnostic({ kind: 'storage-recovered', lost: queue.storageLost })
+          }
+          continue
+        }
         if (clock.now() >= credential.expires_at) {
           totals.credentialExpired = true
           diagnostic({ kind: 'credential-expired' })
@@ -476,6 +1042,7 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
             tracked,
             () => clock.now(),
             attemptSignal,
+            () => diagnostic({ kind: 'telemetry-entry-dropped' }),
           )
         } finally {
           // Drain may return cancelled before its sender releases the active slot.
@@ -493,15 +1060,16 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
               capacity: result.loss.capacity,
             })
         }
+        if (result.status === 'delivered') totals.delivered += result.count
+        // A storage fault during this attempt is handled at the top of the loop.
+        if (queue.storageDegraded || result.status === 'dropped') continue
         if (
           result.status === 'uncertain' ||
-          (result.status === 'retained' &&
-            ['busy', 'oversized'].includes(result.reason))
+          (result.status === 'retained' && result.reason === 'busy')
         )
           throw new Error('Telemetry drain requires operator review')
         if (signal.aborted) return
         if (result.status === 'delivered') {
-          totals.delivered += result.count
           diagnostic({
             kind: 'delivery',
             status: 'delivered',
@@ -527,7 +1095,26 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
     tasks.push(
       collectIntoQueue({
         config: config.collection,
+        apiJobs,
+        onPrinterState(printer) {
+          if (printer.speedModes === undefined)
+            printerSpeedModes.delete(printer.printerKey)
+          else
+            printerSpeedModes.set(printer.printerKey, [...printer.speedModes])
+        },
+        controlsFor: (printerKey) => {
+          const ref = refs.find((entry) => entry.printerKey === printerKey)
+          return ref ? controlsFor?.(ref.assignmentId) : undefined
+        },
+        onControlsRefresh(refresh) {
+          refreshControls = refresh
+          refresh()
+        },
+        linkHealthFor: (printerKey) => links.get(printerKey),
+        libraryLinks,
         discoverMoonrakerObjects: true,
+        importMoonrakerHistory: true,
+        onLoss: (value) => logger.warn('queue-loss', { ...value }),
         ...(input.onInventory || snapshots
           ? {
               onInventory(value: SpoolmanSnapshot) {
@@ -541,12 +1128,45 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
         onDiagnostic: diagnostic,
         ...(snapshots
           ? {
-              onRawObservation: snapshots.observe,
-              onRawUnavailable: snapshots.invalidate,
+              onRawObservation: (observation) => {
+                if (!snapshots) return
+                snapshots.observe(observation)
+                detailSources.observe(observation.printer)
+              },
+              onRawUnavailable: (event) => {
+                if (!snapshots) return
+                snapshots.invalidate(event)
+                detailSources.invalidate(event.printerKey)
+              },
             }
           : {}),
       }).catch(fail),
     )
+    tasks.push(
+      runBackgroundDiscovery({
+        ...config.discovery,
+        signal,
+        bindings: discoveryBindings(config.collection),
+        now: () => clock.now(),
+        report(results, now) {
+          const { loss } = queue.enqueueDiscovery(results, now)
+          if (loss.expired || loss.capacity)
+            logger.warn('queue-loss', { ...loss })
+        },
+      }).catch(fail),
+    )
+    // Connector library storage (#446): answers the server's relay operations
+    // on this host's store. A failure here never stops telemetry.
+    if (library)
+      tasks.push(
+        library
+          .serveRelay(signal, (event) =>
+            logger.warn(event.kind, { reason: event.reason }),
+          )
+          .catch((error: unknown) =>
+            logger.warn('library-relay-stopped', { error }),
+          ),
+      )
     tasks.push(drainLoop().catch(fail))
     await Promise.all(tasks)
   } catch (error) {
@@ -560,13 +1180,20 @@ async function runConnectorAgentOnce(input: AgentInput): Promise<boolean> {
     }
     snapshots?.close()
     await Promise.all(tasks)
+    await filamentRuns?.idle()
+    withdrawU1()
+    withdrawPendingDispatch()
     try {
       queue.close()
     } catch (error) {
       fail(error)
     }
     try {
-      input.onDiagnostic({ kind: 'agent-summary', ...totals })
+      input.onDiagnostic({
+        kind: 'agent-summary',
+        ...totals,
+        storageLost: queue.storageLost,
+      })
     } catch (error) {
       fail(error)
     }

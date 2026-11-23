@@ -4,13 +4,13 @@ Data de corte: 2026-11-13. Produto base `bad76165aa4fbe86949ae624ddedc973721d5fc
 
 ## README.md
 
-Node 24.22.2, engine >=24.22.2 <25; pnpm 12.18.0. Instalação: pnpm install --frozen-lockfile --ignore-scripts; interface: pnpm run dev. Imagem usa node:24.22.2-alpine e inicia node server/index.mjs como UID 10001, copiando migrations. Não configura contas automaticamente.
+Node conforme `^22.22.3 || >=24.22.2 <25`; npm. Instalação: `npm ci --ignore-scripts`; interface: `npm run dev`. Imagem usa node:24.22.2-alpine e inicia node server/index.mjs como UID 10001, copiando migrations. Não configura contas automaticamente.
 
 Fontes inspecionadas: `README.md; package.json; apps/farm/Dockerfile`.
 
 ## docs/LOCAL-CI.md
 
-Verificação prevista: bash scripts/test-local-ci.sh; bash scripts/local-ci.sh code; pnpm run check:all; pnpm exec playwright install chromium; pnpm run test:e2e após build. Ubuntu CI usa pnpm exec playwright install --with-deps chromium. Chromium e bibliotecas do SO devem ser preparados separadamente. Instalação com --ignore-scripts não comprova preparação de módulos nativos. Experimentos RTC e farm-view são separados.
+Verificação prevista: bash scripts/test-local-ci.sh; bash scripts/local-ci.sh code; npm run check:all; npx playwright install chromium; npm run test:e2e após build. Ubuntu CI usa npx playwright install --with-deps chromium. Chromium e bibliotecas do SO devem ser preparados separadamente. Instalação com --ignore-scripts não comprova preparação de módulos nativos. Experimentos RTC e farm-view são separados.
 
 Fontes inspecionadas: `docs/LOCAL-CI.md; scripts/local-ci.sh; .github/workflows/ci.yml`.
 
@@ -46,21 +46,43 @@ Fontes inspecionadas: `packages/connector/src/config/local.ts: readPrivateJsonFi
 
 ## docs/SESSION-PERSISTENCE-CONTRACT.md
 
-Backup/restore exige impedir reativação de sessões revogadas; contrato aponta epoch separado ou invalidação obrigatória, mas procedimento permanece pendente. Persistência normal e transação não equivalem a backup ou garantia contra perda de energia.
+O procedimento abaixo revoga as sessões e as chaves de navegador do dump antes de liberar o banco restaurado.
 
 Fontes inspecionadas: `docs/SESSION-PERSISTENCE-CONTRACT.md; docs/CONNECTOR-IDENTITY.md`.
 
+## Restaurar um backup self-hosted
+
+Use um dump confiável em formato customizado (`pg_dump -Fc`), o backup privado de configuração do Connector e uma versão do aplicativo que conheça o histórico de migrações do dump. Prepare os roles referenciados no dump e use o contêiner PostgreSQL dedicado com seu usuário de bootstrap. Preserve o banco anterior para recuperação. O aplicativo deve usar um role sem superusuário.
+
+1. Pare todos os processos do aplicativo e todos os Connectors antes da restauração. Mantenha-os parados durante a troca. Prepare um nome de banco que ainda não existe e um caminho ausente para receber a configuração validada.
+2. Para cada Connector em outro host, execute o comando abaixo como seu usuário de serviço, no diretório real de estado usado pelo processo. Inclua no comando de restauração todos os diretórios de estado locais. Preserve o marcador ao recuperar arquivos, junto com a identidade, as credenciais válidas e os journals de comandos. O marcador seleciona um checkpoint novo, mesmo se o checkpoint anterior tiver uma versão maior.
+
+   ```sh
+   node scripts/self-host/restore.ts fence /caminho/estado
+   ```
+
+3. Restaure o banco e o arquivo de configuração selecionado.
+
+   ```sh
+   node scripts/self-host/restore.ts restore CONTAINER BANCO_NOVO DUMP provisioning BACKUP CONFIG_NOVA DIRETORIO_ESTADO...
+   ```
+
+   Use `collector` para um backup de coleta v1. O script importa em um banco novo isolado de clientes comuns, valida o histórico e recusa um schema mais novo ou incompatível. Em seguida, incrementa as versões de sessão, revoga sessões e chaves de navegador e grava os marcadores locais antes de liberar conexões. Em caso de falha, o script tenta remover o banco novo. Marcadores já gravados permanecem válidos, e uma configuração já copiada pode ser preservada com outro nome para a próxima tentativa.
+
+4. Aplique as migrações pendentes. Antes de reabrir o serviço, reconcilie contas, memberships, credenciais e revogações de Connector e de integrações alteradas desde o backup. A configuração restaurada referencia arquivos gerenciados separadamente. Confira os caminhos e a validade desses arquivos antes de ativá-la.
+5. Aponte a aplicação para o banco novo, confira `/readyz` e só então reinicie os Connectors com suporte ao marcador de restauração. O controle de navegador fica bloqueado até a confirmação autenticada do conjunto de chaves. Usuários precisam entrar novamente e registrar novas chaves de navegador para aprovação.
+
+O procedimento recupera o instantâneo do dump. Dados posteriores ao backup precisam ser reconciliados separadamente.
+
 ## Limites e próximos passos
 
-Resta qualificar instalação limpa, preparação nativa por SO e arquitetura, upgrade e restauração com dados sintéticos. Nenhum comando de runtime foi executado.
-
-Não foi identificado procedimento operacional completo de backup/restore nas buscas limitadas em docs e scripts. Existem migração e persistência implementadas.
+Resta qualificar instalação limpa, preparação nativa por SO e arquitetura e upgrade.
 
 Documentos antigos de identidade dizem que pareamento não existe; CLI atual contém pair. Não usar esse texto histórico como inventário atual.
 
 Firmware/hardware desconhecido; sem alegação de suporte.
 
-Definir retenção e restauração de banco, roles, configuração externa e identidade, incluindo invalidação de sessões.
+Definir a política de retenção e reconciliar identidades, credenciais e permissões externas após a recuperação.
 
 Qualificar com dados sintéticos em ambiente descartável nesta frente autorizada; hardware, deploy e credenciais mantêm autorização separada.
 

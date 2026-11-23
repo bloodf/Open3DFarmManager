@@ -15,6 +15,11 @@ import {
 } from './readonly-session.ts'
 import type { PrinterState } from '../../../farm-protocol/src/state.ts'
 
+/** Bound queued read-only status data to a small number of recent frames. */
+export const FARM_STATUS_PENDING_BYTES = 1_048_576
+/** Close a read-only session when its native send queue stays congested. */
+export const FARM_STATUS_BACKPRESSURE_TIMEOUT_MS = 5_000
+
 /** Trusted provider evidence uses this Connector's performance.now() clock.
  * The provider owns current assignment authority and complete aggregation.
  * StatusMessage itself carries neither assignment IDs nor freshness evidence.
@@ -45,6 +50,7 @@ type Client = {
   ): () => void
   subscribeTerminal(listener: (reason: string) => void): () => void
   sendStatus(message: unknown): boolean
+  bufferedAmount?(): number
   close(reason?: string): void
 }
 /** Display-only sender. No production provider is installed by this module.
@@ -56,6 +62,7 @@ export class FarmStatusSender {
   #refs: readonly AssignmentRef[]
   #open: FarmSnapshotProvider
   #signal: AbortSignal
+  #storageDegraded: () => boolean
   #controller = new AbortController()
   #unsubscribe = () => {}
   #unsubscribeTerminal = () => {}
@@ -63,10 +70,13 @@ export class FarmStatusSender {
   #admission: VerifiedRtcAdmission | undefined
   #terminal = false
   #seq = 0
+  /** Frames the client accepted. Congested attempts stay out of the budget. */
+  #delivered = 0
   #captured = -1
   #sourceDeadline = Infinity
   #sending = false
   #timer: ReturnType<typeof setTimeout> | undefined
+  #backpressureTimer: ReturnType<typeof setTimeout> | undefined
   #abort = () => this.close('aborted')
   constructor(options: {
     client: Client
@@ -74,7 +84,10 @@ export class FarmStatusSender {
     assignmentRefs: readonly AssignmentRef[]
     openSnapshots: FarmSnapshotProvider
     signal: AbortSignal
+    /** Read per frame; true marks the snapshot `storage: 'degraded'`. */
+    storageDegraded?: () => boolean
   }) {
+    this.#storageDegraded = options.storageDegraded ?? (() => false)
     this.#rtcScope = isLoopbackBindAddress(
       options.bindAddress ?? DEFAULT_RTC_BIND_ADDRESS,
     )
@@ -220,7 +233,7 @@ export class FarmStatusSender {
         until < 0 ||
         now >= until ||
         until > this.#admission.deadlineMonoMs ||
-        this.#seq >= 1024
+        this.#delivered >= 1024
       )
         throw Error('Incomplete or stale source')
       const message = validatedStatusMessage(
@@ -232,22 +245,44 @@ export class FarmStatusSender {
           seq: this.#seq,
           printers: input.printers,
           ...(input.inventory ? { inventory: input.inventory } : {}),
+          ...(this.#storageDegraded() === true
+            ? { storage: 'degraded' as const }
+            : {}),
         },
         this.#refs,
       )
       // Parsed copies precede the external send callback; no caller array survives.
       if (!this.current()) return
       if (performance.now() >= until) throw Error('Expired source')
+      const buffered = this.#client.bufferedAmount?.() ?? 0
+      if (!Number.isSafeInteger(buffered) || buffered < 0)
+        throw Error('Invalid status buffer')
+      const wireBytes = new TextEncoder().encode(
+        JSON.stringify(message),
+      ).byteLength
+      if (
+        wireBytes > FARM_STATUS_PENDING_BYTES ||
+        buffered + wireBytes > FARM_STATUS_PENDING_BYTES
+      ) {
+        this.#armBackpressure()
+        return
+      }
       this.#captured = captured
       this.#seq++
       this.#sending = true
       this.#sourceDeadline = until
       const outcome = this.#client.sendStatus(message)
       if (outcome !== true) {
-        runSynchronous(() => outcome)
-        this.close('status-send')
+        // Native backpressure: the peer coalesces the frame until its channel
+        // drains. The newest snapshot wins, nothing is lost and the session
+        // stays open until the #173 timeout.
+        this.#armBackpressure()
+        if (this.current()) this.schedule(until)
         return
       }
+      this.#delivered++
+      clearTimeout(this.#backpressureTimer)
+      this.#backpressureTimer = undefined
       if (this.current()) this.schedule(until)
     } catch {
       this.close('source-invalid')
@@ -255,10 +290,19 @@ export class FarmStatusSender {
       this.#sending = false
     }
   }
+  /** Close a read-only session whose status queue stays congested. */
+  #armBackpressure() {
+    if (this.#backpressureTimer) return
+    this.#backpressureTimer = setTimeout(
+      () => this.close('status-backpressure'),
+      FARM_STATUS_BACKPRESSURE_TIMEOUT_MS,
+    )
+  }
   close(reason = 'closed') {
     if (this.#terminal) return
     this.#terminal = true
     clearTimeout(this.#timer)
+    clearTimeout(this.#backpressureTimer)
     this.#controller.abort()
     this.#signal.removeEventListener('abort', this.#abort)
     try {

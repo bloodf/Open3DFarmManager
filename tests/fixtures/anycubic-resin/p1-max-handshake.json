@@ -1,0 +1,19 @@
+{
+  "identity": {
+    "code": 0,
+    "cn": "FIXTURE-P1-MAX",
+    "deviceType": "lcd",
+    "ctrlType": "net",
+    "modelId": "132",
+    "modelName": "Anycubic Photon P1 Max",
+    "token": "0123456789abcdefghijklmnopqrstuv",
+    "ctrlInfoUrl": "http://192.0.2.1:18910/ctrl"
+  },
+  "credentials": {
+    "broker": "192.0.2.1:8883",
+    "deviceId": "fixture-device",
+    "clientId": "clientId",
+    "username": "fixture-user",
+    "password": "fixture-password"
+  }
+}

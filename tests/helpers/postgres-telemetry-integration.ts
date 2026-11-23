@@ -25,6 +25,24 @@ const fixedEvent = {
     observedAt: 1000,
   },
 }
+/**
+ * The store also upserts farm.printer_latest_state (migration 0033) in the
+ * same transaction. This fixture only carries 0001 and 0002, so it takes the
+ * table definition verbatim from 0033; that migration's role grants need
+ * later migrations and are out of scope for the dedup checks here.
+ */
+function latestStateTableSql(): string {
+  const text = readFileSync(
+    new URL(
+      '../../infra/db/migrations/0033_printer_latest_state.up.sql',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+  const statement = text.slice(0, text.indexOf(';') + 1)
+  assert.match(statement, /^CREATE TABLE farm\.printer_latest_state \(/)
+  return statement
+}
 export async function testTelemetryPersistence(
   sql: Sql,
   afterRestart: boolean,
@@ -41,6 +59,7 @@ export async function testTelemetryPersistence(
     )
     assert.equal(await count(), 3)
     await sql.begin(async (tx) => {
+      await tx`DROP TABLE farm.printer_latest_state`
       await tx
         .unsafe(
           readFileSync(
@@ -67,7 +86,15 @@ export async function testTelemetryPersistence(
         ),
       )
       .simple()
+    await tx.unsafe(latestStateTableSql()).simple()
   })
+  // Fixture readiness: the store writes both tables in one transaction, so a
+  // missing one would only surface later as an unexplained zero row count.
+  for (const table of ['farm.telemetry_events', 'farm.printer_latest_state'])
+    assert.ok(
+      (await sql`SELECT to_regclass(${table}) AS t`)[0]?.t,
+      `Telemetry fixture table ${table} must exist before ingestion`,
+    )
   const directory = mkdtempSync(join(tmpdir(), 'open3d-postgres-queue-'))
   let queue = new TelemetryQueue(directory, 1000)
   try {
@@ -82,16 +109,28 @@ export async function testTelemetryPersistence(
       }).printer,
       1000,
     )
+    // The drain turns any sender throw into 'retained', so an assertion inside
+    // the sender would be swallowed. Keep the ingestion result and check it here.
+    let firstIngestion: Awaited<ReturnType<typeof ingestTelemetry>> | undefined
     const first = await drainTelemetryOnce(
       queue,
       async (body) => {
-        assert.equal((await ingestTelemetry(body, context, store)).ok, true)
+        firstIngestion = await ingestTelemetry(body, context, store)
         throw new Error('synthetic lost acknowledgement')
       },
       () => 1000,
       new AbortController().signal,
     )
-    assert.equal(first.status, 'retained')
+    assert.deepEqual(first, {
+      status: 'retained',
+      reason: 'transport',
+      loss: { expired: 0, capacity: 0, partialTail: false },
+    })
+    assert.equal(
+      firstIngestion?.ok,
+      true,
+      `First ingestion must persist before the lost acknowledgement: ${JSON.stringify(firstIngestion)}`,
+    )
     assert.equal(await count(), 1)
     queue.close()
     queue = new TelemetryQueue(directory, 1001)

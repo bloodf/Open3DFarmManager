@@ -362,15 +362,14 @@
       "Caminho pela porta Moonraker com chave por impressora"
     ],
     "implementation_paths": [
-      "packages/connector/src/kobralink/management-client.ts",
-      "packages/connector/src/kobralink/live-state.ts",
-      "packages/connector/src/kobralink/pause-driver.ts",
-      "packages/connector/src/config/kobralink.ts",
-      "tests/unit/kobralink-management-client.test.ts",
-      "tests/unit/kobralink-live-state.test.ts",
-      "tests/node/kobralink-pause-driver.test.ts",
-      "tests/helpers/kobralink-synthetic-service.ts",
-      "tests/fixtures/kobralink/*.json"
+      "packages/connector/src/kobralink/client.ts",
+      "packages/connector/src/kobralink/runtime.ts",
+      "packages/connector/src/kobralink/control-driver.ts",
+      "packages/connector/src/kobralink/configuration.ts",
+      "tests/node/kobralink-runtime.test.ts",
+      "tests/node/kobralink-extended-wire.test.ts",
+      "tests/node/kobralink-integration-fixture.test.ts",
+      "tests/fixtures/kobralink-integration/*.ts"
     ],
     "prerequisites": [
       "Decisão do fluxo de onboarding sobre onde a senha da conta do serviço é gerada e guardada (A7, A8).",

@@ -1,4 +1,6 @@
-import { z } from '../../packages/farm-protocol/node_modules/zod/index.js'
+import { rejectionWire } from './rtc-farm-rejection-wire.ts'
+import type { RtcRejectionKind } from './rtc-farm-rejections.ts'
+import { z } from 'zod'
 import {
   BrowserDeviceProofChallenge,
   signBrowserDeviceProof,
@@ -24,6 +26,7 @@ export type PauseExecutionBrowserScope = Readonly<{
   issuer: string
   kid: string
   publicKeySpki: string
+  rejection?: RtcRejectionKind
 }>
 
 export type PauseExecutionCommandReceipt = Readonly<{
@@ -47,6 +50,23 @@ export async function createPauseExecutionRtcBrowserActor(
   )
   const identity = await validateBrowserDevicePublicKey({ kty, crv, x, y })
 
+  // This disposable page records the actual channel frame for the adversarial
+  // replay. The maintained browser API correctly refuses a second command.
+  const originalSend = RTCDataChannel.prototype.send
+  let replayFrame: { channel: RTCDataChannel; wire: string } | undefined
+  if (scope.rejection === 'replayed') {
+    RTCDataChannel.prototype.send = function (
+      data: string | Blob | ArrayBuffer | ArrayBufferView<ArrayBuffer>,
+    ) {
+      if (typeof data === 'string' && data.includes('"t":"control.command"'))
+        replayFrame = { channel: this, wire: data }
+      const send = originalSend.bind(this)
+      if (typeof data === 'string') return send(data)
+      if (data instanceof Blob) return send(data)
+      if (data instanceof ArrayBuffer) return send(data)
+      return send(data)
+    }
+  }
   const abort = new AbortController()
   let enrolled = false
   let terminal = false
@@ -145,6 +165,22 @@ export async function createPauseExecutionRtcBrowserActor(
             } catch {
               // Captured on best effort
             }
+            if (
+              scope.rejection &&
+              scope.rejection !== 'replayed' &&
+              scope.rejection !== 'revoked-device'
+            ) {
+              void rejectionWire(scope.rejection, message.wire, pair.privateKey)
+                .then((wire) => {
+                  if (!client?.sendCommand({ t: 'control.command', wire }))
+                    stop()
+                })
+                .catch(() => {
+                  failed = true
+                  stop()
+                })
+              return true
+            }
             return client?.sendCommand(message) ?? false
           },
         },
@@ -205,6 +241,17 @@ export async function createPauseExecutionRtcBrowserActor(
       return await commandClient.pause()
     },
 
+    adversarialReplay(): boolean {
+      if (!replayFrame || replayFrame.channel.readyState !== 'open')
+        return false
+      const frame = JSON.parse(replayFrame.wire)
+      // Preserve the signed command, advance only the channel sequence so the
+      // duplicate-command guard, rather than stale sequence detection, rejects it.
+      frame.seq++
+      originalSend.bind(replayFrame.channel)(JSON.stringify(frame))
+      return true
+    },
+
     replay(): boolean {
       if (!client || !lastWire || terminal || failed) return false
       return client.sendCommand({ t: 'control.command', wire: lastWire })
@@ -212,6 +259,7 @@ export async function createPauseExecutionRtcBrowserActor(
 
     observe() {
       return {
+        terminalReason: client?.snapshot().reason ?? null,
         terminal,
         failed,
         commandHttpRequests,
@@ -225,6 +273,8 @@ export async function createPauseExecutionRtcBrowserActor(
     },
 
     async dispose() {
+      if (scope.rejection === 'replayed')
+        RTCDataChannel.prototype.send = originalSend
       stop()
       const results = await Promise.allSettled([
         commandClient?.settled,

@@ -2,6 +2,12 @@
 
 Issue #6 (E3). `pnpm run test:connector-outage` (`scripts/test-connector-outage-recovery.ts`) runs one integrated, reproducible acceptance of the Connector's durable telemetry path across server outages and its own restarts. It contributes the "outage and recovery, bounded telemetry drain" evidence required by [PHASE-0.md](PHASE-0.md); it is not the combined Phase 0 acceptance.
 
+## Issue #182 — pause authority during outages
+
+The opt-in runner now includes scenarios 7–9 for a signed pause refused after offline authority expiry, accepted after authenticated confirmation, and stale-authority audit entries retained in order across a runtime restart. `tests/node/outage-pause-scenarios.test.ts` verifies scenario names/order, signature verification, the real offline-authority tracker, and the durable audit writer without Docker or a printer.
+
+The first two real opt-in runs on 2026-11-17 exposed missing read-only `printer.objects.list` and `printer.objects.query` behavior in the synthetic Moonraker. The Connector correctly rejected the malformed replies. The fixture now implements both methods. A subsequent run passed all outage and pause scenarios with the pinned PostgreSQL image on isolated loopback ports: 153.8 s total, 25 exactly-once telemetry rows, 5 queue-cap evictions, 46 records/s measured drain rate, one credential renewal retry during outage, and all three pause scenarios passed (`signedCommandVerified`, authority stale/fresh as expected, and 2 ordered audit events). The runner reported `cleanup: complete`; it removed its container, roles, processes, listeners, and successful run directory. The earlier bounded diagnostics remain outside the repository under `/tmp/o3dfm-p1-outage-pause/`.
+
 ## What runs
 
 - A fresh, disposable, digest-pinned PostgreSQL 17 container (read-only root, tmpfs data, all capabilities dropped, loopback port), migrated to the current catalog. The runner never pulls an image or accepts a database URL, and removes only its own container, verified by ID, name and label.

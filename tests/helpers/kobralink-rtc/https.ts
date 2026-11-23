@@ -26,7 +26,7 @@ import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative } from 'node:path'
 import postgres from 'postgres'
-import { z } from '../../../packages/farm-protocol/node_modules/zod/index.js'
+import { z } from 'zod'
 import { hashPassword } from '../../../apps/farm/server/utils/auth/password.ts'
 import { signallingHttpsProxy } from '../signalling-https-proxy.ts'
 import { assertSignallingCatalog } from '../signalling-https-catalog.ts'
@@ -248,7 +248,7 @@ if (mode === '--prepare-layer') {
   const app = join(checkout, 'apps/farm')
   const output = join(layer, 'output')
   await symlink(
-    await realpath(join(app, 'node_modules')),
+    await realpath(join(checkout, 'node_modules')),
     join(layer, 'node_modules'),
     'dir',
   )
@@ -754,8 +754,6 @@ if (mode === '--prepare-layer') {
         NUXT_AUTH_DATABASE_URL: dbUrl(0),
         NUXT_PRINTER_ASSIGNMENTS_ENABLED: 'true',
         NUXT_PRINTER_ASSIGNMENTS_DATABASE_URL: dbUrl(8),
-        NUXT_PUBLIC_FLAGS_FARM_VIEW:
-          process.env.SIGNALLING_HTTPS_FARM_PAGE === 'yes' ? 'true' : 'false',
         ...(pauseIssuer
           ? {
               NUXT_PAUSE_AUTHORITY_ENABLED: 'true',

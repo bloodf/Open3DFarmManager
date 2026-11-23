@@ -1,6 +1,6 @@
 # Farm page pause checkpoint
 
-The farm page (`apps/farm/app/pages/farm.vue`) can now send one confirmed, signed pause for one assigned printer. The command travels only over the authenticated pause WebRTC data channel to the Connector. There is no HTTP or server command path; the only HTTP calls are the existing pause authority challenge and capability issuance.
+The farm page (`apps/farm/app/pages/farm.vue`) can now send one confirmed, signed pause for one assigned printer. Browser commands travel only over the authenticated pause WebRTC data channel to the Connector with no TURN or HTTP fallback; API-originated commands are delivered separately under owner-granted scopes. For the browser farm page, there is no HTTP fallback; the only HTTP calls are the existing pause authority challenge and capability issuance.
 
 ## When the button is enabled
 
@@ -32,7 +32,7 @@ Just after the direct connection recovers, **Pausar impressão** can be enabled 
 ## Validation boundary
 
 - `tests/node/farm-pause-control.test.ts`: real keys and signatures with issuer and signalling doubles. Covers one command after admission, no offer without enough capability validity, transport end before confirmation, unresolved key, cancel while ready, and every availability reason.
-- `tests/e2e/farm-view.spec.ts` (opt-in `FARM_VIEW_E2E=true`): the button stays disabled with the pt-BR reason when pause is not enabled and when no approved device is selected.
+- `tests/e2e/farm-view.spec.ts` (in the dedicated farm view Playwright configuration): the button stays disabled with the pt-BR reason when pause is not enabled and when no approved device is selected.
 - `farm-page-pause` in the real-RTC runner ([RTC-FARM-ACCEPTANCE-CHECKPOINT.md](RTC-FARM-ACCEPTANCE-CHECKPOINT.md)) drives this page end to end: login, live row, stale and revoked disabled reasons, the dialog, one confirmed signed pause over WebRTC and exactly one pause on the synthetic Moonraker.
 
 No physical printer was used.

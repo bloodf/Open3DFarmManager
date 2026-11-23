@@ -1,4 +1,13 @@
-import { TelemetryQueue, type QueueLoss } from './queue.ts'
+import {
+  parseBoundedJson,
+  TELEMETRY_BATCH_JSON_LIMITS,
+  TelemetryBatch,
+} from '@open3dfarmmanager/farm-protocol'
+import {
+  TelemetryQueue,
+  type QueueLoss,
+  type TelemetryRecord,
+} from './queue.ts'
 
 /** Internal adapter boundary only; no HTTP response format or authentication is defined. */
 export type TelemetrySender = (
@@ -8,15 +17,49 @@ export type TelemetrySender = (
 export type DrainResult =
   | { status: 'uncertain'; reason: 'queue'; loss?: QueueLoss }
   | { status: 'empty'; loss: QueueLoss }
+  | { status: 'dropped'; loss: QueueLoss }
   | { status: 'delivered'; count: number; loss: QueueLoss }
   | {
       status: 'retained'
-      reason:
-        'busy' | 'cancelled' | 'transport' | 'acknowledgement' | 'oversized'
+      reason: 'busy' | 'cancelled' | 'transport' | 'acknowledgement'
       loss?: QueueLoss
     }
 
 const active = new WeakSet<TelemetryQueue>()
+const MAX_BATCH_RECORDS = 100
+
+function withinBatchLimits(records: readonly TelemetryRecord[]): boolean {
+  try {
+    TelemetryBatch.parse(
+      parseBoundedJson(JSON.stringify(records), TELEMETRY_BATCH_JSON_LIMITS),
+    )
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The queue bounds a batch by count and bytes only; the upload also bounds
+ * its JSON value count. Send the longest prefix that fits, so a batch of
+ * value-rich records drains in smaller steps instead of being refused forever.
+ */
+function fittingPrefix(
+  records: readonly TelemetryRecord[],
+): readonly TelemetryRecord[] {
+  if (withinBatchLimits(records)) return records
+  let fits = 0
+  let low = 1
+  let high = records.length - 1
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2)
+    if (withinBatchLimits(records.slice(0, middle))) {
+      fits = middle
+      low = middle + 1
+    } else high = middle - 1
+  }
+  return records.slice(0, fits)
+}
 
 /**
  * One bounded attempt. Sender returns the exact ordered event-ID array only after
@@ -28,6 +71,7 @@ export async function drainTelemetryOnce(
   send: TelemetrySender,
   now: () => number,
   signal: AbortSignal,
+  onDrop: () => void = () => console.warn('telemetry-entry-dropped'),
 ): Promise<DrainResult> {
   if (active.has(queue)) return { status: 'retained', reason: 'busy' }
   if (signal.aborted) return { status: 'retained', reason: 'cancelled' }
@@ -38,20 +82,52 @@ export async function drainTelemetryOnce(
   let deliverySettled = false
   let finished = false
   try {
-    let batch
-    try {
-      batch = queue.batch(now(), 100, 64 * 1024)
-      loss = batch.loss
-    } catch {
-      return { status: 'uncertain', reason: 'queue' }
+    let records: readonly TelemetryRecord[]
+    for (let dropped = 0; ; dropped++) {
+      if (loss && (dropped === MAX_BATCH_RECORDS || queue.storageDegraded))
+        return { status: 'dropped', loss }
+      if (signal.aborted)
+        return {
+          status: 'retained',
+          reason: 'cancelled',
+          ...(loss && { loss }),
+        }
+      let batch
+      let batchNow
+      try {
+        batchNow = now()
+        batch = queue.batch(
+          batchNow,
+          MAX_BATCH_RECORDS,
+          TELEMETRY_BATCH_JSON_LIMITS.maxBytes,
+        )
+      } catch {
+        return { status: 'uncertain', reason: 'queue', ...(loss && { loss }) }
+      }
+      if (loss) {
+        loss.expired += batch.loss.expired
+        loss.capacity += batch.loss.capacity
+        loss.partialTail ||= batch.loss.partialTail
+      } else {
+        loss = batch.loss
+      }
+      if (signal.aborted)
+        return { status: 'retained', reason: 'cancelled', loss }
+      records = fittingPrefix(batch.records)
+      if (records.length) break
+      if (!queue.depth) return { status: 'empty', loss }
+      // Batch preparation and removal are synchronous. The unencodable head
+      // has not reached the sender and cannot be fixed by retrying it.
+      try {
+        queue.discardHead(batchNow)
+      } catch {
+        return { status: 'uncertain', reason: 'queue', loss }
+      }
+      onDrop()
     }
-    if (!batch.records.length)
-      return queue.depth
-        ? { status: 'retained', reason: 'oversized', loss }
-        : { status: 'empty', loss }
-    const ids = batch.records.map((record) => record.eventId)
+    const ids = records.map((record) => record.eventId)
     // The immutable serialized body prevents the adapter from changing the acknowledgement target.
-    const body = JSON.stringify(batch.records)
+    const body = JSON.stringify(records)
     let accepted: unknown
     try {
       const cancelled = new Promise<never>((_, reject) => {

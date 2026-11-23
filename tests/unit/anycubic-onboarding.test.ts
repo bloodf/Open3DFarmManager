@@ -167,7 +167,12 @@ async function apply(w: ReturnType<typeof world>, revision = 0) {
   return { prepare, prepared, commit, committed }
 }
 
-describe('Anycubic native onboarding', () => {
+// Every engine call here fsyncs its journal, credential and binding writes
+// (the durability the suite asserts), and these tests chain many such calls.
+// That is about 1-4 s idle but over 30 s when the os.tmpdir() disk is
+// contended, so the suite gets an explicit timeout rather than moving
+// fixtures to tmpfs.
+describe('Anycubic native onboarding', { timeout: 120_000 }, () => {
   it('accepts the provisional LAN contract and defaults to port 9883', () => {
     expect(ConfigurationTarget.parse(target())).toMatchObject({
       backend: 'anycubic',
@@ -636,83 +641,93 @@ describe('Anycubic native onboarding', () => {
 })
 
 describe('Anycubic form', () => {
-  it('dispatches the validated host through the signed session and persists recovery state', async () => {
-    const require = createRequire(resolve('apps/farm/package.json'))
-    const { parse, compileScript } = require('vue/compiler-sfc')
-    const { descriptor } = parse(
-      readFileSync('apps/farm/app/pages/impressoras.vue', 'utf8'),
-    )
-    const compiled = compileScript(descriptor, { id: 'anycubic-form' })
-    const node = compiled.scriptSetupAst.find(
-      (item: { type: string; id?: { name: string } }) =>
-        item.type === 'FunctionDeclaration' &&
-        item.id?.name === 'prepareAnycubicPrinter',
-    )
-    const javascript = transformSync(
-      descriptor.scriptSetup.content.slice(node.start, node.end),
-      { loader: 'ts', target: 'es2022' },
-    ).code
-    const ref = <T>(value: T) => ({ value })
-    const persisted: unknown[] = []
-    const sent: unknown[] = []
-    const context = {
-      kobraBusy: ref(false),
-      kobraBootstrap: ref({
-        kind: 'ready',
-        data: { bootstrap: { revision: 0 } },
-      }),
-      kobraError: ref(''),
-      kobraStatus: ref(''),
-      anycubicHost: ref('192.168.1.60'),
-      anycubicPort: ref(9883),
-      anycubicModelId: ref('20024'),
-      anycubicDeviceId: ref('device-1'),
-      anycubicUsername: ref('lan-user'),
-      anycubicPassword: ref('private-lan-password'),
-      withoutAnycubicCredentials,
-      kobraLabel: ref('K1'),
-      kobraGeneration: 1,
-      kobraController: null,
-      kobraStage: ref('idle'),
-      kobraKeyState: ref({ kind: 'available', accountId: 'admin' }),
-      farmId: ref(randomUUID()),
-      kobraAgentId: ref(randomUUID()),
-      kobraKeyId: ref(randomUUID()),
-      kobraOperation: ref<unknown>(null),
-      validateAnycubicTargetInput,
-      configurationTargetHash,
-      crypto,
-      AbortController,
-      persistPendingOperation: (input: unknown) => persisted.push(input),
-      ensureKobraSession: async () => ({
-        async prepare(input: { target: unknown; beforeDispatch: () => void }) {
-          input.beforeDispatch()
-          sent.push(input.target)
-          return { kind: 'prepared' }
-        },
-      }),
-      applySessionOutcome: vi.fn(),
-      handleKobraException: vi.fn(),
-      nextTick: async () => {},
-      kobraErrorSummary: ref(null),
-    }
-    const prepare = new Function(
-      'context',
-      `with (context) { ${javascript}; return prepareAnycubicPrinter }`,
-    )(context)
-    await prepare()
-    expect(sent).toEqual([target()])
-    expect(persisted).toHaveLength(1)
-    expect(JSON.stringify(persisted)).not.toContain('private-lan-password')
-    expect(JSON.stringify(persisted)).not.toContain('lan-user')
-    expect(context.anycubicPassword.value).toBe('')
-    expect(context.anycubicUsername.value).toBe('')
-    expect(context.applySessionOutcome).toHaveBeenCalledOnce()
-    expect(context.handleKobraException).not.toHaveBeenCalled()
-    context.anycubicHost.value = 'http://user:private@host'
-    await prepare()
-    expect(sent).toHaveLength(1)
-    expect(context.kobraError.value).not.toContain('private')
-    expect(context.kobraError.value).toContain('IPv4')
-  })
+  // Loading vue/compiler-sfc and compiling the full impressoras.vue page is
+  // inherently heavy (about 0.5 s idle, several seconds on a loaded CI host),
+  // so this test gets an explicit timeout instead of the 5 s default.
+  it(
+    'dispatches the validated host through the signed session and persists recovery state',
+    { timeout: 30_000 },
+    async () => {
+      const require = createRequire(resolve('apps/farm/package.json'))
+      const { parse, compileScript } = require('vue/compiler-sfc')
+      const { descriptor } = parse(
+        readFileSync('apps/farm/app/pages/impressoras.vue', 'utf8'),
+      )
+      const compiled = compileScript(descriptor, { id: 'anycubic-form' })
+      const node = compiled.scriptSetupAst.find(
+        (item: { type: string; id?: { name: string } }) =>
+          item.type === 'FunctionDeclaration' &&
+          item.id?.name === 'prepareAnycubicPrinter',
+      )
+      const javascript = transformSync(
+        descriptor.scriptSetup.content.slice(node.start, node.end),
+        { loader: 'ts', target: 'es2022' },
+      ).code
+      const ref = <T>(value: T) => ({ value })
+      const persisted: unknown[] = []
+      const sent: unknown[] = []
+      const context = {
+        kobraBusy: ref(false),
+        kobraBootstrap: ref({
+          kind: 'ready',
+          data: { bootstrap: { revision: 0 } },
+        }),
+        kobraError: ref(''),
+        kobraStatus: ref(''),
+        anycubicHost: ref('192.168.1.60'),
+        anycubicPort: ref(9883),
+        anycubicModelId: ref('20024'),
+        anycubicDeviceId: ref('device-1'),
+        anycubicUsername: ref('lan-user'),
+        anycubicPassword: ref('private-lan-password'),
+        withoutAnycubicCredentials,
+        kobraLabel: ref('K1'),
+        kobraGeneration: 1,
+        kobraController: null,
+        kobraStage: ref('idle'),
+        kobraKeyState: ref({ kind: 'available', accountId: 'admin' }),
+        farmId: ref(randomUUID()),
+        kobraAgentId: ref(randomUUID()),
+        kobraKeyId: ref(randomUUID()),
+        kobraOperation: ref<unknown>(null),
+        validateAnycubicTargetInput,
+        configurationTargetHash,
+        crypto,
+        AbortController,
+        persistPendingOperation: (input: unknown) => persisted.push(input),
+        ensureKobraSession: async () => ({
+          async prepare(input: {
+            target: unknown
+            beforeDispatch: () => void
+          }) {
+            input.beforeDispatch()
+            sent.push(input.target)
+            return { kind: 'prepared' }
+          },
+        }),
+        applySessionOutcome: vi.fn(),
+        handleKobraException: vi.fn(),
+        nextTick: async () => {},
+        kobraErrorSummary: ref(null),
+      }
+      const prepare = new Function(
+        'context',
+        `with (context) { ${javascript}; return prepareAnycubicPrinter }`,
+      )(context)
+      await prepare()
+      expect(sent).toEqual([target()])
+      expect(persisted).toHaveLength(1)
+      expect(JSON.stringify(persisted)).not.toContain('private-lan-password')
+      expect(JSON.stringify(persisted)).not.toContain('lan-user')
+      expect(context.anycubicPassword.value).toBe('')
+      expect(context.anycubicUsername.value).toBe('')
+      expect(context.applySessionOutcome).toHaveBeenCalledOnce()
+      expect(context.handleKobraException).not.toHaveBeenCalled()
+      context.anycubicHost.value = 'http://user:private@host'
+      await prepare()
+      expect(sent).toHaveLength(1)
+      expect(context.kobraError.value).not.toContain('private')
+      expect(context.kobraError.value).toContain('IPv4')
+    },
+  )
 })

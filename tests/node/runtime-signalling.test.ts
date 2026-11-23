@@ -248,15 +248,24 @@ test('an admitted session resets reconnect backoff to the minimum; unadmitted se
   async function gaps(admit: boolean) {
     const controller = new AbortController()
     const starts: number[] = []
+    const delays: number[] = []
+    let admittedUptime = 0
     const running = runSignallingLifecycle({
-      credentialExpiresAt: Date.now() + 10000,
+      credentialExpiresAt: Date.now() + 1_000_000,
+      monotonic: () => performance.now() + admittedUptime,
       retryMinMs: 20,
       retryMaxMs: 400,
+      sleep: async (ms, signal) => {
+        delays.push(ms)
+        if (signal.aborted) return
+      },
       signal: controller.signal,
       createSession(terminal, admitted) {
         starts.push(performance.now())
         setImmediate(() => {
           if (admit) admitted()
+          // Model a healthy admitted session; flapping is covered separately.
+          if (admit) admittedUptime += 30_000
           terminal()
           // A late admission after terminal never resets backoff.
           if (!admit) admitted()
@@ -268,13 +277,57 @@ test('an admitted session resets reconnect backoff to the minimum; unadmitted se
         }
       },
     })
-    while (starts.length < 5) await new Promise((r) => setTimeout(r, 5))
+    while (starts.length < 5) await tick()
     controller.abort()
     await running
-    return starts.slice(1).map((value, index) => value - starts[index]!)
+    return delays
   }
   const admitted = await gaps(true)
   const unadmitted = await gaps(false)
-  assert.ok(Math.max(...admitted) < 120, String(admitted))
-  assert.ok(unadmitted[3]! >= 150, String(unadmitted))
+  assert.deepEqual(admitted.slice(0, 4), [20, 20, 20, 20])
+  assert.deepEqual(unadmitted.slice(0, 4), [20, 40, 80, 160])
+})
+
+test('a single-use session that served its peer resets backoff; one that never served still backs off', async () => {
+  async function gaps(serve: 'before' | 'after' | 'never') {
+    const controller = new AbortController()
+    const starts: number[] = []
+    const delays: number[] = []
+    const running = runSignallingLifecycle({
+      credentialExpiresAt: Date.now() + 1_000_000,
+      retryMinMs: 20,
+      retryMaxMs: 400,
+      sleep: async (ms, signal) => {
+        delays.push(ms)
+        if (signal.aborted) return
+      },
+      signal: controller.signal,
+      createSession(terminal, admitted, served) {
+        starts.push(performance.now())
+        setImmediate(() => {
+          // Admitted but far short of 30 s of uptime, like a control session.
+          admitted()
+          if (serve === 'before') served()
+          terminal()
+          // Serving after terminal never resets backoff.
+          if (serve === 'after') served()
+        })
+        return {
+          start: async () => {},
+          close() {},
+          dispose: async () => {},
+        }
+      },
+    })
+    while (starts.length < 5) await tick()
+    controller.abort()
+    await running
+    return delays
+  }
+  const served = await gaps('before')
+  const late = await gaps('after')
+  const never = await gaps('never')
+  assert.deepEqual(served.slice(0, 4), [20, 20, 20, 20])
+  assert.deepEqual(late.slice(0, 4), [20, 40, 80, 160])
+  assert.deepEqual(never.slice(0, 4), [20, 40, 80, 160])
 })

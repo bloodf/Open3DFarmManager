@@ -1,0 +1,1311 @@
+[
+  {
+    "name": "vendor-list-empty",
+    "method": "GET",
+    "path": "/api/v1/vendor"
+  },
+  {
+    "name": "vendor-create-full",
+    "method": "POST",
+    "path": "/api/v1/vendor",
+    "body": {
+      "name": "Polymaker",
+      "comment": "Shanghai",
+      "empty_spool_weight": 140,
+      "external_id": "polymaker"
+    }
+  },
+  {
+    "name": "vendor-create-minimal",
+    "method": "POST",
+    "path": "/api/v1/vendor",
+    "body": {
+      "name": "eSun"
+    }
+  },
+  {
+    "name": "vendor-create-empty-name",
+    "method": "POST",
+    "path": "/api/v1/vendor",
+    "body": {
+      "name": ""
+    }
+  },
+  {
+    "name": "vendor-create-numeric-string-weight",
+    "method": "POST",
+    "path": "/api/v1/vendor",
+    "body": {
+      "name": "Prusament",
+      "empty_spool_weight": "201.5",
+      "ignored_field": true
+    }
+  },
+  {
+    "name": "vendor-create-missing-name",
+    "method": "POST",
+    "path": "/api/v1/vendor",
+    "body": {
+      "comment": "x"
+    }
+  },
+  {
+    "name": "vendor-create-name-too-long",
+    "method": "POST",
+    "path": "/api/v1/vendor",
+    "body": {
+      "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+  },
+  {
+    "name": "vendor-create-name-wrong-type",
+    "method": "POST",
+    "path": "/api/v1/vendor",
+    "body": {
+      "name": 123
+    }
+  },
+  {
+    "name": "vendor-create-name-null",
+    "method": "POST",
+    "path": "/api/v1/vendor",
+    "body": {
+      "name": null
+    }
+  },
+  {
+    "name": "vendor-create-negative-weight",
+    "method": "POST",
+    "path": "/api/v1/vendor",
+    "body": {
+      "name": "a",
+      "empty_spool_weight": -1
+    }
+  },
+  {
+    "name": "vendor-create-unparsable-weight",
+    "method": "POST",
+    "path": "/api/v1/vendor",
+    "body": {
+      "name": "a",
+      "empty_spool_weight": "heavy"
+    }
+  },
+  {
+    "name": "vendor-create-comment-too-long",
+    "method": "POST",
+    "path": "/api/v1/vendor",
+    "body": {
+      "name": "a",
+      "comment": "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    }
+  },
+  {
+    "name": "vendor-create-extra-not-dict",
+    "method": "POST",
+    "path": "/api/v1/vendor",
+    "body": {
+      "name": "a",
+      "extra": ["x"]
+    }
+  },
+  {
+    "name": "vendor-create-extra-value-not-string",
+    "method": "POST",
+    "path": "/api/v1/vendor",
+    "body": {
+      "name": "a",
+      "extra": {
+        "rating": 5
+      }
+    }
+  },
+  {
+    "name": "vendor-create-several-errors",
+    "method": "POST",
+    "path": "/api/v1/vendor",
+    "body": {
+      "name": 7,
+      "empty_spool_weight": -2,
+      "external_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    }
+  },
+  {
+    "name": "vendor-create-invalid-json",
+    "method": "POST",
+    "path": "/api/v1/vendor",
+    "rawBody": "{not json",
+    "contentType": "application/json",
+    "compare": "status-type"
+  },
+  {
+    "name": "vendor-create-no-body",
+    "method": "POST",
+    "path": "/api/v1/vendor"
+  },
+  {
+    "name": "vendor-create-array-body",
+    "method": "POST",
+    "path": "/api/v1/vendor",
+    "body": [
+      {
+        "name": "a"
+      }
+    ]
+  },
+  {
+    "name": "vendor-create-text-plain",
+    "method": "POST",
+    "path": "/api/v1/vendor",
+    "rawBody": "{\"name\":\"a\"}",
+    "contentType": "text/plain"
+  },
+  {
+    "name": "vendor-create-unknown-extra",
+    "method": "POST",
+    "path": "/api/v1/vendor",
+    "body": {
+      "name": "a",
+      "extra": {
+        "rating": "5"
+      }
+    }
+  },
+  {
+    "name": "field-vendor-rating",
+    "method": "POST",
+    "path": "/api/v1/field/vendor/rating",
+    "body": {
+      "name": "Rating",
+      "field_type": "integer"
+    },
+    "setup": "field"
+  },
+  {
+    "name": "field-vendor-note",
+    "method": "POST",
+    "path": "/api/v1/field/vendor/note",
+    "body": {
+      "name": "Note",
+      "field_type": "text"
+    },
+    "setup": "field"
+  },
+  {
+    "name": "field-vendor-tags",
+    "method": "POST",
+    "path": "/api/v1/field/vendor/tags",
+    "body": {
+      "name": "Tags",
+      "field_type": "choice",
+      "choices": ["fast", "cheap", "good"],
+      "multi_choice": true
+    },
+    "setup": "field"
+  },
+  {
+    "name": "field-vendor-span",
+    "method": "POST",
+    "path": "/api/v1/field/vendor/span",
+    "body": {
+      "name": "Span",
+      "field_type": "integer_range"
+    },
+    "setup": "field"
+  },
+  {
+    "name": "vendor-create-with-extra",
+    "method": "POST",
+    "path": "/api/v1/vendor",
+    "body": {
+      "name": "Elegoo",
+      "extra": {
+        "rating": "5",
+        "note": "\"hello world\"",
+        "tags": "[\"fast\", \"good\"]",
+        "span": "[1, 9]"
+      }
+    }
+  },
+  {
+    "name": "vendor-create-extra-null-dropped",
+    "method": "POST",
+    "path": "/api/v1/vendor",
+    "body": {
+      "name": "Sunlu",
+      "extra": {
+        "rating": "2",
+        "note": null
+      }
+    }
+  },
+  {
+    "name": "vendor-create-extra-invalid-json",
+    "method": "POST",
+    "path": "/api/v1/vendor",
+    "body": {
+      "name": "a",
+      "extra": {
+        "rating": "five"
+      }
+    }
+  },
+  {
+    "name": "vendor-create-extra-wrong-type",
+    "method": "POST",
+    "path": "/api/v1/vendor",
+    "body": {
+      "name": "a",
+      "extra": {
+        "rating": "\"5\""
+      }
+    }
+  },
+  {
+    "name": "vendor-create-extra-bool-not-int",
+    "method": "POST",
+    "path": "/api/v1/vendor",
+    "body": {
+      "name": "a",
+      "extra": {
+        "rating": "true"
+      }
+    }
+  },
+  {
+    "name": "vendor-create-extra-bad-choice",
+    "method": "POST",
+    "path": "/api/v1/vendor",
+    "body": {
+      "name": "a",
+      "extra": {
+        "tags": "[\"slow\"]"
+      }
+    }
+  },
+  {
+    "name": "vendor-create-extra-bad-range",
+    "method": "POST",
+    "path": "/api/v1/vendor",
+    "body": {
+      "name": "a",
+      "extra": {
+        "span": "[1]"
+      }
+    }
+  },
+  {
+    "name": "vendor-list-all",
+    "method": "GET",
+    "path": "/api/v1/vendor"
+  },
+  {
+    "name": "vendor-get",
+    "method": "GET",
+    "path": "/api/v1/vendor/1"
+  },
+  {
+    "name": "vendor-get-missing",
+    "method": "GET",
+    "path": "/api/v1/vendor/999"
+  },
+  {
+    "name": "vendor-get-not-int",
+    "method": "GET",
+    "path": "/api/v1/vendor/abc"
+  },
+  {
+    "name": "vendor-get-signed",
+    "method": "GET",
+    "path": "/api/v1/vendor/+2"
+  },
+  {
+    "name": "vendor-filter-name-partial",
+    "method": "GET",
+    "path": "/api/v1/vendor?name=POLY"
+  },
+  {
+    "name": "vendor-filter-name-exact",
+    "method": "GET",
+    "path": "/api/v1/vendor?name=%22eSun%22"
+  },
+  {
+    "name": "vendor-filter-name-exact-miss",
+    "method": "GET",
+    "path": "/api/v1/vendor?name=%22esun%22"
+  },
+  {
+    "name": "vendor-filter-name-multi",
+    "method": "GET",
+    "path": "/api/v1/vendor?name=elegoo,sun"
+  },
+  {
+    "name": "vendor-filter-name-empty",
+    "method": "GET",
+    "path": "/api/v1/vendor?name="
+  },
+  {
+    "name": "vendor-filter-name-wildcard",
+    "method": "GET",
+    "path": "/api/v1/vendor?name=e_un"
+  },
+  {
+    "name": "vendor-filter-name-last-wins",
+    "method": "GET",
+    "path": "/api/v1/vendor?name=zzz&name=poly"
+  },
+  {
+    "name": "vendor-filter-external-empty",
+    "method": "GET",
+    "path": "/api/v1/vendor?external_id="
+  },
+  {
+    "name": "vendor-filter-external-exact",
+    "method": "GET",
+    "path": "/api/v1/vendor?external_id=%22polymaker%22"
+  },
+  {
+    "name": "vendor-sort-name-asc",
+    "method": "GET",
+    "path": "/api/v1/vendor?sort=name:asc"
+  },
+  {
+    "name": "vendor-sort-weight-desc-nulls-last",
+    "method": "GET",
+    "path": "/api/v1/vendor?sort=empty_spool_weight:desc"
+  },
+  {
+    "name": "vendor-sort-multi",
+    "method": "GET",
+    "path": "/api/v1/vendor?sort=empty_spool_weight:asc,%20name:DESC"
+  },
+  {
+    "name": "vendor-sort-no-direction",
+    "method": "GET",
+    "path": "/api/v1/vendor?sort=name"
+  },
+  {
+    "name": "vendor-sort-bad-direction",
+    "method": "GET",
+    "path": "/api/v1/vendor?sort=name:up"
+  },
+  {
+    "name": "vendor-sort-no-field",
+    "method": "GET",
+    "path": "/api/v1/vendor?sort=:asc"
+  },
+  {
+    "name": "vendor-sort-unknown-field",
+    "method": "GET",
+    "path": "/api/v1/vendor?sort=bogus:asc"
+  },
+  {
+    "name": "vendor-sort-nested-relation",
+    "method": "GET",
+    "path": "/api/v1/vendor?sort=vendor.name:asc"
+  },
+  {
+    "name": "vendor-sort-nested-column",
+    "method": "GET",
+    "path": "/api/v1/vendor?sort=name.x:asc"
+  },
+  {
+    "name": "vendor-sort-registered",
+    "method": "GET",
+    "path": "/api/v1/vendor?sort=registered:desc,id:desc"
+  },
+  {
+    "name": "vendor-page",
+    "method": "GET",
+    "path": "/api/v1/vendor?limit=2&offset=1&sort=id:asc"
+  },
+  {
+    "name": "vendor-page-zero",
+    "method": "GET",
+    "path": "/api/v1/vendor?limit=0"
+  },
+  {
+    "name": "vendor-page-negative-limit",
+    "method": "GET",
+    "path": "/api/v1/vendor?limit=-1&offset=2"
+  },
+  {
+    "name": "vendor-page-negative-offset",
+    "method": "GET",
+    "path": "/api/v1/vendor?limit=2&offset=-3"
+  },
+  {
+    "name": "vendor-offset-without-limit",
+    "method": "GET",
+    "path": "/api/v1/vendor?offset=3"
+  },
+  {
+    "name": "vendor-page-beyond",
+    "method": "GET",
+    "path": "/api/v1/vendor?limit=5&offset=50"
+  },
+  {
+    "name": "vendor-limit-not-int",
+    "method": "GET",
+    "path": "/api/v1/vendor?limit=many"
+  },
+  {
+    "name": "vendor-limit-and-offset-not-int",
+    "method": "GET",
+    "path": "/api/v1/vendor?limit=1.5&offset=x"
+  },
+  {
+    "name": "vendor-extra-int-exact",
+    "method": "GET",
+    "path": "/api/v1/vendor?extra.rating=5"
+  },
+  {
+    "name": "vendor-extra-int-range",
+    "method": "GET",
+    "path": "/api/v1/vendor?extra.rating=1:3"
+  },
+  {
+    "name": "vendor-extra-int-open-range",
+    "method": "GET",
+    "path": "/api/v1/vendor?extra.rating=3:"
+  },
+  {
+    "name": "vendor-extra-int-invalid",
+    "method": "GET",
+    "path": "/api/v1/vendor?extra.rating=five"
+  },
+  {
+    "name": "vendor-extra-int-range-invalid",
+    "method": "GET",
+    "path": "/api/v1/vendor?extra.rating=a:b"
+  },
+  {
+    "name": "vendor-extra-int-range-empty",
+    "method": "GET",
+    "path": "/api/v1/vendor?extra.rating=:"
+  },
+  {
+    "name": "vendor-extra-empty",
+    "method": "GET",
+    "path": "/api/v1/vendor?extra.rating="
+  },
+  {
+    "name": "vendor-extra-text-partial",
+    "method": "GET",
+    "path": "/api/v1/vendor?extra.note=WORLD"
+  },
+  {
+    "name": "vendor-extra-text-exact",
+    "method": "GET",
+    "path": "/api/v1/vendor?extra.note=%22hello%20world%22"
+  },
+  {
+    "name": "vendor-extra-choice-multi",
+    "method": "GET",
+    "path": "/api/v1/vendor?extra.tags=good"
+  },
+  {
+    "name": "vendor-extra-range",
+    "method": "GET",
+    "path": "/api/v1/vendor?extra.span=0:10"
+  },
+  {
+    "name": "vendor-extra-range-no-colon",
+    "method": "GET",
+    "path": "/api/v1/vendor?extra.span=5"
+  },
+  {
+    "name": "vendor-extra-unknown-ignored",
+    "method": "GET",
+    "path": "/api/v1/vendor?extra.nothing=1"
+  },
+  {
+    "name": "vendor-sort-extra",
+    "method": "GET",
+    "path": "/api/v1/vendor?sort=extra.rating:desc,name:asc"
+  },
+  {
+    "name": "vendor-sort-extra-unknown-ignored",
+    "method": "GET",
+    "path": "/api/v1/vendor?sort=extra.nothing:desc"
+  },
+  {
+    "name": "vendor-update",
+    "method": "PATCH",
+    "path": "/api/v1/vendor/1",
+    "body": {
+      "comment": null,
+      "empty_spool_weight": 200,
+      "external_id": "pm-2"
+    }
+  },
+  {
+    "name": "vendor-update-empty-body",
+    "method": "PATCH",
+    "path": "/api/v1/vendor/2",
+    "body": {}
+  },
+  {
+    "name": "vendor-update-name-null",
+    "method": "PATCH",
+    "path": "/api/v1/vendor/1",
+    "body": {
+      "name": null
+    }
+  },
+  {
+    "name": "vendor-update-path-and-body-errors",
+    "method": "PATCH",
+    "path": "/api/v1/vendor/x",
+    "body": {
+      "name": null,
+      "comment": 5
+    }
+  },
+  {
+    "name": "vendor-update-missing",
+    "method": "PATCH",
+    "path": "/api/v1/vendor/999",
+    "body": {
+      "name": "n"
+    }
+  },
+  {
+    "name": "vendor-update-unknown-extra-before-404",
+    "method": "PATCH",
+    "path": "/api/v1/vendor/999",
+    "body": {
+      "extra": {
+        "nope": "1"
+      }
+    }
+  },
+  {
+    "name": "vendor-update-extra-merge",
+    "method": "PATCH",
+    "path": "/api/v1/vendor/5",
+    "body": {
+      "extra": {
+        "note": null,
+        "rating": "4"
+      }
+    }
+  },
+  {
+    "name": "vendor-method-not-allowed",
+    "method": "PUT",
+    "path": "/api/v1/vendor/1",
+    "body": {
+      "name": "x"
+    }
+  },
+  {
+    "name": "vendor-collection-method-not-allowed",
+    "method": "DELETE",
+    "path": "/api/v1/vendor"
+  },
+  {
+    "name": "filament-list-empty",
+    "method": "GET",
+    "path": "/api/v1/filament"
+  },
+  {
+    "name": "filament-create-minimal",
+    "method": "POST",
+    "path": "/api/v1/filament",
+    "body": {
+      "density": 1.24,
+      "diameter": 1.75
+    }
+  },
+  {
+    "name": "filament-create-full",
+    "method": "POST",
+    "path": "/api/v1/filament",
+    "body": {
+      "name": "PolyTerra Charcoal Black",
+      "vendor_id": 1,
+      "material": "PLA",
+      "price": 20,
+      "density": 1.24,
+      "diameter": 1.75,
+      "weight": 1000,
+      "article_number": "PM70820",
+      "comment": "matte",
+      "settings_extruder_temp": 210,
+      "settings_bed_temp": 60,
+      "color_hex": "#ff0000",
+      "external_id": "polymaker_pla"
+    }
+  },
+  {
+    "name": "filament-create-vendor-weight-default",
+    "method": "POST",
+    "path": "/api/v1/filament",
+    "body": {
+      "name": "Fallback",
+      "vendor_id": 1,
+      "material": "PETG",
+      "density": 1.27,
+      "diameter": 1.75,
+      "color_hex": "00FF00"
+    }
+  },
+  {
+    "name": "filament-create-explicit-spool-weight",
+    "method": "POST",
+    "path": "/api/v1/filament",
+    "body": {
+      "name": "Own spool",
+      "vendor_id": 1,
+      "material": "pla+",
+      "density": 1.24,
+      "diameter": 2.85,
+      "spool_weight": 0,
+      "price": 35.5,
+      "color_hex": "0000ff80"
+    }
+  },
+  {
+    "name": "filament-create-multi-color",
+    "method": "POST",
+    "path": "/api/v1/filament",
+    "body": {
+      "name": "Rainbow",
+      "vendor_id": 2,
+      "material": "Silk PLA",
+      "density": 1.24,
+      "diameter": 1.75,
+      "multi_color_hexes": "#ff0000,00ff00,0000FF",
+      "multi_color_direction": "coaxial",
+      "settings_extruder_temp": "215"
+    }
+  },
+  {
+    "name": "filament-create-missing-vendor",
+    "method": "POST",
+    "path": "/api/v1/filament",
+    "body": {
+      "vendor_id": 999,
+      "density": 1.24,
+      "diameter": 1.75
+    }
+  },
+  {
+    "name": "filament-create-missing-density-diameter",
+    "method": "POST",
+    "path": "/api/v1/filament",
+    "body": {
+      "name": "x"
+    }
+  },
+  {
+    "name": "filament-create-density-zero",
+    "method": "POST",
+    "path": "/api/v1/filament",
+    "body": {
+      "density": 0,
+      "diameter": 1.75
+    }
+  },
+  {
+    "name": "filament-create-weight-zero",
+    "method": "POST",
+    "path": "/api/v1/filament",
+    "body": {
+      "density": 1,
+      "diameter": 1.75,
+      "weight": 0
+    }
+  },
+  {
+    "name": "filament-create-temp-fraction",
+    "method": "POST",
+    "path": "/api/v1/filament",
+    "body": {
+      "density": 1,
+      "diameter": 1.75,
+      "settings_extruder_temp": 210.5
+    }
+  },
+  {
+    "name": "filament-create-temp-negative",
+    "method": "POST",
+    "path": "/api/v1/filament",
+    "body": {
+      "density": 1,
+      "diameter": 1.75,
+      "settings_bed_temp": -1
+    }
+  },
+  {
+    "name": "filament-create-temp-string",
+    "method": "POST",
+    "path": "/api/v1/filament",
+    "body": {
+      "density": 1,
+      "diameter": 1.75,
+      "settings_bed_temp": "hot"
+    }
+  },
+  {
+    "name": "filament-create-vendor-id-string",
+    "method": "POST",
+    "path": "/api/v1/filament",
+    "body": {
+      "density": 1,
+      "diameter": 1.75,
+      "vendor_id": "one"
+    }
+  },
+  {
+    "name": "filament-create-bad-color-char",
+    "method": "POST",
+    "path": "/api/v1/filament",
+    "body": {
+      "density": 1,
+      "diameter": 1.75,
+      "color_hex": "GG0000"
+    }
+  },
+  {
+    "name": "filament-create-bad-color-length",
+    "method": "POST",
+    "path": "/api/v1/filament",
+    "body": {
+      "density": 1,
+      "diameter": 1.75,
+      "color_hex": "FFF"
+    }
+  },
+  {
+    "name": "filament-create-empty-color-is-null",
+    "method": "POST",
+    "path": "/api/v1/filament",
+    "body": {
+      "name": "No color",
+      "density": 1.1,
+      "diameter": 1.75,
+      "color_hex": ""
+    }
+  },
+  {
+    "name": "filament-create-color-and-multi",
+    "method": "POST",
+    "path": "/api/v1/filament",
+    "body": {
+      "density": 1,
+      "diameter": 1.75,
+      "color_hex": "FF0000",
+      "multi_color_hexes": "FF0000,00FF00",
+      "multi_color_direction": "coaxial"
+    }
+  },
+  {
+    "name": "filament-create-multi-single",
+    "method": "POST",
+    "path": "/api/v1/filament",
+    "body": {
+      "density": 1,
+      "diameter": 1.75,
+      "multi_color_hexes": "FF0000",
+      "multi_color_direction": "coaxial"
+    }
+  },
+  {
+    "name": "filament-create-multi-no-direction",
+    "method": "POST",
+    "path": "/api/v1/filament",
+    "body": {
+      "density": 1,
+      "diameter": 1.75,
+      "multi_color_hexes": "FF0000,00FF00"
+    }
+  },
+  {
+    "name": "filament-create-direction-no-multi",
+    "method": "POST",
+    "path": "/api/v1/filament",
+    "body": {
+      "density": 1,
+      "diameter": 1.75,
+      "multi_color_direction": "longitudinal"
+    }
+  },
+  {
+    "name": "filament-create-bad-direction",
+    "method": "POST",
+    "path": "/api/v1/filament",
+    "body": {
+      "density": 1,
+      "diameter": 1.75,
+      "multi_color_direction": "diagonal"
+    }
+  },
+  {
+    "name": "filament-create-bad-multi-part",
+    "method": "POST",
+    "path": "/api/v1/filament",
+    "body": {
+      "density": 1,
+      "diameter": 1.75,
+      "multi_color_hexes": "FF0000,,00FF00",
+      "multi_color_direction": "coaxial"
+    }
+  },
+  {
+    "name": "filament-create-field-and-color-errors",
+    "method": "POST",
+    "path": "/api/v1/filament",
+    "body": {
+      "diameter": -1,
+      "color_hex": "XYZXYZ",
+      "name": 5
+    }
+  },
+  {
+    "name": "filament-create-name-too-long",
+    "method": "POST",
+    "path": "/api/v1/filament",
+    "body": {
+      "density": 1,
+      "diameter": 1.75,
+      "name": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+      "material": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+      "article_number": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  {
+    "name": "field-filament-batch",
+    "method": "POST",
+    "path": "/api/v1/field/filament/batch",
+    "body": {
+      "name": "Batch",
+      "field_type": "text"
+    },
+    "setup": "field"
+  },
+  {
+    "name": "field-filament-dry",
+    "method": "POST",
+    "path": "/api/v1/field/filament/dry",
+    "body": {
+      "name": "Dried",
+      "field_type": "boolean"
+    },
+    "setup": "field"
+  },
+  {
+    "name": "field-filament-hours",
+    "method": "POST",
+    "path": "/api/v1/field/filament/hours",
+    "body": {
+      "name": "Hours",
+      "field_type": "float"
+    },
+    "setup": "field"
+  },
+  {
+    "name": "filament-create-with-extra",
+    "method": "POST",
+    "path": "/api/v1/filament",
+    "body": {
+      "name": "Extra",
+      "density": 1.2,
+      "diameter": 1.75,
+      "material": "ABS",
+      "extra": {
+        "batch": "\"B-12\"",
+        "dry": "true",
+        "hours": "4.5"
+      }
+    }
+  },
+  {
+    "name": "filament-create-unknown-extra",
+    "method": "POST",
+    "path": "/api/v1/filament",
+    "body": {
+      "density": 1,
+      "diameter": 1.75,
+      "extra": {
+        "nope": "1"
+      }
+    }
+  },
+  {
+    "name": "filament-list",
+    "method": "GET",
+    "path": "/api/v1/filament"
+  },
+  {
+    "name": "filament-get",
+    "method": "GET",
+    "path": "/api/v1/filament/2"
+  },
+  {
+    "name": "filament-get-missing",
+    "method": "GET",
+    "path": "/api/v1/filament/999"
+  },
+  {
+    "name": "filament-get-not-int",
+    "method": "GET",
+    "path": "/api/v1/filament/two"
+  },
+  {
+    "name": "filament-filter-vendor-name",
+    "method": "GET",
+    "path": "/api/v1/filament?vendor.name=poly"
+  },
+  {
+    "name": "filament-filter-vendor-name-old",
+    "method": "GET",
+    "path": "/api/v1/filament?vendor_name=esun"
+  },
+  {
+    "name": "filament-filter-vendor-name-empty",
+    "method": "GET",
+    "path": "/api/v1/filament?vendor.name="
+  },
+  {
+    "name": "filament-filter-vendor-id",
+    "method": "GET",
+    "path": "/api/v1/filament?vendor.id=1"
+  },
+  {
+    "name": "filament-filter-vendor-id-multi-none",
+    "method": "GET",
+    "path": "/api/v1/filament?vendor.id=2,-1"
+  },
+  {
+    "name": "filament-filter-vendor-id-old",
+    "method": "GET",
+    "path": "/api/v1/filament?vendor_id=2"
+  },
+  {
+    "name": "filament-filter-vendor-id-new-wins",
+    "method": "GET",
+    "path": "/api/v1/filament?vendor_id=2&vendor.id=1"
+  },
+  {
+    "name": "filament-filter-vendor-id-invalid",
+    "method": "GET",
+    "path": "/api/v1/filament?vendor.id=one"
+  },
+  {
+    "name": "filament-filter-vendor-id-old-invalid",
+    "method": "GET",
+    "path": "/api/v1/filament?vendor_id=1,"
+  },
+  {
+    "name": "filament-filter-material",
+    "method": "GET",
+    "path": "/api/v1/filament?material=pla"
+  },
+  {
+    "name": "filament-filter-material-exact",
+    "method": "GET",
+    "path": "/api/v1/filament?material=%22PLA%22"
+  },
+  {
+    "name": "filament-filter-name-empty",
+    "method": "GET",
+    "path": "/api/v1/filament?name="
+  },
+  {
+    "name": "filament-filter-article",
+    "method": "GET",
+    "path": "/api/v1/filament?article_number=pm7"
+  },
+  {
+    "name": "filament-filter-external-empty",
+    "method": "GET",
+    "path": "/api/v1/filament?external_id="
+  },
+  {
+    "name": "filament-filter-color",
+    "method": "GET",
+    "path": "/api/v1/filament?color_hex=FF0000"
+  },
+  {
+    "name": "filament-filter-color-hash-threshold",
+    "method": "GET",
+    "path": "/api/v1/filament?color_hex=%23ee1111&color_similarity_threshold=5"
+  },
+  {
+    "name": "filament-filter-color-wide",
+    "method": "GET",
+    "path": "/api/v1/filament?color_hex=00ff00&color_similarity_threshold=100"
+  },
+  {
+    "name": "filament-filter-threshold-invalid",
+    "method": "GET",
+    "path": "/api/v1/filament?color_hex=00ff00&color_similarity_threshold=close"
+  },
+  {
+    "name": "filament-filter-tag-invalid",
+    "method": "GET",
+    "path": "/api/v1/filament?tag=zz"
+  },
+  {
+    "name": "filament-filter-tag-odd",
+    "method": "GET",
+    "path": "/api/v1/filament?tag=04A"
+  },
+  {
+    "name": "filament-filter-tag-empty",
+    "method": "GET",
+    "path": "/api/v1/filament?tag="
+  },
+  {
+    "name": "filament-filter-tag-valid",
+    "method": "GET",
+    "path": "/api/v1/filament?tag=04:a2:b3:c4"
+  },
+  {
+    "name": "filament-filter-extra-text",
+    "method": "GET",
+    "path": "/api/v1/filament?extra.batch=b-1"
+  },
+  {
+    "name": "filament-filter-extra-bool",
+    "method": "GET",
+    "path": "/api/v1/filament?extra.dry=TRUE"
+  },
+  {
+    "name": "filament-filter-extra-bool-empty",
+    "method": "GET",
+    "path": "/api/v1/filament?extra.dry="
+  },
+  {
+    "name": "filament-filter-extra-bool-invalid",
+    "method": "GET",
+    "path": "/api/v1/filament?extra.dry=yes"
+  },
+  {
+    "name": "filament-filter-extra-float",
+    "method": "GET",
+    "path": "/api/v1/filament?extra.hours=4.50"
+  },
+  {
+    "name": "filament-filter-extra-float-range",
+    "method": "GET",
+    "path": "/api/v1/filament?extra.hours=4:5"
+  },
+  {
+    "name": "filament-sort-vendor-name",
+    "method": "GET",
+    "path": "/api/v1/filament?sort=vendor.name:asc,id:desc"
+  },
+  {
+    "name": "filament-sort-vendor-relation-only",
+    "method": "GET",
+    "path": "/api/v1/filament?sort=vendor:asc"
+  },
+  {
+    "name": "filament-sort-vendor-unknown",
+    "method": "GET",
+    "path": "/api/v1/filament?sort=vendor.bogus:asc"
+  },
+  {
+    "name": "filament-sort-filament-relation",
+    "method": "GET",
+    "path": "/api/v1/filament?sort=filament.name:asc"
+  },
+  {
+    "name": "filament-sort-price-desc",
+    "method": "GET",
+    "path": "/api/v1/filament?sort=price:desc"
+  },
+  {
+    "name": "filament-sort-material-asc",
+    "method": "GET",
+    "path": "/api/v1/filament?sort=material:asc"
+  },
+  {
+    "name": "filament-sort-extra",
+    "method": "GET",
+    "path": "/api/v1/filament?sort=extra.hours:asc"
+  },
+  {
+    "name": "filament-page",
+    "method": "GET",
+    "path": "/api/v1/filament?limit=2&offset=2"
+  },
+  {
+    "name": "filament-page-filtered-count",
+    "method": "GET",
+    "path": "/api/v1/filament?vendor.id=1&limit=1"
+  },
+  {
+    "name": "filament-errors-combined",
+    "method": "GET",
+    "path": "/api/v1/filament?vendor.id=x&limit=y&color_similarity_threshold=z"
+  },
+  {
+    "name": "filament-update",
+    "method": "PATCH",
+    "path": "/api/v1/filament/2",
+    "body": {
+      "name": "Renamed",
+      "price": null,
+      "settings_bed_temp": 65,
+      "vendor_id": 2
+    }
+  },
+  {
+    "name": "filament-update-to-multi",
+    "method": "PATCH",
+    "path": "/api/v1/filament/2",
+    "body": {
+      "color_hex": "",
+      "multi_color_hexes": "ff0000,00ff00",
+      "multi_color_direction": "longitudinal"
+    }
+  },
+  {
+    "name": "filament-update-clear-vendor",
+    "method": "PATCH",
+    "path": "/api/v1/filament/3",
+    "body": {
+      "vendor_id": null
+    }
+  },
+  {
+    "name": "filament-update-density-null",
+    "method": "PATCH",
+    "path": "/api/v1/filament/2",
+    "body": {
+      "density": null
+    }
+  },
+  {
+    "name": "filament-update-diameter-zero",
+    "method": "PATCH",
+    "path": "/api/v1/filament/2",
+    "body": {
+      "diameter": 0
+    }
+  },
+  {
+    "name": "filament-update-missing",
+    "method": "PATCH",
+    "path": "/api/v1/filament/999",
+    "body": {
+      "name": "x"
+    }
+  },
+  {
+    "name": "filament-update-missing-vendor",
+    "method": "PATCH",
+    "path": "/api/v1/filament/2",
+    "body": {
+      "vendor_id": 999
+    }
+  },
+  {
+    "name": "filament-update-multi-without-direction",
+    "method": "PATCH",
+    "path": "/api/v1/filament/2",
+    "body": {
+      "multi_color_hexes": "FF0000,00FF00"
+    }
+  },
+  {
+    "name": "filament-update-extra-merge",
+    "method": "PATCH",
+    "path": "/api/v1/filament/7",
+    "body": {
+      "extra": {
+        "batch": null,
+        "hours": "6"
+      }
+    }
+  },
+  {
+    "name": "filament-update-extra-invalid",
+    "method": "PATCH",
+    "path": "/api/v1/filament/7",
+    "body": {
+      "extra": {
+        "dry": "maybe"
+      }
+    }
+  },
+  {
+    "name": "filament-update-path-invalid",
+    "method": "PATCH",
+    "path": "/api/v1/filament/x",
+    "body": {
+      "density": null
+    }
+  },
+  {
+    "name": "filament-method-not-allowed",
+    "method": "POST",
+    "path": "/api/v1/filament/2",
+    "body": {
+      "density": 1
+    }
+  },
+  {
+    "name": "filament-delete",
+    "method": "DELETE",
+    "path": "/api/v1/filament/1"
+  },
+  {
+    "name": "filament-delete-again",
+    "method": "DELETE",
+    "path": "/api/v1/filament/1"
+  },
+  {
+    "name": "filament-delete-not-int",
+    "method": "DELETE",
+    "path": "/api/v1/filament/one"
+  },
+  {
+    "name": "spool-for-filament-4",
+    "method": "POST",
+    "path": "/api/v1/spool",
+    "body": {
+      "filament_id": 4
+    },
+    "setup": "spool"
+  },
+  {
+    "name": "filament-delete-with-spool",
+    "method": "DELETE",
+    "path": "/api/v1/filament/4"
+  },
+  {
+    "name": "filament-still-there",
+    "method": "GET",
+    "path": "/api/v1/filament/4"
+  },
+  {
+    "name": "vendor-delete",
+    "method": "DELETE",
+    "path": "/api/v1/vendor/1"
+  },
+  {
+    "name": "vendor-delete-again",
+    "method": "DELETE",
+    "path": "/api/v1/vendor/1"
+  },
+  {
+    "name": "vendor-delete-not-int",
+    "method": "DELETE",
+    "path": "/api/v1/vendor/x"
+  },
+  {
+    "name": "filament-vendor-cleared",
+    "method": "GET",
+    "path": "/api/v1/filament?sort=id:asc"
+  },
+  {
+    "name": "vendor-list-final",
+    "method": "GET",
+    "path": "/api/v1/vendor?sort=id:asc"
+  }
+]

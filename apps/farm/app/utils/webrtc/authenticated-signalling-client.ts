@@ -1,3 +1,4 @@
+import type { WebcamDetailOptions } from './readonly-peer.ts'
 import { assignmentSetDigest } from '../../../../../packages/farm-protocol/src/rtc-assignment-set.ts'
 import {
   immutableAdmission,
@@ -75,6 +76,7 @@ type Scope = {
   audience: string
   publicKey: unknown
   privateKey: CryptoKey
+  cameraPrinterId?: string
 }
 type Peer = Partial<Pick<ReadonlyBrowserPeer, 'diagnostics'>> & {
   answer(sdp: string): Promise<string>
@@ -90,6 +92,7 @@ type PeerOptions = {
   onVerifiedAdmission?: (admission: VerifiedRtcAdmission) => void
   onVerified?: () => void
   onTerminal?: (reason: string) => void
+  webcamDetail?: WebcamDetailOptions
   cameraMedia?: BrowserCameraHooks
 }
 type CameraFactory = (
@@ -108,6 +111,7 @@ export class AuthenticatedBrowserSignallingClient {
     genuineStatus?: GenuineStatusOptions
     onVerifiedAdmission?: (admission: VerifiedRtcAdmission) => void
     onTerminal?: (reason: string) => void
+    webcamDetail?: WebcamDetailOptions
     cameraMedia?: CameraFactory
   }>
   #peer: Peer | undefined
@@ -132,6 +136,7 @@ export class AuthenticatedBrowserSignallingClient {
       onVerifiedAdmission?: (admission: VerifiedRtcAdmission) => void
       onTerminal?: (reason: string) => void
       /** Opt-in camera media per peer; violations close this session. */
+      webcamDetail?: WebcamDetailOptions
       cameraMedia?: CameraFactory
     } = {},
   ) {
@@ -178,6 +183,9 @@ export class AuthenticatedBrowserSignallingClient {
           farm_id: this.#scope.farmId,
           agent_id: this.#scope.agentId,
           key_id: this.#scope.keyId,
+          ...(this.#scope.cameraPrinterId
+            ? { camera_printer_id: this.#scope.cameraPrinterId }
+            : {}),
         })
       },
       onFrame: (frame) => this.frame(frame),
@@ -243,6 +251,9 @@ export class AuthenticatedBrowserSignallingClient {
         expectedAgentId: this.#scope.agentId,
         admittedBinding: this.#binding,
         ...deadlines,
+        ...(this.#options.webcamDetail
+          ? { webcamDetail: this.#options.webcamDetail }
+          : {}),
         ...(this.#options.cameraMedia
           ? {
               cameraMedia: this.#options.cameraMedia((reason) =>
@@ -333,6 +344,7 @@ export class AuthenticatedBrowserSignallingClient {
         b.agent_id !== s.agentId ||
         b.account_id !== s.accountId ||
         b.key_id !== s.keyId ||
+        (b.v === 2 && b.camera_printer_id !== s.cameraPrinterId) ||
         b.origin !== s.origin ||
         b.audience !== s.audience ||
         b.browser_thumbprint !== this.#thumbprint ||

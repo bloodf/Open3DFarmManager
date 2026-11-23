@@ -1,9 +1,15 @@
 // Outage and restart acceptance for the Connector against the built farm server.
-// Caller owns the disposable PostgreSQL container, work directory and port range.
+// Caller owns the disposable PostgreSQL (container or local cluster), work directory and port range.
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { appendFileSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import {
+  appendFileSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Sql } from 'postgres'
@@ -13,13 +19,17 @@ import { PostgresPrinterOwnership } from '../../apps/farm/server/storage/postgre
 import { loadOrCreateIdentity } from '../../packages/connector/src/identity/store.ts'
 import {
   handlerErrors,
+  interruption,
   startConnector,
   startFakeMoonraker,
   startFarmApp,
   startFaultProxy,
   until,
 } from './connector-outage-fixtures.ts'
+import { automaticLockRecovery } from './queue-lock-platform.ts'
 import { credentialRenewalAcrossOutage } from './connector-outage-renewal.ts'
+import { runOutagePauseScenarios } from './connector-outage-pause.ts'
+import { outageDatabaseUrls } from './connector-outage-database-url.ts'
 
 const QUEUE_MAX_BYTES = 50 * 1024 * 1024 // Documented TelemetryQueue cap.
 const TELEMETRY = { timeoutMs: 3000, retryMinMs: 500, retryMaxMs: 2000 }
@@ -33,10 +43,15 @@ type Record = { eventId: string; queuedAt: number; kind: string } & {
 
 export async function runConnectorOutageScenarios(input: {
   admin: Sql
+  fixturePassword: string
   ports: Ports
   workDir: string
-  container: string
-  docker: (...args: string[]) => Promise<string>
+  /**
+   * Freezes and thaws PostgreSQL: Docker pause/unpause (OPENFARM_SIM=docker) or a
+   * blackhole on the loopback fault proxy in front of the cluster (mock).
+   * Established and new connections stall; nothing is lost while stalled.
+   */
+  dbStall: { stall: () => Promise<void>; resume: () => Promise<void> }
   ledger: (value: object) => void
 }) {
   const { admin, ports, workDir, ledger } = input
@@ -46,6 +61,7 @@ export async function runConnectorOutageScenarios(input: {
     { name: prefix + '_pair', group: 'farm_pairing_runtime' },
     { name: prefix + '_owner', group: 'farm_printer_ownership' },
   ]
+  const rolePassword = randomUUID().replaceAll('-', '')
   const created: string[] = []
   const pools: Sql[] = []
   const closers: Array<() => Promise<void>> = []
@@ -56,6 +72,7 @@ export async function runConnectorOutageScenarios(input: {
   try {
     for (const role of roles) {
       await admin`CREATE ROLE ${admin(role.name)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS IN ROLE ${admin(role.group)}`
+      await admin.unsafe(`ALTER ROLE "${role.name}" PASSWORD '${rolePassword}'`)
       created.push(role.name)
       ledger({ resource: 'database-role', name: role.name })
     }
@@ -66,7 +83,7 @@ export async function runConnectorOutageScenarios(input: {
         port: ports.db,
         database: 'fixture',
         username,
-        password: '',
+        password: rolePassword,
         ssl: false,
         max: 2,
         connect_timeout: 3,
@@ -238,21 +255,25 @@ export async function runConnectorOutageScenarios(input: {
     )
 
     // Process control.
-    const databaseUrl = (user: string) =>
-      `postgres://${encodeURIComponent(user)}:synthetic@127.0.0.1:${ports.db}/fixture`
+    const databaseUrls = outageDatabaseUrls({
+      port: ports.db,
+      fixturePassword: input.fixturePassword,
+      telemetryUser: prefix,
+      telemetryPassword: rolePassword,
+    })
     const appEnv = {
       PATH: process.env.PATH ?? '/usr/bin:/bin',
       NODE_ENV: 'production',
       NITRO_HOST: '127.0.0.1',
       NITRO_PORT: String(ports.app),
       NUXT_DATABASE_ENABLED: 'true',
-      NUXT_DATABASE_DATABASE_URL: databaseUrl('fixture'),
+      NUXT_DATABASE_DATABASE_URL: databaseUrls.fixture,
       NUXT_DATABASE_MIGRATIONS: 'verify',
       NUXT_DATABASE_MIGRATIONS_DIR: fileURLToPath(
         new URL('../../infra/db/migrations/', import.meta.url),
       ),
       NUXT_CONNECTOR_TELEMETRY_ENABLED: 'true',
-      NUXT_CONNECTOR_TELEMETRY_DATABASE_URL: databaseUrl(prefix),
+      NUXT_CONNECTOR_TELEMETRY_DATABASE_URL: databaseUrls.telemetry,
       NUXT_CONNECTOR_TELEMETRY_ORIGIN: proxy.origin,
       NUXT_CONNECTOR_TELEMETRY_ISSUER: issuer,
       NUXT_CONNECTOR_TELEMETRY_AUDIENCE: audience,
@@ -318,14 +339,20 @@ export async function runConnectorOutageScenarios(input: {
     async function startConnectorAndBaseline(timeoutMs = 30000) {
       const current = launchConnector()
       // The first subscription snapshot after each start is a new observation.
-      await until(
-        () => {
-          if (!current.running) throw new Error('Connector exited at startup')
-          return current.count('queued') >= 1
-        },
-        timeoutMs,
-        'connector baseline queued',
-      )
+      try {
+        await until(
+          () => {
+            if (!current.running) throw new Error('Connector exited at startup')
+            return current.count('queued') >= 1
+          },
+          timeoutMs,
+          'connector baseline queued',
+        )
+      } catch (error) {
+        throw new Error(
+          `${error instanceof Error ? error.message : String(error)}; fixture=${JSON.stringify({ moonrakerClients: moon.clients, moonrakerSubscriptions: moon.subscriptions, handlerErrors, connectorDiagnostics: current.diagnostics })}`,
+        )
+      }
       expected.push(moon.progress)
       assert.ok(current.running, 'connector alive after baseline')
       return current
@@ -459,7 +486,7 @@ export async function runConnectorOutageScenarios(input: {
 
     await scenario('2-database-unavailable-and-startup-gate-503', async () => {
       const current = connector!
-      await input.docker('pause', input.container)
+      await input.dbStall.stall()
       const outageStart = performance.now()
       let paused = true
       try {
@@ -488,7 +515,7 @@ export async function runConnectorOutageScenarios(input: {
         }
         assert.ok(gate503 >= 1, 'Connector observed the startup gate 503')
         await new Promise((r) => setTimeout(r, 3000))
-        await input.docker('unpause', input.container)
+        await input.dbStall.resume()
         paused = false
         // The same gated process must recover on its own: no restart fallback.
         const gated = app!
@@ -516,13 +543,16 @@ export async function runConnectorOutageScenarios(input: {
           drainMs,
         }
       } finally {
-        if (paused) await input.docker('unpause', input.container)
+        if (paused) await input.dbStall.resume()
       }
     })
 
     await scenario('3-connector-sigkill-after-commit-before-ack', async () => {
       const victim = connector!
-      const held = proxy.holdNextCommit()
+      const held = proxy.holdNextCommit({
+        timeoutMs: 30_000,
+        signal: interruption.signal,
+      })
       await push(3)
       const { eventIds, release } = await held
       const killedPid = victim.child.pid
@@ -545,11 +575,27 @@ export async function runConnectorOutageScenarios(input: {
         'SIGKILL left the owner lock behind',
       )
       const restartAt = performance.now()
+      if (!automaticLockRecovery) {
+        // No machine/boot/PID-namespace identity (not Linux): the Connector must fail
+        // closed and leave the lock alone until the operator removes that exact lock.
+        const refused = launchConnector()
+        await until(
+          () => !refused.running,
+          20000,
+          'fail-closed on unproven lock',
+        )
+        assert.equal(
+          (JSON.parse(readFileSync(lockFile, 'utf8')) as { pid: number }).pid,
+          killedPid,
+          'refused start left the lock untouched',
+        )
+        unlinkSync(lockFile)
+      }
       const restarted = await startConnectorAndBaseline()
       assert.equal(
         restarted.count('queue-lock-recovered'),
-        1,
-        'automatic stale-lock recovery diagnostic',
+        automaticLockRecovery ? 1 : 0,
+        'stale-lock recovery diagnostic matches platform support',
       )
       const drainMs = await drained()
       const replays = proxy.log.filter(
@@ -565,7 +611,7 @@ export async function runConnectorOutageScenarios(input: {
         assert.equal(after.filter((r) => r.id === id).length, 1, 'no duplicate')
       return {
         heldEventIds: eventIds.length,
-        automaticLockRecovery: true,
+        automaticLockRecovery,
         replays,
         drainMs,
       }
@@ -668,19 +714,25 @@ export async function runConnectorOutageScenarios(input: {
       // Database rows, not diagnostics: the diagnostic budget is bounded per run.
       const delivered = (await rows()).length - rowsBefore
       assert.ok(current.running, 'no crash while draining a full queue')
+      await current.stop()
+      assert.equal((await current.exited).code, 0)
+      // A resubscription can add a snapshot while the queue is still full,
+      // after the pre-drain inspection. Include those reported evictions.
+      const finalEvicted = current.diagnostics
+        .filter((d) => d.kind === 'loss' && d.phase === 'retention')
+        .reduce((n, d) => n + Number(d.capacity), 0)
+      assert.ok(finalEvicted >= evicted && finalEvicted < seeded.length)
       const first =
-        await admin`SELECT count(*)::int AS n FROM farm.telemetry_events WHERE agent_id=${agentId}::uuid AND event_id=${seeded[evicted]!}::uuid`
+        await admin`SELECT count(*)::int AS n FROM farm.telemetry_events WHERE agent_id=${agentId}::uuid AND event_id=${seeded[finalEvicted]!}::uuid`
       assert.equal(first[0]?.n, 1, 'oldest retained record delivered')
       const firstCommit = proxy.log
         .slice(logFrom)
         .find((e) => e.route === 'commit' && e.outcome === 200)
       assert.equal(
         firstCommit?.eventIds?.[0],
-        seeded[evicted],
+        seeded[finalEvicted],
         'oldest retained record is the first committed after restart',
       )
-      await current.stop()
-      assert.equal((await current.exited).code, 0)
       const drainRecordsPerSecond = Math.round(delivered / seconds)
       const backlogDrainEstimateS = Math.round(
         lines.length / Math.max(1, delivered / seconds),
@@ -692,7 +744,7 @@ export async function runConnectorOutageScenarios(input: {
         seededRecords: seededCount,
         queueBytes: fullBytes,
         reopenMs: openMs,
-        evicted,
+        evicted: finalEvicted,
         drainRecordsPerSecond,
         backlogDrainEstimateS,
       }
@@ -726,6 +778,19 @@ export async function runConnectorOutageScenarios(input: {
         dropRoleLater: (role) => created.push(role),
       }),
     )
+    await app?.stop()
+    const pauseScenarios = await runOutagePauseScenarios(
+      join(workDir, 'pause-runtime'),
+    )
+    for (const entry of pauseScenarios.scenarios) {
+      const recorded = { durationMs: 0, ...entry }
+      report.scenarios.push(recorded)
+      appendFileSync(
+        join(workDir, 'progress.jsonl'),
+        JSON.stringify(recorded) + '\n',
+      )
+    }
+    await startApp(renewalEnv)
     return report
   } finally {
     const failures: string[] = []

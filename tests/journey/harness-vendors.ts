@@ -4,7 +4,15 @@
 // assignment) for the paired agent, and exposes scripted controls plus a
 // loopback discovery probe. Nothing here touches a physical printer.
 import { X509Certificate, createHash } from 'node:crypto'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
+import {
+  chmod,
+  copyFile,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -12,13 +20,26 @@ import { probeAnycubic } from '../../packages/connector/src/discovery/anycubic.t
 import { probeCreality } from '../../packages/connector/src/discovery/creality.ts'
 import type { Printer } from '../../packages/connector/src/discovery/index.ts'
 import { probePrinterHost } from '../../packages/connector/src/discovery/probe.ts'
+import { startAnycubicCameraSim } from '../../packages/sim-tools/src/anycubic-camera-sim.ts'
 import { startAnycubicSimulator } from '../../packages/sim-tools/src/anycubic-simulator.ts'
 import { createAnycubicDiscoverySimulator } from '../../packages/sim-tools/src/anycubic-discovery-sim.ts'
 import { startBambuSimulator } from '../../packages/sim-tools/src/bambu-simulator.ts'
 import { createCrealitySimulator } from '../../packages/sim-tools/src/creality-simulator.ts'
+import { startFormlabsJourneyFixture } from './formlabs-fixture.ts'
+import { startSdcpFixture } from './sdcp-fixture.ts'
+import { startPrusaLinkJourneyFixture } from './prusa-link-fixture.ts'
+import { createJourneyCameraEncoder, realFfmpeg } from './camera-encoder.ts'
+import { startBambuCameraFixture } from './bambu-camera-fixture.ts'
 import { startKobraBridgeSimulator } from './harness-kobralink-bridge.ts'
 
-export type VendorName = 'bambu' | 'creality' | 'anycubic' | 'kobralink'
+export type VendorName =
+  | 'bambu'
+  | 'creality'
+  | 'anycubic'
+  | 'kobralink'
+  | 'sdcp'
+  | 'formlabs'
+  | 'prusa-link'
 
 /** What a spec can do to the running simulated print. */
 export type VendorControls = Readonly<{
@@ -30,10 +51,25 @@ export type VendorControls = Readonly<{
   failPrint(): void
 }>
 
+export type BambuCameraScenario = 'jpeg' | 'rtsps' | 'unmapped'
+
 export type VendorOptions = Readonly<{
   printerKey: string
+  /** Optional unique device suffix when sharing a Connector with siblings. */
+  deviceId?: string
   /** Bambu only: opt the binding in to control commands (default false). */
   control?: boolean
+  bambuCamera?: BambuCameraScenario
+  /** Bambu simulator FTPS port; zero selects an ephemeral loopback port. */
+  ftpsPort?: number
+  /** Bambu simulator address for its browser onboarding journey. */
+  host?: string
+  /**
+   * Creality only: the printer advertises a secure endpoint (HTTPS `/info`
+   * naming a WSS port) with a synthetic certificate that the Connector trusts
+   * through its binding's `caFile`. Off by default: stock plain WebSocket.
+   */
+  secure?: boolean
 }>
 
 export type RuntimeScope = Readonly<{
@@ -45,7 +81,7 @@ export type RuntimeScope = Readonly<{
 
 /** The Connector runtime file sections this vendor needs. */
 export type VendorRuntime = Readonly<{
-  version: 2 | 3 | 4 | 5
+  version: 2 | 3 | 4 | 5 | 6 | 7 | 8
   collection: Readonly<Record<string, unknown>>
   assignment: Readonly<Record<string, unknown>>
   /**
@@ -54,16 +90,33 @@ export type VendorRuntime = Readonly<{
    * slot free for the inboxes of a simulator that reports every second.
    */
   telemetryIdleMs?: number
+  /** Opt-in camera section of the runtime file. */
+  camera?: (assignmentId: string) => Record<string, unknown>
 }>
 
 export type VendorDiscovery = Readonly<{
   /** Loopback endpoint the discovery/probe responder listens on. */
   host: string
   port: number
+  /** Secure discovery only: how the Connector's probe reaches the responder. */
+  secure?: Readonly<{ https: number; caFile: string }>
+  /** Plain `/info` requests the discovery responder served so far. */
+  plainRequests?(): number
   /** Runs the Connector's own probe against the responder. */
   probe(): Promise<
     Printer | { vendor: 'kobralink'; host: string; port: number } | undefined
   >
+}>
+
+/** Loopback camera the Connector reads. */
+export type VendorCamera = Readonly<{
+  host: string
+  port: number
+  /** Absolute path of the encoder the Connector runs for this camera. */
+  helper: string
+  /** Stream requests the simulated camera served. */
+  requests(): number
+  activeConnections?(): number
 }>
 
 export type VendorSimulator = Readonly<{
@@ -74,12 +127,17 @@ export type VendorSimulator = Readonly<{
   controls: VendorControls
   /** Absent for vendors with no network discovery step (Bambu). */
   discovery: VendorDiscovery | undefined
+  /** Absent for vendors whose camera is not simulated. */
+  camera: VendorCamera | undefined
   runtime(scope: RuntimeScope): Promise<VendorRuntime>
   close(): Promise<void>
 }>
 
 /** Moonraker is the harness default; everything else is a VendorName. */
 export const VENDOR_DESCRIPTIONS: Readonly<Record<VendorName, string>> = {
+  'prusa-link': 'Loopback PrusaLink status simulator',
+  formlabs: 'Loopback Formlabs PreForm status simulator',
+  sdcp: 'Loopback SDCP status simulator',
   bambu:
     'Loopback Bambu LAN MQTT/TLS simulator (packages/sim-tools), pinned TLS, printing at 25 %; control commands opt-in',
   creality:
@@ -90,6 +148,11 @@ export const VENDOR_DESCRIPTIONS: Readonly<Record<VendorName, string>> = {
     'Loopback KobraLink bridge stand-in (tests/journey/harness-kobralink-bridge.ts), synthetic Kobra X, printing at 25 %',
 }
 
+/**
+ * LAN access code the Bambu simulator accepts. It must satisfy the production
+ * form rule (6 to 32 letters and digits) so browser set-up can submit it.
+ */
+export const BAMBU_ACCESS_CODE = 'journeyaccess'
 const MODEL_ID = '20024'
 
 type Closer = () => Promise<void>
@@ -100,6 +163,34 @@ async function privateJson(path: string, value: unknown) {
 
 function pinOf(pem: string): string {
   return createHash('sha256').update(new X509Certificate(pem).raw).digest('hex')
+}
+
+/**
+ * Synthetic self-signed certificate for the secure Creality simulator. The
+ * certificate doubles as the CA file the Connector's binding trusts.
+ */
+async function syntheticCrealityTls(directory: string) {
+  const caFile = join(directory, 'creality-ca.pem')
+  const keyFile = join(directory, 'creality-key.pem')
+  execFileSync(
+    'openssl',
+    [
+      ...['req', '-x509', '-newkey', 'rsa:2048', '-nodes'],
+      ...['-keyout', keyFile, '-out', caFile, '-days', '1'],
+      ...['-subj', '/CN=127.0.0.1'],
+      ...['-addext', 'subjectAltName=IP:127.0.0.1'],
+    ],
+    { stdio: 'ignore', timeout: 15_000 },
+  )
+  return {
+    caFile,
+    material: {
+      key: await readFile(keyFile, 'utf8'),
+      cert: await readFile(caFile, 'utf8'),
+      // The stock /info answer of the plain responder next to it.
+      info: { model: 'Creality K1', mac: 'AA:BB:CC:00:00:01' },
+    },
+  }
 }
 
 function listening(server: Server) {
@@ -144,6 +235,69 @@ function closing(server: Server) {
     })
 }
 
+/** One real JPEG frame (320x240 test pattern) from the local ffmpeg. */
+function testFrame(ffmpeg: string): Buffer {
+  return execFileSync(
+    ffmpeg,
+    [
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-f',
+      'lavfi',
+      '-i',
+      'testsrc2=size=320x240:rate=10',
+      '-frames:v',
+      '1',
+      '-f',
+      'image2pipe',
+      '-c:v',
+      'mjpeg',
+      'pipe:1',
+    ],
+    { maxBuffer: 4 * 1024 * 1024, timeout: 30_000 },
+  )
+}
+
+/**
+ * Starts the paced loopback camera and builds the Connector's camera section.
+ * The encoder is the pinned offline stand-in unless the real FFmpeg
+ * qualification is requested (see ./camera-encoder.ts).
+ */
+async function startCamera(
+  kind: 'creality-mjpeg' | 'anycubic-rinkhals',
+  undo: Closer[],
+) {
+  const encoder = await createJourneyCameraEncoder()
+  undo.push(() => encoder.dispose())
+  const { path: ffmpeg, sha256 } = encoder
+  const sim = await startAnycubicCameraSim({
+    // The qualification keeps the 320x240 frame from the real encoder; the
+    // stand-in ignores pixels and reads the pre-encoded frame.
+    jpeg: encoder.kind === 'ffmpeg' ? testFrame(ffmpeg) : encoder.frame,
+    frameIntervalMs: 100,
+  })
+  undo.push(() => sim.close())
+  const camera: VendorCamera = {
+    host: sim.host,
+    port: sim.port,
+    helper: ffmpeg,
+    requests: () => sim.requests,
+  }
+  const section = (assignmentId: string) => ({
+    helper: { path: ffmpeg, sha256 },
+    maxSessions: 1,
+    cameras: [
+      {
+        cameraId: 'journey-camera',
+        assignmentId,
+        source: { kind, address: sim.host, port: sim.port },
+      },
+    ],
+  })
+  return { camera, section }
+}
+
 function localAssignment(scope: RuntimeScope) {
   return {
     assignment_id: scope.assignmentId,
@@ -162,15 +316,134 @@ export async function startVendorSimulator(
   try {
     const { printerKey } = options
     let discovery: VendorDiscovery | undefined
+    let camera: VendorCamera | undefined
+    let cameraSection:
+      ((assignmentId: string) => Record<string, unknown>) | undefined
     let raw: unknown
     let controls: VendorControls
     let runtime: VendorSimulator['runtime']
 
-    if (name === 'bambu') {
-      const serial = 'JOURNEYBAMBU'
+    if (name === 'prusa-link') {
+      const fixture = await startPrusaLinkJourneyFixture()
+      undo.push(fixture.close)
+      raw = fixture
+      const unsupported = () => {
+        throw new Error('PrusaLink journey is read-only')
+      }
+      controls = {
+        setProgress: unsupported,
+        finishPrint: unsupported,
+        failPrint: unsupported,
+      }
+      const apiKeyFile = join(directory, 'prusa-key.json')
+      await privateJson(apiKeyFile, {
+        origin: fixture.simulator.endpoint,
+        apiKey: fixture.apiKey,
+      })
+      runtime = async (scope) => ({
+        version: 8,
+        collection: {
+          version: 8,
+          allowedOrigins: [fixture.simulator.endpoint],
+          printers: [],
+          drivers: [
+            {
+              family: 'prusa-link',
+              printerKey: scope.printerKey,
+              origin: fixture.simulator.endpoint,
+              apiKeyFile,
+              expect: { serial: 'SIM-PRUSA', printerType: '1.4.0' },
+            },
+          ],
+          limits: { staleAfterMs: 5000 },
+        },
+        assignment: { ...localAssignment(scope), backend: 'prusa-link' },
+      })
+    } else if (name === 'formlabs') {
+      const fixture = await startFormlabsJourneyFixture()
+      undo.push(fixture.close)
+      raw = fixture
+      const unsupported = () => {
+        throw new Error('Formlabs journey does not simulate print controls')
+      }
+      controls = {
+        setProgress: unsupported,
+        finishPrint: unsupported,
+        failPrint: unsupported,
+      }
+      runtime = async (scope) => ({
+        version: 7,
+        collection: {
+          version: 7,
+          allowedOrigins: [],
+          printers: [],
+          formlabs: {
+            printers: [
+              {
+                printerKey: scope.printerKey,
+                host: '127.0.0.1',
+                port: fixture.simulator.port,
+                deviceId: fixture.deviceId,
+              },
+            ],
+          },
+          limits: { staleAfterMs: 5000 },
+        },
+        assignment: { ...localAssignment(scope), backend: 'formlabs' },
+      })
+    } else if (name === 'sdcp') {
+      const sim = await startSdcpFixture()
+      undo.push(() => sim.close())
+      raw = sim
+      controls = {
+        setProgress: sim.setProgress,
+        finishPrint: () => sim.setProgress(100),
+        failPrint: () => sim.setOnline(false),
+      }
+      runtime = async (scope) => ({
+        version: 6,
+        collection: {
+          version: 6,
+          allowedOrigins: [],
+          printers: [],
+          sdcp: {
+            printers: [
+              {
+                printerKey: scope.printerKey,
+                host: '127.0.0.1',
+                mainboardId: 'journey01',
+                model: 'Saturn 4 Ultra',
+              },
+            ],
+          },
+          limits: { staleAfterMs: 5000 },
+        },
+        assignment: { ...localAssignment(scope), backend: 'sdcp' },
+      })
+    } else if (name === 'bambu') {
+      const serial = options.deviceId
+        ? `JOURNEYBAMBU_${options.deviceId}`
+        : 'JOURNEYBAMBU'
       const sim = await startBambuSimulator({
         serial,
+        accessCode: BAMBU_ACCESS_CODE,
+        ...(options.host === undefined ? {} : { host: options.host }),
         initialState: 'RUNNING',
+        // Matches the 25 % the simulator reports for the running print.
+        initialLayer: 25,
+        // A running print reports its nozzle target; filament changes use it.
+        initialTargetTemperature: 210,
+        totalLayers: 100,
+        printDurationMs: 15_000,
+        // State changes are reported at once; the repeated report is slow
+        // enough for the Connector's telemetry queue to run empty between
+        // uploads, yet well inside the binding's 5 s staleness limit. A queue
+        // that never empties uploads without pause and keeps the credential
+        // proof slot away from both signalling inboxes.
+        reportIntervalMs: 2000,
+        ...(options.ftpsPort === undefined
+          ? {}
+          : { ftpsPort: options.ftpsPort }),
       })
       undo.push(() => sim.close())
       raw = sim
@@ -179,11 +452,56 @@ export async function startVendorSimulator(
         finishPrint: () => sim.finishPrint(),
         failPrint: () => sim.failPrint(),
       }
+      const model =
+        options.bambuCamera === 'jpeg'
+          ? 'A1'
+          : options.bambuCamera === 'unmapped'
+            ? 'A2L'
+            : 'X1C'
+      if (options.bambuCamera) {
+        const encoder = await realFfmpeg()
+        const ffmpeg = join(directory, 'bambu-ffmpeg')
+        await copyFile(encoder.path, ffmpeg)
+        await chmod(ffmpeg, 0o700)
+        // The unmapped model points at a reachable fixture to prove that it
+        // stays unavailable regardless of whether an endpoint can serve frames.
+        const fixture = await startBambuCameraFixture({
+          directory,
+          accessCode: BAMBU_ACCESS_CODE,
+        })
+        undo.push(fixture.close)
+        camera = { ...fixture, helper: ffmpeg }
+        cameraSection = (assignmentId) => ({
+          helper: {
+            path: join(directory, 'unconfigured-rtsp-ingest'),
+            sha256: '0'.repeat(64),
+          },
+          cameras: [
+            {
+              cameraId: 'journey-camera',
+              assignmentId,
+              source: {
+                kind: 'bambu-lan',
+                model,
+                ffmpeg: { path: ffmpeg, sha256: encoder.sha256 },
+                address: fixture.host,
+                port: fixture.port,
+                caFile: fixture.caFile,
+                credentialFile: join(directory, 'bambu-credential.json'),
+              },
+            },
+          ],
+        })
+      }
       runtime = async (scope) => {
         const credentialFile = join(directory, 'bambu-credential.json')
-        await privateJson(credentialFile, { accessCode: 'journey-access' })
+        await privateJson(credentialFile, { accessCode: BAMBU_ACCESS_CODE })
         return {
           version: 3,
+          // Uploads and signalling inboxes share one credential proof
+          // slot on the server; spaced uploads leave it free for commands.
+          telemetryIdleMs: 5000,
+          ...(cameraSection ? { camera: cameraSection } : {}),
           collection: {
             version: 3,
             allowedOrigins: [],
@@ -195,7 +513,10 @@ export async function startVendorSimulator(
                   serial,
                   host: sim.host,
                   port: sim.port,
+                  ftpsPort: sim.ftpsPort,
                   control: options.control === true,
+                  // Locally provisioned model: opts into extended actions.
+                  model,
                   credentialFile,
                   pinSha256: pinOf(sim.syntheticTrust),
                   allowedEndpoints: [{ host: sim.host, port: sim.port }],
@@ -208,6 +529,9 @@ export async function startVendorSimulator(
         }
       }
     } else if (name === 'creality') {
+      const secure = options.secure
+        ? await syntheticCrealityTls(directory)
+        : undefined
       const sim = await createCrealitySimulator(
         {
           state: 1,
@@ -224,7 +548,13 @@ export async function startVendorSimulator(
         // A started print lasts long enough for the page to show it running.
         // The status heartbeat keeps the observation current, as stock
         // firmware does while a client is connected.
-        { durationMs: 6000, totalLayers: 12, heartbeatMs: 1000 },
+        {
+          durationMs: 6000,
+          totalLayers: 12,
+          heartbeatMs: 1000,
+          gcodeDirectory: '/mnt/UDISK/printer_data/gcodes',
+          ...(secure ? { secure: secure.material } : {}),
+        },
       )
       undo.push(() => sim.close())
       raw = sim
@@ -235,7 +565,9 @@ export async function startVendorSimulator(
         failPrint: () => sim.setFrame({ state: 0, err: 1 }),
       }
       // The Creality probe reads GET /info from the printer's HTTP port.
+      let plainInfoRequests = 0
       const info = createServer((request, response) => {
+        plainInfoRequests++
         if (request.method !== 'GET' || request.url !== '/info') {
           response.writeHead(404).end()
           return
@@ -250,9 +582,27 @@ export async function startVendorSimulator(
       discovery = {
         host: '127.0.0.1',
         port: infoPort,
-        probe: () => probeCreality('127.0.0.1', { https: 1, http: infoPort }),
+        plainRequests: () => plainInfoRequests,
+        ...(secure && sim.securePort !== undefined
+          ? {
+              secure: { https: sim.securePort, caFile: secure.caFile },
+              probe: () =>
+                probeCreality('127.0.0.1', {
+                  https: sim.securePort!,
+                  http: infoPort,
+                  caFile: secure.caFile,
+                }),
+            }
+          : {
+              probe: () =>
+                probeCreality('127.0.0.1', { https: 1, http: infoPort }),
+            }),
       }
+      const crealityCamera = await startCamera('creality-mjpeg', undo)
+      camera = crealityCamera.camera
+      cameraSection = crealityCamera.section
       runtime = async (scope) => ({
+        ...(cameraSection ? { camera: cameraSection } : {}),
         version: 4,
         collection: {
           version: 4,
@@ -266,6 +616,15 @@ export async function startVendorSimulator(
                 port: sim.port,
                 // Stock HTTP upload endpoint of the simulator.
                 httpPort: sim.httpPort,
+                ...(secure && sim.securePort !== undefined
+                  ? {
+                      // The Connector resolves the advertised WSS port from
+                      // the verified HTTPS /info; no plain fallback.
+                      transport: 'wss',
+                      httpsPort: sim.securePort,
+                      caFile: secure.caFile,
+                    }
+                  : {}),
               },
             ],
           },
@@ -275,11 +634,12 @@ export async function startVendorSimulator(
         telemetryIdleMs: 5000,
       })
     } else if (name === 'anycubic') {
-      const deviceId = 'JOURNEY'
+      const deviceId = options.deviceId ?? 'JOURNEY'
       const username = 'journey-user'
       const password = 'journey-password'
       const sim = await startAnycubicSimulator({
         serial: `${MODEL_ID}/${deviceId}`,
+        lanFiles: { firmware: '2.4.6.7' },
         credentials: { username, password },
         initialState: 'RUNNING',
         // A started file prints for a few seconds, then completes by itself.
@@ -306,11 +666,15 @@ export async function startVendorSimulator(
         port: infoPort,
         probe: () => probeAnycubic('127.0.0.1', infoPort),
       }
+      const anycubicCamera = await startCamera('anycubic-rinkhals', undo)
+      camera = anycubicCamera.camera
+      cameraSection = anycubicCamera.section
       runtime = async (scope) => {
         const passwordFile = join(directory, 'anycubic-password.json')
         await privateJson(passwordFile, password)
         return {
           version: 5,
+          ...(cameraSection ? { camera: cameraSection } : {}),
           // Uploads and both signalling inboxes share one credential proof
           // slot on the server; spaced uploads leave it free for commands.
           telemetryIdleMs: 5000,
@@ -324,6 +688,7 @@ export async function startVendorSimulator(
                   printerKey: scope.printerKey,
                   host: sim.host,
                   port: sim.port,
+                  uploadPort: sim.uploadPort,
                   modelId: MODEL_ID,
                   deviceId,
                   username,
@@ -339,8 +704,12 @@ export async function startVendorSimulator(
       }
     } else {
       const identity = {
-        id: 'journey-kobra',
-        deviceId: 'OPENFARM_SYNTHETIC_KOBRA_X_JOURNEY',
+        id: options.deviceId
+          ? `journey-kobra-${options.deviceId}`
+          : 'journey-kobra',
+        deviceId: options.deviceId
+          ? `OPENFARM_SYNTHETIC_KOBRA_X_${options.deviceId}`
+          : 'OPENFARM_SYNTHETIC_KOBRA_X_JOURNEY',
         name: 'Synthetic Kobra X',
         email: 'journey@example.test',
         password: 'journey-password',
@@ -407,7 +776,9 @@ export async function startVendorSimulator(
         },
       }
       runtime = async (scope) => {
-        const bridgeInstance = 'journey-bridge'
+        const bridgeInstance = options.deviceId
+          ? `journey-bridge-${options.deviceId}`
+          : 'journey-bridge'
         const credentialFile = join(directory, 'kobralink-credential.json')
         const binding = {
           backend: 'kobralink' as const,
@@ -461,6 +832,7 @@ export async function startVendorSimulator(
       raw,
       controls,
       discovery,
+      camera,
       runtime,
       close: () =>
         (closed ??= (async () => {

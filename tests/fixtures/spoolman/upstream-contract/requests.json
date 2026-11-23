@@ -1,0 +1,257 @@
+[
+  {
+    "method": "GET",
+    "path": "/api/v1/spool",
+    "body": null,
+    "status": 200,
+    "response": [],
+    "name": "octoprint-empty",
+    "client": "OctoPrint plugin"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/location",
+    "body": null,
+    "status": 200,
+    "response": [],
+    "name": "home-assistant-locations",
+    "client": "Home Assistant community integration"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/spool/999",
+    "body": null,
+    "status": 404,
+    "response": {
+      "message": "No spool with ID 999 found."
+    },
+    "name": "moonraker-missing-spool",
+    "client": "Moonraker"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/filament",
+    "body": {
+      "name": "Contract PLA",
+      "material": "PLA",
+      "density": 1.24,
+      "diameter": 1.75,
+      "weight": 1000
+    },
+    "status": 200,
+    "response": {
+      "id": 1,
+      "registered": "<timestamp>",
+      "name": "Contract PLA",
+      "material": "PLA",
+      "density": 1.24,
+      "diameter": 1.75,
+      "weight": 1000.0,
+      "extra": {},
+      "tags": []
+    },
+    "name": "setup-filament",
+    "client": "setup"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/spool",
+    "body": {
+      "filament_id": 1,
+      "remaining_weight": 1000
+    },
+    "status": 200,
+    "response": {
+      "id": 1,
+      "registered": "<timestamp>",
+      "filament": {
+        "id": 1,
+        "registered": "<timestamp>",
+        "name": "Contract PLA",
+        "material": "PLA",
+        "density": 1.24,
+        "diameter": 1.75,
+        "weight": 1000.0,
+        "extra": {},
+        "tags": []
+      },
+      "remaining_weight": 1000.0,
+      "initial_weight": 1000.0,
+      "used_weight": 0.0,
+      "remaining_length": 335283.6194167644,
+      "used_length": 0.0,
+      "archived": false,
+      "extra": {},
+      "tags": []
+    },
+    "name": "setup-spool",
+    "client": "setup"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/spool/1",
+    "body": null,
+    "status": 200,
+    "response": {
+      "id": 1,
+      "registered": "<timestamp>",
+      "filament": {
+        "id": 1,
+        "registered": "<timestamp>",
+        "name": "Contract PLA",
+        "material": "PLA",
+        "density": 1.24,
+        "diameter": 1.75,
+        "weight": 1000.0,
+        "extra": {},
+        "tags": []
+      },
+      "remaining_weight": 1000.0,
+      "initial_weight": 1000.0,
+      "used_weight": 0.0,
+      "remaining_length": 335283.6194167644,
+      "used_length": 0.0,
+      "archived": false,
+      "extra": {},
+      "tags": []
+    },
+    "name": "moonraker-spool",
+    "client": "Moonraker"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/spool",
+    "body": null,
+    "status": 200,
+    "response": [
+      {
+        "id": 1,
+        "registered": "<timestamp>",
+        "filament": {
+          "id": 1,
+          "registered": "<timestamp>",
+          "name": "Contract PLA",
+          "material": "PLA",
+          "density": 1.24,
+          "diameter": 1.75,
+          "weight": 1000.0,
+          "extra": {},
+          "tags": []
+        },
+        "remaining_weight": 1000.0,
+        "initial_weight": 1000.0,
+        "used_weight": 0.0,
+        "remaining_length": 335283.6194167644,
+        "used_length": 0.0,
+        "archived": false,
+        "extra": {},
+        "tags": []
+      }
+    ],
+    "name": "octoprint-spools",
+    "client": "OctoPrint plugin and Home Assistant community integration"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/spool/1/use",
+    "body": {
+      "use_length": 100
+    },
+    "status": 200,
+    "response": {
+      "id": 1,
+      "registered": "<timestamp>",
+      "first_used": "<timestamp>",
+      "last_used": "<timestamp>",
+      "filament": {
+        "id": 1,
+        "registered": "<timestamp>",
+        "name": "Contract PLA",
+        "material": "PLA",
+        "density": 1.24,
+        "diameter": 1.75,
+        "weight": 1000.0,
+        "extra": {},
+        "tags": []
+      },
+      "remaining_weight": 999.7017450474498,
+      "initial_weight": 1000.0,
+      "used_weight": 0.298254952550181,
+      "remaining_length": 335183.61941676436,
+      "used_length": 100.00000000000001,
+      "archived": false,
+      "extra": {},
+      "tags": []
+    },
+    "name": "moonraker-use",
+    "client": "Moonraker and OctoPrint plugin"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/spool/1",
+    "body": null,
+    "status": 200,
+    "response": {
+      "id": 1,
+      "registered": "<timestamp>",
+      "first_used": "<timestamp>",
+      "last_used": "<timestamp>",
+      "filament": {
+        "id": 1,
+        "registered": "<timestamp>",
+        "name": "Contract PLA",
+        "material": "PLA",
+        "density": 1.24,
+        "diameter": 1.75,
+        "weight": 1000.0,
+        "extra": {},
+        "tags": []
+      },
+      "remaining_weight": 999.7017450474498,
+      "initial_weight": 1000.0,
+      "used_weight": 0.298254952550181,
+      "remaining_length": 335183.61941676436,
+      "used_length": 100.00000000000001,
+      "archived": false,
+      "extra": {},
+      "tags": []
+    },
+    "name": "home-assistant-spool",
+    "client": "Home Assistant community integration"
+  },
+  {
+    "name": "orcaslicer-active-spools",
+    "client": "PipSpool OrcaSlicer plugin",
+    "method": "GET",
+    "path": "/api/v1/spool?allow_archived=false",
+    "body": null,
+    "status": 200,
+    "response": [
+      {
+        "id": 1,
+        "registered": "<timestamp>",
+        "first_used": "<timestamp>",
+        "last_used": "<timestamp>",
+        "filament": {
+          "id": 1,
+          "registered": "<timestamp>",
+          "name": "Contract PLA",
+          "material": "PLA",
+          "density": 1.24,
+          "diameter": 1.75,
+          "weight": 1000.0,
+          "extra": {},
+          "tags": []
+        },
+        "remaining_weight": 999.7017450474498,
+        "initial_weight": 1000.0,
+        "used_weight": 0.298254952550181,
+        "remaining_length": 335183.61941676436,
+        "used_length": 100.00000000000001,
+        "archived": false,
+        "extra": {},
+        "tags": []
+      }
+    ]
+  }
+]

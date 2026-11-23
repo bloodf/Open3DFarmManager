@@ -15,6 +15,14 @@ import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
 
 const source = fileURLToPath(new URL('../', import.meta.url))
+test('check:all includes the security and helper gates', () => {
+  const scripts = JSON.parse(
+    readFileSync(join(source, 'package.json'), 'utf8'),
+  ).scripts
+  assert.match(scripts['check:all'], /test-local-ci-regression/)
+  assert.match(scripts['check:all'], /test:postgres/)
+  assert.match(scripts['check:all'], /test:go/)
+})
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'open3d-selftest-regression-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
@@ -22,7 +30,9 @@ function fixture(t) {
     'scripts/test-local-ci.sh',
     'scripts/local-ci.sh',
     'scripts/klipper-diagnostics.mjs',
+    'packages/sim-tools/src/mocks/env.ts',
     '.github/workflows/ci.yml',
+    'apps/farm/Dockerfile',
     'package.json',
     '.nvmrc',
   ]) {
@@ -82,14 +92,14 @@ exec "$REGRESSION_REAL_NODE" "$@"
   )
 })
 
-test('workflow-only pnpm pin drift fails the selftest', (t) => {
+test('workflow-only Node pin drift fails the selftest', (t) => {
   const root = fixture(t)
   const path = join(root, '.github/workflows/ci.yml')
   writeFileSync(
     path,
-    readFileSync(path, 'utf8').replace(
-      /version: '[0-9]+\.[0-9]+\.[0-9]+'/,
-      "version: '99.0.0'",
+    readFileSync(path, 'utf8').replaceAll(
+      /node-version: '[0-9]+\.[0-9]+\.[0-9]+'/g,
+      "node-version: '99.0.0'",
     ),
   )
   const result = run(root)
@@ -100,11 +110,19 @@ test('workflow-only pnpm pin drift fails the selftest', (t) => {
 test('maintained Node pins changing together expose stale runner guards', (t) => {
   const root = fixture(t)
   const path = join(root, '.github/workflows/ci.yml')
+  const dockerfile = join(root, 'apps/farm/Dockerfile')
   writeFileSync(
     path,
-    readFileSync(path, 'utf8').replace(
-      /node-version: '[0-9]+\.[0-9]+\.[0-9]+'/,
+    readFileSync(path, 'utf8').replaceAll(
+      /node-version: '[0-9]+\.[0-9]+\.[0-9]+'/g,
       "node-version: '99.0.0'",
+    ),
+  )
+  writeFileSync(
+    dockerfile,
+    readFileSync(dockerfile, 'utf8').replaceAll(
+      /FROM node:[0-9]+\.[0-9]+\.[0-9]+-alpine/g,
+      'FROM node:99.0.0-alpine',
     ),
   )
   writeFileSync(join(root, '.nvmrc'), '99.0.0\n')

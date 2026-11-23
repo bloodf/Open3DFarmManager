@@ -18,6 +18,8 @@ const keys = [
   'firmwareNotes',
   'connection',
   'capabilities',
+  'controlAreas',
+  'controlAreaEvidence',
   'sources',
   'limitations',
 ]
@@ -36,7 +38,12 @@ describe('catálogo Klipper/Moonraker', () => {
     expect(klipperCatalog).toHaveLength(5)
     expect(new Set(klipperCatalog.map((p) => p.id)).size).toBe(5)
     for (const product of klipperCatalog) {
-      expect(Object.keys(product).sort()).toEqual([...keys].sort())
+      // `hardwareReports` is optional: present only where hardware was qualified.
+      expect(
+        Object.keys(product)
+          .filter((key) => key !== 'hardwareReports')
+          .sort(),
+      ).toEqual([...keys].sort())
       expect(Object.keys(product.capabilities).sort()).toEqual(
         [...capabilityKeys].sort(),
       )
@@ -70,13 +77,21 @@ describe('catálogo Klipper/Moonraker', () => {
   it('usa os status decididos e nunca documented sem fonte', () => {
     for (const product of klipperCatalog) {
       const c = product.capabilities
-      expect(c.telemetry).toBe('simulated')
+      // Only the generic entry has recorded hardware qualification reports.
+      expect(c.telemetry).toBe(
+        product.id === 'klipper-generic-moonraker' ? 'hardware' : 'simulated',
+      )
       expect(c.pause).toBe('simulated')
       expect(c.resume).toBe('simulated')
       expect(c.cancel).toBe('simulated')
       expect(c.camera).toBe('simulated')
+      // `createFileTargets` never builds a Moonraker file target, so file
+      // listing and upload stay unreachable for the whole family.
       expect(c.files).toBe('unknown')
-      expect(c.materials).toBe('unknown')
+      // Materials come from the configured Spoolman mirror: the active spool
+      // reaches the Moonraker snapshot, so the status is no longer unknown.
+      expect(c.materials).not.toBe('unknown')
+      expect(c.materials).toBe('simulated')
       for (const status of Object.values(c)) {
         expect(capabilityStatusLabels[status]).toBeTruthy()
         if (status === 'documented')

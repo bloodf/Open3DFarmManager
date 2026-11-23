@@ -23,12 +23,14 @@ import { actionDialogTitle, actionDialogDescription, actionButtonConfirmationLab
 import { extendedLabel } from '../utils/farm-control-extended.ts'
 const now = { wall: Date.now(), mono: performance.now() }
 const keys = { kind: 'available', selected: 'synthetic-key', choices: [] }
-const rows = [
+// A spec may mount its own printers (name, state, controls) before the bundle runs.
+const printers: any[] = (window as any).farmControlsPrinters ?? [
   { name: 'KobraLink', controls: [] },
   { name: 'Bambu', controls: [] },
   { name: 'Legada', controls: undefined },
   { name: 'Klipper', controls: ['pause', 'set_temperature', 'home', 'firmware_restart', 'emergency_stop'] },
-].map(({name, controls}) => ({ assignment: { assignmentId: name, printerKey: name, status: 'active', connectorStatus: 'approved' }, connection: 'authenticated', observation: { state: { state: name === 'Klipper' ? 'idle' : 'printing', observedAt: now.wall, controls }, received: now, historical: false, sourceClockComparable: true } }))
+]
+const rows = printers.map(({name, controls, state}) => ({ assignment: { assignmentId: name, printerKey: name, status: 'active', connectorStatus: 'approved' }, connection: 'authenticated', observation: { state: { state: state ?? (name === 'Klipper' ? 'idle' : 'printing'), observedAt: now.wall, controls }, received: now, historical: false, sourceClockComparable: true } }))
 const pauseDialog = ref<HTMLDialogElement | null>(null)
 const pauseCancel = ref<HTMLButtonElement | null>(null)
 const pauseTarget = ref<any>(null)
@@ -85,7 +87,7 @@ function cancelPause(event: Event) { event.preventDefault(); closePause() }
       __VUE_PROD_DEVTOOLS__: 'false',
       __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: 'false',
     },
-    nodePaths: [join(app, 'node_modules')],
+    nodePaths: [join(app, '../../node_modules')],
   })
   return result.outputFiles[0]!.text
 }

@@ -9,6 +9,8 @@ export interface AnycubicControlTransportOptions {
   serial: string
   credentials: { username: string; password: string }
   caPem?: string
+  certPem?: string
+  keyPem?: string
   pinSha256?: string
   limits: {
     maxFrameBytes: number
@@ -18,7 +20,7 @@ export interface AnycubicControlTransportOptions {
     maxReconnects: number
   }
   signal: AbortSignal
-  onReport: (payload: Buffer) => void
+  onReport: (payload: Buffer, topic: string) => void
   onConnection: (state: 'connected' | 'disconnected' | 'closed') => void
 }
 
@@ -86,6 +88,9 @@ export function createAnycubicControlTransport(
         host,
         port,
         ca: options.caPem,
+        ...(options.certPem && options.keyPem
+          ? { cert: options.certPem, key: options.keyPem }
+          : {}),
         minVersion: 'TLSv1.2',
         // A configured exact certificate pin is an alternative trust anchor.
         rejectUnauthorized: !options.pinSha256,
@@ -184,7 +189,7 @@ export function createAnycubicControlTransport(
     inflight = Math.max(0, inflight - 1)
     if (stopped || !matches(receivedTopic)) return
     try {
-      onReport(payload)
+      onReport(payload, receivedTopic)
     } catch {
       void close()
     }
@@ -231,8 +236,6 @@ export function createAnycubicControlTransport(
       )
     })
   }
-  // Documented slicer print topic, distinct from the public control request topic.
-  // https://github.com/rvanderp3/kobra-connect/blob/main/docs/mqtt-commands.md
   function publishFile(
     topic: string,
     payload: string,
@@ -241,7 +244,11 @@ export function createAnycubicControlTransport(
     if (
       stopped ||
       !client.connected ||
-      topic !== `anycubic/anycubicCloud/v1/slicer/printer/${serial}/print` ||
+      !['info', 'file', 'print'].some(
+        (type) =>
+          topic ===
+          `anycubic/anycubicCloud/v1/slicer/printer/${serial}/${type}`,
+      ) ||
       Buffer.byteLength(payload) > 2048
     )
       return Promise.reject(new Error('Anycubic request unavailable'))

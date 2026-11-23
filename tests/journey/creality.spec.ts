@@ -1,6 +1,12 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import type { createCrealitySimulator } from '../../packages/sim-tools/src/creality-simulator.ts'
 import {
+  commandDialog,
+  expectInspectedTelemetry,
+  inspectPrinter,
+} from './creality-inspector.ts'
+import { discoverOnPage, expectCameraFrames } from './discovery-page.ts'
+import {
   journeyEnabled,
   startJourneyHarness,
   type JourneyHarness,
@@ -88,7 +94,7 @@ if (journeyEnabled())
       button: string,
       outcome: string,
     ) {
-      const dialog = page.getByRole('dialog')
+      const dialog = commandDialog(started(), page)
       const status = dialog.getByRole('status')
       const confirmation = dialog.getByRole('button', {
         name: button,
@@ -222,6 +228,7 @@ if (journeyEnabled())
         browser,
         simulator: 'creality',
         signedControl: true,
+        discovery: true,
       })
     })
 
@@ -246,24 +253,26 @@ if (journeyEnabled())
         )
     })
 
-    test('the Connector probe finds the printer and the farm lists it', async () => {
+    test('the page finds the printer through discovery and the farm lists it', async () => {
+      test.setTimeout(8 * 60_000)
       const journey = started()
-      const discovery = journey.discovery
-      if (!discovery) throw new Error('Discovery responder missing')
-      expect(await discovery.probe()).toMatchObject({
-        vendor: 'creality',
-        host: '127.0.0.1',
-        model: 'Creality K1',
+      // Find: "Procurar impressoras" on Impressoras, answered by the
+      // Connector's own Creality probe against the loopback responder; the
+      // selected result prefills the set-up form.
+      await discoverOnPage(journey, {
+        family: 'creality-native',
+        label: 'Creality K1',
+        hostField: 'creality-host',
       })
       // Set up: the assignment is active on an approved Connector.
-      const row = await journey.openFarm()
+      const row = await inspectPrinter(journey)
       await expect(row).toContainText('Atribuição ativa. Connector aprovado.')
     })
 
     test('live telemetry reaches the farm page', async () => {
       test.setTimeout(2 * 60_000)
       const journey = started()
-      await journey.expectLiveTelemetry()
+      await expectInspectedTelemetry(journey)
       const row = printerRow(journey.ownerPage)
       await reportedState(row, 'Imprimindo')
       const temperatures = row.getByLabel('Temperaturas observadas')
@@ -272,7 +281,9 @@ if (journeyEnabled())
       const job = row.getByLabel('Trabalho atual')
       await expect(job).toContainText('journey.gcode')
       await expect(job).toContainText('25/100')
-      // A scripted progress step from the simulator reaches the page.
+      // The simulator drops peers that fail the stock WebSocket keepalive.
+      expect(await simulator().challengeHeartbeat()).toBeGreaterThan(0)
+      // Live progress keeps reaching the page after the keepalive.
       journey.controls.setProgress(40)
       await journey.expectProgress(0.4)
     })
@@ -299,7 +310,7 @@ if (journeyEnabled())
       await reportedState(row, 'Imprimindo')
     })
 
-    test('temperature, fan, light and homing commands reach the printer', async () => {
+    test('temperature, fan and light reach the printer while homing is blocked', async () => {
       test.setTimeout(8 * 60_000)
       const page = started().ownerPage
       const row = printerRow(page)
@@ -331,8 +342,11 @@ if (journeyEnabled())
       await expect(environment).toContainText('Luz da câmara')
       await expect(environment).toContainText('Ligada')
 
-      await extended(page, 'Referenciar eixos')
-      expect(sets()).toContainEqual({ autohome: 'X Y Z' })
+      await expect(
+        extendedControls(page).getByRole('button', {
+          name: 'Referenciar eixos',
+        }),
+      ).toBeDisabled()
     })
 
     test('commands without a documented stock protocol are shown as não suportado', async () => {
@@ -379,13 +393,22 @@ if (journeyEnabled())
       await expect(row.getByLabel('Último trabalho')).toContainText(
         'journey.gcode',
       )
+      await extended(page, 'Referenciar eixos')
+      expect(sets()).toContainEqual({ autohome: 'X Y Z' })
       await expectHistory(page, 'Cancelado', 'journey.gcode')
     })
 
-    test('a file is uploaded and started; the job ends with its card and history entry', async () => {
+    test('a simulated file is uploaded, listed and started at its reported stock path', async () => {
       test.setTimeout(6 * 60_000)
       const journey = started()
       const page = journey.ownerPage
+      // A start needs an idle printer. In the full journey the cancel step
+      // leaves it idle; run alone, the simulator is still on its initial
+      // print, so that print ends on its own first.
+      if ([1, 2].includes(simulator().state.state as number)) {
+        journey.controls.finishPrint()
+        await reportedState(await inspectPrinter(journey), 'Ociosa')
+      }
       await page.goto(journey.origin + '/arquivos', {
         waitUntil: 'domcontentloaded',
       })
@@ -426,10 +449,9 @@ if (journeyEnabled())
         }
       }
 
-      // The stock protocol documents no file listing.
       await fileOperation(
         'Consultar arquivos',
-        'Listagem não suportada pela biblioteca desta impressora.',
+        'Nenhum arquivo nesta impressora.',
       )
 
       await input.setInputFiles({
@@ -443,6 +465,14 @@ if (journeyEnabled())
       )
       // The printer's own HTTP upload endpoint stored it (multipart body).
       expect(simulator().uploads.get(UPLOAD)).toBeGreaterThan(GCODE.length)
+      await fileOperation('Consultar arquivos', 'Arquivos atualizados.')
+      expect(simulator().requests).toContainEqual({
+        method: 'get',
+        params: { reqGcodeFile: 1 },
+      })
+      await expect(
+        page.locator('#files-existing').locator('option', { hasText: UPLOAD }),
+      ).toHaveCount(1)
 
       // Starting is never repeated: one attempt on a fresh control session.
       await controlInbox()
@@ -455,12 +485,16 @@ if (journeyEnabled())
         'Resultado desconhecido. Verifique a impressora antes de tentar novamente.',
         { timeout: 60_000 },
       )
-      expect(sets()).toContainEqual({
-        opGcodeFile: `printprt:/usr/data/printer_data/gcodes/${UPLOAD}`,
-      })
+      expect(sets().filter((params) => 'opGcodeFile' in params)).toEqual([
+        { opGcodeFile: `printprt:/mnt/UDISK/printer_data/gcodes/${UPLOAD}` },
+      ])
 
       // The print runs to the end on its own; the card names the finished job.
-      const row = await journey.openFarm()
+      const row = await inspectPrinter(journey)
+      // The end card belongs to this file, not to an earlier job.
+      await expect(row.getByLabel('Último trabalho')).toContainText(UPLOAD, {
+        timeout: 60_000,
+      })
       await expect(row.getByText('Concluído', { exact: true })).toBeVisible({
         timeout: 60_000,
       })
@@ -469,6 +503,15 @@ if (journeyEnabled())
       expect(simulator().state).toMatchObject({ state: 0, printProgress: 100 })
 
       await expectHistory(page, 'Concluído', UPLOAD)
+      expect(journey.simulatorObservation()).toMatchObject({ failure: false })
+    })
+
+    test('the farm page shows decoded camera frames from the printer', async () => {
+      test.setTimeout(2 * 60_000)
+      const journey = started()
+      // A fresh farm page: the camera runs after every control step.
+      await inspectPrinter(journey)
+      await expectCameraFrames(journey)
       expect(journey.simulatorObservation()).toMatchObject({ failure: false })
     })
   })

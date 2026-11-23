@@ -1,11 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import {
-  chromium,
-  type Browser,
-  type BrowserContext,
-  type Page,
-} from '@playwright/test'
+import { launchBrowser } from '../browser.ts'
+import { type Browser, type BrowserContext, type Page } from '@playwright/test'
 import { loadOrCreateIdentity } from '../../../packages/connector/src/identity/store.ts'
 import {
   PairingStartResponse,
@@ -35,6 +31,7 @@ import {
 } from './extension.ts'
 import { instrumentPage, type PageObserver } from './observe.ts'
 import {
+  secretSetAccepted,
   unexplainedConsoleIssues,
   type Secret,
   type World,
@@ -327,7 +324,7 @@ export async function runQualificationWorld(input: {
   const allowedConsole: RegExp[] = []
   let host: ConnectorHost | undefined
   stage('chromium-launch')
-  const browser = await chromium.launch({ headless: true })
+  const browser = await launchBrowser()
   let failed: unknown
   try {
     const bundle = await browserBundle(
@@ -609,16 +606,23 @@ export async function runQualificationWorld(input: {
         !secret.label.startsWith('bridge:') &&
         !secret.label.startsWith('printer:'),
     ).length
+    const inspectionComplete =
+      uninspected.length === 0 && unread === 0 && !truncated
+    const markersPresent = secretSetAccepted({
+      secrets: secrets.length,
+      connectorSecrets,
+      truncated,
+    })
     await checks.record(
       q,
       'secret-set-non-empty',
-      secrets.length >= 4 && !truncated,
+      markersPresent,
       `secrets=${secrets.length} connector-state=${connectorSecrets} responses=${responses} frames=${frames} truncated=${truncated}`,
     )
     await checks.record(
       q,
       'browser-inspection-complete',
-      uninspected.length === 0 && unread === 0 && !truncated,
+      inspectionComplete,
       `pages=${observers.length} storage/DOM unread on: ${uninspected.join(',') || 'none'}; response bodies read: ${read}; unread: ${unread}; bodyless by protocol: ${bodyless}; aborted by the browser before completion: ${aborted}`,
     )
     for (const key of [
@@ -631,7 +635,7 @@ export async function runQualificationWorld(input: {
       await checks.record(
         q,
         `${key}-clean`,
-        found[key].size === 0,
+        inspectionComplete && markersPresent && found[key].size === 0,
         found[key].size ? [...found[key]].join(',') : `searched ${key}`,
       )
     const httpIssues = observers.flatMap((observer) => observer.httpIssues)

@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import {
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -17,6 +18,7 @@ import {
   assertFarmReadOnly,
   assertFarmStatusFlowing,
 } from '../helpers/sim-netfault-observation.ts'
+import { isDockerSim } from '../../packages/sim-tools/src/mocks/env.ts'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const harness = join(root, 'infra/sim/netfault')
@@ -61,6 +63,13 @@ for (const profile of profiles) {
 test('Compose parses offline and installed Docker validates every profile', (t) => {
   for (const profile of profiles)
     assert.ok(compose.services.connector.profiles.includes(profile))
+  // The Docker CLI is a real external tool; only an explicit opt-in may run it.
+  if (!isDockerSim()) {
+    t.diagnostic(
+      'OPENFARM_SIM is not docker; offline profile parsing passed; CLI validation not requested',
+    )
+    return
+  }
   const available = spawnSync('docker', ['--version'], { encoding: 'utf8' })
   if (
     available.error &&
@@ -113,6 +122,11 @@ test('run and teardown scope deletion to the owned, labelled Compose project', (
     /--remove-orphans|--rmi|\bprune\b|network_mode: host/,
   )
   assert.match(source, /trap finish EXIT/)
+})
+
+test('starting the Connector preserves the router with the configured fault', () => {
+  const source = readFileSync(join(harness, 'run.sh'), 'utf8')
+  assert.match(source, /dc --profile "\$scenario" run --no-deps .* connector/)
 })
 
 test('run refuses a foreign existing project before teardown or build', () => {
@@ -262,14 +276,21 @@ esac
 if [ "$1" = compose ]; then
   case "$*" in
     *' up '*) touch "$STATE"; exit 7 ;;
+    *' logs --no-color browser') echo "probe failed to start" ;;
   esac
 fi
 `,
       )
       chmodSync(docker, 0o700)
-      // Supply a tiny dependency closure without requiring pnpm in offline tests.
+      // Supply a tiny dependency closure without requiring an install in offline tests.
+      const modules = join(directory, 'modules')
+      mkdirSync(join(modules, 'node-datachannel'), { recursive: true })
+      mkdirSync(join(modules, 'detect-libc'), { recursive: true })
+      mkdirSync(join(modules, '@node-datachannel', 'linux-x64-gnu'), {
+        recursive: true,
+      })
       const realpath = join(directory, 'realpath')
-      writeFileSync(realpath, '#!/bin/sh\nprintf "%s/ndc\\n" "$FIXTURE"\n')
+      writeFileSync(realpath, '#!/bin/sh\nprintf "%s/modules\\n" "$FIXTURE"\n')
       chmodSync(realpath, 0o700)
       const result = spawnSync(
         'bash',
@@ -289,13 +310,21 @@ fi
       )
       assert.notEqual(result.status, 0)
       const commands = readFileSync(calls, 'utf8')
+      assert.equal(
+        readFileSync(join(directory, 'nat-browser.log'), 'utf8'),
+        'probe failed to start\n',
+      )
+      assert.match(result.stderr, /probe failed to start/)
       if (foreign) {
         assert.match(result.stderr, /refusing cleanup/)
         assert.equal(commands.match(/--profile nat down --volumes/g)?.length, 1)
         assert.doesNotMatch(commands, /image rm/)
       } else {
         assert.equal(result.status, 7)
-        assert.match(commands, /--profile nat down --volumes/)
+        assert.match(
+          commands,
+          /logs --no-color browser\n[\s\S]*--profile nat down --volumes/,
+        )
       }
     } finally {
       rmSync(directory, { recursive: true })

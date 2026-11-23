@@ -14,11 +14,9 @@ const moduleUrl = new URL(
   '../../scripts/simulator-identify-diagnostic.mjs',
   import.meta.url,
 ).href
-const { verifyComposePin, PINNED_IMAGE_REFERENCE } = (await import(
-  moduleUrl
-)) as {
+const { verifyComposePin, PINNED_COMPOSE_BASE } = (await import(moduleUrl)) as {
   verifyComposePin: (composeFile: string) => string
-  PINNED_IMAGE_REFERENCE: string
+  PINNED_COMPOSE_BASE: string
 }
 
 const repoCompose = readFileSync(
@@ -55,19 +53,29 @@ test('rejects a Dockerfile whose final stage is not the pinned digest', () => {
   const builderOnly = `${repoDockerfile}\nFROM debian:bookworm\n`
   assert.throws(
     () => check(repoCompose, builderOnly),
-    /does not pin the reviewed amd64 image digest/,
+    /does not pin the reviewed multi-platform image digest/,
   )
   assert.throws(
     () =>
       check(
         repoCompose,
-        repoDockerfile.replaceAll(PINNED_IMAGE_REFERENCE, 'busybox'),
+        repoDockerfile.replace(PINNED_COMPOSE_BASE, 'busybox'),
       ),
-    /does not pin the reviewed amd64 image digest/,
+    /does not pin the reviewed multi-platform image digest/,
   )
 })
 
 test('rejects printer services that do not build from ./klipper', () => {
+  const anchorImageOverride = repoCompose.replace(
+    'image: openfarm-klipper:sim',
+    'image: busybox',
+  )
+  assert.notEqual(anchorImageOverride, repoCompose)
+  assert.throws(
+    () => check(anchorImageOverride, repoDockerfile),
+    /do not build from \.\/klipper/,
+  )
+
   const imageOverride = repoCompose.replace(
     '  sv06:\n    <<: *printer\n',
     '  sv06:\n    <<: *printer\n    image: busybox\n',
@@ -91,5 +99,16 @@ test('rejects printer services that do not build from ./klipper', () => {
   assert.throws(
     () => check(noMerge, repoDockerfile),
     /do not build from \.\/klipper/,
+  )
+})
+
+test('rejects a platform override that prevents native builds', () => {
+  const overridden = repoCompose.replace(
+    '  profiles: [klipper]',
+    '  platform: linux/amd64\n  profiles: [klipper]',
+  )
+  assert.throws(
+    () => check(overridden, repoDockerfile),
+    /overrides native platform selection/,
   )
 })

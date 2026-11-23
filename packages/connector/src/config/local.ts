@@ -53,6 +53,11 @@ const LegacyCollectorConfigSchema = z.strictObject({
         printerKey: z.string().min(1).max(128),
         origin: z.string().min(1).max(2048),
         apiKeyFile: z.string().min(1).max(4096).optional(),
+        /**
+         * Locally declared model. "Snapmaker U1" opts the printer into the U1
+         * tool mapping and the U1 command capability set.
+         */
+        model: z.string().min(1).max(128).optional(),
       }),
     )
     .min(1)

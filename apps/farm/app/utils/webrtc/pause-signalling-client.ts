@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { FileListExtra } from '../../../../../packages/farm-protocol/src/file-list.ts'
 import { canonicalize } from '../../../../../packages/farm-protocol/src/canonical.ts'
 import {
   BrowserDeviceUuid,
@@ -368,8 +369,7 @@ export class PauseBrowserSignallingClient {
       !this.#bindingValue ||
       canonicalize(value.binding) !== canonicalize(this.#bindingValue) ||
       !Number.isFinite(value.deadlineMonoMs) ||
-      value.deadlineMonoMs <= this.#channel.now() ||
-      value.deadlineMonoMs > this.#channel.deadlines().lifetimeDeadline
+      value.deadlineMonoMs <= this.#channel.now()
     ) {
       this.close('unexpected-control-proof')
       return
@@ -377,7 +377,15 @@ export class PauseBrowserSignallingClient {
     this.#proofsReady = true
     this.#channel.completeAdmission()
     try {
-      const copy = structuredClone(value)
+      // The peer and signalling channel convert the same wall-clock lease
+      // separately. Clamp to both caps instead of rejecting sub-ms drift.
+      const copy = {
+        ...structuredClone(value),
+        deadlineMonoMs: Math.min(
+          value.deadlineMonoMs,
+          this.#channel.deadlines().lifetimeDeadline,
+        ),
+      }
       Object.freeze(copy.binding.browser_public_key)
       Object.freeze(copy.binding)
       Object.freeze(copy)
@@ -414,14 +422,19 @@ export class PauseBrowserSignallingClient {
       return false
     }
   }
-  async listFiles(printerKey: string) {
+  async listFiles(
+    printerKey: string,
+    directory?: string,
+    download?: string,
+    config?: FileListExtra,
+  ) {
     if (
       !this.#channel.current() ||
       !this.#proofsReady ||
       !this.#peer?.listFiles
     )
       throw Error('File list unavailable')
-    return this.#peer.listFiles(printerKey)
+    return this.#peer.listFiles(printerKey, directory, download, config)
   }
   async sendFile(...args: Parameters<PauseBrowserPeer['sendFile']>) {
     if (!this.#channel.current() || !this.#proofsReady || !this.#peer?.sendFile)

@@ -1,5 +1,4 @@
-// Explicit test-only runner. Never accepts a database URL, existing container,
-// hardware mount or inherited PostgreSQL connection settings.
+// Explicit test-only runner. Never accepts an inherited PostgreSQL connection setting.
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -16,18 +15,21 @@ import {
 } from './db/migrations.ts'
 import { testPostgresCredentialRenewal } from '../tests/helpers/postgres-credential-renewal-integration.ts'
 import { testRenewalHttps } from '../tests/helpers/renewal-https-integration.ts'
+import {
+  POSTGRES_IMAGE_PATTERN,
+  disposablePostgres,
+  type DockerCommand,
+} from '../tests/helpers/disposable-postgres.ts'
 
 const exec = promisify(execFile)
+const isDocker = process.env.OPENFARM_PG === 'docker'
 const image = process.env.RENEWAL_TEST_IMAGE
 if (
   process.argv.length !== 2 ||
   process.env.RENEWAL_TEST_ADMITTED !== 'yes' ||
-  !image ||
-  !/^postgres:17(?:\.[0-9]+)?(?:-[a-z0-9.-]+)?@sha256:[a-f0-9]{64}$/.test(image)
+  (isDocker && (!image || !POSTGRES_IMAGE_PATTERN.test(image)))
 )
-  throw new Error(
-    'Fresh test admission and locally available digest-pinned PostgreSQL 17 image required',
-  )
+  throw new Error('Fresh test admission required')
 // Optional built-server phase: "<appPort>,<proxyPort>" on loopback; needs apps/farm/.output.
 const httpsPorts = process.env.RENEWAL_TEST_HTTPS_PORTS?.split(',').map(Number)
 if (
@@ -49,24 +51,54 @@ const evidence = join(
   id,
 )
 await mkdir(evidence, { recursive: true, mode: 0o700 })
-const docker = async (...args: string[]) =>
-  (
-    await exec('docker', args, { timeout: 60000, maxBuffer: 1024 * 1024 })
-  ).stdout.trim()
-const endpoint =
-  process.env.DOCKER_HOST ??
-  (await docker('context', 'inspect', '--format', '{{.Endpoints.docker.Host}}'))
-assert.match(endpoint, /^unix:\/\//, 'Only a local Docker daemon is allowed')
+
+let dockerCmd: DockerCommand | undefined
+if (isDocker) {
+  dockerCmd = async (...args: string[]) =>
+    (
+      await exec('docker', args, { timeout: 60000, maxBuffer: 1024 * 1024 })
+    ).stdout.trim()
+  const endpoint =
+    process.env.DOCKER_HOST ??
+    (await dockerCmd(
+      'context',
+      'inspect',
+      '--format',
+      '{{.Endpoints.docker.Host}}',
+    ))
+  assert.match(endpoint, /^unix:\/\//, 'Only a local Docker daemon is allowed')
+}
+
 const baseline = {
   disk: await statfs(process.cwd(), { bigint: true }).then((x) => ({
     availableBytes: String(x.bavail * x.bsize),
   })),
   gitStatus: (await exec('git', ['status', '--porcelain'])).stdout,
   worktrees: (await exec('git', ['worktree', 'list', '--porcelain'])).stdout,
-  containers: await docker('ps', '-a', '--format', '{{.ID}} {{.Names}}'),
-  images: await docker('image', 'ls', '--no-trunc', '--format', '{{.ID}}'),
-  volumes: await docker('volume', 'ls', '--format', '{{.Name}}'),
-  networks: await docker('network', 'ls', '--format', '{{.ID}} {{.Name}}'),
+  ...(isDocker && dockerCmd
+    ? {
+        containers: await dockerCmd(
+          'ps',
+          '-a',
+          '--format',
+          '{{.ID}} {{.Names}}',
+        ),
+        images: await dockerCmd(
+          'image',
+          'ls',
+          '--no-trunc',
+          '--format',
+          '{{.ID}}',
+        ),
+        volumes: await dockerCmd('volume', 'ls', '--format', '{{.Name}}'),
+        networks: await dockerCmd(
+          'network',
+          'ls',
+          '--format',
+          '{{.ID}} {{.Name}}',
+        ),
+      }
+    : {}),
 }
 await writeFile(
   join(evidence, 'baseline.json'),
@@ -77,127 +109,39 @@ assert.ok(
   BigInt(baseline.disk.availableBytes) >= 2n * 1024n ** 3n,
   'At least 2 GiB free required; no pull is performed',
 )
-// Fails rather than pulling: image ownership and deletion remain with its owner.
-await docker('image', 'inspect', image)
-const imageVolumes: unknown = JSON.parse(
-  await docker(
-    'image',
-    'inspect',
-    '--format',
-    '{{json .Config.Volumes}}',
-    image,
-  ),
+
+await writeFile(
+  join(evidence, 'ownership.json'),
+  JSON.stringify({
+    id,
+    name,
+    label,
+    image: image ?? null,
+    reason:
+      'Fresh isolated cluster is required: migrations create cluster-wide roles',
+    volumes: [],
+    networksCreated: [],
+    imagePulled: false,
+  }),
+  { mode: 0o600 },
 )
-assert.ok(
-  imageVolumes === null ||
-    (typeof imageVolumes === 'object' &&
-      Object.keys(imageVolumes).every(
-        (path) => path === '/var/lib/postgresql/data',
-      )),
-  'Image volumes must be covered by the task-owned tmpfs; no anonymous volumes allowed',
-)
-let container: string | undefined
+
+const database = disposablePostgres({
+  name,
+  labelKey: 'org.open3dfarmmanager.renewal-test',
+  labelValue: id,
+  port: 0,
+  through: false,
+  ...(isDocker ? { docker: dockerCmd, image } : {}),
+})
+
 let sql: ReturnType<typeof postgres> | undefined
 let failure: unknown
 let cleanupFailure: unknown
 try {
-  // Record intent before allocation, so interrupted startup has an exact name.
-  await writeFile(
-    join(evidence, 'ownership.json'),
-    JSON.stringify({
-      id,
-      name,
-      label,
-      image,
-      reason:
-        'Fresh isolated cluster is required: migrations create cluster-wide roles',
-      volumes: [],
-      networksCreated: [],
-      imagePulled: false,
-    }),
-    { mode: 0o600 },
-  )
-  await docker(
-    'create',
-    '--name',
-    name,
-    '--label',
-    label,
-    '--pull',
-    'never',
-    '--cpus',
-    '4',
-    '--memory',
-    '8g',
-    '--read-only',
-    '--cap-drop',
-    'ALL',
-    '--security-opt',
-    'no-new-privileges',
-    '--user',
-    'postgres',
-    '--tmpfs',
-    '/var/lib/postgresql/data:rw,mode=1777',
-    '--tmpfs',
-    '/var/run/postgresql:rw,mode=1777',
-    '--tmpfs',
-    '/tmp:rw,mode=1777',
-    '-p',
-    '127.0.0.1::5432',
-    '-e',
-    'POSTGRES_USER=fixture',
-    '-e',
-    'POSTGRES_DB=fixture',
-    '-e',
-    'POSTGRES_HOST_AUTH_METHOD=trust',
-    '-e',
-    // A child directory lets the image's postgres UID own PGDATA without
-    // assuming Debian/Alpine UID values or chmodding a root-owned tmpfs.
-    'PGDATA=/var/lib/postgresql/data/pgdata',
-    image,
-  )
-  container = await docker('inspect', '--format', '{{.Id}}', name)
-  assert.match(container, /^[a-f0-9]{64}$/)
-  assert.equal(
-    await docker(
-      'inspect',
-      '--format',
-      '{{index .Config.Labels "org.open3dfarmmanager.renewal-test"}}',
-      container,
-    ),
-    id,
-  )
-  await writeFile(join(evidence, 'container-id.txt'), container + '\n', {
-    mode: 0o600,
-  })
-  await docker('start', container)
-  // Bounded startup readiness inside the owned container, never a shared server.
-  await docker(
-    'exec',
-    container,
-    'sh',
-    '-c',
-    'n=0; until pg_isready -U fixture -d fixture >/dev/null; do n=$((n+1)); [ "$n" -lt 30 ] || exit 1; sleep 1; done',
-  )
-  const mapping = await docker('port', container, '5432/tcp')
-  assert.match(mapping, /^127\.0\.0\.1:[0-9]+$/)
-  const port = Number(mapping.split(':')[1])
-  assert.ok(Number.isInteger(port) && port >= 1024 && port <= 65535)
-  sql = postgres({
-    host: '127.0.0.1',
-    port,
-    database: 'fixture',
-    username: 'fixture',
-    password: '',
-    ssl: false,
-    max: 8,
-    connect_timeout: 3,
-    connection: {
-      application_name: name,
-      statement_timeout: 10000,
-      lock_timeout: 5000,
-    },
-  })
+  sql = await database.start()
+  const port = database.port
+
   const identity = (
     await sql`SELECT current_database() AS db,current_user AS actor`
   )[0]
@@ -209,7 +153,12 @@ try {
     'fresh task-owned cluster only',
   )
   const version = (await sql`SHOW server_version`)[0]?.server_version
-  assert.match(version, /^17\./)
+  const major = parseInt(version ?? '', 10)
+  assert.ok(
+    !Number.isNaN(major) && major >= 13,
+    'PostgreSQL version >= 13 required',
+  )
+
   const catalog = catalogThrough(
     await loadMigrationCatalog(),
     '0023_connector_credential_renewals',
@@ -220,7 +169,7 @@ try {
   assert.equal(validateMigrationHistory(catalog, [...journal]), catalog.length)
   await writeFile(
     join(evidence, 'journal.json'),
-    JSON.stringify({ version, image, journal }, null, 2),
+    JSON.stringify({ version, image: image ?? null, journal }, null, 2),
   )
   const dependency = 'renewal_dependency_' + id.replaceAll('-', '')
   await sql`CREATE TABLE public.${sql(dependency)}(root_jti uuid,kind text,jti uuid,FOREIGN KEY(root_jti,kind,jti) REFERENCES farm.connector_credential_renewals(root_jti,predecessor_kind,predecessor_jti))`
@@ -270,12 +219,6 @@ try {
       mode: 0o600,
     },
   )
-  if (container) {
-    const logs = await docker('logs', '--tail', '200', container).catch(
-      (error) => String(error),
-    )
-    await writeFile(join(evidence, 'postgres.log'), logs, { mode: 0o600 })
-  }
 } finally {
   try {
     await sql?.end({ timeout: 3 })
@@ -283,40 +226,7 @@ try {
     cleanupFailure = error
   }
   try {
-    // Recover exact ownership if create completed but ID recording was interrupted.
-    const owned =
-      container ??
-      (await docker('inspect', '--format', '{{.Id}}', name).catch(() => ''))
-    if (owned) {
-      assert.match(owned, /^[a-f0-9]{64}$/)
-      assert.equal(
-        await docker(
-          'inspect',
-          '--format',
-          '{{index .Config.Labels "org.open3dfarmmanager.renewal-test"}}',
-          owned,
-        ),
-        id,
-      )
-      assert.equal(
-        await docker('inspect', '--format', '{{.Name}}', owned),
-        '/' + name,
-      )
-      await docker('stop', '--time', '3', owned)
-      await docker('rm', owned)
-      assert.equal(
-        await docker(
-          'ps',
-          '-a',
-          '--filter',
-          'id=' + owned,
-          '--format',
-          '{{.ID}}',
-        ),
-        '',
-        'exact owned container must be absent',
-      )
-    }
+    await database.stop()
   } catch (error) {
     cleanupFailure ??= error
   }
@@ -324,7 +234,6 @@ try {
     join(evidence, 'cleanup.json'),
     JSON.stringify(
       {
-        container,
         name,
         removed: !cleanupFailure,
         retained:

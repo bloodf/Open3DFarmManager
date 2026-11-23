@@ -64,7 +64,10 @@ export function createKobraLinkRuntimeSubscription(input: {
           if (status.availability === 'available') {
             reconnectDelay = 30_000
             reconnectAt = undefined
-          } else if (status.connectionReason) {
+          } else if (
+            status.connectionReason &&
+            status.connectionReason !== 'client_certificate_missing'
+          ) {
             const now = performance.now()
             reconnectAt ??= now + reconnectDelay
             if (now >= reconnectAt && !signal.aborted) {

@@ -9,6 +9,6 @@
   "dependencies": {
     "effect": "4.1.4",
     "zod": "4.6.7",
-    "@open3dfarmmanager/farm-protocol": "workspace:*"
+    "@open3dfarmmanager/farm-protocol": "*"
   }
 }

@@ -1,164 +1,190 @@
-import { expect, test } from 'vitest'
+// v2 command path (#609): signature (verifyCommandV2), capability admission
+// and durable replay run through the shipped dispatcher with a fake driver.
+import { afterEach, expect, test } from 'vitest'
+import { randomUUID } from 'node:crypto'
 import {
-  createBrowserKey,
-  signCommand,
-  encodeCommand,
-  decodeCommand,
-} from '@open3dfarmmanager/farm-protocol'
-import { authorizeCommand } from '../../packages/connector/src/auth/verify.ts'
-import type { CommandContext } from '../../packages/connector/src/auth/verify.ts'
+  decodeCommandV2,
+  encodeCommandV2,
+  verifyCommandV2,
+} from '../../packages/farm-protocol/src/command-v2.ts'
+import {
+  createV2Authority,
+  nodeSigner,
+  openV2Dispatch,
+  rejected,
+  type V2Dispatch,
+} from '../helpers/command-v2-dispatch.ts'
 
-const id = '00000000-0000-4000-8000-000000000001'
-const other = '00000000-0000-4000-8000-000000000002'
-const input = {
-  farm_id: id,
-  agent_id: id,
-  printer_id: id,
-  user_id: id,
-  key_id: id,
-  session_id: id,
-  action: 'pause' as const,
+const open: V2Dispatch[] = []
+afterEach(() => {
+  for (const harness of open.splice(0)) harness.close()
+})
+async function fixture(options: Parameters<typeof openV2Dispatch>[1] = {}) {
+  const authority = await createV2Authority(await nodeSigner())
+  const harness = await openV2Dispatch(authority, options)
+  open.push(harness)
+  return { authority, harness }
 }
-async function fixture() {
-  const pair = await createBrowserKey()
-  const command = await signCommand(input, pair.privateKey, 100_000)
-  const context: CommandContext = {
-    farmId: id,
-    agentId: id,
-    userId: id,
-    keyId: id,
-    sessionId: id,
-    printerIds: new Set([id]),
-    now: 100_000,
-    authorization: { issuedAt: 100_000, expiresAt: 160_000 },
-    key: {
-      id,
-      farmId: id,
-      userId: id,
-      role: 'operator',
-      revokedAt: null,
-      publicJwk: await crypto.subtle.exportKey('jwk', pair.publicKey),
-    },
-  }
-  let claims = 0
-  const replay = {
-    claim() {
-      claims++
-      return 'accepted' as const
-    },
-  }
-  return {
-    pair,
-    command,
-    context,
-    replay,
-    get claims() {
-      return claims
-    },
-  }
-}
-test('nonextractable browser key signs a command verified by Node crypto', async () => {
-  const f = await fixture()
+
+test('nonextractable browser key signs a command the Connector applies once', async () => {
+  const pair = await crypto.subtle.generateKey(
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    false,
+    ['sign', 'verify'],
+  )
   await expect(
-    crypto.subtle.exportKey('jwk', f.pair.privateKey),
+    crypto.subtle.exportKey('jwk', pair.privateKey),
   ).rejects.toThrow()
-  expect(
-    authorizeCommand(encodeCommand(f.command), f.context, f.replay).ok,
-  ).toBe(true)
-  expect(f.claims).toBe(1)
+  const { authority, harness } = await fixture()
+  const result = await harness.dispatch(await authority.sign())
+  expect(result.kind).toBe('applied')
+  expect(harness.claims()).toBe(1)
+  expect(harness.writes()).toBe(1)
 })
+
 test('nonces and command IDs differ for repeated actions', async () => {
-  const f = await fixture()
-  const next = await signCommand(input, f.pair.privateKey, 100_000)
-  expect(next.nonce).not.toBe(f.command.nonce)
-  expect(next.cmd_id).not.toBe(f.command.cmd_id)
+  const authority = await createV2Authority(await nodeSigner())
+  const first = authority.command()
+  const next = authority.command()
+  expect(next.nonce).not.toBe(first.nonce)
+  expect(next.cmd_id).not.toBe(first.cmd_id)
 })
+
+// v1 printer_id/user_id/session_id map to v2 assignment_id/account_id/transport_id.
 test.each([
   'farm_id',
   'agent_id',
-  'printer_id',
-  'user_id',
+  'assignment_id',
+  'account_id',
   'key_id',
-  'session_id',
-] as const)('reject substituted scope %s before persistence', async (field) => {
-  const f = await fixture()
-  const decision = authorizeCommand(
-    encodeCommand({ ...f.command, [field]: other }),
-    f.context,
-    f.replay,
-  )
-  expect(decision.ok).toBe(false)
-  expect(f.claims).toBe(0)
-})
+  'transport_id',
+  'capability_id',
+] as const)(
+  'reject re-signed substituted scope %s before persistence',
+  async (field) => {
+    const { authority, harness } = await fixture()
+    const wire = await authority.sign({
+      [field]: field === 'account_id' ? 'other_account' : randomUUID(),
+    })
+    expect(await harness.dispatch(wire)).toEqual(rejected('scope'))
+    expect(harness.claims()).toBe(0)
+    expect(harness.driverEntries()).toBe(0)
+  },
+)
+
 test('reject changed action even when all scope IDs match', async () => {
-  const f = await fixture()
-  expect(
-    authorizeCommand(
-      encodeCommand({ ...f.command, action: 'cancel' }),
-      f.context,
-      f.replay,
-    ),
-  ).toEqual({ ok: false, reason: 'invalid-signature' })
-  expect(f.claims).toBe(0)
+  // The capability allows both actions, so only the signature can refuse it.
+  const { authority, harness } = await fixture({
+    capability: { actions: ['pause', 'resume'] },
+  })
+  const signed = decodeCommandV2(await authority.sign())
+  const tampered = encodeCommandV2({
+    ...signed,
+    action: 'resume',
+    purpose: 'printer-control',
+  })
+  expect(await harness.dispatch(tampered)).toEqual(rejected('signature'))
+  expect(harness.claims()).toBe(0)
 })
+
+test('viewer role cannot hold a command capability', async () => {
+  const authority = await createV2Authority(await nodeSigner())
+  await expect(
+    openV2Dispatch(authority, {
+      capability: { role: 'viewer' as 'operator' },
+    }),
+  ).rejects.toThrow()
+})
+
+test('a private JWK is never accepted as the bound browser key', async () => {
+  const signer = await nodeSigner()
+  await expect(
+    createV2Authority({
+      ...signer,
+      publicJwk: { ...signer.publicJwk, d: 'A'.repeat(43) } as never,
+    }),
+  ).rejects.toThrow()
+  const command = decodeCommandV2(
+    await (await createV2Authority(signer)).sign(),
+  )
+  expect(
+    await verifyCommandV2(command, { ...signer.publicJwk, d: 'A'.repeat(43) }),
+  ).toBe(false)
+  expect(await verifyCommandV2(command, signer.publicJwk)).toBe(true)
+})
+
+test('capability lifetime beyond policy is refused at admission', async () => {
+  const authority = await createV2Authority(await nodeSigner())
+  await expect(
+    openV2Dispatch(authority, { capability: { expires_at: 999_999 } }),
+  ).rejects.toThrow()
+})
+
 test.each([
-  'viewer',
+  'action-outside-capability',
   'revoked',
-  'expired-lease',
-  'oversized-lease',
+  'expired-capability',
   'expired-command',
   'future-command',
-  'private-jwk',
+  'oversized-command-lifetime',
   'wrong-key',
   'storage-failure',
 ])('fail closed: %s', async (scenario) => {
-  const f = await fixture()
-  let command = f.command
-  if (scenario === 'viewer') f.context.key.role = 'viewer'
-  if (scenario === 'revoked') f.context.key.revokedAt = 1
-  if (scenario === 'expired-lease') {
-    f.context.now = 160_000
-    command = await signCommand(input, f.pair.privateKey, 150_000)
+  const { authority, harness } = await fixture()
+  let wire = await authority.sign()
+  let expected = rejected('signature')
+  if (scenario === 'action-outside-capability') {
+    wire = await authority.sign({
+      action: 'cancel',
+      purpose: 'printer-control',
+    })
+    expected = rejected('scope')
   }
-  if (scenario === 'oversized-lease')
-    f.context.authorization.expiresAt = 999_999
+  if (scenario === 'revoked') {
+    harness.revoke()
+    expected = rejected('invalid-authority')
+  }
+  if (scenario === 'expired-capability') {
+    harness.advance(30_000)
+    wire = await authority.sign({}, 31_000)
+    expected = rejected('invalid-authority')
+  }
   if (scenario === 'expired-command') {
-    f.context.now = 160_000
-    f.context.authorization = { issuedAt: 160_000, expiresAt: 220_000 }
+    harness.advance(5000)
+    expected = rejected('expired')
   }
-  if (scenario === 'future-command')
-    command = await signCommand(input, f.pair.privateKey, 160_001)
-  if (scenario === 'private-jwk')
-    f.context.key.publicJwk = {
-      ...(f.context.key.publicJwk as object),
-      d: 'A'.repeat(43),
-    }
-  if (scenario === 'wrong-key')
-    f.context.key.publicJwk = await crypto.subtle.exportKey(
-      'jwk',
-      (await createBrowserKey()).publicKey,
-    )
-  const replay =
-    scenario === 'storage-failure'
-      ? {
-          claim() {
-            throw new Error('disk full')
-          },
-        }
-      : f.replay
-  expect(authorizeCommand(encodeCommand(command), f.context, replay).ok).toBe(
-    false,
-  )
-  expect(f.claims).toBe(0)
+  if (scenario === 'future-command') {
+    wire = await authority.sign({}, 2001)
+    expected = rejected('expired')
+  }
+  if (scenario === 'oversized-command-lifetime') {
+    const signed = decodeCommandV2(wire)
+    wire = JSON.stringify({ ...signed, expires_at: signed.issued_at + 5001 })
+    expected = rejected('invalid-command')
+  }
+  if (scenario === 'wrong-key') {
+    // The key bound by admission is the only key that can authorise.
+    const other = await nodeSigner()
+    wire = encodeCommandV2(await other.signCommand(authority.command()))
+  }
+  if (scenario === 'storage-failure') {
+    harness.closeJournal()
+    expected = rejected('storage')
+  }
+  const result = await harness.dispatch(wire)
+  expect(result).toEqual(expected)
+  if (scenario !== 'storage-failure') expect(harness.claims()).toBe(0)
+  expect(harness.writes()).toBe(0)
 })
+
 test('canonical wire rejects duplicate fields, padding and oversized frames', async () => {
-  const f = await fixture()
-  const wire = encodeCommand(f.command)
-  expect(decodeCommand(wire)).toEqual(f.command)
+  const authority = await createV2Authority(await nodeSigner())
+  const wire = await authority.sign()
+  expect(encodeCommandV2(decodeCommandV2(wire))).toBe(wire)
   for (const value of [
     ' ' + wire,
-    wire.replace('{', '{"v":1,'),
+    wire.replace('{', '{"v":2,'),
     'x'.repeat(8193),
   ])
-    expect(() => decodeCommand(value)).toThrow()
+    expect(() => decodeCommandV2(value)).toThrow()
 })

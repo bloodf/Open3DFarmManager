@@ -2,7 +2,16 @@
 import { Buffer } from 'node:buffer'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { constants, fstatSync, lstatSync, type BigIntStats } from 'node:fs'
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readSync,
+  realpathSync,
+  type BigIntStats,
+} from 'node:fs'
 import {
   lstat,
   mkdtemp,
@@ -11,16 +20,61 @@ import {
   rmdir,
   type FileHandle,
 } from 'node:fs/promises'
-import { BlockList, isIP } from 'node:net'
+import {
+  BlockList,
+  createServer,
+  isIP,
+  type AddressInfo,
+  type Socket,
+} from 'node:net'
 import { tmpdir } from 'node:os'
-import { isAbsolute, join } from 'node:path'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { Duplex } from 'node:stream'
+import { fileURLToPath } from 'node:url'
 import {
   createRecordReader,
   HelperFailure,
   readAURecord,
 } from './record-reader.ts'
+
+const SUPERVISOR_DIR = dirname(fileURLToPath(import.meta.url))
+export const DEFAULT_RTSP_HELPER_BIN_DIR = resolve(SUPERVISOR_DIR, '../bin')
+export const DEFAULT_RTSP_HELPER_PATH = join(
+  DEFAULT_RTSP_HELPER_BIN_DIR,
+  'rtsp-ingest',
+)
+export const DEFAULT_RTSP_FIXTURE_PATH = join(
+  DEFAULT_RTSP_HELPER_BIN_DIR,
+  'rtspfixture',
+)
+
+export type RtspHelperStatus = Readonly<
+  | {
+      available: true
+      helperAvailable: true
+      status: 'available'
+      reason?: undefined
+      sha256: string
+      message: string
+    }
+  | {
+      available: false
+      helperAvailable: false
+      status: 'unavailable'
+      reason: 'helper-unavailable'
+      sha256?: undefined
+      message: string
+    }
+>
+
+const UNAVAILABLE_HELPER_STATUS: RtspHelperStatus = Object.freeze({
+  available: false,
+  helperAvailable: false,
+  status: 'unavailable',
+  reason: 'helper-unavailable',
+  message: 'RTSP camera unavailable: rtsp-ingest helper is unavailable',
+})
 
 export type HelperExecutable = Readonly<{ path: string; sha256: string }>
 export type LocalDestination = Readonly<{
@@ -555,4 +609,251 @@ export async function openHelperSource(
     openingDone = true
     finishIfReaped()
   }
+}
+
+export function getRtspHelperStatusSync(
+  executable?: Partial<HelperExecutable> | null,
+): RtspHelperStatus {
+  const executablePath = executable?.path ?? DEFAULT_RTSP_HELPER_PATH
+  const expectedHash = executable?.sha256
+  if (
+    process.platform === 'win32' ||
+    typeof executablePath !== 'string' ||
+    !isAbsolute(executablePath) ||
+    (expectedHash !== undefined && !/^[a-f0-9]{64}$/.test(expectedHash))
+  ) {
+    return UNAVAILABLE_HELPER_STATUS
+  }
+  let fd: number | undefined
+  try {
+    if (realpathSync(executablePath) !== executablePath) {
+      return UNAVAILABLE_HELPER_STATUS
+    }
+    const original = lstatSync(executablePath, { bigint: true })
+    if (
+      !original.isFile() ||
+      (original.mode & 0o111n) === 0n ||
+      original.size <= 0n
+    ) {
+      return UNAVAILABLE_HELPER_STATUS
+    }
+    fd = openSync(executablePath, constants.O_RDONLY | constants.O_NOFOLLOW)
+    const opened = fstatSync(fd, { bigint: true })
+    if (!sameFile(original, opened)) {
+      return UNAVAILABLE_HELPER_STATUS
+    }
+    const hash = createHash('sha256')
+    const chunk = Buffer.allocUnsafe(65_536)
+    let hashed = 0n
+    for (;;) {
+      const bytesRead = readSync(fd, chunk, 0, chunk.length, null)
+      if (bytesRead === 0) break
+      hashed += BigInt(bytesRead)
+      if (hashed > opened.size) return UNAVAILABLE_HELPER_STATUS
+      hash.update(chunk.subarray(0, bytesRead))
+    }
+    const finalOpened = fstatSync(fd, { bigint: true })
+    const finalPath = lstatSync(executablePath, { bigint: true })
+    if (
+      hashed !== opened.size ||
+      !sameFile(opened, finalOpened) ||
+      !sameFile(opened, finalPath)
+    ) {
+      return UNAVAILABLE_HELPER_STATUS
+    }
+    const sha256 = hash.digest('hex')
+    if (expectedHash !== undefined && sha256 !== expectedHash) {
+      return UNAVAILABLE_HELPER_STATUS
+    }
+    return Object.freeze({
+      available: true,
+      helperAvailable: true,
+      status: 'available',
+      sha256,
+      message: 'RTSP camera helper is available',
+    })
+  } catch {
+    return UNAVAILABLE_HELPER_STATUS
+  } finally {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd)
+      } catch {
+        /* Best-effort close. */
+      }
+    }
+  }
+}
+
+export async function checkRtspHelperStatus(
+  executable?: Partial<HelperExecutable> | null,
+): Promise<RtspHelperStatus> {
+  return getRtspHelperStatusSync(executable)
+}
+
+export type NodeRtspFallbackInstance = Readonly<{
+  backend: 'node-fallback'
+  host: '127.0.0.1'
+  port: number
+  path: string
+  url: string
+  helperStatus: RtspHelperStatus
+  close(): Promise<void>
+}>
+
+export async function startNodeRtspFallbackServer(
+  options: {
+    path?: string
+    packetsPerPlay?: number
+    helperStatus?: RtspHelperStatus
+  } = {},
+): Promise<NodeRtspFallbackInstance> {
+  const rtspPath =
+    typeof options.path === 'string' && options.path.startsWith('/')
+      ? options.path
+      : '/test'
+  const packetsPerPlay =
+    typeof options.packetsPerPlay === 'number' &&
+    Number.isInteger(options.packetsPerPlay) &&
+    options.packetsPerPlay >= 1 &&
+    options.packetsPerPlay <= 120
+      ? options.packetsPerPlay
+      : 12
+  const helperStatus = options.helperStatus ?? UNAVAILABLE_HELPER_STATUS
+  const sdp = [
+    'v=0',
+    'o=- 0 0 IN IP4 127.0.0.1',
+    's=OpenFarm RTSP Node Fallback',
+    'c=IN IP4 127.0.0.1',
+    't=0 0',
+    'm=video 0 RTP/AVP 96',
+    'a=rtpmap:96 H264/90000',
+    'a=fmtp:96 packetization-mode=1;profile-level-id=42e01f;sprop-parameter-sets=Z0LgH6o=,aM4GAA==',
+    'a=control:trackID=0',
+    '',
+  ].join('\r\n')
+  const sockets = new Set<Socket>()
+  const server = createServer((socket) => {
+    sockets.add(socket)
+    socket.on('close', () => sockets.delete(socket))
+    socket.on('error', () => socket.destroy())
+    let buffer = ''
+    socket.on('data', (chunk) => {
+      buffer += chunk.toString('latin1')
+      if (buffer.length > 65_536) {
+        socket.destroy()
+        return
+      }
+      for (;;) {
+        const end = buffer.indexOf('\r\n\r\n')
+        if (end < 0) break
+        const request = buffer.slice(0, end)
+        buffer = buffer.slice(end + 4)
+        const firstLine = request.split('\r\n')[0] ?? ''
+        const [method = '', target = ''] = firstLine.split(' ')
+        const cseq = /^CSeq:\s*(\d+)/im.exec(request)?.[1] ?? '1'
+        const reply = (status: string, headers: string[] = [], body = '') => {
+          const lines = [
+            `RTSP/1.0 ${status}`,
+            `CSeq: ${cseq}`,
+            ...headers,
+            `Content-Length: ${Buffer.byteLength(body, 'latin1')}`,
+            '',
+            body,
+          ]
+          socket.write(lines.join('\r\n'), 'latin1')
+        }
+        let pathname = rtspPath
+        try {
+          if (target.startsWith('rtsp://')) {
+            pathname = new URL(target).pathname
+          }
+        } catch {
+          reply('400 Bad Request')
+          continue
+        }
+        if (method === 'OPTIONS') {
+          reply('200 OK', ['Public: OPTIONS, DESCRIBE, SETUP, PLAY, TEARDOWN'])
+        } else if (method === 'DESCRIBE') {
+          if (pathname !== rtspPath) {
+            reply('404 Not Found')
+          } else {
+            reply('200 OK', ['Content-Type: application/sdp'], sdp)
+          }
+        } else if (method === 'SETUP') {
+          reply('200 OK', [
+            'Transport: RTP/AVP/TCP;unicast;interleaved=0-1',
+            'Session: nodefallback1;timeout=60',
+          ])
+        } else if (method === 'PLAY') {
+          reply('200 OK', ['Session: nodefallback1'])
+          const nal = Buffer.from([0x65, 0x88, 0x84, 0x21, 0xa0])
+          const frames: Buffer[] = []
+          for (let seq = 0; seq < packetsPerPlay; seq++) {
+            const rtp = Buffer.alloc(12 + nal.length)
+            rtp[0] = 0x80
+            rtp[1] = 0x80 | 96
+            rtp.writeUInt16BE((seq + 1) & 0xffff, 2)
+            rtp.writeUInt32BE((seq * 3000) >>> 0, 4)
+            rtp.writeUInt32BE(0x12345678, 8)
+            nal.copy(rtp, 12)
+            const interleaved = Buffer.alloc(4 + rtp.length)
+            interleaved[0] = 0x24
+            interleaved[1] = 0
+            interleaved.writeUInt16BE(rtp.length, 2)
+            rtp.copy(interleaved, 4)
+            frames.push(interleaved)
+          }
+          socket.write(Buffer.concat(frames))
+        } else if (method === 'TEARDOWN') {
+          reply('200 OK', ['Session: nodefallback1'])
+        } else {
+          reply('405 Method Not Allowed')
+        }
+      }
+    })
+  })
+  await new Promise<void>((resolveListen, rejectListen) => {
+    server.once('error', rejectListen)
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', rejectListen)
+      resolveListen()
+    })
+  })
+  const port = (server.address() as AddressInfo).port
+  let closed = false
+  return Object.freeze({
+    backend: 'node-fallback' as const,
+    host: '127.0.0.1' as const,
+    port,
+    path: rtspPath,
+    url: `rtsp://127.0.0.1:${port}${rtspPath}`,
+    helperStatus,
+    async close() {
+      if (closed) return
+      closed = true
+      for (const socket of sockets) socket.destroy()
+      sockets.clear()
+      await new Promise<void>((resolveClose) =>
+        server.close(() => resolveClose()),
+      )
+    },
+  })
+}
+
+export async function startRtspCameraMock(
+  options: {
+    helperExecutable?: Partial<HelperExecutable> | null
+    path?: string
+    packetsPerPlay?: number
+  } = {},
+): Promise<NodeRtspFallbackInstance> {
+  const helperStatus = getRtspHelperStatusSync(options.helperExecutable)
+  return startNodeRtspFallbackServer({
+    ...(options.path !== undefined ? { path: options.path } : {}),
+    ...(options.packetsPerPlay !== undefined
+      ? { packetsPerPlay: options.packetsPerPlay }
+      : {}),
+    helperStatus,
+  })
 }

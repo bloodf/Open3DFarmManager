@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
+import { setPolishTheme } from '../helpers/polish-theme.ts'
+import { mockShellApi } from '../helpers/shell-api.ts'
 
 // Isolated UI checks for /membros and /convites on mocked /api routes. No real
 // printer, database, auth service or external network is involved: every
@@ -187,6 +189,8 @@ async function mockApi(page: Page, scenario: string): Promise<Mock> {
     }
     return json({}, 404)
   })
+  await mockShellApi(page, farmA)
+  await mockShellApi(page, farmB)
   return mock
 }
 
@@ -346,7 +350,7 @@ async function open(
   theme: Theme,
 ) {
   await page.setViewportSize(viewport)
-  await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+  await setPolishTheme(page, theme)
   const mock = await mockFor(page, screen)
   await page.goto(`/${screen.page}`)
   await page.getByRole('heading', { level: 1, name: h1[screen.page] }).waitFor()

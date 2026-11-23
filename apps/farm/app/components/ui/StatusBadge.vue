@@ -31,9 +31,10 @@ const icon = computed(() => icons[role.value])
 </script>
 
 <template>
-  <span class="badge" :class="`badge--${role}`"
-    ><span aria-hidden="true">{{ icon }}</span> {{ label }}</span
-  >
+  <span class="badge" :class="`badge--${role}`">
+    <span aria-hidden="true">{{ icon }}</span>
+    <span>{{ label }}</span>
+  </span>
 </template>
 
 <style scoped>

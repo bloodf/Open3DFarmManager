@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { mockShellApi } from '../helpers/shell-api.ts'
 import { randomUUID } from 'node:crypto'
 import {
   validateBrowserDevicePublicKey,
@@ -95,6 +96,7 @@ test('actual device page retains nonextractable key across reload and rejects co
     }
     throw new Error('Unexpected API ' + url.pathname)
   })
+  await mockShellApi(page, farm)
   await page.goto('/dispositivos')
   await page.locator('#device-farm').selectOption(farm)
   await expect(
@@ -310,6 +312,7 @@ test('account change after challenge stops signing and proof submission', async 
     }
     throw new Error('Unexpected API ' + url.pathname)
   })
+  await mockShellApi(page, farm)
   await page.goto('/dispositivos')
   await page.locator('#device-farm').selectOption(farm)
   await page
@@ -364,6 +367,7 @@ test('unproven local key resumes explicitly after reload without creating anothe
     }
     throw new Error('Unexpected API ' + url.pathname)
   })
+  await mockShellApi(page, farm)
   await page.goto('/dispositivos')
   await page.locator('#device-farm').selectOption(farm)
   await page
@@ -487,6 +491,7 @@ test('approved local key explicitly proves possession again after reload', async
     }
     throw new Error('Unexpected API ' + url.pathname)
   })
+  await mockShellApi(page, farm)
   await page.goto('/dispositivos')
   await page.locator('#device-farm').selectOption(farm)
   await page
@@ -569,6 +574,7 @@ test('administrator confirms full fingerprint before approval and terminal revoc
     }
     throw new Error('Unexpected API ' + url.pathname)
   })
+  await mockShellApi(page, farm)
   await page.goto('/dispositivos')
   await page.locator('#device-farm').selectOption(farm)
   const approve = page.getByRole('button', { name: 'Aprovar dispositivo' })

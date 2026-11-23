@@ -3,11 +3,24 @@ import { createServer as createHttpServer } from 'node:http'
 import { createServer as createTcpServer, type Socket } from 'node:net'
 import { readFile } from 'node:fs/promises'
 import { once } from 'node:events'
+import { randomBytes } from 'node:crypto'
 import { createCameraServer } from '../../sim-cams/src/server.ts'
 
-/** Loopback-only cameras. Each instance owns all of its sockets and timers. */
+export interface CameraFlvRequestRecord {
+  method: string
+  url: string
+  status: number
+}
+
+/**
+ * Loopback-only cameras. Each instance owns all of its sockets and timers.
+ *
+ * With `captureGated` the HTTP-FLV endpoint is opt-in capture-gated: it only
+ * serves the synthetic token issued by the current capture session. Without it
+ * the stream stays always live at `/live/<token>`.
+ */
 export async function startCameraMock(
-  options: { rtspPort?: number; token?: string } = {},
+  options: { rtspPort?: number; token?: string; captureGated?: boolean } = {},
 ) {
   const annex = await readFile(
     new URL('../../sim-cams/fixtures/test-pattern.h264', import.meta.url),
@@ -42,6 +55,40 @@ export async function startCameraMock(
   }
   const token = options.token ?? 'camera-token'
   const state = { stall: false, disconnect: false }
+  const captureGated = options.captureGated === true
+  const capture = {
+    token: undefined as string | undefined,
+    starts: 0,
+    stops: 0,
+    accepted: 0,
+    rejected: 0,
+    closed: 0,
+  }
+  const flvRequests: CameraFlvRequestRecord[] = []
+  const flvResponses = new Set<{ destroy: () => unknown }>()
+  const flvPath = () =>
+    captureGated
+      ? capture.token === undefined
+        ? undefined
+        : `/live/${capture.token}`
+      : `/live/${token}`
+  const startCapture = () => {
+    capture.starts++
+    if (capture.token === undefined) {
+      do capture.token = `capture-${randomBytes(8).toString('hex')}`
+      while (capture.token === token)
+    }
+    return { token: capture.token, url: `${flvBase}/live/${capture.token}` }
+  }
+  const stopCapture = () => {
+    capture.stops++
+    capture.token = undefined
+    for (const response of [...flvResponses]) {
+      capture.closed++
+      response.destroy()
+    }
+    flvResponses.clear()
+  }
   const sockets = new Set<Socket>()
   const timers = new Set<ReturnType<typeof setInterval>>()
   const rtsp = createTcpServer((socket) => {
@@ -144,11 +191,29 @@ export async function startCameraMock(
     })
   })
   const camera = await createCameraServer()
+  let flvBase = ''
   const flv = createHttpServer((req, res) => {
-    if (req.url !== `/live/${token}`) {
+    const method = req.method ?? 'GET'
+    const url = req.url ?? ''
+    const record = (status: number) => {
+      flvRequests.push({ method, url, status })
+    }
+    if (captureGated && method !== 'GET') {
+      capture.rejected++
+      record(405)
+      res.writeHead(405, { Allow: 'GET' }).end()
+      return
+    }
+    if (url !== flvPath()) {
+      capture.rejected++
+      record(403)
       res.writeHead(403).end()
       return
     }
+    capture.accepted++
+    record(200)
+    flvResponses.add(res)
+    res.once('close', () => flvResponses.delete(res))
     res.writeHead(200, {
       'Content-Type': 'video/x-flv',
       'Cache-Control': 'no-store',
@@ -190,29 +255,30 @@ export async function startCameraMock(
       ]),
     )
     let time = 0
+    let unitIndex = 0
     const send = () => {
       if (state.disconnect) {
         res.destroy()
         return
       }
       if (state.stall) return
-      for (const nal of nals.filter((n) => [1, 5].includes(n[0]! & 31))) {
-        const len = Buffer.alloc(4)
-        len.writeUInt32BE(nal.length)
-        res.write(
-          tag(
-            Buffer.concat([
-              Buffer.from([(nal[0]! & 31) === 5 ? 0x17 : 0x27, 1, 0, 0, 0]),
-              len,
-              nal,
-            ]),
-            time,
-          ),
-        )
-        time += 200
+      const slices = accessUnits[unitIndex]!.filter((nal) =>
+        [1, 5].includes(nal[0]! & 31),
+      )
+      unitIndex = (unitIndex + 1) % accessUnits.length
+      if (slices.length === 0) return
+      const key = slices.some((nal) => (nal[0]! & 31) === 5)
+      const payload: Buffer[] = [Buffer.from([key ? 0x17 : 0x27, 1, 0, 0, 0])]
+      for (const nal of slices) {
+        const length = Buffer.alloc(4)
+        length.writeUInt32BE(nal.length)
+        payload.push(length, nal)
       }
+      // An AVC FLV tag carries the whole access unit, including both slices.
+      res.write(tag(Buffer.concat(payload), time))
+      time += 100
     }
-    const timer = setInterval(send, 1000)
+    const timer = setInterval(send, 100)
     timers.add(timer)
     res.once('close', () => {
       clearInterval(timer)
@@ -239,14 +305,35 @@ export async function startCameraMock(
       throw Error('Camera unavailable')
     return address.port
   }
+  flvBase = `http://127.0.0.1:${port(flv)}`
   return {
     cameraUrl: `http://127.0.0.1:${port(camera.server)}`,
     rtspUrl: `rtsp://127.0.0.1:${port(rtsp)}/test`,
-    flvUrl: `http://127.0.0.1:${port(flv)}/live/${token}`,
+    flvUrl: captureGated ? undefined : `${flvBase}/live/${token}`,
+    flvBase,
     state,
+    capture: {
+      gated: captureGated,
+      /** Idempotent while active; a new synthetic token only after stop. */
+      start: startCapture,
+      /** Invalidate the token and destroy every open FLV response. */
+      stop: stopCapture,
+      active: () => capture.token !== undefined,
+      token: () => capture.token,
+      openStreams: () => flvResponses.size,
+      counts: () => ({
+        starts: capture.starts,
+        stops: capture.stops,
+        accepted: capture.accepted,
+        rejected: capture.rejected,
+        closed: capture.closed,
+      }),
+      requests: () => flvRequests.map((r) => ({ ...r })),
+    },
     async close() {
       for (const timer of timers) clearInterval(timer)
       for (const socket of sockets) socket.destroy()
+      flvResponses.clear()
       flv.closeAllConnections()
       await Promise.all([
         camera.close(),

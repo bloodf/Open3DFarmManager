@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import ShellNavigation from '../components/shell/ShellNavigation.vue'
 import Button from '../components/ui/Button.vue'
 import Dialog from '../components/ui/Dialog.vue'
@@ -215,16 +215,10 @@ const paletteGroups = computed(() => {
     },
     {
       label: 'Bobinas',
-      items: spools.value
-        .filter((item) =>
-          matches(
-            `${spoolDisplayTitle(item)} ${item.id} ${item.filament.material ?? ''} ${item.filament.color_hex ?? ''}`,
-          ),
-        )
-        .map((item) => ({
-          label: `${spoolDisplayTitle(item)} · #${item.id}`,
-          to: `/bobinas?farm=${encodeURIComponent(selectedFarmId.value ?? '')}&q=${encodeURIComponent(String(item.id))}`,
-        })),
+      items: spools.value.map((item) => ({
+        label: `${spoolDisplayTitle(item)} · #${item.id}`,
+        to: `/bobinas?farm=${encodeURIComponent(selectedFarmId.value ?? '')}&q=${encodeURIComponent(String(item.id))}`,
+      })),
     },
   ]
 })
@@ -243,6 +237,11 @@ function paletteKey(event: KeyboardEvent) {
     paletteIndex.value =
       (paletteIndex.value + delta + paletteItems.value.length) %
       paletteItems.value.length
+    void nextTick(() => {
+      document
+        .getElementById(`shell-search-option-${paletteIndex.value}`)
+        ?.scrollIntoView({ block: 'nearest' })
+    })
   } else if (event.key === 'Enter' && paletteItems.value[paletteIndex.value]) {
     event.preventDefault()
     void router.push(paletteItems.value[paletteIndex.value]!.to)

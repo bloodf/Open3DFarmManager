@@ -211,13 +211,11 @@ describe('Cofre3D integration scopes', () => {
     const page = await readFile('apps/farm/app/pages/integracoes.vue', 'utf8')
     for (const scope of INTEGRATION_SCOPES)
       expect(guide).toMatch(new RegExp(`^\\|[ \t]*\`${scope}\`[ \t]*\\|`, 'm'))
+    expect(page).toContain("'inventory:write': 'Registrar e retirar carretéis'")
+    expect(page).toContain("'environment:control': 'Controlar ambiente'")
     expect(page).toContain(
-      "['inventory:write', 'Registrar e retirar carretéis']",
+      "'alerts:manage': 'Gerenciar regras de alerta e testar notificações'",
     )
-    expect(page).toContain("['environment:control', 'Controlar ambiente']")
-    expect(page).toContain(
-      "['alerts:manage', 'Gerenciar regras de alerta e testar notificações']",
-    )
-    expect(page).toContain("['camera:view', 'Ver câmera']")
+    expect(page).toContain("'camera:view': 'Ver câmera'")
   })
 })

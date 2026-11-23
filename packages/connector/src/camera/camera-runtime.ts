@@ -9,7 +9,8 @@ import {
   type AnycubicCameraSource,
 } from '../anycubic/camera.ts'
 import { openBambuCameraSource } from '../bambu/camera-media.ts'
-import type { BambuCameraSource } from '../bambu/camera.ts'
+import { selectBambuCamera, type BambuCameraSource } from '../bambu/camera.ts'
+import { readBambuCredentials } from '../bambu/credentials.ts'
 import {
   getRtspHelperStatusSync,
   type HelperExecutable,
@@ -20,6 +21,38 @@ import type { ConnectorIdentity } from '../identity/store.ts'
 import type { AssignmentRef } from '../webrtc/readonly-session.ts'
 import { createMoonrakerSnapshotSource } from '../moonraker/snapshot.ts'
 import { ConnectorCameraMedia } from './camera-media.ts'
+
+type ConfiguredBambuCamera = Extract<
+  CameraRuntimeConfig['cameras'][number]['source'],
+  { kind: 'bambu-lan' }
+>
+
+function readConfiguredBambuCamera(
+  camera: ConfiguredBambuCamera,
+  helper: HelperExecutable,
+) {
+  const { address: host, model, port, caFile, pinSha256, ffmpeg } = camera
+  if (
+    (!caFile && !pinSha256) ||
+    ffmpeg.path === helper.path ||
+    ffmpeg.sha256 === helper.sha256
+  )
+    return undefined
+  try {
+    const { password: accessCode } = readBambuCredentials(camera)
+    const source: BambuCameraSource = {
+      model,
+      host,
+      accessCode,
+      ...(port === undefined ? {} : { port }),
+      ...(caFile ? { caFile } : {}),
+      ...(pinSha256 ? { pinSha256 } : {}),
+    }
+    if (selectBambuCamera(source).kind === 'jpeg') return { source, ffmpeg }
+  } catch {
+    return undefined
+  }
+}
 
 export type RtspCameraEntryStatus = Readonly<
   | {
@@ -38,6 +71,14 @@ export type RtspCameraEntryStatus = Readonly<
       available: true
       status: 'available'
       reason?: undefined
+      message: string
+    }
+  | {
+      cameraId: string
+      assignmentId: string
+      kind: 'bambu-lan'
+      available: boolean
+      status: 'available' | 'unavailable'
       message: string
     }
 >
@@ -67,6 +108,22 @@ export function getRtspCameraStatus(
         available: true as const,
         status: 'available' as const,
         message: 'Moonraker snapshot camera is available',
+      })
+    }
+    if ('kind' in camera.source && camera.source.kind === 'bambu-lan') {
+      const configured = readConfiguredBambuCamera(camera.source, config.helper)
+      const available =
+        configured !== undefined &&
+        getRtspHelperStatusSync(configured.ffmpeg).available
+      return Object.freeze({
+        cameraId: camera.cameraId,
+        assignmentId: camera.assignmentId,
+        kind: 'bambu-lan' as const,
+        available,
+        status: available ? ('available' as const) : ('unavailable' as const),
+        message: available
+          ? 'Bambu TLS JPEG camera'
+          : 'Bambu camera unavailable',
       })
     }
     return Object.freeze({
@@ -144,13 +201,10 @@ export async function createCameraMediaFactory(input: {
   )
   // Vendor MJPEG cameras from the runtime file reuse the same local encoder.
   const configured = config.cameras.flatMap((camera, index) =>
-    'kind' in camera.source &&
-    (camera.source.kind === 'creality-mjpeg' ||
-      camera.source.kind === 'anycubic-rinkhals')
+    'kind' in camera.source && camera.source.kind === 'creality-mjpeg'
       ? [
           {
             handle: 'camera-' + index,
-            kind: camera.source.kind,
             host: camera.source.address,
             port: camera.source.port,
           },
@@ -158,21 +212,31 @@ export async function createCameraMediaFactory(input: {
       : [],
   )
   const configuredCreality = new Map(
-    configured
-      .filter((camera) => camera.kind === 'creality-mjpeg')
-      .map(({ handle, host, port }) => {
-        selectCrealityCamera({ host, port })
-        return [handle, Object.freeze({ host, port })] as const
-      }),
+    configured.map(({ handle, host, port }) => {
+      selectCrealityCamera({ host, port })
+      return [handle, Object.freeze({ host, port })] as const
+    }),
   )
   const configuredAnycubic = new Map(
-    configured
-      .filter((camera) => camera.kind === 'anycubic-rinkhals')
-      .map(({ handle, host, port }) => {
-        const source = { kind: 'rinkhals', host, port } as const
-        selectAnycubicCamera(source)
-        return [handle, Object.freeze(source)] as const
-      }),
+    config.cameras.flatMap((camera, index) => {
+      const entry = camera.source
+      if (!('kind' in entry)) return []
+      let source: AnycubicCameraSource
+      if (entry.kind === 'anycubic-rinkhals') {
+        source = { kind: 'rinkhals', host: entry.address, port: entry.port }
+      } else if (entry.kind === 'kobra-x-flv') {
+        source = {
+          kind: entry.kind,
+          host: entry.address,
+          port: entry.port,
+          path: entry.path,
+        }
+      } else {
+        return []
+      }
+      selectAnycubicCamera(source)
+      return [['camera-' + index, Object.freeze(source)] as const]
+    }),
   )
   const snapshots = new Map(
     config.cameras.flatMap((camera, index) => {
@@ -197,11 +261,23 @@ export async function createCameraMediaFactory(input: {
       ] as const
     }),
   )
-  const cameras = config.cameras.map((camera, index) => ({
-    cameraId: camera.cameraId,
-    scope: { farmId, agentId, printerId: camera.assignmentId },
-    sourceHandle: 'camera-' + index,
-  }))
+  const cameras = config.cameras.flatMap((camera, index) =>
+    'kind' in camera.source && camera.source.kind === 'bambu-lan'
+      ? []
+      : [
+          {
+            cameraId: camera.cameraId,
+            scope: { farmId, agentId, printerId: camera.assignmentId },
+            sourceHandle: 'camera-' + index,
+          },
+        ],
+  )
+  const configuredBambu = config.cameras.flatMap((camera) => {
+    if (!('kind' in camera.source) || camera.source.kind !== 'bambu-lan')
+      return []
+    const configured = readConfiguredBambuCamera(camera.source, helper)
+    return configured ? [{ ...camera, ...configured }] : []
+  })
   const anycubic = new Map(
     (input.anycubic?.cameras ?? []).map((camera, index) => {
       selectAnycubicCamera(camera.source)
@@ -226,15 +302,37 @@ export async function createCameraMediaFactory(input: {
   const anycubicFfmpeg = input.anycubic
     ? Object.freeze({ ...input.anycubic.ffmpeg })
     : undefined
+  const suppliedBambu = input.bambu
   const bambu = new Map(
-    (input.bambu?.cameras ?? []).map((camera, index) => {
+    [
+      ...configuredBambu,
+      ...(suppliedBambu?.cameras.map((camera) => ({
+        ...camera,
+        ffmpeg: suppliedBambu.ffmpeg,
+      })) ?? []),
+    ].flatMap((camera, index) => {
+      if (
+        selectBambuCamera(camera.source).kind !== 'jpeg' ||
+        (!camera.source.caFile && !camera.source.pinSha256) ||
+        camera.ffmpeg.path === helper.path ||
+        camera.ffmpeg.sha256 === helper.sha256
+      )
+        return []
       const handle = 'bambu-camera-' + index
       cameras.push({
         cameraId: camera.cameraId,
         scope: { farmId, agentId, printerId: camera.assignmentId },
         sourceHandle: handle,
       })
-      return [handle, Object.freeze({ ...camera.source })] as const
+      return [
+        [
+          handle,
+          {
+            source: Object.freeze({ ...camera.source }),
+            ffmpeg: Object.freeze({ ...camera.ffmpeg }),
+          },
+        ],
+      ] as const
     }),
   )
   const creality = new Map(
@@ -251,9 +349,6 @@ export async function createCameraMediaFactory(input: {
   )
   const crealityFfmpeg = input.creality
     ? Object.freeze({ ...input.creality.ffmpeg })
-    : undefined
-  const ffmpeg = input.bambu
-    ? Object.freeze({ ...input.bambu.ffmpeg })
     : undefined
   let active = 0
   const factory = (onViolation: (reason: string) => void) =>
@@ -341,8 +436,8 @@ export async function createCameraMediaFactory(input: {
               streamCrealityJpegs({ ...crealitySource, signal: jpegSignal }),
           })
         }
-        const source = bambu.get(handle)
-        if (source && ffmpeg) {
+        const bambuCamera = bambu.get(handle)
+        if (bambuCamera) {
           if (
             !isCurrent() ||
             signal.aborted ||
@@ -351,8 +446,7 @@ export async function createCameraMediaFactory(input: {
           )
             throw Error('Bambu camera admission expired')
           return openBambuCameraSource({
-            source,
-            ffmpeg,
+            ...bambuCamera,
             isCurrent,
             signal: AbortSignal.any([
               signal,
@@ -385,6 +479,7 @@ export async function createCameraMediaFactory(input: {
       onViolation,
     })
   return Object.assign(factory, {
+    assignmentIds: [...new Set(cameras.map(({ scope }) => scope.printerId))],
     getCameraStatus: () => getRtspCameraStatus(config),
   })
 }

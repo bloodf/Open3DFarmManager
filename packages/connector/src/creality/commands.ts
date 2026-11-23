@@ -11,6 +11,8 @@
  *    lightSw, autohome).
  */
 
+import { crealityGcodePath } from './gcode-path.ts'
+
 export const CREALITY_ACTIONS = [
   'pause',
   'resume',
@@ -51,17 +53,12 @@ export function buildCrealityCommand(
 
   if (action === 'start_print') {
     keys(['file'])
-    if (
-      typeof args.file !== 'string' ||
-      !/^[A-Za-z0-9_][A-Za-z0-9_. -]{0,254}\.gcode$/i.test(args.file) ||
-      args.file.includes('..') ||
-      Buffer.byteLength(args.file) > 255
-    )
+    if (typeof args.file !== 'string')
       throw new Error('Invalid Creality filename')
     return {
       method: 'set',
       params: {
-        opGcodeFile: `printprt:/usr/data/printer_data/gcodes/${args.file}`,
+        opGcodeFile: `printprt:${crealityGcodePath(args.file)}`,
       },
     }
   }

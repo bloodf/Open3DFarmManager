@@ -337,11 +337,9 @@ export async function openV2Dispatch(
       expires_at: wall + 8000,
     }
     admitted = await dispatcher.admit(admission.token, {
-      capabilityWire: options.capabilityWire
-        ? await options.capabilityWire(capability, authority.issuer.privateKey)
-        : encodePauseCapability(
-            await signPauseCapability(capability, authority.issuer.privateKey),
-          ),
+      capabilityWire: encodePauseCapability(
+        await signPauseCapability(capability, authority.issuer.privateKey),
+      ),
       admissionProofWire: encodePauseAdmissionProof(
         await authority.signer.signAdmissionProof(challenge),
       ),
@@ -359,6 +357,12 @@ export async function openV2Dispatch(
           authority.binding,
           'connector',
           authority.connector.privateKey,
+        ),
+      }),
+      ...(options.capabilityWire && {
+        capabilityWire: await options.capabilityWire(
+          capability,
+          authority.issuer.privateKey,
         ),
       }),
     })

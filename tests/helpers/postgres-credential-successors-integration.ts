@@ -366,6 +366,7 @@ export async function testPostgresCredentialSuccessors(
       await admin`SELECT bool_or(has_column_privilege(${role.rolname},'farm.connector_credential_successors',attname,'SELECT,INSERT,UPDATE,REFERENCES')) AS allowed FROM pg_attribute WHERE attrelid='farm.connector_credential_successors'::regclass AND attnum>0 AND NOT attisdropped`
     assert.equal(columns[0]?.allowed, false, role.rolname)
   }
+  const controlsMigrations = await pauseAuthorityAdvertisedControlsMigrations()
   const login = 'successor_fixture_' + randomUUID().replaceAll('-', '')
   await admin`CREATE ROLE ${admin(login)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS IN ROLE farm_pause_authority`
   const rolePassword = randomUUID().replaceAll('-', '')
@@ -386,30 +387,30 @@ export async function testPostgresCredentialSuccessors(
       transaction_timeout: 10000,
     },
   })
-  const controlsMigrations = await pauseAuthorityAdvertisedControlsMigrations()
+  let controlsInstalled = false
   try {
     await admin.begin(async (tx) => {
       for (const migration of controlsMigrations)
         await tx.unsafe(migration.up).simple()
     })
+    controlsInstalled = true
+    await validatePauseAuthorityRole(pauseSql)
+    await admin`GRANT SELECT ON farm.connector_credential_successors TO farm_pause_authority`
     try {
-      await validatePauseAuthorityRole(pauseSql)
-      await admin`GRANT SELECT ON farm.connector_credential_successors TO farm_pause_authority`
-      try {
-        await assert.rejects(validatePauseAuthorityRole(pauseSql))
-      } finally {
-        await admin`REVOKE SELECT ON farm.connector_credential_successors FROM farm_pause_authority`
-      }
-      await validatePauseAuthorityRole(pauseSql)
+      await assert.rejects(validatePauseAuthorityRole(pauseSql))
     } finally {
+      await admin`REVOKE SELECT ON farm.connector_credential_successors FROM farm_pause_authority`
+    }
+    await validatePauseAuthorityRole(pauseSql)
+  } finally {
+    await pauseSql.end({ timeout: 3 })
+    await admin`DROP ROLE ${admin(login)}`
+    if (controlsInstalled) {
       await admin.begin(async (tx) => {
         for (const migration of controlsMigrations.toReversed())
           await tx.unsafe(migration.down).simple()
       })
     }
-  } finally {
-    await pauseSql.end({ timeout: 3 })
-    await admin`DROP ROLE ${admin(login)}`
   }
   checks.push('effective-table-column-privileges-and-pause-role-allowlist')
   const history = [

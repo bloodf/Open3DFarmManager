@@ -761,6 +761,9 @@ export async function startJourneyHarness(
       audience: AUDIENCE,
       claim,
       assignmentRefs,
+      ...(options.moonraker?.mock?.profile === 'u1'
+        ? { model: 'Snapmaker U1' }
+        : {}),
       ...(multiMoonraker ? { runtime: multiMoonraker } : {}),
       ...(vendor
         ? {

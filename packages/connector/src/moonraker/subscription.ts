@@ -504,7 +504,7 @@ export function createMoonrakerSubscription(input: {
             }
             if (eventtime < baseline.eventtime) return
             if (eventtime === baseline.eventtime) {
-              if (JSON.stringify(status) !== JSON.stringify(baseline.status))
+              if (!isDeepStrictEqual(status, baseline.status))
                 throw new Error('Conflicting source time')
               return
             }

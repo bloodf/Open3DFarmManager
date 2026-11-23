@@ -1,6 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises'
 import {
   parseBoundedJson,
+  TELEMETRY_BATCH_JSON_LIMITS,
   TelemetryBatch,
 } from '@open3dfarmmanager/farm-protocol'
 import { TelemetryProofChallenge } from '../../../farm-protocol/src/telemetry-proof.ts'
@@ -68,14 +69,7 @@ export function createAuthenticatedTelemetrySender(options: {
     try {
       if (signal.aborted) throw new Error()
       const bytes = new TextEncoder().encode(body)
-      TelemetryBatch.parse(
-        parseBoundedJson(body, {
-          maxBytes: 65536,
-          maxDepth: 7,
-          maxValues: 2000,
-          maxStringChars: 128,
-        }),
-      )
+      TelemetryBatch.parse(parseBoundedJson(body, TELEMETRY_BATCH_JSON_LIMITS))
       async function post(
         path: string,
         requestHeaders: Record<string, string>,

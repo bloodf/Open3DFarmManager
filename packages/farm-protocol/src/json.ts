@@ -1,3 +1,5 @@
+import { isWellFormedJsonString } from './string-bounds.ts'
+
 export interface JsonLimits {
   maxBytes?: number
   maxDepth?: number
@@ -32,17 +34,6 @@ function bounded(
     throw new JsonReadError('invalid-limits')
   return limit
 }
-function validUnicode(value: string): boolean {
-  for (let index = 0; index < value.length; index++) {
-    const unit = value.charCodeAt(index)
-    if (unit >= 0xd800 && unit <= 0xdbff) {
-      const next = value.charCodeAt(++index)
-      if (!(next >= 0xdc00 && next <= 0xdfff)) return false
-    } else if (unit >= 0xdc00 && unit <= 0xdfff) return false
-  }
-  return true
-}
-
 /** Validates ambiguity and resource limits before native decoding. Returns untrusted data. */
 export function parseBoundedJson(
   source: string,
@@ -84,7 +75,8 @@ export function parseBoundedJson(
         }
         if (decoded.length > maxStringChars)
           throw new JsonReadError('string-limit')
-        if (!validUnicode(decoded)) throw new JsonReadError('invalid-unicode')
+        if (!isWellFormedJsonString(decoded))
+          throw new JsonReadError('invalid-unicode')
         return decoded
       }
       if (char === '\\') {

@@ -123,7 +123,7 @@ test(
             shortCircuit: true,
             source: readFileSync(new URL(url), 'utf8').replace(
               'return { observe, invalidate, setInventory, open, close }',
-              `globalThis.firmwareProbe.read = () => { const now = performance.now(); return snapshot(now, now + 5000); }; return { observe, invalidate, setInventory, open, close }`,
+              `globalThis.firmwareProbe.read = () => { const now = performance.now(); return snapshot(now, now + 5000)?.value; }; return { observe, invalidate, setInventory, open, close }`,
             ),
           }
         return next(url, context)

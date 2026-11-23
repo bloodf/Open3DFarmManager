@@ -12,6 +12,12 @@ Do not start this checklist until all of the following are true:
 
 Write private hostnames, addresses, account names, tokens and credential files only in the private evidence location (section 15), never in this repository, an issue or a pull request. Wherever this document shows a placeholder such as `<farm-origin>`, substitute your own value privately.
 
+For Kobra X hardware qualification, use the direct printer's native LAN
+endpoints. Read `/info` on port 18910 and use MQTT on port 9883. The
+cortex-kobralink Moonraker bridge must never be used for Kobra X tests or
+evidence. Record the direct address privately. See the
+[hardware qualification route](compatibility/kobra-x-lan.md#hardware-qualification-route).
+
 UI text is pt-BR. Exact on-screen strings are quoted as they appear, with an English gloss where it helps.
 
 ## 0. Safety rules for the whole run

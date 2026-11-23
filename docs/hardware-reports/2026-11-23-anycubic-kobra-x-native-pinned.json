@@ -1,0 +1,132 @@
+{
+  "vendor": "kobra-x",
+  "host": "<printer-host>",
+  "port": 9883,
+  "timestamp": "2026-11-23T22:02:47.353Z",
+  "identity": {
+    "vendor": "Anycubic",
+    "model": "Kobra X",
+    "firmware": "2.0.2.8",
+    "hostname": "<printer-hostname>",
+    "serial": "<device-id>"
+  },
+  "telemetry": {
+    "observed": true,
+    "fields": [
+      "toolTemperatureCelsius",
+      "bedTemperatureCelsius",
+      "materials",
+      "state",
+      "fans"
+    ],
+    "sample": {
+      "toolTemperatureCelsius": 34,
+      "bedTemperatureCelsius": 32,
+      "materials": [
+        {
+          "slot": "-1:0",
+          "materialType": "PLA Silk",
+          "colorHex": "FDDB27FF",
+          "remainingPercent": 100,
+          "active": true
+        },
+        {
+          "slot": "-1:1",
+          "materialType": "PLA Metal",
+          "colorHex": "3E55ABFF",
+          "remainingPercent": 100,
+          "active": true
+        },
+        {
+          "slot": "-1:2",
+          "materialType": "PLA+",
+          "colorHex": "FAD6C6FF",
+          "remainingPercent": 100,
+          "active": true
+        },
+        {
+          "slot": "-1:3",
+          "materialType": "PLA",
+          "colorHex": "6F6F6FFF",
+          "remainingPercent": 0,
+          "active": true
+        },
+        {
+          "slot": "0:0",
+          "materialType": "PLA Silk",
+          "colorHex": "658946FF",
+          "remainingPercent": 100,
+          "active": true
+        },
+        {
+          "slot": "0:1",
+          "materialType": "PLA+",
+          "colorHex": "F1E9E0FF",
+          "remainingPercent": 100,
+          "active": true
+        },
+        {
+          "slot": "0:2",
+          "materialType": "PLA+",
+          "colorHex": "201612FF",
+          "remainingPercent": 100,
+          "active": true
+        },
+        {
+          "slot": "0:3",
+          "materialType": "PLA+",
+          "colorHex": "E10600FF",
+          "remainingPercent": 100,
+          "active": true
+        }
+      ],
+      "state": "idle",
+      "fans": {
+        "part": 0,
+        "aux": 0
+      }
+    }
+  },
+  "camera": {
+    "reachable": true,
+    "kind": "mjpeg",
+    "url": "<camera-url>",
+    "detail": "Camera URL reachable"
+  },
+  "files": {
+    "listable": false,
+    "count": 0,
+    "files": [],
+    "reason": "No file listing reported over the native LAN path"
+  },
+  "catalog": {
+    "matchedCatalogId": "anycubic-kobra-x",
+    "matchedCatalogBrand": "Anycubic",
+    "matchedCatalogModel": "Kobra X",
+    "currentCapabilities": {
+      "telemetry": "hardware",
+      "files": "simulated",
+      "camera": "unknown",
+      "materials": "unknown",
+      "pause": "simulated",
+      "resume": "simulated",
+      "cancel": "simulated"
+    },
+    "provenCapabilities": {
+      "telemetry": true,
+      "camera": true,
+      "files": false
+    },
+    "canPromoteToHardwareProven": true,
+    "promotionNotes": [
+      "Identified catalog entry: anycubic-kobra-x (Anycubic Kobra X)",
+      "Telemetry observed with 5 active field(s) [toolTemperatureCelsius, bedTemperatureCelsius, materials, state, fans]",
+      "Camera verified reachable via mjpeg",
+      "File listing was not supported or returned no listable files"
+    ]
+  },
+  "qualification": {
+    "status": "qualified",
+    "summary": "Printer successfully qualified with active telemetry (5 fields) and camera verified."
+  }
+}

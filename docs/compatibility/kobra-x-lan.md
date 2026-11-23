@@ -144,6 +144,14 @@ The focused loopback test checks the supplied signature and ciphertext vectors.
 They are synthetic and establish agreement with S6. Hardware TLS interoperability,
 firmware compatibility, and browser acceptance require separate evidence.
 
+### Hardware qualification route
+
+Use the printer's direct native LAN endpoints for every Kobra X test and
+qualification. Read identity from `/info` on port 18910 and use the printer's
+MQTT broker on port 9883. Never use the cortex-kobralink Moonraker bridge for
+Kobra X tests, qualification, or catalog evidence. Verify the direct printer
+address from private configuration.
+
 ### Activation: native setup, persistence and confirmation (E16.22)
 
 New Kobra X setup in the web UI uses the native `kobra-x` configuration backend

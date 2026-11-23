@@ -123,13 +123,14 @@ const loginRoles = []
 const connectAs = async (groupRole) => {
   const name = `${groupRole}_${randomUUID().replaceAll('-', '')}`
   await admin`CREATE ROLE ${admin(name)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS IN ROLE ${admin(groupRole)}`
+  await admin.unsafe(`ALTER ROLE "${name}" PASSWORD '${fixture.password}'`)
   loginRoles.push(name)
   return postgres({
     host: '127.0.0.1',
     port: fixture.port,
     database: 'fixture',
     username: name,
-    password: '',
+    password: fixture.password,
     ssl: false,
     max: 4,
     connect_timeout: 3,

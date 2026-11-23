@@ -10,6 +10,7 @@ import {
   parseNotificationChannel,
 } from './alert-rules/delivery.ts'
 import { integrationProblem, readText } from './integration-auth-http.ts'
+import { integrationAuthPool } from './integration-auth-runtime.ts'
 import { uuidPattern, type IntegrationPrincipal } from './integration-auth.ts'
 import { credentialKeyring } from './sealed-credential-key.ts'
 import { openWebhookSecret, sealWebhookSecret } from './webhooks/secret.ts'
@@ -55,7 +56,7 @@ export function alertSettingsHandler(operation: Operation) {
       return integrationProblem('invalid-request', headers)
 
     try {
-      const store = alertRulesStore()
+      const store = alertRulesStore(integrationAuthPool())
       if (operation === 'list') {
         const overrides = new Map(
           (await store.list(farmId)).map(({ kind, enabled }) => [
@@ -125,8 +126,7 @@ export function alertSettingsHandler(operation: Operation) {
       }
 
       try {
-        if ((await readText(request, 8192)).length !== 0)
-          return integrationProblem('invalid-request', headers)
+        await readText(request, 0)
       } catch {
         return integrationProblem('invalid-request', headers)
       }

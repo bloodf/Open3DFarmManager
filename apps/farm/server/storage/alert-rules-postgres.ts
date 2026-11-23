@@ -1,6 +1,5 @@
 import type { Sql, TransactionSql } from 'postgres'
 import type { FarmAlertKind } from '../../app/utils/farm-alerts.ts'
-import { integrationAuthPool } from '../utils/integration-auth-runtime.ts'
 
 function managedSettings(tx: TransactionSql, farmId: string, appId: string) {
   return {
@@ -28,7 +27,7 @@ function managedSettings(tx: TransactionSql, farmId: string, appId: string) {
   }
 }
 
-export function alertRulesStore(sql: Sql = integrationAuthPool()) {
+export function alertRulesStore(sql: Sql) {
   return {
     async list(farmId: string) {
       return sql<{ kind: FarmAlertKind; enabled: boolean }[]>`

@@ -18,7 +18,8 @@ const sql = postgres({
   port,
   database: 'fixture',
   username: 'fixture',
-  password: '',
+  password: process.env.PGPASSWORD ?? '',
+  max: 1,
   connect_timeout: 3,
 })
 const owner = `alert_owner_${randomUUID()}`
@@ -32,12 +33,18 @@ try {
   await sql`INSERT INTO farm.integration_apps (id, farm_id, name, sandbox, created_at, created_by) VALUES (${app}, ${farm}, 'alerts', false, 1, ${owner})`
   await sql`INSERT INTO farm.integration_app_grants (id, app_id, farm_id, scopes, created_at, created_by) VALUES (${grant}, ${app}, ${farm}, ARRAY['alerts:manage'], 1, ${owner})`
   const store = alertRulesStore(sql)
-  const change = (grantId = grant) =>
-    store.manage(app, farm, [grantId], async (settings) => {
-      await settings.writeRule('error', false)
-      return true
-    })
-  assert.deepEqual(await change(), { value: true })
+  async function change(grantId = grant, enabled = true) {
+    await sql`SET ROLE farm_integration_apps`
+    try {
+      return await store.manage(app, farm, [grantId], async (settings) => {
+        await settings.writeRule('error', enabled)
+        return true
+      })
+    } finally {
+      await sql`RESET ROLE`
+    }
+  }
+  assert.deepEqual(await change(grant, false), { value: true })
   await sql`UPDATE farm.memberships SET role = 'viewer' WHERE farm_id = ${farm} AND account_id = ${owner}`
   assert.equal(await change(), null, 'former owner denied')
   await sql`UPDATE farm.memberships SET role = 'owner' WHERE farm_id = ${farm} AND account_id = ${owner}`
@@ -48,6 +55,10 @@ try {
     (${approval}, ${app}, ${farm}, ARRAY['alerts:manage'], true, 3, ${owner})`
   assert.equal(await change(missingScope), null, 'missing scope denied')
   assert.equal(await change(approval), null, 'approval required denied')
+  assert.deepEqual(
+    [...(await store.list(farm))],
+    [{ kind: 'error', enabled: false }],
+  )
   console.log('alert rules authorization checks passed')
 } finally {
   await sql.end({ timeout: 3 })

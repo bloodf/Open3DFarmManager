@@ -47,15 +47,25 @@ export function isChamberTemperatureObject(name: string) {
   )
 }
 
+function reading(object: unknown, key: string) {
+  if (typeof object !== 'object' || object === null || !(key in object))
+    return undefined
+  const value = (object as Record<string, unknown>)[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+/** The raw chamber reading, when the printer reports a chamber sensor. */
+export function chamberTemperatureReading(
+  status: Record<string, unknown>,
+): number | undefined {
+  const heater = status['heater_generic chamber']
+  return (
+    reading(status['temperature_sensor chamber'], 'temperature') ??
+    reading(heater, 'temperature')
+  )
+}
+
 export function observedTemperatureDetails(status: Record<string, unknown>) {
-  function reading(object: unknown, key: string) {
-    if (typeof object !== 'object' || object === null || !(key in object))
-      return undefined
-    const value = (object as Record<string, unknown>)[key]
-    return typeof value === 'number' && Number.isFinite(value)
-      ? value
-      : undefined
-  }
   const tools = new Map<number, number>()
   const primaryTarget = reading(status.extruder, 'target')
   if (primaryTarget !== undefined) tools.set(0, primaryTarget)
@@ -65,9 +75,7 @@ export function observedTemperatureDetails(status: Record<string, unknown>) {
     if (tool && target !== undefined) tools.set(Number(tool[1]), target)
   }
   const heater = status['heater_generic chamber']
-  const chamberTemperatureCelsius =
-    reading(status['temperature_sensor chamber'], 'temperature') ??
-    reading(heater, 'temperature')
+  const chamberTemperatureCelsius = chamberTemperatureReading(status)
   const chamberTargetCelsius = reading(heater, 'target')
   return {
     ...(tools.size

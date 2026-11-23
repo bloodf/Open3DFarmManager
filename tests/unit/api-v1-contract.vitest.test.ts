@@ -7,9 +7,37 @@
 import { describe, expect, it, vi } from 'vitest'
 import { IntegrationClient } from '../../examples/integration-client/client.ts'
 
-vi.mock('nuxt/server', async () =>
-  (await import('../helpers/api-v1-contract/mocks.ts')).nuxtServer(),
-)
+vi.mock('nuxt/server', async () => {
+  const server = (
+    await import('../helpers/api-v1-contract/mocks.ts')
+  ).nuxtServer()
+  return {
+    ...server,
+    useRuntimeConfig: () => ({
+      ...server.useRuntimeConfig(),
+      auth: { credentialEncryptionKey: 'contract-key'.repeat(4) },
+    }),
+  }
+})
+vi.mock('../../apps/farm/server/storage/alert-rules-postgres.ts', () => ({
+  alertRulesStore: () => alertSettingsFixture(currentWorld()),
+}))
+vi.mock('node:https', async (original) => {
+  const { EventEmitter } = await import('node:events')
+  return {
+    ...(await original<typeof import('node:https')>()),
+    // Spec-derived sandbox receiver. It rejects the notification without opening a socket.
+    request: (
+      options: { hostname: string; path: string },
+      respond: (response: { statusCode: number; destroy: () => void }) => void,
+    ) => {
+      expect(options).toMatchObject({ hostname: '1.1.1.1', path: '/fixture' })
+      return Object.assign(new EventEmitter(), {
+        end: () => respond({ statusCode: 503, destroy: () => {} }),
+      })
+    },
+  }
+})
 vi.mock('../../apps/farm/server/utils/integration-auth-runtime.ts', async () =>
   (await import('../helpers/api-v1-contract/mocks.ts')).authRuntime(),
 )
@@ -37,6 +65,7 @@ vi.mock(
 import { mismatches } from '../helpers/api-v1-contract/mismatches.ts'
 import {
   apiBase,
+  type CallInput,
   call,
   matchRoute,
   routeFiles,
@@ -55,12 +84,255 @@ import {
   type ResponseSpec,
   type Schema,
 } from '../helpers/api-v1-contract/spec.ts'
-import { freshWorld, ids } from '../helpers/api-v1-contract/world.ts'
+import {
+  currentWorld,
+  freshWorld,
+  ids,
+} from '../helpers/api-v1-contract/world.ts'
 import { jobBody } from '../helpers/api-v1-contract/world.ts'
 import { openJourney } from '../helpers/api-v1-contract/journey.ts'
 
+type ContractWorld = ReturnType<typeof freshWorld>
+
+const settingsByWorld = new WeakMap<
+  ContractWorld,
+  ReturnType<typeof makeAlertSettings>
+>()
+
+function makeAlertSettings() {
+  const rules = new Map<string, boolean>()
+  const channels = new Map<string, string>()
+  return {
+    canManage: true,
+    list(farmId: string) {
+      return rules.has(farmId)
+        ? [{ kind: 'paused', enabled: rules.get(farmId) }]
+        : []
+    },
+    async manage(
+      appId: string,
+      farmId: string,
+      _grantIds: string[],
+      work: (settings: {
+        writeRule: (kind: string, enabled: boolean) => void
+        writeChannel: (sealed: string) => void
+        readChannel: () => string | undefined
+      }) => Promise<unknown>,
+    ) {
+      if (!this.canManage) return null
+      return {
+        value: await work({
+          writeRule(kind, enabled) {
+            expect(kind).toBe('paused')
+            rules.set(farmId, enabled)
+          },
+          writeChannel(sealed) {
+            expect(sealed).toMatch(/^O3W1\./)
+            expect(sealed).not.toContain(channelBody.secret)
+            expect(sealed).not.toContain(channelBody.url)
+            channels.set(farmId + appId, sealed)
+          },
+          readChannel() {
+            return channels.get(farmId + appId)
+          },
+        }),
+      }
+    },
+  }
+}
+
+function alertSettingsFixture(world: ContractWorld) {
+  let fixture = settingsByWorld.get(world)
+  if (!fixture) {
+    fixture = makeAlertSettings()
+    settingsByWorld.set(world, fixture)
+  }
+  return fixture
+}
+
+const channelBody = {
+  url: 'https://127.0.0.1/fixture',
+  secret: 'channel-secret'.repeat(3),
+}
+const channelPath = '/notification-channels/{farmId}'
+const alertSettingsOperations = [
+  ['GET', '/alert-rules/{farmId}', 'printers:read'],
+  ['PATCH', '/alert-rules/{farmId}/{kind}', 'alerts:manage'],
+  ['PUT', channelPath, 'alerts:manage'],
+  ['POST', channelPath + '/test', 'alerts:manage'],
+] as const
+
+function alertSettingsScenarios(): Scenario[] {
+  return alertSettingsOperations.flatMap(([method, path, scope]) => {
+    const scenario = (
+      status: string,
+      name: string,
+      run: (world: ContractWorld, input: CallInput) => Promise<Outcome>,
+    ): Scenario => ({
+      op: method + ' ' + path,
+      status,
+      name,
+      run: (world) =>
+        run(world, {
+          method,
+          path: path.replace('{farmId}', ids.farmA).replace('{kind}', 'paused'),
+          ...(method === 'PATCH'
+            ? { body: { enabled: false } }
+            : method === 'PUT'
+              ? { body: channelBody }
+              : {}),
+        }),
+    })
+    const send = async (input: CallInput) => ({
+      input,
+      result: await call(input),
+    })
+    const authorized = async (world: ContractWorld, input: CallInput) => {
+      const app = world.addApp([{ scopes: [scope] }], { sandbox: true })
+      return { ...input, token: await tokenFor(world, app) }
+    }
+    return [
+      scenario(
+        '200',
+        'reads, updates, configures or reports the test outcome',
+        async (world, input) => {
+          input = await authorized(world, input)
+          if (method === 'POST') {
+            const configured = await call({
+              ...input,
+              method: 'PUT',
+              path: input.path.replace(/\/test$/, ''),
+              body: channelBody,
+            })
+            expect(configured.status).toBe(200)
+          }
+          const outcome = await send(input)
+          if (method === 'POST')
+            expect(outcome.result.json).toEqual({
+              attempted: false,
+              status: 'not-run',
+            })
+          if (method === 'PUT') {
+            expect(outcome.result.text).not.toContain(channelBody.secret)
+            expect(outcome.result.text).not.toContain(channelBody.url)
+          }
+          return outcome
+        },
+      ),
+      scenario('400', 'unexpected query parameter', async (world, input) =>
+        send(
+          await authorized(world, { ...input, path: input.path + '?extra=1' }),
+        ),
+      ),
+      scenario('401', 'token missing', (_world, input) => send(input)),
+      scenario('403', 'scope missing', async (world, input) => {
+        const app = world.addApp([{ scopes: ['jobs:start'] }])
+        return send({ ...input, token: await tokenFor(world, app) })
+      }),
+      scenario('404', 'another farm', async (world, input) =>
+        send(
+          await authorized(world, {
+            ...input,
+            path: input.path.replace(ids.farmA, ids.farmB),
+          }),
+        ),
+      ),
+      scenario('404', 'printer-only grant', async (world, input) => {
+        const app = world.addApp([
+          { scopes: [scope], printerId: ids.printerA1 },
+        ])
+        return send({ ...input, token: await tokenFor(world, app) })
+      }),
+      scenario('405', 'wrong method', async (world, input) => {
+        const allowed = await authorized(world, input)
+        return send({
+          method: 'DELETE',
+          path: input.path,
+          token: allowed.token,
+        })
+      }),
+      scenario('429', 'request limit reached', async (world, input) => {
+        world.config.integrationAuth.readLimit = 1
+        world.config.integrationAuth.writeLimit = 1
+        const allowed = await authorized(world, input)
+        await send(allowed)
+        return send(allowed)
+      }),
+      scenario(
+        '503',
+        'authorization store unavailable',
+        async (world, input) => {
+          const allowed = await authorized(world, input)
+          world.faults.add('auth-store')
+          return send(allowed)
+        },
+      ),
+      ...(method === 'GET'
+        ? []
+        : [
+            scenario(
+              '403',
+              'farm owner role no longer active',
+              async (world, input) => {
+                alertSettingsFixture(world).canManage = false
+                return send(await authorized(world, input))
+              },
+            ),
+            scenario('403', 'grant requires approval', async (world, input) => {
+              const app = world.addApp([
+                { scopes: [scope], requiresApproval: true },
+              ])
+              return send({ ...input, token: await tokenFor(world, app) })
+            }),
+          ]),
+      ...(method === 'POST'
+        ? [
+            scenario(
+              '200',
+              'sandbox receiver rejected the test delivery',
+              async (world, input) => {
+                const allowed = await authorized(world, input)
+                const configured = await call({
+                  ...allowed,
+                  method: 'PUT',
+                  path: allowed.path.replace(/\/test$/, ''),
+                  body: { ...channelBody, url: 'https://1.1.1.1/fixture' },
+                })
+                expect(configured.status).toBe(200)
+                const outcome = await send(allowed)
+                expect(outcome.result.json).toEqual({
+                  attempted: true,
+                  status: 'failed',
+                })
+                return outcome
+              },
+            ),
+            scenario(
+              '404',
+              'another app configured the channel',
+              async (world, input) => {
+                const first = await authorized(world, input)
+                expect(
+                  (
+                    await call({
+                      ...first,
+                      method: 'PUT',
+                      path: first.path.replace(/\/test$/, ''),
+                      body: channelBody,
+                    })
+                  ).status,
+                ).toBe(200)
+                return send(await authorized(world, input))
+              },
+            ),
+          ]
+        : []),
+    ]
+  })
+}
+
 const ops = operations()
-const scenarios = allScenarios()
+const scenarios = [...allScenarios(), ...alertSettingsScenarios()]
 const pairs = ops.flatMap((op) =>
   op.responses.map((response) => ({
     op,
@@ -260,6 +532,37 @@ describe('responses match the spec', () => {
       }
     })
   }
+})
+
+it('keeps the farm rule available to another authorized reader after a change', async () => {
+  const world = freshWorld()
+  const writer = world.addApp([{ scopes: ['alerts:manage'] }], {
+    sandbox: true,
+  })
+  const reader = world.addApp([{ scopes: ['printers:read'] }], {
+    sandbox: true,
+  })
+  const path = '/alert-rules/' + ids.farmA
+  const token = await tokenFor(world, reader)
+  const before = await call({ method: 'GET', path, token })
+  expect(before.json).toMatchObject({
+    rules: expect.arrayContaining([
+      { kind: 'paused', label: 'Pausada', enabled: true },
+    ]),
+  })
+  const changed = await call({
+    method: 'PATCH',
+    path: path + '/paused',
+    token: await tokenFor(world, writer),
+    body: { enabled: false },
+  })
+  expect(changed.status).toBe(200)
+  const after = await call({ method: 'GET', path, token })
+  expect(after.json).toMatchObject({
+    rules: expect.arrayContaining([
+      { kind: 'paused', label: 'Pausada', enabled: false },
+    ]),
+  })
 })
 
 it('routes reference-client start, pause and cancel requests through v1', async () => {

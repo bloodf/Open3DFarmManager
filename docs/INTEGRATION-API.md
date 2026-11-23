@@ -41,12 +41,11 @@ Owners can grant one or more scopes across a farm or limit them to a printer ass
 | `camera:view`         | Open the camera view for a granted printer.                                  |
 | `inventory:write`     | Register and withdraw physical spools.                                       |
 | `environment:control` | Control drying programs, smart plugs and extraction.                         |
-| `alerts:manage`       | Change alert rules and test notification channels.                           |
+| `alerts:manage`       | Change alert rules and configure or test notification channels.              |
 
-Owners can grant `inventory:write`, `environment:control` and `alerts:manage`,
-and tokens can carry them, but no endpoint uses them yet. Any command a future
-endpoint accepts under these scopes still travels as an issuer-signed envelope
-that the Connector enforces and may refuse with a reason.
+Owners can grant `inventory:write` and `environment:control` in advance of
+the endpoints that use them. Commands that reach a printer travel as
+issuer-signed envelopes that the Connector enforces and may refuse with a reason.
 
 Revocations are audited and take effect on the next API request. Revoking an app
 also makes its webhook subscriptions ineligible for delivery, including events
@@ -126,6 +125,32 @@ assignment. Send `{"action":"acknowledge"}` or
 the first acknowledgement timestamp. A silence can last up to seven days
 and can be extended. These actions affect the inbox and issue no printer
 commands. An occurrence that has resolved returns `404` on update.
+
+### Farm alert rules and notification channels
+
+Use `GET /alert-rules/{farmId}` with a farm-wide `printers:read` grant to read
+the farm's rule settings. Rules default to enabled. Send
+`PATCH /alert-rules/{farmId}/{kind}` with `{"enabled":false}` to save an
+override for the farm.
+
+Use `PUT /notification-channels/{farmId}` with an HTTPS `url` and a
+`secret` of 32 to 256 characters to configure or replace an app's webhook
+channel for the farm. OpenFarm seals the URL and secret and omits both from
+responses. Channels belong to the farm and the app that configured them.
+These endpoints manage settings and send test notifications. Live event
+subscriptions use the separate webhook subscription API.
+
+Rule and channel changes and channel tests require a farm-wide
+`alerts:manage` grant from a current farm owner that does not require
+interactive approval. Outside the farm-wide grant, the API returns `404`.
+A grant whose owner lost the required role is denied with `403`.
+
+Send an empty `POST /notification-channels/{farmId}/test` to attempt one
+signed `farm.notification.test` event to a public destination. The result reports `delivered` when
+the receiver returned 2xx, `failed` when an outbound attempt failed, or
+`not-run` when target validation prevented an attempt. The `attempted`
+boolean distinguishes those cases. A channel that has never been configured
+returns `404`. The test does not retry or follow redirects.
 
 ## Read printers, state and inventory
 

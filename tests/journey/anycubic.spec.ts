@@ -190,12 +190,15 @@ function suite(title: string) {
      * "Nenhum comando foi enviado" is closed and asked for again, as a person
      * would; a sent command is never repeated.
      */
+    const commandDialog = (page: Page) =>
+      page.locator('dialog[aria-labelledby="pause-dialog-title"]')
+
     async function command(
       page: Page,
       open: () => Promise<void>,
       confirm: string,
     ) {
-      const dialog = page.getByRole('dialog')
+      const dialog = commandDialog(page)
       const status = dialog.getByRole('status')
       // "Cancelar" until the command settles or fails, "Fechar" after.
       const close = dialog.getByRole('button', { name: /^(Fechar|Cancelar)$/ })
@@ -252,7 +255,7 @@ function suite(title: string) {
               timeout: 10_000,
             })
             await button.click({ timeout: 5000 })
-            await expect(page.getByRole('dialog')).toBeVisible({
+            await expect(commandDialog(page)).toBeVisible({
               timeout: 3000,
             })
           }).toPass({ timeout: 300_000 })
@@ -282,7 +285,7 @@ function suite(title: string) {
             await expect(button).toBeEnabled({ timeout: 5000 })
             await button.click({ timeout: 5000 })
             // The page ignores a click that lands between two live sessions.
-            await expect(page.getByRole('dialog')).toBeVisible({
+            await expect(commandDialog(page)).toBeVisible({
               timeout: 3000,
             })
           }).toPass({ timeout: 300_000 })

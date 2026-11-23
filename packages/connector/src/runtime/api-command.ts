@@ -1,3 +1,8 @@
+import {
+  temperatureJournalAction,
+  toolTemperatureRefusal,
+} from '../control/control-driver.ts'
+import type { ToolHeaters } from '../../../farm-protocol/src/state.ts'
 import { createHash } from 'node:crypto'
 import { resinArtifactFormatFor } from '../../../shared/src/print-file/resin-artifacts.ts'
 import {
@@ -67,6 +72,7 @@ export type ApiGrant = Readonly<{
 export type ApiPrinterObservation = Readonly<{
   ready: boolean
   printState: string
+  toolHeaters?: readonly ToolHeaters[number][] | undefined
 }>
 export type ApiCommandDriver = Pick<
   PreparedPauseDriver,
@@ -187,6 +193,7 @@ export function createApiCommandRunner(config: {
   }
   journal: CommandJournalHandle
   printer(assignmentId: string): PrinterBinding | undefined
+  /** Returns the latest fresh local observation, or null when unavailable or stale. */
   observe(binding: PrinterBinding): ApiPrinterObservation | null
   driver: ApiCommandDriver
   /** Sends one encoded `api-envelope.result` frame over the inbox. */
@@ -479,7 +486,12 @@ export function createApiCommandRunner(config: {
         // The journal records the driver action the environment control runs.
         envelope: environment
           ? { ...envelope, action: environment as ApiEnvelopeV1['action'] }
-          : envelope,
+          : envelope.action?.action === 'set_tool_temperature'
+            ? {
+                ...envelope,
+                action: temperatureJournalAction(envelope.action.args.target_c),
+              }
+            : envelope,
         printerKey: mapping.printer_key,
         wireSha256: createHash('sha256').update(String(wire)).digest('hex'),
       })
@@ -524,6 +536,21 @@ export function createApiCommandRunner(config: {
     const resin = ApiResinReplay.safeParse(envelope.action)
     let runEvidence: ApiRunEvidence | undefined
     const commandStateRefusal = (): [ApiEnvelopeRefusalCode, string] | null => {
+      if (request.action === 'set_tool_temperature') {
+        const observed = config.observe(binding)
+        const refusal = toolTemperatureRefusal(observed, request.args)
+        if (refusal === 'tool-state-stale') return ['not-ready', refusal]
+        if (refusal === 'tool-heater-not-advertised')
+          return ['unsupported', refusal]
+        if (refusal)
+          return [
+            observed && controlPrinterBusy(request.action, observed.printState)
+              ? 'printer-busy'
+              : 'wrong-state',
+            refusal,
+          ]
+        return null
+      }
       if (run.success || plate.success) {
         const observed = config.observe(binding)
         if (!observed?.ready || observed.printState === 'unknown')

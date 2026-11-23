@@ -222,8 +222,9 @@ export function commitSpoolman(
         origin,
         farmId: scope.farm_id,
         serviceId:
-          (previous.success ? previous.data.serviceId : undefined) ??
-          randomUUID(),
+          (previous.success && previous.data.origin === origin
+            ? previous.data.serviceId
+            : undefined) ?? randomUUID(),
         limit: (previous.success ? previous.data.limit : undefined) ?? 200,
         credentialFile: plan.credential_file,
       },

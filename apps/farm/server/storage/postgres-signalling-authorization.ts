@@ -49,6 +49,7 @@ const Scope = z.strictObject({
   farmId: BrowserDeviceUuid,
   agentId: BrowserDeviceUuid,
   keyId: BrowserDeviceUuid,
+  cameraPrinterId: BrowserDeviceUuid.optional(),
 })
 const time = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
 const Credential = z.strictObject({
@@ -313,6 +314,11 @@ export class PostgresSignallingAuthorization implements SignallingAuthoritySourc
       assignments.data.some(
         (row) => row.farm_id !== scope.farmId || row.agent_id !== scope.agentId,
       )
+    )
+      return null
+    if (
+      scope.cameraPrinterId &&
+      !assignments.data.some((row) => row.id === scope.cameraPrinterId)
     )
       return null
     const assignmentSet = await assignmentSetDigest(

@@ -50,6 +50,7 @@ export const RtcSessionBindingV2 = bindingFields
     v: z.literal(2),
     assignment_count: z.number().int().min(1).max(16),
     assignment_digest: digest,
+    camera_printer_id: BrowserDeviceUuid.optional(),
   })
   .refine(validLifetime)
 export type RtcSessionBindingV2 = z.infer<typeof RtcSessionBindingV2>

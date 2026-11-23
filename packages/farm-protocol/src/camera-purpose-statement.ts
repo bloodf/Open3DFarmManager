@@ -184,8 +184,11 @@ export function cameraStatementFromBinding(
   fields: CameraPurposeFields,
 ): CameraPurposeStatement {
   const binding = RtcSessionBindingV2.parse(input)
+  if (binding.camera_printer_id !== fields.printer_id)
+    throw new Error('Camera target does not match binding')
+  const { camera_printer_id: _cameraPrinterId, ...statementBinding } = binding
   return CameraPurposeStatement.parse({
-    ...binding,
+    ...statementBinding,
     v: 3,
     purpose: 'camera-rtc',
     camera_id: fields.camera_id,

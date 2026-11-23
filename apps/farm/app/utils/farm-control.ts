@@ -222,6 +222,12 @@ export function getPrinterActionButtons(
  * never instead of it: the code does not change what happened to the command.
  */
 export const RESULT_CODE_HINTS: Record<ControlResultCode, string> = {
+  'tool-state-stale': 'Os dados da impressora estão desatualizados.',
+  'tool-printer-not-idle': 'A impressora precisa estar ociosa.',
+  'tool-heater-not-advertised':
+    'A impressora não disponibiliza esta ferramenta.',
+  'tool-temperature-above-maximum':
+    'A temperatura excede o limite da ferramenta.',
   signature: 'O Connector não conseguiu verificar a assinatura do comando.',
   scope: 'Você não tem permissão para enviar este comando.',
   state: 'O estado atual da impressora impede este comando.',
@@ -290,6 +296,26 @@ function actionOutcomeBaseText(
     case 'outcome-unknown':
       return `Não foi possível confirmar se a impressão foi ${actionPast}. Verifique a impressora antes de tentar novamente.`
   }
+}
+
+export function extendedControlStatusText(
+  state: FarmPauseControlState,
+  remainingSeconds: number,
+): string {
+  if (state.kind === 'sending') return 'Enviando o comando…'
+  if (state.kind === 'settled') {
+    const base = {
+      applied: 'Comando confirmado pelo Connector.',
+      rejected: 'Comando recusado.',
+      'not-sent': 'Comando não enviado.',
+      'outcome-unknown':
+        'Resultado desconhecido. Verifique a impressora antes de tentar novamente.',
+    }[state.outcome]
+    const hint =
+      state.outcome === 'applied' ? undefined : resultCodeHint(state.code)
+    return hint ? `${base} ${hint}` : base
+  }
+  return controlStatusText('pause', state, remainingSeconds)
 }
 
 /**

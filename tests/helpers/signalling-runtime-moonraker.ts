@@ -129,6 +129,7 @@ export async function createRuntimeMoonrakerFixture() {
       }[]
       /** Locally declared Moonraker model for the journey printer. */
       model?: string
+      camera?: Record<string, unknown>
       /**
        * Journey harness only: another vendor's collection and assignment
        * replace the Moonraker ones (the packaged Connector is unchanged).
@@ -251,6 +252,7 @@ export async function createRuntimeMoonrakerFixture() {
           ...(input.runtime?.camera
             ? { camera: input.runtime.camera(ref.assignmentId) }
             : {}),
+          ...(input.camera ? { camera: input.camera } : {}),
           telemetry: {
             endpoint: input.origin + '/api/connector/telemetry',
             audience: input.audience,

@@ -28,6 +28,7 @@ const props = withDefaults(
     failed?: boolean
     /** The account has no farm to show. */
     noFarm?: boolean
+    requiresFarmSelection?: boolean
     /** Fixed pt-BR reason for a failure, when one is known. */
     problem?: string
     page?: number
@@ -105,8 +106,14 @@ function temperature(value: number | undefined) {
     </div>
     <EmptyState
       v-else-if="noFarm"
-      title="Nenhuma farm disponível"
-      description="Esta conta ainda não tem acesso a uma farm. Entre com outra conta para ver o painel."
+      :title="
+        requiresFarmSelection ? 'Selecione uma farm' : 'Nenhuma farm disponível'
+      "
+      :description="
+        requiresFarmSelection
+          ? 'Escolha uma farm na página Minha farm e abra o Painel (TV).'
+          : 'Esta conta ainda não tem acesso a uma farm. Entre com outra conta para ver o painel.'
+      "
     />
     <!-- Read-only wall for a TV: no control, so the retry is automatic. -->
     <ErrorState

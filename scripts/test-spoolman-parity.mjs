@@ -151,7 +151,12 @@ try {
       ),
     ),
   ])
-  builtin = await startBuiltin({ pgPort: pg.port, admin, externalUrl })
+  builtin = await startBuiltin({
+    pgPort: pg.port,
+    pgPassword: pg.password,
+    admin,
+    externalUrl,
+  })
   const pairs = new Map()
   for (const [index, corpus] of corpora.entries())
     pairs.set(corpus.name, {

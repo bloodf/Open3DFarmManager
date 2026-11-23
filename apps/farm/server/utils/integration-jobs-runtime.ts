@@ -1,4 +1,6 @@
 import postgres from 'postgres'
+import { PostgresFleetMode } from '../storage/fleet-mode-postgres.ts'
+import { integrationAuthPool } from './integration-auth-runtime.ts'
 import { useRuntimeConfig } from 'nuxt/server'
 import { z } from 'zod'
 import {
@@ -128,6 +130,9 @@ export async function integrationJobsRuntime() {
   const library = new IntegrationLibraryService(libraryStore)
   const service = new IntegrationJobsService({
     store: new PostgresIntegrationJobs(pool),
+    fleetMode: async (id) =>
+      (await new PostgresFleetMode(integrationAuthPool()).read(id))?.mode ??
+      'in-service',
     library: {
       version: (id) => library.version(id),
       recordReplay: (entry) => library.recordReplay(entry),

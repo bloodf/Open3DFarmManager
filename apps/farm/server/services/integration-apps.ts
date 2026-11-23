@@ -1,13 +1,11 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 
+export { INTEGRATION_SCOPES } from '../../app/utils/integration-scopes.ts'
 import {
   INTEGRATION_SCOPES,
   type IntegrationScope,
 } from '../../app/utils/integration-scopes.ts'
-export {
-  INTEGRATION_SCOPES,
-  type IntegrationScope,
-} from '../../app/utils/integration-scopes.ts'
+export type { IntegrationScope } from '../../app/utils/integration-scopes.ts'
 
 export function validScopes(value: unknown): value is IntegrationScope[] {
   return (

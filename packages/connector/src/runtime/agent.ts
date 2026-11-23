@@ -12,7 +12,11 @@ import {
   pause,
   runBackgroundDiscovery,
 } from './background-discovery.ts'
-import { decodeApiEnvelopeFrame } from '../../../farm-protocol/src/api-envelope.ts'
+import {
+  ApiResinReplay,
+  decodeApiEnvelopeFrame,
+  encodeApiEnvelopeResultFrame,
+} from '../../../farm-protocol/src/api-envelope.ts'
 import { encodeSignallingClientFrame } from '../../../farm-protocol/src/signalling-socket.ts'
 import {
   CLIENT_WRITE_LIMIT,
@@ -151,6 +155,9 @@ const systemClock: AgentClock = { now: () => Date.now() }
 
 type AgentInput = {
   trustedKeys?: TrustedKeyAuthority
+  resinCapabilities?: Parameters<
+    typeof import('./pause-control.ts').runPauseControl
+  >[0]['resinCapabilities']
   clock?: AgentClock
   statusPort?: number
   configPath: string
@@ -291,6 +298,12 @@ async function runConnectorAgentOnce(
   let controlsFor:
     ((assignmentId: string) => readonly ExtendedControlAction[]) | undefined
   let refreshControls: (() => void) | undefined
+  const printerSpeedModes = new Map<
+    string,
+    NonNullable<
+      import('../../../farm-protocol/src/state.ts').PrinterState['speedModes']
+    >
+  >()
   const detailSources = createPrinterDetailSources(config)
   // Library prints (#384): download from the server or read the local copy,
   // checked against what each printer itself reported. Never stops the agent.
@@ -481,6 +494,21 @@ async function runConnectorAgentOnce(
       })
     }
     if (signal.aborted) return false
+    const cameraMedia =
+      config.camera &&
+      config.signalling &&
+      lookupId &&
+      rtcBackend.mode === 'direct'
+        ? await (
+            await import('../camera/camera-runtime.ts')
+          ).createCameraMediaFactory({
+            config: config.camera,
+            identity,
+            agentId: credential.agent_id,
+            farmId: credential.farm_id,
+            assignmentRefs: refs,
+          })
+        : undefined
     const links = new Map(
       config.collection.printers.map(({ printerKey }) => [
         printerKey,
@@ -501,12 +529,8 @@ async function runConnectorAgentOnce(
                 ? 'loopback'
                 : 'lan',
         },
-        ...(config.camera && lookupId && rtcBackend.mode === 'direct'
-          ? {
-              cameraAssignments: config.camera.cameras.map(
-                (camera) => camera.assignmentId,
-              ),
-            }
+        ...(cameraMedia
+          ? { cameraAssignments: cameraMedia.assignmentIds }
           : {}),
         printers: Array.from(links.values(), (link) => link.read()),
       }) satisfies import('../../../farm-protocol/src/telemetry.ts').HeartbeatHealth
@@ -664,17 +688,6 @@ async function runConnectorAgentOnce(
         collection,
       )
       const source = snapshots
-      const cameraMedia = config.camera
-        ? await (
-            await import('../camera/camera-runtime.ts')
-          ).createCameraMediaFactory({
-            config: config.camera,
-            identity,
-            agentId: credential.agent_id,
-            farmId: credential.farm_id,
-            assignmentRefs: refs,
-          })
-        : undefined
       const detailSourceFor = detailSources.sourceFor
       tasks.push(
         runSignallingLifecycle({
@@ -788,11 +801,40 @@ async function runConnectorAgentOnce(
                     })
                 },
                 onApiCommand(frame, report) {
-                  if (!offline || inbox.signal.aborted) return
+                  if (inbox.signal.aborted) return
                   const { envelope } = decodeApiEnvelopeFrame(frame.wire)
+                  const assignedHandler = apiHandlers.get(
+                    envelope.assignment_id,
+                  )
+                  if (
+                    !assignedHandler &&
+                    ApiResinReplay.safeParse(envelope.action).success
+                  ) {
+                    // This inbox is credential-authenticated. An assignment
+                    // without a control handler can only report a refusal.
+                    if (
+                      envelope.farm_id === credential.farm_id &&
+                      envelope.agent_id === credential.agent_id &&
+                      refs.some(
+                        (ref) => ref.assignmentId === envelope.assignment_id,
+                      )
+                    )
+                      report(
+                        encodeApiEnvelopeResultFrame({
+                          v: 1,
+                          t: 'api-envelope.result',
+                          cmd_id: envelope.cmd_id,
+                          outcome: 'refused',
+                          refusal_code: 'unsupported',
+                          detail: 'resin-artifact-dispatch-unavailable',
+                          at: clock.now(),
+                        }),
+                      )
+                    return
+                  }
+                  if (!offline) return
                   const handler =
-                    apiHandlers.get(envelope.assignment_id) ??
-                    apiHandlers.values().next().value
+                    assignedHandler ?? apiHandlers.values().next().value
                   handler?.(frame, {
                     report,
                     apiJobs,
@@ -898,6 +940,9 @@ async function runConnectorAgentOnce(
           apiHandlers,
           libraryLinks,
           collection,
+          speedModesFor(printerKey) {
+            return printerSpeedModes.get(printerKey)
+          },
           libraryPrint(assignmentId) {
             const key = refs.find(
               (ref) => ref.assignmentId === assignmentId,
@@ -907,6 +952,9 @@ async function runConnectorAgentOnce(
             )
           },
           ...(input.trustedKeys ? { trustedKeys: input.trustedKeys } : {}),
+          ...(input.resinCapabilities
+            ? { resinCapabilities: input.resinCapabilities }
+            : {}),
           storageDegraded: () => queue.storageDegraded,
           onDiagnostic: pauseDiagnostic,
           onMacroParams(read) {
@@ -1048,6 +1096,12 @@ async function runConnectorAgentOnce(
       collectIntoQueue({
         config: config.collection,
         apiJobs,
+        onPrinterState(printer) {
+          if (printer.speedModes === undefined)
+            printerSpeedModes.delete(printer.printerKey)
+          else
+            printerSpeedModes.set(printer.printerKey, [...printer.speedModes])
+        },
         controlsFor: (printerKey) => {
           const ref = refs.find((entry) => entry.printerKey === printerKey)
           return ref ? controlsFor?.(ref.assignmentId) : undefined

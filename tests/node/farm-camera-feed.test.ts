@@ -58,6 +58,7 @@ async function fixture(withCamera = true) {
     now = Date.now()
   const binding = RtcSessionBinding.parse({
     v: 2,
+    camera_printer_id: assignmentId,
     assignment_count: set.count,
     assignment_digest: set.digest,
     purpose: 'read-only-rtc',
@@ -140,12 +141,15 @@ async function fixture(withCamera = true) {
   cameraHooks = hooks
   const offer = (printerId: string) =>
     connector.signCameraPurposeProof({
-      statement: cameraStatementFromBinding(binding, {
-        camera_id: 'cam-1',
-        printer_id: printerId,
-        video_mid: 'camera',
-        lease_ref: nonce(),
-      }),
+      statement: cameraStatementFromBinding(
+        { ...binding, camera_printer_id: printerId },
+        {
+          camera_id: 'cam-1',
+          printer_id: printerId,
+          video_mid: 'camera',
+          lease_ref: nonce(),
+        },
+      ),
       expectedAgentId: agentId,
     })
   return {

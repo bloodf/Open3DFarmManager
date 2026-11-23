@@ -95,7 +95,7 @@ export async function startHarness(farmCount = 2): Promise<Harness> {
       port,
       database: 'fixture',
       username,
-      password: '',
+      password: env('WS_PG_PASSWORD'),
       ssl: false,
       max: 4,
       connect_timeout: 3,

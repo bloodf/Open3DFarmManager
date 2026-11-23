@@ -98,7 +98,7 @@ if (journeyEnabled())
       ).toBeVisible({ timeout: 90_000 })
       const assignments = page.getByRole('region', { name: 'Atribuições' })
       await expect(
-        assignments.getByText(/^kobra-x-[A-Za-z0-9_-]{43}$/),
+        assignments.getByRole('link', { name: /^kobra-x-[A-Za-z0-9_-]{43}$/ }),
       ).toBeVisible()
       // Secrets stay out of the page and of browser storage.
       const text = await page.evaluate(

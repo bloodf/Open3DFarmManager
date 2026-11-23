@@ -1,4 +1,6 @@
-import { ref, watch } from 'vue'
+import { computed, ref } from 'vue'
+import { fetchFarmMemberships } from './useFarmMemberships.ts'
+import { farmLocation, resolveFarmScope } from '../utils/farm-scope.ts'
 
 export interface FarmSummary {
   farmId: string
@@ -9,43 +11,20 @@ export function useSpoolLibraryFarm() {
   const router = useRouter()
 
   const farms = ref<FarmSummary[]>([])
-  const farmId = ref('')
+  const farmId = computed(
+    () => resolveFarmScope(farms.value, route.query.farm)?.farmId ?? '',
+  )
   const loadingFarm = ref(true)
   const farmLoadError = ref('')
   const signInRequired = ref(false)
-  const noFarm = ref(false)
-
-  function requestedFarm(): string {
-    const raw = route.query.farm
-    return typeof raw === 'string' ? raw : ''
-  }
-
-  function syncFarmFromRoute() {
-    const preferred = requestedFarm()
-    const selected =
-      farms.value.find((farm) => farm.farmId === preferred)?.farmId ??
-      farms.value[0]?.farmId ??
-      ''
-    farmId.value = selected
-    noFarm.value = !selected
-    if (selected && preferred !== selected) {
-      void router.replace({ query: { ...route.query, farm: selected } })
-    }
-  }
+  const noFarm = computed(() => !farmId.value)
 
   async function loadFarms() {
     loadingFarm.value = true
     farmLoadError.value = ''
     signInRequired.value = false
-    noFarm.value = false
     try {
-      const page = await $fetch<{ farms: FarmSummary[] }>('/api/farms', {
-        query: { limit: 50 },
-        retry: 0,
-        timeout: 15_000,
-      })
-      farms.value = page.farms
-      syncFarmFromRoute()
+      farms.value = await fetchFarmMemberships({ timeout: 15_000 })
     } catch (cause) {
       const code =
         cause && typeof cause === 'object' && 'statusCode' in cause
@@ -63,17 +42,12 @@ export function useSpoolLibraryFarm() {
 
   function selectFarm(nextFarmId: string) {
     if (!farms.value.some((farm) => farm.farmId === nextFarmId)) return
-    if (nextFarmId === requestedFarm()) return
-    void router.replace({ query: { ...route.query, farm: nextFarmId } })
+    if (nextFarmId === route.query.farm) return
+    void router.replace({
+      ...farmLocation(route.path, nextFarmId, route.query),
+      hash: route.hash,
+    })
   }
-
-  watch(
-    () => route.query.farm,
-    () => {
-      if (!loadingFarm.value) syncFarmFromRoute()
-    },
-    { flush: 'sync' },
-  )
 
   return {
     farms,

@@ -244,7 +244,7 @@ async function standIn(): Promise<JourneyCameraEncoder> {
 }
 
 /** The real FFmpeg, resolved through symlinks so ps shows the pinned path. */
-async function realFfmpeg(): Promise<JourneyCameraEncoder> {
+export async function realFfmpeg(): Promise<JourneyCameraEncoder> {
   let configured: string
   try {
     configured = qualificationEncoder().path

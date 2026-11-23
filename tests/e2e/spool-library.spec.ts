@@ -695,16 +695,19 @@ test('operator browses, searches, filters, sorts, creates, edits, archives, uses
   await page.goto('/bobinas')
   await waitHydrated(page)
 
-  // Main navigation exposes both /bobinas and /spoolman
-  const mainNav = page
-    .getByRole('complementary')
-    .getByRole('navigation', { name: 'Navegação principal' })
+  const inventory = page.getByRole('navigation', {
+    name: 'Navegação principal',
+  })
   await expect(
-    mainNav.getByRole('link', { name: 'Bobinas', exact: true }),
-  ).toHaveAttribute('href', '/bobinas')
+    inventory.getByRole('link', { name: 'Estoque', exact: true }),
+  ).toHaveAttribute('href', `/bobinas?farm=${FARM_ID}`)
+  const section = page.getByRole('navigation', { name: 'Navegação da seção' })
   await expect(
-    mainNav.getByRole('link', { name: 'Spoolman', exact: true }),
-  ).toHaveAttribute('href', '/spoolman')
+    section.getByRole('link', { name: 'Bobinas', exact: true }),
+  ).toHaveAttribute('href', `/bobinas?farm=${FARM_ID}`)
+  await expect(
+    section.getByRole('link', { name: 'Spoolman', exact: true }),
+  ).toHaveAttribute('href', `/spoolman?farm=${FARM_ID}`)
 
   // Initial list hides archived spool #3
   await expect(page.getByText('2 bobina(s) encontrada(s).')).toBeVisible()

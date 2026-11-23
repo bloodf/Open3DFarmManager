@@ -43,12 +43,17 @@ const selectedVersion = ref('')
 const plate = ref('1')
 const pendingDelete = ref('')
 const replaying = ref(false)
-const replayVersion = ref<LibraryVersion>()
+type ReplayableVersion = LibraryVersion & { kind: 'gcode' | '3mf' }
+const replayVersion = ref<ReplayableVersion>()
 const replayItemId = ref('')
 const replayPlate = ref(1)
-const canReplay = (v: LibraryVersion) =>
-  !!props.replaySend && !!props.replayPrinters && v.deletedAt === null
+const canReplay = (v: LibraryVersion): v is ReplayableVersion =>
+  v.kind !== 'resin' &&
+  !!props.replaySend &&
+  !!props.replayPrinters &&
+  v.deletedAt === null
 function replay(v: LibraryVersion) {
+  if (!canReplay(v)) return
   replayVersion.value = v
   replayItemId.value = props.item?.id ?? ''
   replayPlate.value = Number(plate.value)
@@ -67,6 +72,7 @@ async function sendReplay(
     replayVersion.value?.id === versionId &&
     versions.value.some(
       (entry) =>
+        entry.kind !== 'resin' &&
         entry.id === versionId &&
         entry.sha256 === args.sha256 &&
         entry.deletedAt === null &&
@@ -204,7 +210,11 @@ async function uploaded() {
           </option>
         </select>
       </div>
-      <p class="note">
+      <p v-if="current.kind === 'resin'" class="note">
+        Perfil de impressão informado no envio:
+        {{ current.metadata.resinProfile ?? 'não informado' }}.
+      </p>
+      <p v-else class="note">
         Os metadados abaixo vêm do arquivo da versão v{{
           current.versionNumber
         }}

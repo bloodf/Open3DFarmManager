@@ -84,7 +84,12 @@ describe('Cofre3D integration scopes', () => {
       'library:read',
       'library:write',
     ])
-    expect(INTEGRATION_SCOPES.slice(11)).toEqual([...NEW_SCOPES])
+    expect(INTEGRATION_SCOPES.slice(11)).toEqual([
+      ...NEW_SCOPES,
+      'inventory:write',
+      'environment:control',
+      'alerts:manage',
+    ])
     // Masks are 32-bit bitwise values.
     expect(INTEGRATION_SCOPES.length).toBeLessThanOrEqual(31)
   })
@@ -174,10 +179,12 @@ describe('Cofre3D integration scopes', () => {
       new URL('0094_integration_cofre3d_scopes.down.sql', dir),
       'utf8',
     )
-    const quoted = INTEGRATION_SCOPES.map((scope) => `'${scope}'`).join(',')
+    const quoted = INTEGRATION_SCOPES.slice(0, 15)
+      .map((scope) => `'${scope}'`)
+      .join(',')
     expect(up).toContain(`ARRAY[${quoted}]::text[]`)
     expect(up).toContain(
-      `cardinality(scopes) BETWEEN 1 AND ${INTEGRATION_SCOPES.length}`,
+      `cardinality(scopes) BETWEEN 1 AND ${INTEGRATION_SCOPES.slice(0, 15).length}`,
     )
     expect(down).toContain('FROM farm.integration_app_grants')
     expect(down).toContain('RAISE EXCEPTION')
@@ -208,9 +215,9 @@ describe('Cofre3D integration scopes', () => {
     const page = await readFile('apps/farm/app/pages/integracoes.vue', 'utf8')
     for (const scope of INTEGRATION_SCOPES)
       expect(guide).toMatch(new RegExp(`^\\|[ \t]*\`${scope}\`[ \t]*\\|`, 'm'))
-    expect(page).toContain("['environment:read', 'Consultar ambiente']")
-    expect(page).toContain("['plates:confirm', 'Confirmar placa livre']")
-    expect(page).toContain("['alerts:write', 'Enviar alertas']")
-    expect(page).toContain("['camera:view', 'Ver câmera']")
+    expect(page).toContain("'environment:read': 'Consultar ambiente'")
+    expect(page).toContain("'plates:confirm': 'Confirmar placa livre'")
+    expect(page).toContain("'alerts:write': 'Enviar alertas'")
+    expect(page).toContain("'camera:view': 'Ver câmera'")
   })
 })

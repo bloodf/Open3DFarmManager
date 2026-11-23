@@ -61,13 +61,11 @@ const bambuCapabilities = {
 
 const detailTest = 'tests/unit/bambu-detail.test.ts'
 const extendedTest = 'tests/unit/bambu-control-extended.test.ts'
-const cameraTest = 'tests/node/bambu-camera.test.ts'
-const cameraName = 'models select local TLS JPEG or authenticated RTSPS 322'
 
 /**
  * Áreas do painel (E18) comprovadas apenas pelo simulador Bambu do E16 em
- * loopback, sem impressora física. Cada `simulated` aponta para o teste que o
- * exercita; a câmera só vale para os modelos que o seletor aceita.
+ * loopback, sem impressora física. Cada `simulated` aponta para o teste
+ * que exercita a área.
  */
 export const bambuControlAreaEvidence = {
   temperatures: { file: detailTest, test: 'reports temperatures' },
@@ -82,9 +80,6 @@ export const bambuControlAreaEvidence = {
     test: 'lists, downloads and deletes SD card files over FTPS',
   },
   timelapse: { file: detailTest, test: 'lists timelapse files over FTPS' },
-} as const satisfies ControlAreaEvidenceMap
-const cameraEvidence = {
-  webcams: { file: cameraTest, test: cameraName },
 } as const satisfies ControlAreaEvidenceMap
 
 /**
@@ -110,10 +105,8 @@ const withAreas = (
   ...Object.fromEntries(unsupportedAreas.map((k) => [k, 'unsupported'])),
 })
 const baseControlAreas = withAreas(bambuControlAreaEvidence)
-const cameraControlAreas = withAreas({
-  ...bambuControlAreaEvidence,
-  ...cameraEvidence,
-})
+const rtspsCameraLimitation =
+  'A captura de câmera por RTSPS está indisponível no OpenFarm.'
 export const bambuDetailUnsupported =
   'Não suportado no painel Bambu: editor de configuração, malha da mesa, serviços, energia, fila de impressão, atualizações além das versões de firmware, macros, exclusão de objetos e histórico. O protocolo LAN documentado não os expõe; fonte em docs/protocols/bambu-detail.md.'
 export const bambuDetailHardwareNote =
@@ -145,7 +138,6 @@ const common = {
     'Telemetria, envio de arquivos e comandos foram simulados; não comprovado em hardware. Comandos exigem ativação LAN.',
     'Arquivos: leitura e envio por FTPS passivo foram exercitados contra o simulador com endereço local, TLS fixado e credencial privada; não comprovado em hardware.',
     'Materiais: leitura de bandejas AMS e comandos de carga e descarga de filamento foram simulados; não comprovado em hardware.',
-    'Câmera: o módulo de câmera do OpenFarm não está ligado ao caminho de configuração do agente, então a câmera permanece desconhecida.',
   ],
 } satisfies Omit<
   BambuCatalogProduct,
@@ -181,50 +173,32 @@ export const bambuCatalog: readonly BambuCatalogProduct[] = [
   },
   {
     ...common,
-    capabilities: { ...bambuCapabilities, camera: 'simulated' },
-    controlAreas: cameraControlAreas,
-    controlAreaEvidence: { ...bambuControlAreaEvidence, ...cameraEvidence },
     id: 'bambu-h2c',
     model: 'H2C',
     releaseDate: '2025-11-14',
     sources: [
       'https://blog.bambulab.com/bambu-lab-h2c-where-multi-material-vortek-system-meets-engineering-precision/',
     ],
-    limitations: [
-      ...common.limitations,
-      'Câmera: o OpenFarm aceita o H2C no seletor de modelo e simula o transporte RTSPS autenticado na porta 322; não comprovado em hardware.',
-    ],
+    limitations: [...common.limitations, rtspsCameraLimitation],
   },
   {
     ...common,
-    capabilities: { ...bambuCapabilities, camera: 'simulated' },
-    controlAreas: cameraControlAreas,
-    controlAreaEvidence: { ...bambuControlAreaEvidence, ...cameraEvidence },
     id: 'bambu-p2s',
     model: 'P2S',
     releaseDate: '2025-10-14',
     sources: [
       'https://blog.bambulab.com/the-icon-redefined-meet-the-p2s-a-completely-reengineered-version-of-the-ultra-productive-p1-series/',
     ],
-    limitations: [
-      ...common.limitations,
-      'Câmera: o OpenFarm aceita o P2S no seletor de modelo e simula o transporte RTSPS autenticado na porta 322; não comprovado em hardware.',
-    ],
+    limitations: [...common.limitations, rtspsCameraLimitation],
   },
   {
     ...common,
-    capabilities: { ...bambuCapabilities, camera: 'simulated' },
-    controlAreas: cameraControlAreas,
-    controlAreaEvidence: { ...bambuControlAreaEvidence, ...cameraEvidence },
     id: 'bambu-h2s',
     model: 'H2S',
     releaseDate: '2025-08-26',
     sources: [
       'https://blog.bambulab.com/h2s-the-ultimate-single-nozzle-3d-printer-now-bigger-than-ever/',
     ],
-    limitations: [
-      ...common.limitations,
-      'Câmera: o OpenFarm aceita o H2S no seletor de modelo e simula o transporte RTSPS autenticado na porta 322; não comprovado em hardware.',
-    ],
+    limitations: [...common.limitations, rtspsCameraLimitation],
   },
 ]

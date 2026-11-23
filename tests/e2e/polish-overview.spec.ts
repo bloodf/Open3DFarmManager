@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
+import { setPolishTheme } from '../helpers/polish-theme.ts'
+import { mockShellApi } from '../helpers/shell-api.ts'
 
 // Isolated UI checks for the overview screens (/, /painel, /impressoras and
 // /compatibilidade) on mocked /api routes. No real printer, database, auth
@@ -133,6 +135,8 @@ async function mockApi(page: Page, scenario: Scenario) {
   await page.route('**/api/**', (route) =>
     route.fulfill({ status: 404, json: {} }),
   )
+  await mockShellApi(page, farm)
+  await mockShellApi(page, otherFarm)
   await page.route('**/api/auth/me', (route) =>
     route.fulfill({ json: { accountId: 'conta-sintetica' } }),
   )
@@ -209,7 +213,7 @@ async function open(
 ) {
   const entry = scenarios.find((item) => item.name === scenario)!
   await page.setViewportSize(viewport)
-  await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+  await setPolishTheme(page, theme)
   await mockApi(page, scenario)
   await page.goto(entry.path)
   await page.getByRole('heading', { level: 1, name: entry.heading }).waitFor()
@@ -434,11 +438,39 @@ test('compatibility search is a named landmark, announces the count and clears',
   expect(await fits(page)).toBe(true)
 })
 
-test('each compatibility entry labels its sources and limits', async ({
+test('compatibility catalog shows reviewed-model evidence and product sources', async ({
   page,
 }) => {
   await open(page, 'compat-catalog', viewports[0], 'light')
-  const first = page.locator('section[aria-labelledby]').first()
+  const reviewed = page.getByRole('region', { name: 'Modelos revisados' })
+  await expect(reviewed.getByRole('heading', { level: 2 })).toBeVisible()
+  await expect(
+    reviewed.getByText(
+      /Especificações publicadas e evidências de protocolo; não habilitam recursos do Connector\./,
+    ),
+  ).toBeVisible()
+  const reviewedModel = reviewed.locator('.reviewed-model').filter({
+    has: page.getByRole('heading', { name: 'Anycubic Kobra X' }),
+  })
+  await expect(reviewedModel).toContainText(
+    'Evidência do modelo: Qualificado em hardware',
+  )
+  await expect(reviewedModel).toContainText('Especificações: 260 × 260 × 260')
+  await expect(reviewedModel).toContainText(
+    'Rede: unverified (store pages returned HTTP 429)',
+  )
+  await expect(reviewedModel).toContainText(
+    'Protocolo: LAN Mode documented (A1), cloud off while enabled; ports not published by Anycubic, so unverified · Não verificado',
+  )
+  await expect(reviewedModel.getByRole('link').first()).toHaveAttribute(
+    'href',
+    /^https?:/,
+  )
+
+  const first = page
+    .locator('main section[aria-labelledby]')
+    .filter({ has: page.getByRole('heading', { name: 'Áreas de controle' }) })
+    .first()
   for (const name of ['Áreas de controle', 'Limitações', 'Fontes'])
     await expect(first.getByRole('heading', { name })).toBeVisible()
   await expect(first.getByRole('link').first()).toHaveAttribute(

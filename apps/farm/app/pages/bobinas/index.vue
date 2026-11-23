@@ -394,6 +394,16 @@ onMounted(async () => {
 })
 
 watch(
+  () => route.query.q,
+  (query) => {
+    const next = typeof query === 'string' ? query : ''
+    if (next === filters.q) return
+    filters.q = next
+    void loadSpools()
+  },
+)
+
+watch(
   farmId,
   (next, prev) => {
     if (next === prev) return
@@ -426,14 +436,6 @@ watch(
     if (next) void loadAll()
   },
   { flush: 'sync' },
-)
-
-watch(
-  () => route.query.q,
-  (query) => {
-    filters.q = typeof query === 'string' ? query : ''
-    void loadSpools()
-  },
 )
 
 onBeforeUnmount(() => {

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useFarmRoute } from '../composables/useFarmRoute.ts'
 import { formatNumber } from '../utils/ui-format.ts'
 import {
   computed,
@@ -32,7 +33,11 @@ import {
 } from '../utils/webrtc/farm-pause-control.ts'
 import { createFarmStatusKeyResolver } from '../utils/webrtc/farm-status-key-resolver.ts'
 
-const { state, ready, now, discover, selectFarm, selectKey } = useFarmView()
+const { route, setFarmScope } = useFarmRoute()
+const { state, ready, now, discover, selectFarm, selectKey } = useFarmView({
+  requestedFarm: () => route.query.farm,
+})
+
 const printer = ref('')
 const files = shallowRef<PrinterFile[]>([])
 const selected = ref('')
@@ -242,7 +247,7 @@ watch([selected, manualName], () => {
 })
 function chooseFarm(event: Event) {
   if (event.target instanceof HTMLSelectElement)
-    void selectFarm(event.target.value)
+    setFarmScope(event.target.value)
 }
 function chooseKey(event: Event) {
   if (event.target instanceof HTMLSelectElement) selectKey(event.target.value)

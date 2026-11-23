@@ -147,6 +147,8 @@ export class PostgresWebhooks {
       WHERE o.subscription_id = ${delivery.subscriptionId} AND o.event_id = ${delivery.eventId}
         AND o.attempts = ${delivery.attempts} AND o.expires_at > clock_timestamp()
         AND farm.integration_webhook_allowed(w.app_id, o.farm_id, o.printer_id)
+        AND (o.body->>'type' IS DISTINCT FROM 'printer.alert.raised'
+          OR farm.integration_alert_enabled(o.farm_id, o.body#>>'{data,alert,kind}'))
     `
     return Boolean(row)
   }

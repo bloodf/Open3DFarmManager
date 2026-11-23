@@ -414,8 +414,8 @@ export function openMoonrakerClient(input: {
             const tools = selectToolObjects(listed)
             if (tools.some((name) => name !== 'extruder')) {
               delete queryObjects.extruder
-              // Fields a caller already selected (the Snapmaker U1 tool
-              // projection reads `target` and the active tool) must survive.
+              // Fields a caller already selected for the tool projection,
+              // including `target` and the active tool, must survive.
               for (const name of tools)
                 queryObjects[name] = extraObjects[name] ?? ['temperature']
               queryObjects.toolhead = extraObjects.toolhead ?? ['extruder']

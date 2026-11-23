@@ -450,6 +450,12 @@ export class MemoryWebhooks {
 
 export class World {
   clock = 1_700_000_000_000
+  private alertActions: {
+    appId: string
+    action: string
+    actedAt: number
+    silencedUntil: number | null
+  }[] = []
   cameraEnabled = false
   readonly faults = new Set<Fault>()
   readonly config: {
@@ -754,12 +760,45 @@ export class World {
       if (this.faults.has('pool')) throw new Error('pool down')
       const text = strings.join('?')
       if (text.includes('farm.integration_alert_lifecycle')) {
-        if (text.includes('UPDATE')) {
-          const [acknowledgedAt, silencedUntil, printerId, alertId] = v
+        if (text.includes('INSERT INTO farm.integration_alert_actions')) {
+          const [appId, action, actedAt, silencedUntil, printerId, alertId] =
+            v as [string, string, number, number | null, string, string]
           if (printerId !== ids.printerA1 || alertId !== ids.alertA) return []
-          return [{ id: alertId, acknowledgedAt, silencedUntil }]
+          this.alertActions.push({ appId, action, actedAt, silencedUntil })
+          const actions = this.alertActions.filter(
+            (entry) => entry.appId === appId,
+          )
+          const acknowledgements = actions
+            .filter((entry) => entry.action === 'acknowledge')
+            .map((entry) => entry.actedAt)
+          const silences = actions.flatMap((entry) =>
+            entry.silencedUntil === null ? [] : [entry.silencedUntil],
+          )
+          return [
+            {
+              id: alertId,
+              acknowledgedAt: acknowledgements.length
+                ? Math.min(...acknowledgements)
+                : null,
+              silencedUntil: silences.length ? Math.max(...silences) : null,
+            },
+          ]
         }
-        return v[1] === ids.printerA1
+        const [now, appId, printerId] = v as [number, string, string]
+        const actions = this.alertActions.filter(
+          (entry) => entry.appId === appId,
+        )
+        const acknowledgements = actions
+          .filter((entry) => entry.action === 'acknowledge')
+          .map((entry) => entry.actedAt)
+        const silences = actions.flatMap((entry) =>
+          entry.silencedUntil === null ? [] : [entry.silencedUntil],
+        )
+        const acknowledgedAt = acknowledgements.length
+          ? Math.min(...acknowledgements)
+          : null
+        const silencedUntil = silences.length ? Math.max(...silences) : null
+        return printerId === ids.printerA1
           ? [
               {
                 id: ids.alertA,
@@ -768,9 +807,11 @@ export class World {
                 message: 'Impressora em estado de erro.',
                 openedAt: this.clock,
                 resolvedAt: null,
-                acknowledgedAt: null,
-                silencedUntil: null,
-                needsAttention: true,
+                acknowledgedAt,
+                silencedUntil,
+                needsAttention:
+                  acknowledgedAt === null &&
+                  (silencedUntil === null || silencedUntil <= now),
               },
             ]
           : []

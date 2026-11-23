@@ -56,11 +56,19 @@ export default defineEventHandler(async (event) => {
     )
     if (!printer) return integrationProblem('not-found', headers)
     const sql = integrationAuthPool()
-    const [updated] = await sql`UPDATE farm.integration_alert_lifecycle SET
-      acknowledged_at = COALESCE(acknowledged_at, ${action.acknowledgedAt}::bigint),
-      silenced_until = GREATEST(silenced_until, ${action.silencedUntil}::bigint)
+    const appId = (event.context.integrationAuth as IntegrationPrincipal).appId
+    const actedAt = Date.now()
+    const [updated] = await sql`WITH inserted AS (
+      INSERT INTO farm.integration_alert_actions (alert_id, app_id, action, acted_at, silenced_until)
+      SELECT id, ${appId}::uuid, ${action.acknowledgedAt === null ? 'silence' : 'acknowledge'}, ${actedAt}, ${action.silencedUntil}::bigint
+      FROM farm.integration_alert_lifecycle
       WHERE printer_id = ${printerId}::uuid AND id = ${alertId}::uuid AND resolved_at IS NULL
-      RETURNING id, acknowledged_at::float8 AS "acknowledgedAt", silenced_until::float8 AS "silencedUntil"`
+      RETURNING alert_id
+    )
+    SELECT alert_id AS id,
+      LEAST((SELECT MIN(acted_at)::float8 FROM farm.integration_alert_actions WHERE alert_id = ${alertId}::uuid AND app_id = ${appId}::uuid AND action = 'acknowledge'), ${action.acknowledgedAt}::float8) AS "acknowledgedAt",
+      GREATEST((SELECT MAX(silenced_until)::float8 FROM farm.integration_alert_actions WHERE alert_id = ${alertId}::uuid AND app_id = ${appId}::uuid), ${action.silencedUntil}::float8) AS "silencedUntil"
+    FROM inserted`
     if (!updated) return integrationProblem('not-found', headers)
     return updated
   } catch {

@@ -274,6 +274,7 @@ export async function createRtcMemoryHarness(ledger: string) {
           answer_sha256: await rtcSdpHash(answer.sdp),
           connector_dtls: rtcDtlsFingerprint(offer),
           browser_dtls: rtcDtlsFingerprint(answer.sdp),
+          camera_printer_id: assignmentId,
           assignment_count: assignments.count,
           assignment_digest: assignments.digest,
         })

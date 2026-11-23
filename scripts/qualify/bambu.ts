@@ -244,9 +244,7 @@ export async function qualifyBambu(
           }
           await frameStream.return(undefined)
         } else if (camSource.kind === 'rtsps') {
-          camera.url = camSource.url
-          camera.reachable = true
-          camera.detail = 'RTSPS camera endpoint configured'
+          camera.detail = 'Bambu RTSPS ingest unavailable'
         }
       } catch (err) {
         camera.detail =

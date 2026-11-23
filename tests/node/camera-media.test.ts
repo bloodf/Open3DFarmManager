@@ -1,7 +1,30 @@
 // Original work, MIT licensed. Synthetic keys, fake native track; no RTSP or printer.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto'
+import {
+  createHash,
+  generateKeyPairSync,
+  randomBytes,
+  randomUUID,
+} from 'node:crypto'
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import {
+  createCameraMediaFactory,
+  getRtspCameraStatus,
+} from '../../packages/connector/src/camera/camera-runtime.ts'
+import {
+  parseCameraRuntimeConfig,
+  type CameraRuntimeConfig,
+} from '../../packages/connector/src/config/camera.ts'
+import { startCameraMock } from '../../packages/sim-tools/src/camera-mock.ts'
+import { startBambuCameraFixture } from '../journey/bambu-camera-fixture.ts'
+import {
+  createFakeEncoder,
+  ffmpegQualificationSkip,
+  qualificationEncoder,
+} from '../helpers/camera-encoder.ts'
 import { ConnectorIdentity } from '../../packages/connector/src/identity/store.ts'
 import { validateBrowserDevicePublicKey } from '../../packages/farm-protocol/src/browser-device-proof.ts'
 import { RtcSessionBinding } from '../../packages/farm-protocol/src/rtc-session-binding.ts'
@@ -86,6 +109,7 @@ async function fixture(
     assigned?: boolean
     slots?: number
     units?: number
+    runtime?: { config: CameraRuntimeConfig; assignmentId: string }
     twoCameras?: boolean
   } = {},
 ) {
@@ -104,7 +128,7 @@ async function fixture(
   const browser = await validateBrowserDevicePublicKey({ kty, crv, x, y })
   const agentId = randomUUID(),
     farmId = randomUUID(),
-    assignmentId = randomUUID(),
+    assignmentId = options.runtime?.assignmentId ?? randomUUID(),
     firstAssignmentId = randomUUID()
   const digest = () => randomBytes(32).toString('base64url')
   const now = Date.now()
@@ -143,72 +167,88 @@ async function fixture(
     currents: (() => boolean)[] = []
   let slots = options.slots ?? 1,
     released = 0
-  const media = new ConnectorCameraMedia({
-    native,
-    expectedAgentId: agentId,
-    assignmentRefs: [
-      ...(options.twoCameras
-        ? [
-            {
-              assignmentId: firstAssignmentId,
-              agentId,
-              printerKey: 'printer zero',
-            },
-          ]
-        : []),
-      {
-        assignmentId: options.assigned === false ? randomUUID() : assignmentId,
-        agentId,
-        printerKey: 'printer one',
-      },
-    ],
-    cameras: [
-      ...(options.twoCameras
-        ? [
-            {
-              cameraId: 'cam-0',
-              scope: { farmId, agentId, printerId: firstAssignmentId },
-              sourceHandle: 'rtsp-other',
-            },
-          ]
-        : []),
-      {
-        cameraId: 'cam-1',
-        scope: { farmId, agentId, printerId: assignmentId },
-        sourceHandle: 'rtsp-sim',
-      },
-    ],
-    signProof: (statement) =>
-      identity.signCameraPurposeProof({ statement, expectedAgentId: agentId }),
-    async openSource(handle, _signal, _expiresAt, isCurrent) {
-      opened.push(handle)
-      currents.push(isCurrent)
-      const count = options.units ?? 3
-      return (async function* (): AsyncGenerator<CameraAccessUnit> {
-        for (let i = 0; i < count; i++) {
-          yield {
-            data: new Uint8Array([0, 0, 0, 1, i ? 0x41 : 0x65, i]),
-            keyframe: i === 0,
-            timestampUs: i * 200000,
+  const assignmentRefs = [
+    ...(options.twoCameras
+      ? [
+          {
+            assignmentId: firstAssignmentId,
+            agentId,
+            printerKey: 'printer zero',
+          },
+        ]
+      : []),
+    {
+      assignmentId: options.assigned === false ? randomUUID() : assignmentId,
+      agentId,
+      printerKey: 'printer one',
+    },
+  ]
+  const onViolation = (reason: string) => violations.push(reason)
+  const media = options.runtime
+    ? (
+        await createCameraMediaFactory({
+          config: options.runtime.config,
+          identity,
+          agentId,
+          farmId,
+          assignmentRefs,
+        })
+      )(onViolation)
+    : new ConnectorCameraMedia({
+        native,
+        expectedAgentId: agentId,
+        assignmentRefs,
+        cameras: [
+          ...(options.twoCameras
+            ? [
+                {
+                  cameraId: 'cam-0',
+                  scope: { farmId, agentId, printerId: firstAssignmentId },
+                  sourceHandle: 'rtsp-other',
+                },
+              ]
+            : []),
+          {
+            cameraId: 'cam-1',
+            scope: { farmId, agentId, printerId: assignmentId },
+            sourceHandle: 'rtsp-sim',
+          },
+        ],
+        signProof: (statement) =>
+          identity.signCameraPurposeProof({
+            statement,
+            expectedAgentId: agentId,
+          }),
+        async openSource(handle, _signal, _expiresAt, isCurrent) {
+          opened.push(handle)
+          currents.push(isCurrent)
+          const count = options.units ?? 3
+          return (async function* (): AsyncGenerator<CameraAccessUnit> {
+            for (let i = 0; i < count; i++) {
+              yield {
+                data: new Uint8Array([0, 0, 0, 1, i ? 0x41 : 0x65, i]),
+                keyframe: i === 0,
+                timestampUs: i * 200000,
+              }
+              await tick()
+            }
+          })()
+        },
+        acquireSlot() {
+          if (slots <= 0) return undefined
+          slots--
+          return () => {
+            released++
+            slots++
           }
-          await tick()
-        }
-      })()
-    },
-    acquireSlot() {
-      if (slots <= 0) return undefined
-      slots--
-      return () => {
-        released++
-        slots++
-      }
-    },
-    onViolation: (reason) => violations.push(reason),
-  })
+        },
+        onViolation,
+      })
   let channelLabel = ''
   media.prepare({
     addVideoTrack(description) {
-      assert.equal((description as unknown as { mid: string }).mid, 'camera')
+      if (!options.runtime)
+        assert.equal((description as unknown as { mid: string }).mid, 'camera')
       return track as never
     },
     createDataChannel(label) {
@@ -360,6 +400,133 @@ test('a browser that closes only the camera channel declines without a violation
   assert.deepEqual(f.violations, [])
   assert.deepEqual(f.opened, [])
 })
+
+test(
+  'mixed runtime routes generic RTSP and Bambu TLS JPEG through their own executables',
+  { timeout: 15000 },
+  async (t) => {
+    const directory = await mkdtemp(join(tmpdir(), 'camera-runtime-mixed-'))
+    t.after(() => rm(directory, { recursive: true, force: true }))
+    const credentialFile = join(directory, 'bambu.json')
+    await writeFile(
+      credentialFile,
+      JSON.stringify({ accessCode: 'synthetic' }),
+      { mode: 0o600 },
+    )
+    const bambu = await startBambuCameraFixture({
+      directory,
+      accessCode: 'synthetic',
+    })
+    t.after(() => bambu.close())
+    const pinned = async (path: string) => ({
+      path,
+      sha256: createHash('sha256')
+        .update(await readFile(path))
+        .digest('hex'),
+    })
+    const realHelper = process.env.OPENFARM_TEST_RTSP_HELPER
+    const helperPath = realHelper
+      ? await realpath(realHelper)
+      : join(directory, 'rtsp-ingest')
+    let rtspPort = 8554
+    if (realHelper) {
+      const rtsp = await startCameraMock()
+      t.after(() => rtsp.close())
+      rtspPort = Number(new URL(rtsp.rtspUrl).port)
+    } else {
+      const stub = await readFile(
+        new URL(
+          '../../tools/rtsp-ingest/supervisor/testdata/child-fixture.mjs',
+          import.meta.url,
+        ),
+        'utf8',
+      )
+      await writeFile(
+        helperPath,
+        stub.replace(/^#![^\n]+/, `#!${process.execPath}`),
+        { mode: 0o700 },
+      )
+    }
+    const helper = await pinned(helperPath)
+    const stubEncoder = ffmpegQualificationSkip
+      ? createFakeEncoder(['synthetic'])
+      : undefined
+    if (stubEncoder) t.after(() => stubEncoder.dispose())
+    const ffmpeg = stubEncoder?.ffmpeg ?? qualificationEncoder()
+    const rtspAssignmentId = randomUUID()
+    const bambuAssignmentId = randomUUID()
+    const cameraConfig = {
+      helper,
+      cameras: [
+        {
+          cameraId: 'generic-rtsp',
+          assignmentId: rtspAssignmentId,
+          source: { address: '127.0.0.1', port: rtspPort, path: '/test' },
+        },
+        {
+          cameraId: 'bambu-jpeg',
+          assignmentId: bambuAssignmentId,
+          source: {
+            kind: 'bambu-lan',
+            model: 'P1S',
+            address: bambu.host,
+            port: bambu.port,
+            caFile: bambu.caFile,
+            credentialFile,
+            ffmpeg,
+          },
+        },
+      ],
+    }
+    const assignments = [rtspAssignmentId, bambuAssignmentId]
+    const config = parseCameraRuntimeConfig(cameraConfig, assignments)
+    assert.deepEqual(
+      getRtspCameraStatus(config).cameras.map(({ kind, available }) => [
+        kind,
+        available,
+      ]),
+      [
+        ['rtsp', true],
+        ['bambu-lan', true],
+      ],
+    )
+    const aliasedConfig = parseCameraRuntimeConfig(
+      {
+        ...cameraConfig,
+        helper: ffmpeg,
+      },
+      assignments,
+    )
+    assert.equal(
+      getRtspCameraStatus(aliasedConfig).cameras[1]?.available,
+      false,
+    )
+    for (const [cameraId, assignmentId] of [
+      ['generic-rtsp', rtspAssignmentId],
+      ['bambu-jpeg', bambuAssignmentId],
+    ] as const) {
+      const f = await fixture({ runtime: { config, assignmentId } })
+      try {
+        f.activate()
+        const statement = await countersign(f)
+        assert.equal(statement.camera_id, cameraId)
+        f.channel.deliver(
+          await signCameraPurposeProof(
+            statement,
+            'browser',
+            f.browserKeys.privateKey,
+          ),
+        )
+        await until(() => f.track.sent.length > 0)
+        assert.deepEqual(f.violations, [])
+        assert.equal(bambu.requests(), cameraId === 'generic-rtsp' ? 0 : 1)
+      } finally {
+        f.media.stop()
+      }
+      await until(() => bambu.activeConnections() === 0)
+    }
+  },
+)
 
 test('selects the target camera when another assigned camera appears first', async () => {
   const f = await fixture({ twoCameras: true })

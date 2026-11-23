@@ -31,3 +31,12 @@ nova execução para recriar uma fazenda de sandbox anterior.
 A credencial inicial do Connector vale uma hora. Quando ela expirar, execute
 `node scripts/sandbox.ts down` para descartar a fazenda local e depois execute
 `node scripts/sandbox.ts` para criar outra.
+
+Em cada inicialização, as migrações pendentes são aplicadas antes de iniciar o
+aplicativo. Se uma migração falhar, a inicialização é interrompida; corrija a
+causa e execute o comando novamente. As credenciais e a fazenda existentes são
+preservadas. Cada diretório de estado canônico tem seu próprio projeto Compose.
+Um sandbox anterior é adotado quando o volume PostgreSQL existente comprova,
+pelas opções e etiquetas do Docker, que pertence ao diretório de estado atual. Se esse
+volume não existir ou não comprovar a associação, o projeto antigo não é
+adotado automaticamente.

@@ -13,6 +13,7 @@ export const AnycubicBinding = z.strictObject({
     .max(253)
     .regex(/^[a-zA-Z0-9.:-]+$/),
   port: z.number().int().min(1).max(65535).default(9883),
+  uploadPort: z.number().int().min(1).max(65535).optional(),
   modelId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
   deviceId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
   username: z.string().min(1).max(256),

@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { useFarmRoute } from '../composables/useFarmRoute.ts'
+import { resolveFarmScope } from '../utils/farm-scope.ts'
+import { fetchFarmMemberships } from '../composables/useFarmMemberships.ts'
 import {
   INTEGRATION_SCOPES,
   type IntegrationScope,
@@ -26,8 +29,7 @@ type Grant = {
   requiresApproval: boolean
 }
 type Directory = { apps: App[]; printers: Printer[] }
-const route = useRoute()
-const router = useRouter()
+const { route, setFarmScope } = useFarmRoute()
 const farms = ref<Farm[]>([])
 const farmId = ref('')
 let generation = 0
@@ -130,20 +132,12 @@ async function start() {
   loading.value = true
   loadError.value = ''
   try {
-    const page = await $fetch<{ farms: Farm[] }>('/api/farms', {
-      query: { limit: 50 },
-      retry: 0,
-    })
-    farms.value = page.farms
+    farms.value = await fetchFarmMemberships<Farm>({ timeout: 15_000 })
     const selected =
-      farms.value.find((farm) => farm.farmId === route.query.farm)?.farmId ??
-      farms.value[0]?.farmId ??
-      ''
+      resolveFarmScope(farms.value, route.query.farm)?.farmId ?? ''
     if (selected === farmId.value && selected) await load()
     else if (selected) farmId.value = selected
     else loading.value = false
-    if (selected && route.query.farm !== selected)
-      void router.replace({ query: { ...route.query, farm: selected } })
   } catch {
     loading.value = false
     loadError.value = 'Não foi possível carregar suas farms.'
@@ -175,15 +169,12 @@ watch(
 watch(
   () => route.query.farm,
   (id) => {
-    farmId.value =
-      typeof id === 'string' && farms.value.some((farm) => farm.farmId === id)
-        ? id
-        : ''
+    farmId.value = resolveFarmScope(farms.value, id)?.farmId ?? ''
   },
 )
 function selectFarm(event: Event) {
   const id = (event.target as HTMLSelectElement).value
-  void router.replace({ query: { ...route.query, farm: id || undefined } })
+  void setFarmScope(id)
 }
 
 async function registerApp() {

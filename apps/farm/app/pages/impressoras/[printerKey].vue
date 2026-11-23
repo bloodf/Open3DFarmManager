@@ -94,55 +94,46 @@ const consoleResponses = shallowRef<
 >([])
 let consoleSequence = 0
 const view = useFarmView({
-  onGcodeHelp(commands) {
-    consoleCommands.value = commands
-  },
-  onGcodeResponse(frame) {
-    consoleResponses.value = [
-      ...consoleResponses.value.slice(-999),
-      { seq: consoleSequence++, lines: frame.lines },
-    ]
-  },
-  onDetail(frame) {
-    detailFrame.value = frame
-  },
-  onQuery(frame) {
-    detailQueries.value = applyDetailQuery(detailQueries.value, frame)
-    if (frame.kind === 'temperature-store')
-      history.value = backfillHistory(
-        history.value,
-        frame,
-        Date.now(),
-        Date.now(),
-      )
-  },
-  // The queue and timelapse areas are advertised by the printer's controls.
-  advertised: () => capabilities.value ?? [],
-  printerKey: initialPrinterKey,
-  onUpdate(value) {
-    webcams.value = value
-  },
-  onClose() {
-    webcams.value = null
-    detailFrame.value = undefined
-    consoleCommands.value = []
-    detailQueries.value = emptyDetailQueries
+  requestedFarm: () => route.query.farm,
+  webcamDetail: {
+    onGcodeHelp(commands) {
+      consoleCommands.value = commands
+    },
+    onGcodeResponse(frame) {
+      consoleResponses.value = [
+        ...consoleResponses.value.slice(-999),
+        { seq: consoleSequence++, lines: frame.lines },
+      ]
+    },
+    onDetail(frame) {
+      detailFrame.value = frame
+    },
+    onQuery(frame) {
+      detailQueries.value = applyDetailQuery(detailQueries.value, frame)
+      if (frame.kind === 'temperature-store')
+        history.value = backfillHistory(
+          history.value,
+          frame,
+          Date.now(),
+          Date.now(),
+        )
+    },
+    // The queue and timelapse areas are advertised by the printer's controls.
+    advertised: () => capabilities.value ?? [],
+    printerKey: initialPrinterKey,
+    onUpdate(value) {
+      webcams.value = value
+    },
+    onClose() {
+      webcams.value = null
+      detailFrame.value = undefined
+      consoleCommands.value = []
+      detailQueries.value = emptyDetailQueries
+    },
   },
 })
 definePageMeta({ key: (route) => route.path })
 const { state: viewState, ready, now, discover } = view
-watch(
-  () =>
-    [route.query.farm, ready.value?.farms, ready.value?.scope?.farmId] as const,
-  ([farm, farms, current]) => {
-    if (
-      typeof farm === 'string' &&
-      farm !== current &&
-      farms?.some((item) => item.farmId === farm)
-    )
-      void view.selectFarm(farm)
-  },
-)
 const heading = ref<HTMLElement | null>(null)
 const page = ref<HTMLElement | null>(null)
 const pauseDialog = ref<HTMLDialogElement | null>(null)

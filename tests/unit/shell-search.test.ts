@@ -94,9 +94,10 @@ it('scrolls the newly active keyboard option into the dialog viewport', async ()
       }
       target.__scrollIntoViewCalls = []
       Element.prototype.scrollIntoView = function (options) {
+        const block = typeof options === 'object' ? options.block : undefined
         target.__scrollIntoViewCalls.push({
           id: (this as HTMLElement).id,
-          block: options?.block,
+          ...(block ? { block } : {}),
         })
       }
     })

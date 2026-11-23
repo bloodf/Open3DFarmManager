@@ -141,6 +141,7 @@ export function simulatorStack(input: {
 
 export async function runSimFarmAcceptance(input: {
   admin: Sql
+  fixtureDatabaseUrl: string
   ports: SimPorts
   origins?: ReturnType<typeof mockSimulatorStack>['origins']
   workDir: string
@@ -362,7 +363,7 @@ export async function runSimFarmAcceptance(input: {
         NITRO_HOST: '127.0.0.1',
         NITRO_PORT: String(ports.app),
         NUXT_DATABASE_ENABLED: 'true',
-        NUXT_DATABASE_DATABASE_URL: databaseUrl('fixture'),
+        NUXT_DATABASE_DATABASE_URL: input.fixtureDatabaseUrl,
         NUXT_DATABASE_MIGRATIONS: 'verify',
         NUXT_DATABASE_MIGRATIONS_DIR: repo('infra/db/migrations/'),
         NUXT_CONNECTOR_TELEMETRY_ENABLED: 'true',
@@ -443,7 +444,13 @@ export async function runSimFarmAcceptance(input: {
     await until(
       async () =>
         delivered() >= PRINTERS.length + 1 &&
-        delivered() >= connector.count('queued') &&
+        delivered() >=
+          connector.count('queued') +
+            Number(
+              (
+                await admin`SELECT count(*)::int AS n FROM farm.telemetry_events WHERE agent_id=${enrolled.agentId}::uuid AND farm_id=${enrolled.farmId}::uuid AND payload ? 'inventory'`
+              )[0]!.n,
+            ) &&
         (await stored()) === delivered(),
       30000,
       'telemetry drain settled',

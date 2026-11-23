@@ -39,15 +39,16 @@ const MAX_BODY_BYTES = 10 * 1024 * 1024
  * (the module reads it from the configuration object given here, never from
  * the process environment).
  */
-export async function startBuiltin({ pgPort, admin, externalUrl }) {
+export async function startBuiltin({ pgPort, pgPassword, admin, externalUrl }) {
   const role = 'parity_' + randomUUID().replaceAll('-', '')
   await admin`CREATE ROLE ${admin(role)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS IN ROLE farm_spool_library, farm_spool_features`
+  await admin.unsafe(`ALTER ROLE "${role}" PASSWORD '${pgPassword}'`)
   const runtime = postgres({
     host: '127.0.0.1',
     port: pgPort,
     database: 'fixture',
     username: role,
-    password: '',
+    password: pgPassword,
     ssl: false,
     max: 4,
     connect_timeout: 3,

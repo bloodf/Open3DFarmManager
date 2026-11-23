@@ -393,7 +393,7 @@ if (journeyEnabled())
       await expectHistory(page, 'Cancelado', 'journey.gcode')
     })
 
-    test('a file is uploaded and started; the job ends with its card and history entry', async () => {
+    test('a simulated file is uploaded, listed and started at its reported stock path', async () => {
       test.setTimeout(6 * 60_000)
       const journey = started()
       const page = journey.ownerPage
@@ -444,10 +444,9 @@ if (journeyEnabled())
         }
       }
 
-      // The stock protocol documents no file listing.
       await fileOperation(
         'Consultar arquivos',
-        'Listagem não suportada pela biblioteca desta impressora.',
+        'Nenhum arquivo nesta impressora.',
       )
 
       await input.setInputFiles({
@@ -461,6 +460,14 @@ if (journeyEnabled())
       )
       // The printer's own HTTP upload endpoint stored it (multipart body).
       expect(simulator().uploads.get(UPLOAD)).toBeGreaterThan(GCODE.length)
+      await fileOperation('Consultar arquivos', 'Arquivos atualizados.')
+      expect(simulator().requests).toContainEqual({
+        method: 'get',
+        params: { reqGcodeFile: 1 },
+      })
+      await expect(
+        page.locator('#files-existing').locator('option', { hasText: UPLOAD }),
+      ).toHaveCount(1)
 
       // Starting is never repeated: one attempt on a fresh control session.
       await controlInbox()
@@ -473,9 +480,9 @@ if (journeyEnabled())
         'Resultado desconhecido. Verifique a impressora antes de tentar novamente.',
         { timeout: 60_000 },
       )
-      expect(sets()).toContainEqual({
-        opGcodeFile: `printprt:/usr/data/printer_data/gcodes/${UPLOAD}`,
-      })
+      expect(sets().filter((params) => 'opGcodeFile' in params)).toEqual([
+        { opGcodeFile: `printprt:/mnt/UDISK/printer_data/gcodes/${UPLOAD}` },
+      ])
 
       // The print runs to the end on its own; the card names the finished job.
       const row = await journey.openFarm()

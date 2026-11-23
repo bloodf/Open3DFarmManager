@@ -409,7 +409,12 @@ export async function startVendorSimulator(
         // A started print lasts long enough for the page to show it running.
         // The status heartbeat keeps the observation current, as stock
         // firmware does while a client is connected.
-        { durationMs: 6000, totalLayers: 12, heartbeatMs: 1000 },
+        {
+          durationMs: 6000,
+          totalLayers: 12,
+          heartbeatMs: 1000,
+          gcodeDirectory: '/mnt/UDISK/printer_data/gcodes',
+        },
       )
       undo.push(() => sim.close())
       raw = sim

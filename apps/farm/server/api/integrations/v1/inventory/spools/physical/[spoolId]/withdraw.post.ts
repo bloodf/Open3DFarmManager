@@ -1,6 +1,8 @@
 import { defineEventHandler } from 'nuxt/server'
 import { integrationSpoolPool } from '../../../../../../../services/spool-usage.ts'
 import { integrationProblem } from '../../../../../../../utils/integration-auth-http.ts'
+import type { IntegrationPrincipal } from '../../../../../../../utils/integration-auth.ts'
+import { inventoryGrantFarms } from '../../../../../../../utils/integration-read.ts'
 import {
   physicalSpoolAccess,
   physicalSpoolBody,
@@ -13,7 +15,14 @@ import {
 
 export default defineEventHandler(async (event) => {
   const headers = event.res.headers
-  const access = physicalSpoolAccess(event, 'inventory:write')
+  const principal = event.context.integrationAuth as IntegrationPrincipal
+  const scope = 'inventory:write'
+  const access = physicalSpoolAccess(
+    event,
+    principal,
+    scope,
+    inventoryGrantFarms(principal, undefined, scope),
+  )
   if (access instanceof Response) return access
   const id = physicalSpoolId(event.context.params?.spoolId)
   if (id === null) return integrationProblem('invalid-request', headers)

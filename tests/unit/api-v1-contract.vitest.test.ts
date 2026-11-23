@@ -61,7 +61,8 @@ import { jobBody } from '../helpers/api-v1-contract/world.ts'
 import { openJourney } from '../helpers/api-v1-contract/journey.ts'
 
 const ops = operations()
-const scenarios = [...allScenarios(), ...physicalSpoolScenarios()]
+const scenarios = allScenarios()
+scenarios.push(...physicalSpoolScenarios())
 const pairs = ops.flatMap((op) =>
   op.responses.map((response) => ({
     op,

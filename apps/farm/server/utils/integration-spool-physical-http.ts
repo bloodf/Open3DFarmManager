@@ -9,14 +9,17 @@ import { uuidPattern, type IntegrationPrincipal } from './integration-auth.ts'
 
 export function physicalSpoolAccess(
   event: RequestEvent,
+  principal: IntegrationPrincipal,
   scope: 'inventory:read' | 'inventory:write',
+  grantedFarms: string[],
 ) {
   const query = new URL(event.req.url).searchParams
   const fields = [...query.keys()]
   const farmId = query.get('farmId')?.toLowerCase()
   if (fields.length !== 1 || !farmId || !uuidPattern.test(farmId))
     return integrationProblem('invalid-request', event.res.headers)
-  const principal = event.context.integrationAuth as IntegrationPrincipal
+  if (!grantedFarms.includes(farmId))
+    return integrationProblem('not-found', event.res.headers)
   const grantIds = principal.grants
     .filter(
       (grant) =>

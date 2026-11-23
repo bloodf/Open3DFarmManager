@@ -75,12 +75,13 @@ export async function testAuthenticatedFarmPage(input: {
     await expect(
       page.getByLabel('Dispositivo aprovado deste navegador', { exact: true }),
     ).toHaveValue(fixture.browserKeyId)
-    const row = page.getByRole('article').filter({
-      has: page.getByRole('heading', {
-        name: assignment.printerKey,
-        exact: true,
-      }),
-    })
+    await page
+      .getByRole('button', { name: /^Inspecionar / })
+      .filter({ has: page.getByText(assignment.printerKey, { exact: true }) })
+      .click()
+    const row = page
+      .getByRole('dialog', { name: 'Inspeção da impressora', exact: true })
+      .getByRole('article', { name: assignment.printerKey, exact: true })
     await expect(
       row.getByText('Conexão direta autenticada', { exact: true }),
     ).toBeVisible()
@@ -126,11 +127,12 @@ export async function testAuthenticatedFarmPage(input: {
     )
     await input.note(`farm-page-readonly-after-ms:${Math.round(elapsed)}`)
     await expect(pauseButton).toBeDisabled()
+    await expect(pauseButton).toHaveAccessibleDescription(
+      farmPause
+        ? 'Pausa indisponível. Não há conexão direta ao vivo.'
+        : 'Pausa indisponível. O controle seguro não está habilitado.',
+    )
     if (farmPause) {
-      // Stale: the reason names the lost live connection, and nothing is sent.
-      await expect(pauseButton).toHaveAccessibleDescription(
-        'Pausa indisponível. Não há conexão direta ao vivo.',
-      )
       assert.equal(await input.pauses!(), 0)
       await input.note('farm-page-pause-stale-disabled-with-reason')
     }
@@ -169,6 +171,7 @@ export async function testAuthenticatedFarmPage(input: {
       // view's maximum reopen backoff, and live status never returns.
       await page.waitForTimeout(REOPEN_BACKOFF_CAP_MS + 1000)
       assert.deepEqual(sockets, [], 'No signalling reopen after revocation')
+      await expect(pauseButton).toBeDisabled()
       await expect(
         row.getByText('Conexão direta autenticada', { exact: true }),
       ).toHaveCount(0)

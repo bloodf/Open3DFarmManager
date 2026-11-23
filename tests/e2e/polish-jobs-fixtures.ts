@@ -9,6 +9,7 @@ import { mkdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import AxeBuilder from '@axe-core/playwright'
 import { type Page } from '@playwright/test'
+import { setPolishTheme } from '../helpers/polish-theme.ts'
 
 export const farm = '00000000-0000-4000-8000-0000000000f1'
 export const otherFarm = '00000000-0000-4000-8000-0000000000f2'
@@ -160,7 +161,7 @@ export async function open(
   theme: Theme,
 ) {
   await page.setViewportSize(viewport)
-  await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+  await setPolishTheme(page, theme)
   await mockApi(page, scenario)
   await page.goto('/historico')
   await page

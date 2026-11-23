@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page, type Route } from '@playwright/test'
+import { setPolishTheme } from '../helpers/polish-theme.ts'
+import { mockShellApi } from '../helpers/shell-api.ts'
 
 // Isolated UI checks for the account and network settings screens (/conta,
 // /rede and /admin/provedores-entrada) on mocked /api routes. No real printer,
@@ -143,6 +145,8 @@ async function baseMocks(page: Page, farms: string[] = [farm]) {
   )
   // Unknown app endpoints answer with an empty failure instead of a real call.
   await page.route('**/api/**', (route) => json(route, {}, 404))
+  await mockShellApi(page, farm)
+  await mockShellApi(page, otherFarm)
   await page.route('**/api/auth/me', (route) =>
     json(route, { accountId: 'conta-sintetica' }),
   )
@@ -569,7 +573,7 @@ async function open(
 ) {
   await page.unrouteAll({ behavior: 'ignoreErrors' })
   await page.setViewportSize(viewport)
-  await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+  await setPolishTheme(page, theme)
   await baseMocks(
     page,
     scene.id === 'rede-escolher-farm' ? [farm, otherFarm] : [farm],

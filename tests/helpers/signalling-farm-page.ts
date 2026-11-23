@@ -1,3 +1,4 @@
+import { openFarmInspector } from './farm-inspector.ts'
 import assert from 'node:assert/strict'
 import { expect } from '@playwright/test'
 import type { ProvisionedSignallingFixture } from './signalling-https-fixture-contract.ts'
@@ -75,21 +76,7 @@ export async function testAuthenticatedFarmPage(input: {
     await expect(
       page.getByLabel('Dispositivo aprovado deste navegador', { exact: true }),
     ).toHaveValue(fixture.browserKeyId)
-    await page
-      .getByRole('button', { name: /^Inspecionar / })
-      .filter({ has: page.getByText(assignment.printerKey, { exact: true }) })
-      .click()
-    const inspector = page.getByRole('dialog', {
-      name: 'Inspeção da impressora',
-      exact: true,
-    })
-    await expect(inspector).toBeVisible()
-    const row = inspector.getByRole('article').filter({
-      has: page.getByRole('heading', {
-        name: assignment.printerKey,
-        exact: true,
-      }),
-    })
+    const row = await openFarmInspector(page, assignment.printerKey)
     await expect(
       row.getByText('Conexão direta autenticada', { exact: true }),
     ).toBeVisible()

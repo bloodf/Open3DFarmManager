@@ -2,7 +2,7 @@ import { parseOffer } from '../../../../packages/farm-protocol/src/file-transfer
 import type { FileListResult } from '../../../../packages/farm-protocol/src/file-list.ts'
 import type { FarmPauseControl } from './webrtc/farm-pause-control.ts'
 import {
-  printableFile,
+  printableEntry,
   printOutcomeText,
   validateUpload,
 } from './files-view.ts'
@@ -27,7 +27,7 @@ export function createFilesSession(input: {
   /** The printer library cannot list files; a stored name may be typed. */
   listUnsupported?(): void
 }) {
-  let printRefs = new Map<string, string>()
+  let listed = new Map<string, PrinterFile>()
   let active: AbortController | undefined
   async function run(
     work: (
@@ -76,7 +76,7 @@ export function createFilesSession(input: {
         if (!result.ok) {
           if (result.reason === 'unsupported') {
             input.files([])
-            printRefs.clear()
+            listed.clear()
             input.listUnsupported?.()
             publish({
               kind: 'error',
@@ -87,11 +87,7 @@ export function createFilesSession(input: {
           }
           throw Error('File list rejected')
         }
-        printRefs = new Map(
-          result.files.flatMap((file) =>
-            file.printRef ? [[file.name, file.printRef]] : [],
-          ),
-        )
+        listed = new Map(result.files.map((file) => [file.name, file]))
         input.files(result.files)
         publish({
           kind: 'done',
@@ -152,6 +148,14 @@ export function createFilesSession(input: {
         )
         signal.throwIfAborted()
         if (!result.ok) {
+          if (result.reason === 'busy') {
+            publish({
+              kind: 'error',
+              message:
+                'A impressora está ocupada. Aguarde a impressão terminar e tente enviar o arquivo novamente.',
+            })
+            return
+          }
           if (result.reason === 'unsupported') {
             publish({
               kind: 'error',
@@ -163,7 +167,7 @@ export function createFilesSession(input: {
         }
         if (result.library) {
           input.files([])
-          printRefs.clear()
+          listed.clear()
           publish({
             kind: 'done',
             message:
@@ -171,23 +175,33 @@ export function createFilesSession(input: {
           })
           return
         }
-        printRefs.clear()
-        input.files([{ name: file.name, size: file.size, modified: 0 }])
+        const entry = {
+          name: file.name,
+          size: file.size,
+          modified: 0,
+          ...(result.printUnsupported
+            ? { printUnsupported: true as const }
+            : {}),
+        }
+        listed = new Map([[entry.name, entry]])
+        input.files([entry])
         publish({
           kind: 'done',
-          message:
-            'Arquivo enviado. Selecione-o e confirme para iniciar a impressão.',
+          message: result.printUnsupported
+            ? 'Arquivo enviado. Para iniciar pela conexão direta, selecione um arquivo .gcode na impressora.'
+            : 'Arquivo enviado. Selecione-o e confirme para iniciar a impressão.',
         })
       })
     },
     start(name: string) {
-      if (!printableFile(name)) return Promise.resolve()
+      const entry = listed.get(name)
+      if (!printableEntry(entry ?? { name })) return Promise.resolve()
       return run(async (session, signal, publish) => {
         signal.throwIfAborted()
         if (!input.available()) throw Error('Unavailable')
         publish({ kind: 'starting' })
         const outcome = await session.issueControlCommand('start_print', {
-          file: printRefs.get(name) ?? name,
+          file: entry?.printRef ?? name,
         })
         publish({ kind: 'done', message: printOutcomeText(outcome) })
       })

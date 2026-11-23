@@ -68,6 +68,7 @@ function fixture(keys = ['a', 'b']) {
     epoch = 1,
     times = { webhooks: now, printState: now, progress: now },
     temperatureObservation?: RawMoonrakerObservation['temperatureObservation'],
+    chamberTemperatureCelsius?: number,
   ) {
     source.observe({
       printerKey: key,
@@ -77,6 +78,9 @@ function fixture(keys = ['a', 'b']) {
         state: 'printing',
         progress: 0.2,
         observedAt: 10,
+        ...(chamberTemperatureCelsius === undefined
+          ? {}
+          : { chamberTemperatureCelsius }),
       },
       status: {
         webhooks: { state: 'ready' },
@@ -300,6 +304,19 @@ test('complete temperature evidence projects zero and negative values and core d
   } finally {
     f.source.close()
     t.mock.timers.reset()
+  }
+})
+
+test('the live frame carries the current chamber temperature', () => {
+  const f = fixture(['a'])
+  try {
+    f.observe('a', 1, undefined, undefined, 21.5)
+    f.open()
+    assert.equal(f.received[0]?.printers[0]?.chamberTemperatureCelsius, 21.5)
+    f.observe('a', 1, undefined, undefined, 22)
+    assert.equal(f.received.at(-1)?.printers[0]?.chamberTemperatureCelsius, 22)
+  } finally {
+    f.source.close()
   }
 })
 

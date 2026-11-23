@@ -4,6 +4,10 @@ import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { promisify } from 'node:util'
 import postgres, { type Sql } from 'postgres'
+import {
+  listIntegrationSpoolUsage,
+  searchIntegrationSpools,
+} from '../apps/farm/server/utils/integration-inventory-ledger.ts'
 import { postgresResinReader } from '../apps/farm/server/utils/integration-resin-postgres.ts'
 import { recordJobs } from '../apps/farm/server/storage/job-history-store.ts'
 import {
@@ -141,6 +145,34 @@ try {
   })
   checks.push(
     'integration role reads resin ledger without access to recorded_by',
+  )
+  await sql.begin(async (tx) => {
+    await tx`SET LOCAL ROLE farm_integration_apps`
+    const pool = tx as unknown as Sql
+    const search = await searchIntegrationSpools(pool, [resinFarm], {
+      farmId: resinFarm,
+      limit: 10,
+      color: null,
+      material: null,
+      availability: 'any',
+      minRemainingGrams: null,
+    })
+    assert.equal(search.data.length, 0)
+    const usage = await listIntegrationSpoolUsage(pool, [resinFarm], {
+      farmId: resinFarm,
+      limit: 10,
+      jobId: '1',
+      cursor: null,
+    })
+    assert.equal(usage.data.length, 0)
+    const privileges = await tx`SELECT
+      has_column_privilege(current_user, 'farm.spool_usage_records', 'grams', 'UPDATE') AS can_update,
+      has_column_privilege(current_user, 'farm.spool_usage_records', 'corrected_by', 'SELECT') AS can_read_correction`
+    assert.equal(privileges[0]?.can_update, false)
+    assert.equal(privileges[0]?.can_read_correction, true)
+  })
+  checks.push(
+    'integration role can read spool search and usage without write access',
   )
   const farmId = randomUUID()
   const agentId = randomUUID()

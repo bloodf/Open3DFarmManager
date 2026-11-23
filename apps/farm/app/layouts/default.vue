@@ -487,6 +487,15 @@ async function refreshAccount() {
         id="shell-search"
         v-model="query"
         type="search"
+        role="combobox"
+        aria-autocomplete="list"
+        :aria-expanded="search"
+        aria-controls="shell-search-results"
+        :aria-activedescendant="
+          paletteItems.length
+            ? `shell-search-option-${paletteIndex}`
+            : undefined
+        "
         autofocus
         @keydown="paletteKey"
       />
@@ -495,21 +504,48 @@ async function refreshAccount() {
         Há mais bobinas. Refine a busca para encontrá-las.
       </p>
       <p v-if="!summary">Busca de impressoras indisponível.</p>
-      <p v-if="!paletteItems.length" role="status">
-        Nenhum resultado encontrado.
+      <p role="status" aria-live="polite">
+        {{ paletteItems.length }}
+        {{
+          paletteItems.length === 1
+            ? 'resultado encontrado'
+            : 'resultados encontrados'
+        }}.
       </p>
-      <div v-for="group in paletteGroups" :key="group.label">
-        <h3 v-if="group.items.length">{{ group.label }}</h3>
-        <ul v-if="group.items.length" class="palette-list">
-          <li v-for="item in group.items" :key="item.to">
-            <NuxtLink
-              :to="item.to"
-              :class="{ selected: paletteItems[paletteIndex] === item }"
-              @click="search = false"
-              >{{ item.label }}</NuxtLink
+      <div
+        id="shell-search-results"
+        role="listbox"
+        aria-label="Resultados da busca"
+      >
+        <div
+          v-for="group in paletteGroups"
+          :key="group.label"
+          role="group"
+          :aria-label="group.label"
+        >
+          <h3 v-if="group.items.length">{{ group.label }}</h3>
+          <ul
+            v-if="group.items.length"
+            class="palette-list"
+            role="presentation"
+          >
+            <li
+              v-for="item in group.items"
+              :id="`shell-search-option-${paletteItems.indexOf(item)}`"
+              :key="item.to"
+              role="option"
+              :aria-selected="paletteItems[paletteIndex] === item"
             >
-          </li>
-        </ul>
+              <NuxtLink
+                :to="item.to"
+                :class="{ selected: paletteItems[paletteIndex] === item }"
+                tabindex="-1"
+                @click="search = false"
+                >{{ item.label }}</NuxtLink
+              >
+            </li>
+          </ul>
+        </div>
       </div>
     </Dialog>
     <Dialog v-model="help" title="Atalhos de teclado">
@@ -662,9 +698,6 @@ a:focus-visible {
 .skip:not(:focus) {
   clip-path: inset(50%);
 }
-.drawer-trigger {
-  display: none;
-}
 .drawer {
   inset: 0 auto 0 0;
   margin: 0;
@@ -680,9 +713,6 @@ a:focus-visible {
   .sidebar,
   .rail {
     display: none;
-  }
-  .drawer-trigger {
-    display: inline-flex;
   }
 }
 </style>

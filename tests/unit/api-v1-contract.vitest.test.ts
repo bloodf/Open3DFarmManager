@@ -535,3 +535,127 @@ describe('the validator rejects undocumented fields', () => {
     expect(out.join('\n')).toMatch(/state/)
   })
 })
+
+describe('sandbox printer operational availability', () => {
+  it('applies a qualified target, refuses the others, and restores only the current app-owned version', async () => {
+    const world = freshWorld()
+    const app = world.addApp(
+      [{ scopes: ['control:extended', 'printers:read'] }],
+      { sandbox: true },
+    )
+    const other = world.addApp([{ scopes: ['control:extended'] }], {
+      sandbox: true,
+    })
+    const token = await tokenFor(world, app)
+    const otherToken = await tokenFor(world, other)
+    const [qualified, unavailable] = world.authStore.printers
+    const now = Date.now()
+    qualified!.sandbox = true
+    qualified!.observedAt = now
+    // Spec-derived, not captured. This projects a qualified Moonraker driver
+    // observation. No test opens a printer connection or sends a command.
+    const observed = {
+      printerKey: qualified!.printerKey,
+      state: 'printing',
+      progress: 0.5,
+      observedAt: now,
+      identity: {
+        vendor: 'Klipper',
+        model: 'Moonraker Generic',
+        firmware: 'Moonraker 2.0.0',
+      },
+      controls: ['pause', 'resume', 'cancel', 'start_print'],
+    }
+    qualified!.state = observed
+    unavailable!.sandbox = true
+    unavailable!.state = null
+    const unsupported = 'aaaaaaaa-0000-4000-8000-000000000003'
+    world.authStore.printers.push({
+      ...qualified!,
+      id: unsupported,
+      printerKey: 'unsupported-printer',
+      state: {
+        ...observed,
+        printerKey: 'unsupported-printer',
+        controls: ['pause'],
+      },
+    })
+
+    const path = '/printers/mode'
+    const readPath = `/printers/${ids.printerA1}/mode`
+    const set = await call({
+      method: 'POST',
+      path,
+      token,
+      body: {
+        action: 'set',
+        mode: 'maintenance',
+        targets: [
+          { printerId: ids.printerA1, expectedVersion: null },
+          { printerId: ids.printerA2, expectedVersion: null },
+          { printerId: unsupported, expectedVersion: null },
+          { printerId: ids.printerB1, expectedVersion: null },
+        ],
+      },
+    })
+    const {
+      data: [applied],
+    } = set.json as { data: { version: string }[] }
+    expect(set.status).toBe(200)
+    expect(set.json).toEqual({
+      data: [
+        {
+          printerId: ids.printerA1,
+          outcome: 'applied',
+          mode: 'maintenance',
+          label: 'Em manutenção',
+          version: expect.any(String),
+        },
+        {
+          printerId: ids.printerA2,
+          outcome: 'denied',
+          reason: 'observation-unavailable',
+        },
+        {
+          printerId: unsupported,
+          outcome: 'unsupported',
+          reason: 'capability-unqualified',
+        },
+        { printerId: ids.printerB1, outcome: 'denied', reason: 'not-found' },
+      ],
+    })
+    expect(
+      validateValue(
+        resolveRef('#/components/schemas/FleetModeResults'),
+        set.json,
+      ),
+    ).toEqual([])
+    expect(qualified!.state).toBe(observed)
+    expect(
+      (await call({ method: 'GET', path: readPath, token })).json,
+    ).toMatchObject({ mode: 'maintenance', version: applied!.version })
+
+    const restore = (appToken: string) =>
+      call({
+        method: 'POST',
+        path,
+        token: appToken,
+        body: {
+          action: 'restore',
+          targets: [
+            { printerId: ids.printerA1, expectedVersion: applied!.version },
+          ],
+        },
+      })
+    expect((await restore(otherToken)).json).toMatchObject({
+      data: [{ outcome: 'denied', reason: 'not-reversible' }],
+    })
+    expect((await restore(token)).json).toMatchObject({
+      data: [{ outcome: 'applied', mode: 'in-service' }],
+    })
+    expect((await restore(token)).json).toMatchObject({
+      data: [{ outcome: 'denied', reason: 'version-conflict' }],
+    })
+    expect(world.inboxCalls).toHaveLength(0)
+  })
+})

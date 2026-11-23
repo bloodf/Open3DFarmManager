@@ -100,32 +100,69 @@ const admin = postgres({
 })
 
 /**
- * The shipped 0093 constraint guards every stored capability. This fixture
- * stops at 0018, where the constraint does not exist yet, so the shipped
- * definition is applied here before any capability is issued.
+ * This fixture stops at 0018, where the capability constraint does not yet
+ * exist. Restore the shipped 0093 constraint, then its latest catalogued
+ * redefinition, without applying unrelated migrations to the reduced schema.
  */
 async function applyConfirmCollectionConstraint(admin: Sql): Promise<string[]> {
-  const migration = (await loadMigrationCatalog()).find(
-    (entry) => entry.id === '0093_pause_authority_confirm_collection',
+  const catalog = await loadMigrationCatalog()
+  const initial = catalog.find(
+    (entry) =>
+      entry.up.includes('ADD CONSTRAINT control_capability_actions') &&
+      entry.up.includes('"confirm_collection"') &&
+      !entry.up.includes('"set_tool_temperature"'),
   )
-  if (!migration)
-    throw new Error('Missing 0093 pause authority constraint migration')
+  const latest = catalog.findLast(
+    (entry) =>
+      entry.up.includes('ADD CONSTRAINT control_capability_actions') &&
+      entry.up.includes('"set_tool_temperature"'),
+  )
+  if (!initial || !latest || initial.id >= latest.id)
+    throw new Error('Missing shipped pause authority constraint chain')
   const definition = async () =>
     await admin`SELECT pg_catalog.pg_get_constraintdef(c.oid) AS definition FROM pg_catalog.pg_constraint c WHERE c.conname='control_capability_actions' AND c.conrelid='farm.pause_authority_challenges'::regclass`
   if ((await definition()).length === 0) {
     // The placeholder only gives the shipped drop its target.
     await admin.begin(async (tx) => {
       await tx`ALTER TABLE farm.pause_authority_challenges ADD CONSTRAINT control_capability_actions CHECK (true) NOT VALID`
-      await tx.unsafe(migration.up).simple()
+      await tx.unsafe(initial.up).simple()
     })
   }
+  const afterInitial = await definition()
+  assert.equal(afterInitial.length, 1)
+  assert.ok(
+    afterInitial[0]?.definition.includes('confirm_collection'),
+    'the shipped 0093 constraint must accept confirm_collection',
+  )
+  assert.ok(
+    !afterInitial[0]?.definition.includes('set_tool_temperature'),
+    '0093 must retain its own action allow-list before the later redefinition',
+  )
+
+  const redefinition = latest.up.match(
+    /ALTER TABLE farm\.pause_authority_challenges DROP CONSTRAINT control_capability_actions;\s*ALTER TABLE farm\.pause_authority_challenges ADD CONSTRAINT control_capability_actions CHECK \([\s\S]*?\);/,
+  )
+  assert.ok(
+    redefinition,
+    'latest catalogued constraint redefinition is present',
+  )
+  await admin.begin(async (tx) => {
+    await tx.unsafe(redefinition[0]).simple()
+  })
   const applied = await definition()
   assert.equal(applied.length, 1)
   assert.ok(
-    applied[0]?.definition.includes('confirm_collection'),
-    'the shipped constraint must accept confirm_collection',
+    applied[0]?.definition.includes('set_tool_temperature'),
+    'the latest shipped constraint must accept set_tool_temperature',
   )
-  return ['shipped 0093 pause authority constraint guards stored capabilities']
+  assert.ok(
+    applied[0]?.definition.includes('confirm_collection'),
+    'the latest shipped constraint must retain confirm_collection',
+  )
+  return [
+    'shipped 0093 constraint guards stored capabilities, followed by latest catalogued redefinition ' +
+      latest.id,
+  ]
 }
 
 /** Store a capability carrying confirm_collection, exactly as a browser journey does. */
@@ -151,9 +188,16 @@ async function storeConfirmCollectionCapability(admin: Sql): Promise<string[]> {
     role: 'owner',
   })
   const stored =
-    await admin`SELECT status,capability->'actions' ? 'confirm_collection' AS has_confirm FROM farm.pause_authority_challenges WHERE challenge_id=${owner}::uuid`
+    await admin`SELECT status,capability->'actions' ? 'confirm_collection' AS has_confirm,capability->'actions' ? 'set_tool_temperature' AS has_tool_temperature FROM farm.pause_authority_challenges WHERE challenge_id=${owner}::uuid`
   assert.ok(stored[0], 'the stored capability must be readable')
-  assert.deepEqual({ ...stored[0] }, { status: 'issued', has_confirm: true })
+  assert.deepEqual(
+    { ...stored[0] },
+    {
+      status: 'issued',
+      has_confirm: true,
+      has_tool_temperature: true,
+    },
+  )
   // An action outside the protocol stays refused by the same constraint.
   await assert.rejects(
     insert({
@@ -169,7 +213,7 @@ async function storeConfirmCollectionCapability(admin: Sql): Promise<string[]> {
       error.constraint_name === 'control_capability_actions',
   )
   return [
-    'stored capability with confirm_collection accepted, unknown action refused',
+    'stored capability with confirm_collection and set_tool_temperature accepted, unknown action refused',
   ]
 }
 try {

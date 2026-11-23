@@ -222,6 +222,12 @@ export function getPrinterActionButtons(
  * never instead of it: the code does not change what happened to the command.
  */
 export const RESULT_CODE_HINTS: Record<ControlResultCode, string> = {
+  'tool-state-stale': 'Os dados da impressora estão desatualizados.',
+  'tool-printer-not-idle': 'A impressora precisa estar ociosa.',
+  'tool-heater-not-advertised':
+    'A impressora não disponibiliza esta ferramenta.',
+  'tool-temperature-above-maximum':
+    'A temperatura excede o limite da ferramenta.',
   signature: 'O Connector não conseguiu verificar a assinatura do comando.',
   scope: 'Você não tem permissão para enviar este comando.',
   state: 'O estado atual da impressora impede este comando.',

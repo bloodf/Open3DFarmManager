@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { useFarmRoute } from '../composables/useFarmRoute.ts'
+import { resolveFarmScope } from '../utils/farm-scope.ts'
+import { fetchFarmMemberships } from '../composables/useFarmMemberships.ts'
 import ReplayAction from '../components/history/ReplayAction.vue'
 import { useReplayLive } from '../composables/useReplayLive.ts'
 import {
@@ -18,8 +21,7 @@ import {
   type JobHistoryItem,
 } from '../utils/job-history-view.ts'
 
-const route = useRoute()
-const router = useRouter()
+const { route, setFarmScope } = useFarmRoute()
 type Farm = { farmId: string }
 const farms = ref<Farm[]>([])
 const farmId = ref('')
@@ -149,27 +151,17 @@ async function run<T>(request: (signal: AbortSignal) => Promise<T>) {
   }
 }
 async function loadFarms() {
-  const page = await run((signal) =>
-    $fetch<{ farms: Farm[] }>('/api/farms', {
-      query: { limit: 50 },
-      signal,
-      retry: 0,
-      timeout: 15000,
-    }),
+  const memberships = await run((signal) =>
+    fetchFarmMemberships<Farm>({ signal, timeout: 15_000 }),
   )
-  farms.value = page?.farms ?? []
-  const requested = route.query.farm
-  const selected =
-    farms.value.find((farm) => farm.farmId === requested)?.farmId ??
-    (farms.value.length === 1 ? (farms.value[0]?.farmId ?? '') : '')
+  farms.value = memberships ?? []
+  const selected = resolveFarmScope(farms.value, route.query.farm)?.farmId ?? ''
   if (selected === farmId.value && selected) await loadJobs()
-  else if (selected) changeFarm(selected)
-  if (selected && requested !== selected)
-    void router.replace({ query: { ...route.query, farm: selected } })
+  else changeFarm(selected)
 }
 function selectFarm(event: Event) {
   const id = (event.target as HTMLSelectElement).value
-  void router.replace({ query: { ...route.query, farm: id || undefined } })
+  void setFarmScope(id)
 }
 async function loadJobs(before: string | null = null) {
   const selected = farmId.value
@@ -206,11 +198,7 @@ async function loadJobs(before: string | null = null) {
 watch(
   () => route.query.farm,
   (id) => {
-    changeFarm(
-      typeof id === 'string' && farms.value.some((farm) => farm.farmId === id)
-        ? id
-        : '',
-    )
+    changeFarm(resolveFarmScope(farms.value, id)?.farmId ?? '')
   },
 )
 onMounted(() => void loadFarms())

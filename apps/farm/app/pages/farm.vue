@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { useFarmRoute } from '../composables/useFarmRoute.ts'
+import { computed, inject, nextTick, onMounted, ref, watch } from 'vue'
 import {
   filterFarmRows,
   groupFarmRows,
@@ -20,7 +21,11 @@ import PrinterWallTable from '../components/farm/PrinterWallTable.vue'
 import FarmPrinterCard from '../components/farm/FarmPrinterCard.vue'
 import PrinterWallCard from '../components/farm/PrinterWallCard.vue'
 import PrinterWallSummary from '../components/farm/PrinterWallSummary.vue'
-import { useStatusSummary } from '../composables/useStatusSummary.ts'
+import { farmLocation } from '../utils/farm-scope.ts'
+import {
+  statusSummaryKey,
+  useStatusSummary,
+} from '../composables/useStatusSummary.ts'
 import { wallCardProps } from '../utils/farm-wall-card.ts'
 import FarmCardControls from '../components/farm/FarmCardControls.vue'
 import CollectionHold from '../components/farm/CollectionHold.vue'
@@ -48,7 +53,8 @@ import EmptyState from '../components/ui/EmptyState.vue'
 import ErrorState from '../components/ui/ErrorState.vue'
 import Skeleton from '../components/ui/Skeleton.vue'
 import StaleNotice from '../components/ui/StaleNotice.vue'
-const view = useFarmView()
+const { route, setFarmScope } = useFarmRoute()
+const view = useFarmView({ requestedFarm: () => route.query.farm })
 const {
   state,
   ready,
@@ -79,9 +85,11 @@ const offlineVisible = computed(
 )
 // The whole farm in one bounded request: counts and latest states even for
 // printers outside the assignment page the wall lists.
-const statusSummary = useStatusSummary({
-  farmId: () => ready.value?.scope?.farmId,
-})
+const statusSummary =
+  inject(statusSummaryKey, undefined) ??
+  useStatusSummary({
+    farmId: () => ready.value?.scope?.farmId,
+  })
 const heading = ref<HTMLElement | null>(null)
 const errorSummary = ref<HTMLElement | null>(null)
 const drafts = ref<
@@ -106,30 +114,15 @@ onMounted(() => heading.value?.focus())
 const errorText = computed(() =>
   state.value.kind === 'error' ? farmViewErrorText(state.value.reason) : '',
 )
-const route = useRoute()
-watch([() => route.query.farm, () => ready.value?.farms], ([farmId, farms]) => {
-  if (
-    typeof farmId === 'string' &&
-    farms?.some((farm) => farm.farmId === farmId) &&
-    ready.value?.scope?.farmId !== farmId
-  )
-    void selectFarm(farmId)
-})
-watch(
-  () => route.query.farm,
-  (id, previous) => {
-    if (!id && previous && ready.value?.scope) void selectFarm('')
-  },
-)
-
 const router = useRouter()
-watch(
-  () => ready.value?.scope?.farmId,
-  (id) => {
-    if (id && !route.query.farm)
-      void router.replace({ query: { ...route.query, farm: id } })
-  },
-)
+const scopedLink = (path: string) =>
+  farmLocation(
+    path,
+    typeof route.query.farm === 'string'
+      ? route.query.farm
+      : ready.value?.scope?.farmId,
+  )
+
 const wallQuery = computed({
   get: () => ({
     ...readFarmWallQuery(route.query),
@@ -311,14 +304,18 @@ function cancelPause(event: Event) {
       </p>
       <nav aria-label="Navegação da farm">
         <ul class="nav-links">
-          <li><NuxtLink to="/">Início</NuxtLink></li>
-          <li><NuxtLink to="/arquivos">Arquivos</NuxtLink></li>
-          <li><NuxtLink to="/impressoras">Impressoras</NuxtLink></li>
-          <li><NuxtLink to="/parear">Connectors</NuxtLink></li>
+          <li><NuxtLink :to="scopedLink('/')">Início</NuxtLink></li>
+          <li><NuxtLink :to="scopedLink('/arquivos')">Arquivos</NuxtLink></li>
           <li>
-            <NuxtLink to="/dispositivos">Dispositivos do navegador</NuxtLink>
+            <NuxtLink :to="scopedLink('/impressoras')">Impressoras</NuxtLink>
           </li>
-          <li><NuxtLink to="/sair">Sair da conta</NuxtLink></li>
+          <li><NuxtLink :to="scopedLink('/parear')">Connectors</NuxtLink></li>
+          <li>
+            <NuxtLink :to="scopedLink('/dispositivos')"
+              >Dispositivos do navegador</NuxtLink
+            >
+          </li>
+          <li><NuxtLink :to="scopedLink('/sair')">Sair da conta</NuxtLink></li>
         </ul>
       </nav>
     </header>
@@ -333,7 +330,7 @@ function cancelPause(event: Event) {
     >
       <h2>Entre para ver a farm</h2>
       <p>Entre na sua conta para consultar suas farms.</p>
-      <NuxtLink to="/entrar" class="cta">Entrar</NuxtLink>
+      <NuxtLink :to="scopedLink('/entrar')" class="cta">Entrar</NuxtLink>
     </section>
     <ErrorState
       v-else-if="state.kind === 'error'"
@@ -342,7 +339,7 @@ function cancelPause(event: Event) {
       <p ref="errorSummary" role="alert" tabindex="-1">{{ errorText }}</p>
       <div class="actions">
         <Button @click="discover()">Tentar novamente</Button>
-        <NuxtLink to="/entrar">Entrar novamente</NuxtLink>
+        <NuxtLink :to="scopedLink('/entrar')">Entrar novamente</NuxtLink>
       </div>
     </ErrorState>
     <div v-else-if="ready" class="stack">
@@ -350,14 +347,7 @@ function cancelPause(event: Event) {
       <div class="setup-grid">
         <FarmScopeSelector
           :ready="ready"
-          @select="
-            (id) => {
-              void router.replace({
-                query: { ...route.query, farm: id || undefined },
-              })
-              if (!id) void selectFarm(id)
-            }
-          "
+          @select="setFarmScope"
           @discover="discover"
         />
         <FarmDeviceSelector
@@ -434,7 +424,17 @@ function cancelPause(event: Event) {
               "
               description="Atribua uma impressora a um Connector para acompanhar o estado dela aqui."
             >
-              <NuxtLink to="/impressoras">Gerenciar atribuições</NuxtLink>
+              <NuxtLink
+                :to="
+                  farmLocation(
+                    '/impressoras',
+                    typeof route.query.farm === 'string'
+                      ? route.query.farm
+                      : undefined,
+                  )
+                "
+                >Gerenciar atribuições</NuxtLink
+              >
             </EmptyState>
             <form
               v-if="rows.length"

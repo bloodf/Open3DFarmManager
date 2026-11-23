@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, provide, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
+import { useFarmRoute } from '../composables/useFarmRoute.ts'
+import { resolveFarmScope } from '../utils/farm-scope.ts'
 import { onBeforeRouteLeave } from 'vue-router'
 import { configurationTargetHash } from '../../../../packages/farm-protocol/src/configuration-target.ts'
 import OverviewHeader from '../components/overview/OverviewHeader.vue'
@@ -38,6 +40,7 @@ import {
   type KobraOperationContext,
 } from '../utils/printer-setup-state.ts'
 
+const { route, setFarmScope } = useFarmRoute()
 const state = createPrinterSetupState()
 const { farmId, canManage } = state
 // True once the first farm read has settled, so the empty state never flashes.
@@ -69,6 +72,7 @@ const setup = createPrinterSetup(state, epoch, {
   handleKobraException,
   openPrinterDiscoverySession,
   adoption: useNetworkAdoption(),
+  requestedFarm: () => route.query.farm,
 })
 const { closeKobraSession, ensureKobraSession, applySessionOutcome } = setup
 const { persistPendingOperation, clearPersistedOperation } = setup
@@ -91,6 +95,10 @@ const prepareSelected = () =>
 provide(printerSetupKey, state)
 provide(printerSetupActionsKey, {
   ...setup,
+  async selectFarm() {
+    void setFarmScope(farmId.value)
+    await setup.selectFarm()
+  },
   prepareSelected,
   selectCrealityMoonraker,
 })
@@ -525,6 +533,17 @@ async function prepareCrealityPrinter() {
   }
 }
 
+watch(
+  () => route.query.farm,
+  (requested) => {
+    const selected =
+      resolveFarmScope(state.farms.value, requested, !!state.nextFarm.value)
+        ?.farmId ?? ''
+    if (selected === farmId.value) return
+    farmId.value = selected
+    void setup.selectFarm()
+  },
+)
 let stopWatching: (() => void) | undefined
 onMounted(() => {
   header.value?.focus()

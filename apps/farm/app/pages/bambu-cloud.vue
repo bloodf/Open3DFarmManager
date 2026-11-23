@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { useFarmSelection } from '../composables/useFarmRoute.ts'
+import { fetchFarmMemberships } from '../composables/useFarmMemberships.ts'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { createFarmRequestGuard } from '../utils/farm-request-guard.ts'
 import Button from '../components/ui/Button.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -20,7 +22,7 @@ type AccountView = {
 type ConnectResponse = AccountView | { tfaRequired: true; tfaKey: string }
 
 const farms = ref<Farm[]>([])
-const farmId = ref('')
+const farmId = useFarmSelection(farms)
 const account = ref<AccountView | null>(null)
 const guard = createFarmRequestGuard(() => farmId.value)
 const accountFarm = ref('')
@@ -118,13 +120,7 @@ async function load() {
   message.value = ''
   error.value = false
   try {
-    const page = await $fetch<{ farms: Farm[] }>('/api/farms', {
-      query: { limit: 50 },
-      retry: 0,
-      timeout: 15_000,
-    })
-    farms.value = page.farms
-    farmId.value = page.farms[0]?.farmId ?? ''
+    farms.value = await fetchFarmMemberships<Farm>({ timeout: 15_000 })
     if (farmId.value) await loadStatus()
   } catch {
     await report('Não foi possível carregar as farms.', true)
@@ -168,14 +164,17 @@ function body() {
 
 async function connect() {
   if (pending.value || !farmId.value || unavailable.value) return
+  const id = farmId.value
+  const current = guard.start(id)
   pending.value = true
   message.value = ''
   error.value = false
   try {
     const response = await $fetch<ConnectResponse>(
-      `/api/farms/${farmId.value}/bambu-cloud`,
+      `/api/farms/${id}/bambu-cloud`,
       { method: 'POST', body: body(), retry: 0, timeout: 15_000 },
     )
+    if (!current()) return
     clearSecrets()
     if ('tfaRequired' in response) {
       tfaKey.value = response.tfaKey
@@ -186,7 +185,7 @@ async function connect() {
     tfaKey.value = ''
     mode.value = 'email-code'
     account.value = response
-    accountFarm.value = farmId.value
+    accountFarm.value = id
     await report(
       response.expired
         ? 'Conta conectada. O token expirou.'
@@ -194,6 +193,7 @@ async function connect() {
       false,
     )
   } catch (cause: unknown) {
+    if (!current()) return
     clearSecrets()
     const status = statusCode(cause)
     await report(
@@ -252,6 +252,17 @@ async function disconnect() {
 }
 
 onMounted(load)
+watch(farmId, (id) => {
+  if (loading.value) return
+  guard.invalidate()
+  clearSecrets()
+  tfaKey.value = ''
+  mode.value = 'email-code'
+  account.value = null
+  accountFarm.value = ''
+  unavailable.value = false
+  if (id) void loadStatus()
+})
 </script>
 
 <template>
@@ -286,44 +297,36 @@ onMounted(load)
       <Button @click="load">Tentar novamente</Button>
     </ErrorState>
     <EmptyState
-      v-else-if="!farmId"
+      v-else-if="!farms.length"
       title="Nenhuma farm disponível"
       description="Esta conta ainda não tem acesso a uma farm para conectar a Bambu Cloud."
     >
       <NuxtLink to="/conta">Voltar para a conta</NuxtLink>
     </EmptyState>
+    <section
+      v-if="!loading && farms.length && (farms.length > 1 || !farmId)"
+      class="panel"
+      aria-labelledby="bambu-farm-heading"
+    >
+      <h2 id="bambu-farm-heading">Escolha a farm</h2>
+      <div class="field">
+        <label for="bambu-farm">Farm</label>
+        <select id="bambu-farm" v-model="farmId" :disabled="pending">
+          <option disabled value="">Selecione uma farm</option>
+          <option v-for="farm in farms" :key="farm.farmId" :value="farm.farmId">
+            {{ farm.farmId }}
+          </option>
+        </select>
+      </div>
+    </section>
     <EmptyState
-      v-else-if="unavailable"
+      v-if="unavailable"
       title="Bambu Cloud indisponível"
       description="Conta Bambu Cloud indisponível nesta instalação."
     >
       <NuxtLink to="/conta">Voltar para a conta</NuxtLink>
     </EmptyState>
-    <template v-else>
-      <section
-        v-if="farms.length > 1"
-        class="panel"
-        aria-labelledby="bambu-farm-heading"
-      >
-        <h2 id="bambu-farm-heading">Escolha a farm</h2>
-        <div class="field">
-          <label for="bambu-farm">Farm</label>
-          <select
-            id="bambu-farm"
-            v-model="farmId"
-            :disabled="pending"
-            @change="loadStatus"
-          >
-            <option
-              v-for="farm in farms"
-              :key="farm.farmId"
-              :value="farm.farmId"
-            >
-              {{ farm.farmId }}
-            </option>
-          </select>
-        </div>
-      </section>
+    <template v-if="farmId && !loading && !unavailable">
       <section
         v-if="account?.connected"
         class="panel"

@@ -29,14 +29,15 @@ export default defineEventHandler(async (event) => {
     const alerts = await sql`SELECT lifecycle.id, kind, label, message,
       opened_at::float8 AS "openedAt", resolved_at::float8 AS "resolvedAt",
       actions.acknowledged_at::float8 AS "acknowledgedAt", actions.silenced_until::float8 AS "silencedUntil",
-      (raised AND farm.integration_alert_enabled(${printer.farmId}::uuid, kind)
+      (raised AND farm.integration_alert_enabled(assignment.farm_id, kind)
         AND resolved_at IS NULL AND acknowledged_at IS NULL AND COALESCE(silenced_until <= ${now}, true)) AS "needsAttention"
       FROM farm.integration_alert_lifecycle lifecycle
+      JOIN farm.printer_assignments assignment ON assignment.id = lifecycle.printer_id
       LEFT JOIN LATERAL (
         SELECT MIN(acted_at) FILTER (WHERE action = 'acknowledge') AS acknowledged_at,
           MAX(silenced_until) AS silenced_until
         FROM farm.integration_alert_actions WHERE alert_id = lifecycle.id AND app_id = ${appId}::uuid
-      ) actions ON true WHERE printer_id = ${printerId}::uuid
+      ) actions ON true WHERE lifecycle.printer_id = ${printerId}::uuid
       ORDER BY (resolved_at IS NULL) DESC, opened_at DESC, lifecycle.id DESC LIMIT 501`
     return {
       printerId,

@@ -2,6 +2,7 @@
 // jobs and actions services and the real handlers run on top of these fakes.
 // Nothing here opens a socket or a database; the fakes implement the same
 // store seams the PostgreSQL adapters implement.
+import type { FarmAlertKind } from '../../../apps/farm/app/utils/farm-alerts.ts'
 import type { FleetModeRecord } from '../../../apps/farm/server/utils/integration-fleet-mode.ts'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import {
@@ -457,6 +458,7 @@ export class World {
     actedAt: number
     silencedUntil: number | null
   }[] = []
+  disabledAlertRules: { farmId: string; kind: FarmAlertKind }[] = []
   cameraEnabled = false
   readonly faults = new Set<Fault>()
   readonly config: {
@@ -795,6 +797,15 @@ export class World {
         const current = fleetModes.get(v[0] as string)
         return current ? [current] : []
       }
+      if (
+        text.includes('FROM farm.integration_alert_rules') &&
+        text.includes('AND NOT enabled')
+      ) {
+        const [farmIds] = v as [string[]]
+        return this.disabledAlertRules.filter(({ farmId }) =>
+          farmIds.includes(farmId),
+        )
+      }
       if (text.includes('farm.integration_alert_lifecycle')) {
         if (text.includes('INSERT INTO farm.integration_alert_actions')) {
           const [appId, action, actedAt, silencedUntil, printerId, alertId] =
@@ -820,12 +831,7 @@ export class World {
             },
           ]
         }
-        const [farmId, now, appId, printerId] = v as [
-          string,
-          number,
-          string,
-          string,
-        ]
+        const [now, appId, printerId] = v as [number, string, string]
         const actions = this.alertActions.filter(
           (entry) => entry.appId === appId,
         )
@@ -839,7 +845,7 @@ export class World {
           ? Math.min(...acknowledgements)
           : null
         const silencedUntil = silences.length ? Math.max(...silences) : null
-        return farmId === ids.farmA && printerId === ids.printerA1
+        return printerId === ids.printerA1
           ? [
               {
                 id: ids.alertA,

@@ -36,6 +36,7 @@ import {
   type RenewalDecision,
 } from '../../packages/farm-protocol/src/credential-renewal.ts'
 import { issueConnectorCredential } from '../../apps/farm/server/utils/connector-credentials.ts'
+import { withOwnedCleanup } from './owned-cleanup.ts'
 
 /** Official migrations and a caller-owned disposable cluster only; all rows synthetic, no hardware. */
 export async function testPostgresCredentialRenewal(
@@ -45,6 +46,8 @@ export async function testPostgresCredentialRenewal(
 ): Promise<string[]> {
   const role = 'renewal_fixture_' + randomUUID().replaceAll('-', '')
   await admin`CREATE ROLE ${admin(role)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS IN ROLE farm_connector_credential_renewer`
+  const rolePassword = randomUUID().replaceAll('-', '')
+  await admin.unsafe(`ALTER ROLE "${role}" PASSWORD '${rolePassword}'`)
   const pools: Sql[] = []
   const connect = () => {
     const s = postgres({
@@ -52,7 +55,7 @@ export async function testPostgresCredentialRenewal(
       port,
       database: 'fixture',
       username: role,
-      password: '',
+      password: rolePassword,
       ssl: false,
       max: 5,
       connect_timeout: 3,
@@ -280,19 +283,6 @@ export async function testPostgresCredentialRenewal(
     const spki = Buffer.from(
       await crypto.subtle.exportKey('spki', signing.publicKey),
     ).toString('base64url')
-    const child = spawn(process.execPath, ['--input-type=module', '-e', code], {
-      cwd: process.cwd(),
-      stdio: ['pipe', 'pipe', 'pipe'],
-    })
-    if (resourceJournal)
-      await appendFile(
-        resourceJournal,
-        JSON.stringify({
-          kind: 'node-child',
-          pid: child.pid,
-          state: 'created',
-        }) + '\n',
-      )
     const input = {
       role,
       port,
@@ -310,21 +300,55 @@ export async function testPostgresCredentialRenewal(
         proofTtlMs: 30000,
       },
     }
-    child.stdin.end(JSON.stringify(input))
-    let output = '',
-      errors = ''
-    child.stdout.on('data', (chunk) => {
-      output += chunk
-    })
-    child.stderr.on('data', (chunk) => {
-      errors += chunk
-    })
-    const timer = setTimeout(() => child.kill('SIGTERM'), 15000)
-    try {
-      const exit = await new Promise<number | null>((resolve, reject) => {
+    await withOwnedCleanup(async (own) => {
+      const child = spawn(
+        process.execPath,
+        ['--input-type=module', '-e', code],
+        {
+          cwd: process.cwd(),
+          stdio: ['pipe', 'pipe', 'pipe'],
+        },
+      )
+      const timer = setTimeout(() => child.kill('SIGTERM'), 15000)
+      const exited = new Promise<number | null>((resolve, reject) => {
         child.once('error', reject)
         child.once('close', resolve)
       })
+      own(async () => {
+        clearTimeout(timer)
+        if (child.exitCode === null && child.signalCode === null) {
+          child.kill('SIGKILL')
+          await exited.catch(() => {})
+        }
+        if (resourceJournal)
+          await appendFile(
+            resourceJournal,
+            JSON.stringify({
+              kind: 'node-child',
+              pid: child.pid,
+              state: 'reaped',
+            }) + '\n',
+          )
+      })
+      if (resourceJournal)
+        await appendFile(
+          resourceJournal,
+          JSON.stringify({
+            kind: 'node-child',
+            pid: child.pid,
+            state: 'created',
+          }) + '\n',
+        )
+      child.stdin.end(JSON.stringify(input))
+      let output = '',
+        errors = ''
+      child.stdout.on('data', (chunk) => {
+        output += chunk
+      })
+      child.stderr.on('data', (chunk) => {
+        errors += chunk
+      })
+      const exit = await exited
       assert.equal(exit, 0, errors)
       const result: unknown = JSON.parse(output)
       assert.ok(
@@ -333,18 +357,7 @@ export async function testPostgresCredentialRenewal(
           'kind' in result &&
           ['denied', 'expired'].includes(String(result.kind)),
       )
-    } finally {
-      clearTimeout(timer)
-      if (resourceJournal)
-        await appendFile(
-          resourceJournal,
-          JSON.stringify({
-            kind: 'node-child',
-            pid: child.pid,
-            state: 'reaped',
-          }) + '\n',
-        )
-    }
+    })
   }
   try {
     assert.ok(
@@ -766,7 +779,7 @@ export async function testPostgresCredentialRenewal(
       port,
       database: 'fixture',
       username: role,
-      password: '',
+      password: rolePassword,
       ssl: false,
       max: 1,
       connect_timeout: 3,
@@ -877,11 +890,17 @@ export async function testPostgresCredentialRenewal(
             ),
         }
       }
-      const directory = await mkdtemp(join(tmpdir(), 'o3dfm-renewal-client-'))
-      await chmod(directory, 0o700)
-      const live = await listen(Date.now)
-      const late = await listen(() => Date.now() + 10_000_000)
-      try {
+      return withOwnedCleanup(async (own) => {
+        const directory = await mkdtemp(join(tmpdir(), 'o3dfm-renewal-client-'))
+        own(async () => {
+          await chmod(directory, 0o700)
+          await rm(directory, { recursive: true, force: true })
+        })
+        await chmod(directory, 0o700)
+        const live = await listen(Date.now)
+        own(() => live.close())
+        const late = await listen(() => Date.now() + 10_000_000)
+        own(() => late.close())
         const item = await issued()
         const credentialPath = join(directory, 'credential.json')
         writeCredentialFileAtomically(credentialPath, {
@@ -975,13 +994,8 @@ export async function testPostgresCredentialRenewal(
         done.push(
           'connector client fails closed when the predecessor is expired at the server',
         )
-      } finally {
-        await chmod(directory, 0o700)
-        await rm(directory, { recursive: true, force: true })
-        await live.close()
-        await late.close()
-      }
-      return done
+        return done
+      })
     }
 
     // Real HTTP transport boundary, not a stand-in store or SQL string mock.

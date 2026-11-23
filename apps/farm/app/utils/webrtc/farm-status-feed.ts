@@ -35,6 +35,7 @@ type ClientInput = {
     audience: string
     publicKey: unknown
     privateKey: CryptoKey
+    cameraPrinterId?: string
   }
   assignmentRefs: readonly Assignment[]
   onVerifiedAdmission: (value: {
@@ -61,6 +62,7 @@ type Options = {
   /** Opt-in camera. Streams are offered only for this feed's server assignment
    * refs; null is always emitted when an attached stream is revoked. */
   onCamera?: (event: FarmCameraEvent) => void
+  cameraTarget?: () => string | null
   webcamDetail?: WebcamDetailOptions & { onClose: () => void }
 }
 function requireSync(callback: () => void) {
@@ -297,13 +299,19 @@ export function createAuthenticatedFarmStatusFeed(
                   : {}),
               }))
           const onCamera = options.onCamera
+          const target = options.cameraTarget?.()
+          const cameraIds = refs
+            .map((ref) => ref.assignmentId)
+            .filter((id) => !options.cameraTarget || id === target)
+          const cameraPrinterId = onCamera ? cameraIds[0] : undefined
           let attached: string | undefined
           const cameraMedia =
             onCamera &&
+            cameraIds.length > 0 &&
             ((onViolation: (reason: string) => void) =>
               new BrowserCameraMedia({
                 privateKey: resolved.privateKey,
-                authorizedPrinterIds: refs.map((ref) => ref.assignmentId),
+                authorizedPrinterIds: cameraIds,
                 onStream(stream, printerId, cameraId) {
                   if (stream && printerId && current() && !attached) {
                     attached = printerId
@@ -330,6 +338,7 @@ export function createAuthenticatedFarmStatusFeed(
               audience: resolved.audience,
               publicKey: key.publicKey,
               privateKey: resolved.privateKey,
+              ...(cameraPrinterId ? { cameraPrinterId } : {}),
             },
             assignmentRefs: refs,
             ...(hasWebcamDetail && webcamDetail
@@ -377,6 +386,7 @@ export function createAuthenticatedFarmStatusFeed(
                   b.v !== 2 ||
                   b.assignment_count !== assignments.count ||
                   b.assignment_digest !== assignments.digest ||
+                  b.camera_printer_id !== cameraPrinterId ||
                   b.account_id !== scope.accountId ||
                   b.farm_id !== scope.farmId ||
                   b.agent_id !== agentId ||

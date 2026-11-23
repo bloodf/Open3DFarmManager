@@ -43,7 +43,7 @@ const props = defineProps<{
   bedMesh?: { mesh?: BedMeshData; availability: MeshAvailabilityMap }
   name: string
   stateLabel: string
-  stateTone: 'idle' | 'printing' | 'paused' | 'error' | 'offline'
+  stateTone: 'idle' | 'printing' | 'paused' | 'error' | 'offline' | 'stale'
   connectorLabel: string
   /** True only with a current direct connection; otherwise the page is read-only. */
   live: boolean
@@ -231,6 +231,7 @@ const heaterReason = computed(
         }}
       </p>
     </header>
+    <slot name="status" />
     <Tabs
       v-model="selected"
       label="Seções da impressora"
@@ -403,6 +404,12 @@ const heaterReason = computed(
 .printer-detail {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+.printer-detail :deep(dd),
+.printer-detail :deep(output),
+.printer-detail :deep(progress) {
+  font-family: var(--ops-font-mono);
+  font-variant-numeric: tabular-nums;
 }
 .printer-detail__status {
   display: flex;

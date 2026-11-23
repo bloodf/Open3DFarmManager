@@ -251,7 +251,7 @@ describe('library view helpers', () => {
   })
 })
 
-describe('library page in a browser', () => {
+describe('library page in a browser', { timeout: 30_000 }, () => {
   let browser: Browser
   let appJs = ''
   let appCss = ''
@@ -264,7 +264,8 @@ describe('library page in a browser', () => {
           import { createApp } from 'vue'
           import Page from './apps/farm/app/pages/biblioteca.vue'
           import './apps/farm/app/assets/css/main.css'
-          // Nuxt provides $fetch; this is the part of ofetch the page uses.
+          // Nuxt provides its page metadata and fetch helpers.
+          globalThis.definePageMeta = () => {}
           globalThis.$fetch = async (url, o = {}) => {
             const q = o.query ? '?' + new URLSearchParams(o.query) : ''
             const response = await fetch(url + q, {
@@ -286,6 +287,29 @@ describe('library page in a browser', () => {
       outfile: 'app.js',
       define: { 'process.env.NODE_ENV': '"production"' },
       plugins: [
+        {
+          // The page only asks this composable which printers can be picked.
+          // The real one mounts the farm status feed (WebRTC, polling); these
+          // tests never send a print, and that feed blows the Node 22 budget.
+          name: 'stub-live-session',
+          setup(b) {
+            b.onResolve({ filter: /useReplayLive\.ts$/ }, () => ({
+              path: 'useReplayLive',
+              namespace: 'stub',
+            }))
+            b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({
+              loader: 'ts',
+              contents: `
+                export function useReplayLive() {
+                  return {
+                    liveFor: () => undefined,
+                    send: async () => ({ outcome: 'not-sent' }),
+                  }
+                }
+              `,
+            }))
+          },
+        },
         {
           name: 'vue-sfc',
           setup(b) {

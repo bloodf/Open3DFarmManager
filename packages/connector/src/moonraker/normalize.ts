@@ -1,4 +1,7 @@
-import { PrinterState } from '@open3dfarmmanager/farm-protocol'
+import {
+  boundPrinterString,
+  PrinterState,
+} from '@open3dfarmmanager/farm-protocol'
 import type { ObservationContext, ValidatedMoonrakerSnapshot } from './parse.ts'
 
 function parseFanSpeedPercent(raw: unknown): number | undefined {
@@ -49,9 +52,9 @@ export function moonrakerLastJob(
     typeof value === 'number' && Number.isFinite(value) && value >= 0
   const filename =
     typeof stats.filename === 'string'
-      ? stats.filename
-          .replace(/[\u0000-\u001f\u007f-\u009f]/g, '')
-          .slice(0, 255)
+      ? boundPrinterString(
+          stats.filename.replace(/[\u0000-\u001f\u007f-\u009f]/g, ''),
+        )
       : ''
   return {
     outcome,
@@ -102,9 +105,9 @@ export function normalizeMoonrakerSnapshot(
       : {}
   const filename =
     typeof print_stats.filename === 'string'
-      ? print_stats.filename
-          .replace(/[\u0000-\u001f\u007f-\u009f]/g, '')
-          .slice(0, 255)
+      ? boundPrinterString(
+          print_stats.filename.replace(/[\u0000-\u001f\u007f-\u009f]/g, ''),
+        )
       : undefined
   const duration = print_stats.print_duration
   const remaining =

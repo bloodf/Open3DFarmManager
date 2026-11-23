@@ -38,14 +38,17 @@ describe('catálogo Anycubic', () => {
           expect(item.sources.length).toBeGreaterThan(0)
         if (status === 'simulated')
           expect(item.limitations.length).toBeGreaterThan(0)
-        expect(status).toBe(
-          item.model === 'Kobra X' &&
-            ['telemetry', 'files', 'pause', 'resume', 'cancel'].includes(
-              capability,
-            )
-            ? 'simulated'
-            : 'unknown',
-        )
+        const expected =
+          item.model === 'Kobra X'
+            ? // Telemetry is hardware-proven from a real Kobra X; files, pause,
+              // resume and cancel stay simulated; the rest unknown.
+              capability === 'telemetry'
+              ? 'hardware'
+              : ['files', 'pause', 'resume', 'cancel'].includes(capability)
+                ? 'simulated'
+                : 'unknown'
+            : 'unknown'
+        expect(status).toBe(expected)
       }
     }
   })

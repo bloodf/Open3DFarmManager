@@ -73,6 +73,7 @@ export function createMoonrakerHistoryImport(input: {
   const dedup = createMoonrakerHistoryDedup()
   const client = historyClient(input.selected, input.signal)
   let wanted = true
+  let pending = false
   let running: Promise<void> | undefined
   let previousActive = false
   async function importOnce() {
@@ -92,6 +93,7 @@ export function createMoonrakerHistoryImport(input: {
     /** A connection was lost: read history again on the next live state. */
     reconnecting() {
       wanted = true
+      pending = false
       previousActive = false
     },
     observe(state: PrinterState['state']) {
@@ -99,9 +101,18 @@ export function createMoonrakerHistoryImport(input: {
       // A job the live path watched end is recorded live, never imported.
       if (previousActive && !active) dedup.noteLive(input.printerKey, now())
       previousActive = active
-      if (!wanted || running || input.signal.aborted) return
+      if (!wanted || input.signal.aborted) return
       wanted = false
-      running = importOnce().finally(() => {
+      if (running) {
+        pending = true
+        return
+      }
+      running = (async () => {
+        do {
+          pending = false
+          await importOnce()
+        } while (pending && !input.signal.aborted)
+      })().finally(() => {
         running = undefined
       })
     },

@@ -269,7 +269,8 @@ describe('compatibility-match', () => {
         expect(match.identified).toBe(true)
         if (match.identified) {
           expect(match.product.id).toBe('klipper-generic-moonraker')
-          expect(match.capabilityStatuses.telemetry).toBe('simulated')
+          expect(match.capabilityStatuses.telemetry).toBe('hardware')
+          expect(match.statusLabels.telemetry).toBe('Comprovado em hardware')
           expect(match.capabilityStatuses.pause).toBe('simulated')
         }
       }

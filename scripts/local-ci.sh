@@ -97,7 +97,7 @@ code_job() {
   fi
   local node_ver
   node_ver=$(node --version)
-  [[ $node_ver =~ ^v(22\.(1[89]|[2-9][0-9])\.[0-9]+|2[34]\.[0-9]+\.[0-9]+)$ ]] || { printf '%s\n' 'UNSUPPORTED: workflow requires Node >=22.18.0 <25.' >&2; return 2; }
+  [[ $node_ver =~ ^v(22\.(22\.([3-9]|[1-9][0-9]+)|2[3-9]\.[0-9]+|[3-9][0-9]\.[0-9]+)|24\.(22\.([2-9]|[1-9][0-9]+)|2[3-9]\.[0-9]+|[3-9][0-9]\.[0-9]+))$ ]] || { printf '%s\n' 'UNSUPPORTED: Node must satisfy ^22.22.3 || >=24.22.2 <25.' >&2; return 2; }
   [[ -d node_modules ]] || { printf '%s\n' 'UNSUPPORTED: install workspace dependencies before running local CI.' >&2; return 2; }
   npm ci --ignore-scripts
   npm run lint

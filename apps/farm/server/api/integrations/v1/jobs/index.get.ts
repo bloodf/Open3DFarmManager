@@ -62,6 +62,7 @@ export default defineEventHandler(async (event) => {
   try {
     return await listIntegrationJobs(integrationAuthPool(), {
       ...scope,
+      appId: principal.appId,
       printerId: normalizedPrinterId ?? null,
       since: since === undefined ? null : Number(since),
       until: until === undefined ? null : Number(until),

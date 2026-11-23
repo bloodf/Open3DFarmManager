@@ -102,6 +102,23 @@ Os simuladores (Moonraker sv06 e u1, Spoolman e câmera) são processos de teste
 
 Para abrir a página da farm no seu próprio Chrome, use o endereço do servidor da etapa 4 e acrescente `/farm`. As impressoras aparecem nessa página somente após o pareamento do Connector, que o `app-smoke` faz sozinho. O `app-smoke` verifica que a página carrega, renderiza texto e não contata hosts externos; ele não confere os nomes das impressoras na tela.
 
+### Verificar as câmeras Bambu Lab simuladas
+
+Instale também o OpenSSL e o FFmpeg com suporte ao encoder `libx264`. Deixe os executáveis no `PATH` ou use `OPENFARM_CAMERA_FFMPEG` para indicar o caminho absoluto do FFmpeg.
+
+Execute na raiz do checkout. A instalação precisa acontecer no mesmo checkout que executa a jornada, inclusive quando uma automação cria uma árvore de trabalho separada.
+
+```sh
+npm ci --ignore-scripts
+npm run test:journey -- tests/journey/bambu.spec.ts --grep "câmera Bambu Lab simulada"
+```
+
+A jornada sobe um banco descartável, o aplicativo e os simuladores locais. O Chrome verifica a imagem ao vivo da câmera TLS JPEG e confirma que revogar o Connector encerra a conexão e o encoder. Os modelos RTSPS e os modelos sem suporte aparecem com a câmera indisponível.
+
+Configure câmeras TLS JPEG Bambu Lab (A1, A1 mini, P1P e P1S) com `kind: bambu-lan` na origem da câmera. A origem exige `ffmpeg` com o caminho absoluto do encoder e seu SHA-256, um `credentialFile` privado e `caFile` ou `pinSha256` para TLS. A configuração `camera.helper` identifica o binário Go para as câmeras RTSP genéricas.
+
+Para habilitar RTSPS, o helper de ingestão precisa de um modo autenticado próprio. Esse modo deve verificar o IP literal e a porta no socket de captura, validar a cadeia de certificados e a identidade do IP durante o handshake TLS e só então permitir a autenticação RTSP nesse mesmo socket. O modo deve recusar redirecionamentos, controles que troquem o destino e qualquer fallback para RTSP sem TLS. O Connector deve encerrar o socket e o processo ao revogar a sessão.
+
 ## 6. Verificar o ambiente
 
 ```sh

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { formatNumber } from '../../utils/ui-format.ts'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { syncMotionFactors } from '../../utils/motion-factors.ts'
 import Button from '../ui/Button.vue'
 import {
   BABYSTEP_STEPS_MM,
@@ -49,6 +50,18 @@ const feed = ref(String(JOG_FEEDS_MM_MIN[2]))
 const babystep = ref(String(BABYSTEP_STEPS_MM[1]))
 const speed = ref(String(props.speedPct ?? 100))
 const flow = ref(String(props.flowPct ?? 100))
+const editedFactors = { speed: false, flow: false }
+watch(
+  () => [props.speedPct, props.flowPct] as const,
+  ([speedPct, flowPct]) => {
+    const synced = syncMotionFactors(editedFactors, speedPct, flowPct, {
+      speed: speed.value,
+      flow: flow.value,
+    })
+    speed.value = synced.speed
+    flow.value = synced.flow
+  },
+)
 const note = ref('')
 
 const can = (control: MotionControl) =>
@@ -197,6 +210,7 @@ function applyFactors(event: Event) {
       <input
         id="factor-speed"
         v-model="speed"
+        @input="editedFactors.speed = true"
         type="number"
         inputmode="numeric"
         min="10"
@@ -208,6 +222,7 @@ function applyFactors(event: Event) {
       <input
         id="factor-flow"
         v-model="flow"
+        @input="editedFactors.flow = true"
         type="number"
         inputmode="numeric"
         min="50"

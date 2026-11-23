@@ -19,21 +19,16 @@ describe('catálogo atualizado', () => {
       // simulador; o alvo de arquivos da coleção Bambu ainda não é montado
       // pela configuração de coleta, e isso fica na limitação.
       expect(product.capabilities.files).toBe('simulated')
-      expect(product.capabilities.camera).toBe(
-        ['H2C', 'P2S', 'H2S'].includes(product.model) ? 'simulated' : 'unknown',
-      )
+      expect(product.capabilities.camera).toBe('unknown')
       // Materiais seguem o espelho AMS decodificado pelo conector.
       expect(product.capabilities.materials).toBe('simulated')
     }
     const kobra = anycubicCatalog.find(
       (product) => product.id === 'anycubic-kobra-x',
     )!
-    for (const capability of [
-      'telemetry',
-      'pause',
-      'resume',
-      'cancel',
-    ] as const)
+    // Telemetry is hardware-proven from a real Kobra X; commands stay simulated.
+    expect(kobra.capabilities.telemetry).toBe('hardware')
+    for (const capability of ['pause', 'resume', 'cancel'] as const)
       expect(kobra.capabilities[capability]).toBe('simulated')
     // A ponte KobraLink monta alvo de arquivos, então a listagem é alcançável.
     expect(kobra.capabilities.files).toBe('simulated')

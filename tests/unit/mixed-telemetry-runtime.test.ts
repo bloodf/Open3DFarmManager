@@ -1,4 +1,5 @@
 import { test, expect, vi } from 'vitest'
+import { afterEach } from 'vitest'
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -58,6 +59,18 @@ vi.mock(
   },
 )
 
+// Vitest starts the next test as soon as one times out, while the timed-out body
+// is still awaiting. Restoring the clock here makes its next fake-timer call
+// fail instead of advancing the next test's clock.
+const stops: Array<() => void> = []
+afterEach(() => {
+  // Stop a timed-out body's collector before any in-flight timer can reach it.
+  for (const stop of stops.splice(0)) stop()
+  vi.useRealTimers()
+})
+// Identifies the running test so a superseded body cannot touch the next clock.
+let current = 0
+
 for (const failure of [
   'auth',
   'lost',
@@ -68,8 +81,18 @@ for (const failure of [
   test(`mixed collection isolates ${failure} and recovers without stopping Moonraker`, async () => {
     await import('../../packages/connector/src/moonraker/subscription.ts')
     vi.useFakeTimers({ now: 1700000000000 })
+    const mine = ++current
+    // Advance in slices so a body superseded by a timeout stops at once instead
+    // of moving the next test's clock.
+    const advance = async (ms: number) => {
+      for (let left = ms; left > 0; left -= 100) {
+        if (mine !== current) throw new Error('Test was superseded')
+        await vi.advanceTimersByTimeAsync(Math.min(100, left))
+      }
+    }
     const dir = mkdtempSync(join(tmpdir(), 'mixed-telemetry-'))
     const controller = new AbortController()
+    stops.push(() => controller.abort())
     const binding = {
       backend: 'kobralink',
       version: 2,
@@ -161,7 +184,7 @@ for (const failure of [
       },
     })
     try {
-      await vi.advanceTimersByTimeAsync(2500)
+      await advance(2500)
       const states = () =>
         queue
           .batch(Date.now())
@@ -195,7 +218,7 @@ for (const failure of [
       }
       const moonBefore = states().length
       failing = false
-      await vi.advanceTimersByTimeAsync(4500)
+      await advance(4500)
       expect(
         states().filter((s) => s.printerKey === 'moon').length,
       ).toBeGreaterThan(moonBefore)
@@ -213,7 +236,7 @@ for (const failure of [
       controller.abort()
       await run
       const depth = queue.depth
-      await vi.advanceTimersByTimeAsync(10000)
+      await advance(10000)
       expect(queue.depth).toBe(depth)
       expect(vi.getTimerCount()).toBe(0)
     } finally {
@@ -221,6 +244,7 @@ for (const failure of [
       await run
       queue.close()
       rmSync(dir, { recursive: true })
+      if (mine !== current) return
       vi.useRealTimers()
     }
   })

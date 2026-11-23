@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 import { randomBytes, randomUUID } from 'node:crypto'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, onTestFinished } from 'vitest'
 import {
   ControlArguments,
   ExtendedControlAction,
@@ -445,11 +445,12 @@ describe('command journal', () => {
   it('migrates a v6 journal and records bed_mesh', () => {
     // Scratch directory under the OS temp area; left in place on purpose.
     const directory = mkdtempSync(join(tmpdir(), 'bed-mesh-journal-'))
+    onTestFinished(() => rmSync(directory, { recursive: true, force: true }))
     closeCommandJournal(openCommandJournal({ directory, clock: Date.now }))
     const db = new DatabaseSync(join(directory, 'pause-commands.sqlite'))
     try {
       db.exec(
-        "DROP TABLE control_command_actions; CREATE TABLE control_command_actions (cmd_id TEXT PRIMARY KEY, action TEXT NOT NULL CHECK(action IN ('pause','resume','cancel','emergency_stop','firmware_restart','run_macro','load_filament','unload_filament','extrude','set_led','set_pin','jog','motors_off','z_babystep','set_factor','set_temperature','set_fan','home','set_light','set_speed','start_print'))) STRICT; INSERT INTO control_command_actions VALUES ('retained', 'set_pin'); PRAGMA user_version=6;",
+        "DROP INDEX pause_active_assignment; DROP INDEX pause_active_printer; CREATE UNIQUE INDEX pause_active_assignment ON pause_commands(assignment_id) WHERE status IN ('claimed','write-started','outcome-unknown'); CREATE UNIQUE INDEX pause_active_printer ON pause_commands(farm_id,printer_key) WHERE status IN ('claimed','write-started','outcome-unknown'); DROP TABLE control_command_actions; CREATE TABLE control_command_actions (cmd_id TEXT PRIMARY KEY, action TEXT NOT NULL CHECK(action IN ('pause','resume','cancel','emergency_stop','firmware_restart','run_macro','load_filament','unload_filament','extrude','set_led','set_pin','jog','motors_off','z_babystep','set_factor','set_temperature','set_fan','home','set_light','set_speed','start_print'))) STRICT; INSERT INTO control_command_actions VALUES ('retained', 'set_pin'); PRAGMA user_version=6;",
       )
     } finally {
       db.close()
@@ -480,6 +481,7 @@ describe('bed_mesh rate limit', () => {
   it('accepts one dispatch per printer a minute and leaves other actions alone', () => {
     // Scratch directory under the OS temp area; left in place on purpose.
     const directory = mkdtempSync(join(tmpdir(), 'bed-mesh-rate-'))
+    onTestFinished(() => rmSync(directory, { recursive: true, force: true }))
     let now = 1000
     const journal = openCommandJournal({ directory, clock: () => now })
     const scope = {

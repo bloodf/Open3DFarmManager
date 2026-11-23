@@ -919,6 +919,37 @@ test('raw complete query has one pending request and <=1s timeout before epoch i
   }
 }, 20000)
 
+test('complete query invalidation occurs before the longer request timeout', async () => {
+  const evidence: RawEvidence = { raw: [], rawUnavailable: [] }
+  const service = await fixture({
+    subscribe(socket, _connection, _later, request) {
+      if (request.id === 1) socket.send(snapshot())
+    },
+  })
+  try {
+    const events = await run(
+      service.origin,
+      {
+        requestTimeoutMs: 5000,
+        staleAfterMs: 5000,
+        reconnectMinMs: 3000,
+        reconnectMaxMs: 3000,
+      },
+      'raw',
+      undefined,
+      evidence,
+      { unavailable: 2, deadlineMs: 3500 },
+    )
+    expect(evidence.completedBy).toBe('unavailable')
+    expect(service.rpcs).toHaveLength(2)
+    expect(evidence.raw).toHaveLength(1)
+    expect(evidence.rawUnavailable).toHaveLength(1)
+    expect(events.some((event) => event.reason === 'stale')).toBe(true)
+  } finally {
+    await service.close()
+  }
+}, 20000)
+
 test.each([10.5, 11, 12])(
   'overlapping complete query at source time %s is discarded without regressing fields or stopping collection',
   async (queryTime) => {
@@ -950,7 +981,7 @@ test.each([10.5, 11, 12])(
         'raw',
         undefined,
         evidence,
-        { rawObservations: 3, deadlineMs: 6000 },
+        { rawObservations: 4, deadlineMs: 6000 },
       )
       expect(evidence.completedBy).toBe('observation')
       expect(service.rpcs.length).toBe(3)
@@ -960,12 +991,16 @@ test.each([10.5, 11, 12])(
           .map((event) => event.printer?.progress),
       ).toEqual([0.25, 0.5, 0.7])
       expect(evidence.raw.map((value) => value.printer.progress)).toEqual([
-        0.25, 0.5, 0.7,
+        0.25, 0.5, 0.5, 0.7,
       ])
       expect(evidence.raw[1]!.fieldObservedAtMonoMs.webhooks).toBe(
         evidence.raw[0]!.fieldObservedAtMonoMs.webhooks,
       )
-      expect(evidence.raw[2]!.fieldObservedAtMonoMs.progress).toBeGreaterThan(
+      expect(evidence.raw[2]!.temperatureObservation?.fields).toEqual({
+        tool: { kind: 'absent' },
+        bed: { kind: 'absent' },
+      })
+      expect(evidence.raw[3]!.fieldObservedAtMonoMs.progress).toBeGreaterThan(
         evidence.raw[1]!.fieldObservedAtMonoMs.progress,
       )
       expect(
@@ -1097,11 +1132,11 @@ test('overlapping progress preserves its value while unchanged readiness receive
       'raw',
       undefined,
       evidence,
-      { rawObservations: 3, deadlineMs: 6000 },
+      { rawObservations: 4, deadlineMs: 6000 },
     )
     expect(evidence.completedBy).toBe('observation')
     expect(evidence.raw.map((o) => o.printer.progress)).toEqual([
-      0.25, 0.5, 0.6,
+      0.25, 0.5, 0.5, 0.6,
     ])
     expect(evidence.raw[1]!.fieldObservedAtMonoMs.webhooks).toBe(
       evidence.raw[0]!.fieldObservedAtMonoMs.webhooks,

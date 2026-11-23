@@ -8,6 +8,7 @@ import {
   encodeApiEnvelopeFrame,
   newApiEnvelopeNonce,
   signApiEnvelope,
+  scopeForApiAction,
   type ApiEnvelopeAction,
   type ApiEnvelopeRefusalCode,
 } from '../../../../packages/farm-protocol/src/api-envelope.ts'
@@ -41,7 +42,11 @@ export type EnvelopeStatus =
   | 'outcome-unknown'
 export type EnvelopeKind = 'job' | 'action'
 export type RequiredScope =
-  'jobs:start' | 'jobs:write' | 'control:basic' | 'control:extended'
+  | 'jobs:start'
+  | 'jobs:write'
+  | 'control:basic'
+  | 'control:extended'
+  | 'plates:confirm'
 /** What the Connector can report, in the order a command can progress. */
 export type ConnectorOutcome =
   'delivered' | 'refused' | 'started' | 'completed' | 'cancelled' | 'failed'
@@ -158,7 +163,6 @@ export type ResultVerdict =
   'recorded' | 'duplicate' | 'ignored' | 'unknown-command'
 export type DeliveryErrorSite = 'audit' | 'store' | 'inbox'
 
-const CONTROL_BASIC = new Set(['pause', 'resume', 'cancel'])
 /** Statuses a Connector outcome may follow; a final status never changes. */
 const OUTCOME_FROM: Record<ConnectorOutcome, readonly EnvelopeStatus[]> = {
   delivered: ['sending', 'sent'],
@@ -190,10 +194,7 @@ export function requiredScopeFor(
   command: IssueEnvelope['command'],
 ): RequiredScope {
   if (command.kind === 'job') return 'jobs:start'
-  if (command.action.action === 'start_library_print') return 'jobs:write'
-  return CONTROL_BASIC.has(command.action.action)
-    ? 'control:basic'
-    : 'control:extended'
+  return scopeForApiAction(command.action.action)
 }
 
 export type IntegrationDeliveryOptions = Readonly<{
@@ -277,6 +278,8 @@ export class IntegrationDeliveryService {
           nonce,
           issued_at: issuedAt,
           expires_at: issuedAt + ttl,
+          scope: requiredScopeFor(input.command),
+          grant_epoch: issuedAt,
           kind: input.command.kind,
           ...(input.command.kind === 'job'
             ? { job: input.command.job }

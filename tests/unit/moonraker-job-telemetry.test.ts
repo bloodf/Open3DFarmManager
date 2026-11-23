@@ -54,7 +54,7 @@ describe('Moonraker job telemetry', () => {
       total_duration: 'bad',
       info: { current_layer: -1, total_layer: 1.5 },
     })
-    expect(printer.filename).toHaveLength(255)
+    expect(printer.filename).toHaveLength(128)
     expect(printer).not.toHaveProperty('printDuration')
     expect(printer).not.toHaveProperty('totalDuration')
     expect(printer).not.toHaveProperty('currentLayer')

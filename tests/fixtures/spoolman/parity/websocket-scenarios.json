@@ -1,0 +1,852 @@
+[
+  {
+    "name": "crud-feeds",
+    "listeners": [
+      {
+        "path": "/api/v1/"
+      },
+      {
+        "path": "/api/v1/vendor"
+      },
+      {
+        "path": "/api/v1/filament"
+      },
+      {
+        "path": "/api/v1/spool"
+      },
+      {
+        "path": "/api/v1/setting"
+      }
+    ],
+    "steps": [
+      {
+        "method": "POST",
+        "path": "/api/v1/vendor",
+        "body": {
+          "name": "WS Vendor",
+          "comment": "c"
+        },
+        "save": {
+          "vendor": "id"
+        }
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/v1/vendor/${vendor}",
+        "body": {
+          "comment": "changed"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/filament",
+        "body": {
+          "name": "WS PLA",
+          "vendor_id": "${vendor}",
+          "material": "PLA",
+          "density": 1.24,
+          "diameter": 1.75,
+          "weight": 1000,
+          "spool_weight": 200
+        },
+        "save": {
+          "filament": "id"
+        }
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/v1/filament/${filament}",
+        "body": {
+          "comment": "f"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/spool",
+        "body": {
+          "filament_id": "${filament}",
+          "location": "WS Shelf",
+          "initial_weight": 1000
+        },
+        "save": {
+          "spool": "id"
+        }
+      },
+      {
+        "method": "PUT",
+        "path": "/api/v1/spool/${spool}/use",
+        "body": {
+          "use_weight": 10
+        }
+      },
+      {
+        "method": "PUT",
+        "path": "/api/v1/spool/${spool}/use",
+        "body": {
+          "use_length": 100
+        }
+      },
+      {
+        "method": "PUT",
+        "path": "/api/v1/spool/${spool}/measure",
+        "body": {
+          "weight": 900
+        }
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/v1/spool/${spool}",
+        "body": {
+          "comment": "x"
+        }
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/v1/spool/${spool}",
+        "body": {
+          "archived": true
+        }
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/v1/spool/${spool}"
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/v1/filament/${filament}"
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/v1/vendor/${vendor}"
+      }
+    ]
+  },
+  {
+    "name": "per-id-feeds",
+    "listeners": [
+      {
+        "path": "/api/v1/vendor/${vendor}",
+        "openAfter": 0
+      },
+      {
+        "path": "/api/v1/filament/${filament}",
+        "openAfter": 1
+      },
+      {
+        "path": "/api/v1/spool/${spool}",
+        "openAfter": 2
+      },
+      {
+        "path": "/api/v1/spool/${spoolOther}",
+        "openAfter": 3
+      },
+      {
+        "path": "/api/v1/spool/99999",
+        "openAfter": 3
+      }
+    ],
+    "steps": [
+      {
+        "method": "POST",
+        "path": "/api/v1/vendor",
+        "body": {
+          "name": "Per Vendor"
+        },
+        "save": {
+          "vendor": "id"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/filament",
+        "body": {
+          "name": "Per PETG",
+          "vendor_id": "${vendor}",
+          "material": "PETG",
+          "density": 1.27,
+          "diameter": 1.75,
+          "weight": 1000
+        },
+        "save": {
+          "filament": "id"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/spool",
+        "body": {
+          "filament_id": "${filament}"
+        },
+        "save": {
+          "spool": "id"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/spool",
+        "body": {
+          "filament_id": "${filament}",
+          "location": "Other"
+        },
+        "save": {
+          "spoolOther": "id"
+        }
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/v1/vendor/${vendor}",
+        "body": {
+          "comment": "v"
+        }
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/v1/filament/${filament}",
+        "body": {
+          "comment": "f"
+        }
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/v1/spool/${spool}",
+        "body": {
+          "comment": "s"
+        }
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/v1/spool/${spoolOther}",
+        "body": {
+          "comment": "o"
+        }
+      },
+      {
+        "method": "PUT",
+        "path": "/api/v1/spool/${spool}/use",
+        "body": {
+          "use_weight": 5
+        }
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/v1/spool/${spoolOther}"
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/v1/spool/${spool}"
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/v1/filament/${filament}"
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/v1/vendor/${vendor}"
+      }
+    ]
+  },
+  {
+    "name": "settings-and-fields",
+    "listeners": [
+      {
+        "path": "/api/v1/"
+      },
+      {
+        "path": "/api/v1/setting"
+      },
+      {
+        "path": "/api/v1/setting/currency"
+      },
+      {
+        "path": "/api/v1/setting/extra_fields_spool"
+      },
+      {
+        "path": "/api/v1/setting/round_prices"
+      },
+      {
+        "path": "/api/v1/vendor"
+      }
+    ],
+    "steps": [
+      {
+        "method": "POST",
+        "path": "/api/v1/setting/currency",
+        "body": "\"USD\""
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/setting/round_prices",
+        "body": "true"
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/field/spool/ws_note",
+        "body": {
+          "name": "Note",
+          "field_type": "text"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/field/spool/ws_note",
+        "body": {
+          "name": "Notes",
+          "field_type": "text",
+          "order": 2
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/field/spool/ws_grade",
+        "body": {
+          "name": "Grade",
+          "field_type": "choice",
+          "choices": ["a", "b"],
+          "multi_choice": false
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/setting/extra_fields_spool",
+        "body": "[{\"name\":\"Note\",\"field_type\":\"text\",\"key\":\"ws_note\",\"entity_type\":\"spool\"}]"
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/v1/field/spool/ws_note"
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/setting/currency",
+        "body": ""
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/setting/round_prices",
+        "body": "null"
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/setting/currency",
+        "body": "\"EUR\""
+      }
+    ]
+  },
+  {
+    "name": "vendor-delete-cascade",
+    "listeners": [
+      {
+        "path": "/api/v1/"
+      },
+      {
+        "path": "/api/v1/vendor"
+      },
+      {
+        "path": "/api/v1/filament"
+      },
+      {
+        "path": "/api/v1/filament/${filamentA}",
+        "openAfter": 2
+      }
+    ],
+    "steps": [
+      {
+        "method": "POST",
+        "path": "/api/v1/vendor",
+        "body": {
+          "name": "Cascade Vendor"
+        },
+        "save": {
+          "vendor": "id"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/filament",
+        "body": {
+          "name": "Cascade A",
+          "vendor_id": "${vendor}",
+          "material": "PLA",
+          "density": 1.24,
+          "diameter": 1.75,
+          "weight": 1000
+        },
+        "save": {
+          "filamentA": "id"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/filament",
+        "body": {
+          "name": "Cascade B",
+          "vendor_id": "${vendor}",
+          "material": "PLA",
+          "density": 1.24,
+          "diameter": 1.75,
+          "weight": 1000
+        },
+        "save": {
+          "filamentB": "id"
+        }
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/v1/vendor/${vendor}"
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/v1/filament/${filamentA}"
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/v1/filament/${filamentB}"
+      }
+    ]
+  },
+  {
+    "name": "renames",
+    "listeners": [
+      {
+        "path": "/api/v1/"
+      },
+      {
+        "path": "/api/v1/spool"
+      },
+      {
+        "path": "/api/v1/setting"
+      }
+    ],
+    "steps": [
+      {
+        "method": "POST",
+        "path": "/api/v1/vendor",
+        "body": {
+          "name": "Rename Vendor"
+        },
+        "save": {
+          "vendor": "id"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/filament",
+        "body": {
+          "name": "Rename PLA",
+          "vendor_id": "${vendor}",
+          "material": "PLA",
+          "density": 1.24,
+          "diameter": 1.75,
+          "weight": 1000
+        },
+        "save": {
+          "filament": "id"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/field/spool/ws_shelf",
+        "body": {
+          "name": "Shelf",
+          "field_type": "text"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/spool",
+        "body": {
+          "filament_id": "${filament}",
+          "location": "Old Place",
+          "extra": {
+            "ws_shelf": "\"s1\""
+          }
+        },
+        "save": {
+          "spoolA": "id"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/spool",
+        "body": {
+          "filament_id": "${filament}",
+          "location": "Old Place",
+          "extra": {
+            "ws_shelf": "\"s1\""
+          }
+        },
+        "save": {
+          "spoolB": "id"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/spool",
+        "body": {
+          "filament_id": "${filament}",
+          "location": "Stay Place",
+          "extra": {
+            "ws_shelf": "\"s2\""
+          }
+        },
+        "save": {
+          "spoolC": "id"
+        }
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/v1/location/Old%20Place",
+        "body": {
+          "name": "New Place"
+        }
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/v1/spool/field/extra.ws_shelf",
+        "body": {
+          "value": "s1",
+          "new_value": "s9"
+        }
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/v1/spool/field/location",
+        "body": {
+          "value": "Stay Place",
+          "new_value": "Moved Place"
+        }
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/v1/field/spool/ws_shelf"
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/v1/spool/${spoolA}"
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/v1/spool/${spoolB}"
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/v1/spool/${spoolC}"
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/v1/filament/${filament}"
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/v1/vendor/${vendor}"
+      }
+    ]
+  },
+  {
+    "name": "failed-writes-are-silent",
+    "listeners": [
+      {
+        "path": "/api/v1/"
+      },
+      {
+        "path": "/api/v1/vendor"
+      },
+      {
+        "path": "/api/v1/setting"
+      }
+    ],
+    "steps": [
+      {
+        "method": "POST",
+        "path": "/api/v1/vendor",
+        "body": {
+          "name": ""
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/vendor",
+        "body": {
+          "comment": "no name"
+        }
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/v1/vendor/987654",
+        "body": {
+          "comment": "x"
+        }
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/v1/vendor/987654"
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/filament",
+        "body": {
+          "name": "Orphan",
+          "vendor_id": 987654,
+          "material": "PLA",
+          "density": 1.2,
+          "diameter": 1.75,
+          "weight": 1000
+        }
+      },
+      {
+        "method": "PUT",
+        "path": "/api/v1/spool/987654/use",
+        "body": {
+          "use_weight": 1
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/setting/currency",
+        "body": "5"
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/setting/nothing",
+        "body": "\"x\""
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/field/spool/bad_field",
+        "body": {
+          "name": "x",
+          "field_type": "choice"
+        }
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/v1/field/spool/nothing"
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/v1/location/Nowhere",
+        "body": {
+          "name": "Else"
+        }
+      }
+    ]
+  },
+  {
+    "name": "two-clients-one-pool",
+    "listeners": [
+      {
+        "path": "/api/v1/vendor"
+      },
+      {
+        "path": "/api/v1/vendor"
+      },
+      {
+        "path": "/api/v1/",
+        "openAfter": 0
+      }
+    ],
+    "steps": [
+      {
+        "method": "POST",
+        "path": "/api/v1/vendor",
+        "body": {
+          "name": "Shared A"
+        },
+        "save": {
+          "vendor": "id"
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/api/v1/vendor",
+        "body": {
+          "name": "Shared B"
+        }
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/v1/vendor/${vendor}"
+      }
+    ]
+  },
+  {
+    "name": "client-ping-reply",
+    "settleMs": 1800,
+    "listeners": [
+      {
+        "path": "/api/v1/",
+        "send": "ping"
+      },
+      {
+        "path": "/api/v1/vendor",
+        "send": ""
+      },
+      {
+        "path": "/api/v1/setting/currency",
+        "send": "hello"
+      }
+    ],
+    "steps": [
+      {
+        "method": "GET",
+        "path": "/api/v1/health"
+      }
+    ]
+  },
+  {
+    "name": "tag-scan-feeds-hear-no-entity-events",
+    "listeners": [
+      {
+        "path": "/api/v1/tag/scan"
+      },
+      {
+        "path": "/api/v1/tag/scan/r1"
+      },
+      {
+        "path": "/api/v1/"
+      }
+    ],
+    "steps": [
+      {
+        "method": "POST",
+        "path": "/api/v1/vendor",
+        "body": {
+          "name": "Not A Scan"
+        },
+        "save": {
+          "vendor": "id"
+        }
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/v1/vendor/${vendor}"
+      }
+    ]
+  },
+  {
+    "name": "handshake-origin-and-host",
+    "listeners": [
+      {
+        "path": "/api/v1/",
+        "headers": {
+          "Origin": "http://evil.example"
+        }
+      },
+      {
+        "path": "/api/v1/vendor",
+        "headers": {
+          "Origin": "http://${host}"
+        }
+      },
+      {
+        "path": "/api/v1/spool",
+        "headers": {
+          "Origin": "null"
+        }
+      },
+      {
+        "path": "/api/v1/filament",
+        "headers": {
+          "Origin": "not a url"
+        }
+      },
+      {
+        "path": "/api/v1/setting",
+        "headers": {
+          "Origin": "http://evil.example",
+          "X-Forwarded-Host": "evil.example"
+        }
+      },
+      {
+        "path": "/api/v1/setting/currency",
+        "headers": {
+          "Origin": "http://evil.example",
+          "X-Forwarded-Host": "evil.example, proxy.example"
+        }
+      }
+    ],
+    "steps": [
+      {
+        "method": "POST",
+        "path": "/api/v1/vendor",
+        "body": {
+          "name": "Origin Probe"
+        },
+        "save": {
+          "vendor": "id"
+        }
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/v1/vendor/${vendor}"
+      }
+    ]
+  },
+  {
+    "name": "handshake-path-spellings",
+    "listeners": [
+      {
+        "path": "/api/v1"
+      },
+      {
+        "path": "/api/v1/setting/"
+      },
+      {
+        "path": "/api/v1/vendor/"
+      },
+      {
+        "path": "/api/v1/filament/"
+      },
+      {
+        "path": "/api/v1/spool/"
+      }
+    ],
+    "steps": [
+      {
+        "method": "POST",
+        "path": "/api/v1/vendor",
+        "body": {
+          "name": "Spelling Probe"
+        },
+        "save": {
+          "vendor": "id"
+        }
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/v1/vendor/${vendor}"
+      }
+    ]
+  },
+  {
+    "name": "handshake-unknown-paths",
+    "listeners": [
+      {
+        "path": "/api/v1/vendor/abc"
+      },
+      {
+        "path": "/api/v1/vendor/1/2"
+      },
+      {
+        "path": "/api/v1/nothing"
+      },
+      {
+        "path": "/api/v1/health"
+      },
+      {
+        "path": "/api/v1/location"
+      },
+      {
+        "path": "/api/v1/vendor/0"
+      },
+      {
+        "path": "/api/v1/spool/-1"
+      }
+    ],
+    "steps": [
+      {
+        "method": "GET",
+        "path": "/api/v1/health"
+      }
+    ]
+  }
+]

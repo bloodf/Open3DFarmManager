@@ -58,6 +58,7 @@ const captionId = useId()
 table {
   border-collapse: collapse;
   width: 100%;
+  font-size: var(--ops-text-body);
 }
 caption {
   text-align: start;
@@ -66,7 +67,7 @@ caption {
 th,
 td {
   text-align: start;
-  padding: var(--space-2);
-  border-block-end: 1px solid var(--text-muted);
+  padding: var(--ops-space-2);
+  border-block-end: 1px solid var(--ops-border);
 }
 </style>

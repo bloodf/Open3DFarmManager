@@ -1,6 +1,9 @@
 import { ApiQueryReply, ApiQueryRequest } from './api-query.ts'
 import { z } from 'zod'
-import { MAX_API_ENVELOPE_WIRE_BYTES } from './api-envelope.ts'
+import {
+  ApiEnvelopeScope,
+  MAX_API_ENVELOPE_WIRE_BYTES,
+} from './api-envelope.ts'
 import { parseBoundedJson } from './json.ts'
 import { BrowserDeviceUuid } from './browser-device-proof.ts'
 import { BrowserTransportProofChallenge } from './browser-transport-proof.ts'
@@ -13,18 +16,14 @@ const signallingChallenge = CredentialProofChallenge.refine(
 const signature = z.string().regex(/^[A-Za-z0-9_-]{85}[AQgw]$/)
 const base = { v: z.literal(1) }
 const envelopeWire = z.string().min(1).max(MAX_API_ENVELOPE_WIRE_BYTES)
-export const ApiInboxScope = z.enum([
-  'jobs:start',
-  'jobs:write',
-  'control:basic',
-  'control:extended',
-])
+export const ApiInboxScope = ApiEnvelopeScope
 const token = z.string().min(1).max(8192)
 const timestamp = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
 export const SignallingClientControl = z.discriminatedUnion('t', [
   z.strictObject({
     ...base,
     t: z.literal('browser.begin'),
+    camera_printer_id: BrowserDeviceUuid.optional(),
     farm_id: BrowserDeviceUuid,
     agent_id: BrowserDeviceUuid,
     key_id: BrowserDeviceUuid,

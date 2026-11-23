@@ -24,6 +24,7 @@ describe('upload validation', () => {
 import { vi } from 'vitest'
 import {
   filesAvailability,
+  printableEntry,
   printableFile,
   printOutcomeText,
 } from '../../apps/farm/app/utils/files-view.ts'
@@ -105,6 +106,15 @@ describe('files permissions', () => {
     expect(printableFile('peca.gcode')).toBe(true)
     for (const name of ['../peca.gcode', 'pasta/peca.gcode', 'x\u0000.gcode'])
       expect(printableFile(name)).toBe(false)
+  })
+  it('checks Anycubic raw G-code names and respects an explicit listing restriction', () => {
+    expect(printableFile('part.gcode', 'anycubic')).toBe(true)
+    for (const name of ['part.GCODE', 'part.gcode.3mf', 'part%.gcode'])
+      expect(printableFile(name, 'anycubic')).toBe(false)
+    expect(printableFile('part.gcode.3mf')).toBe(true)
+    expect(
+      printableEntry({ name: 'part.gcode.3mf', printUnsupported: true }),
+    ).toBe(false)
   })
   it('distinguishes applied, rejected and uncertain command outcomes', () => {
     expect(printOutcomeText('applied')).toContain('Impressão iniciada')
@@ -248,6 +258,71 @@ describe('files session flow', () => {
     expect(h.states.at(-1)?.kind).toBe('error')
     expect(h.files).toEqual([])
   })
+  it('shows a busy upload refusal and tells the operator when to retry', async () => {
+    const h = harness({
+      sendFile: async () => ({
+        type: 'result',
+        transfer_id: 'transfer',
+        ok: false,
+        reason: 'busy',
+      }),
+    })
+    await h.view.upload('printer', new File(['x'], 'part.gcode.3mf'))
+    expect(h.states.at(-1)).toEqual({
+      kind: 'error',
+      message:
+        'A impressora está ocupada. Aguarde a impressão terminar e tente enviar o arquivo novamente.',
+    })
+    expect(h.files).toEqual([])
+  })
+
+  it('keeps a stored-only upload visible and skips its start command', async () => {
+    const h = harness({
+      sendFile: async () => ({
+        type: 'result',
+        transfer_id: 'transfer',
+        ok: true,
+        printUnsupported: true,
+      }),
+    })
+    await h.view.upload('printer', new File(['x'], 'part.gcode.3mf'))
+    expect(h.files).toEqual([
+      { name: 'part.gcode.3mf', size: 1, modified: 0, printUnsupported: true },
+    ])
+    expect(h.states.at(-1)).toMatchObject({
+      message: expect.stringContaining('selecione um arquivo .gcode'),
+    })
+    await h.view.start('part.gcode.3mf')
+    expect(h.session.issueControlCommand).not.toHaveBeenCalled()
+  })
+
+  it('skips listed packages while allowing raw G-code on the same printer', async () => {
+    const h = harness({
+      listFiles: async () => ({
+        type: 'files.list.result',
+        request_id: 'req',
+        printer_key: 'printer',
+        ok: true,
+        files: [
+          {
+            name: 'part.gcode.3mf',
+            size: 3,
+            modified: 0,
+            printUnsupported: true,
+          },
+          { name: 'part.gcode', size: 3, modified: 0 },
+        ],
+      }),
+    })
+    await h.view.list('printer')
+    await h.view.start('part.gcode.3mf')
+    await h.view.start('part.gcode')
+    expect(h.session.issueControlCommand).toHaveBeenCalledExactlyOnceWith(
+      'start_print',
+      { file: 'part.gcode' },
+    )
+  })
+
   it('sends exactly start_print with the selected file, without retry', async () => {
     const h = harness()
     await h.view.start('peca.gcode')

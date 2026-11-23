@@ -33,6 +33,7 @@ export interface IntegrationPrinterRow {
   groupName?: string | null
   location?: string | null
   sandbox: boolean
+  assignedAt?: number
   state: unknown
   observedAt: number | null
 }
@@ -119,6 +120,49 @@ export class IntegrationAuth {
     return createHmac('sha256', this.config.key)
       .update(context + payload)
       .digest()
+  }
+
+  private signCameraTicket(payload: string) {
+    return createHmac('sha256', this.config.key)
+      .update('openfarm-camera-link-v1.' + payload)
+      .digest()
+  }
+
+  issueCameraLink(appId: string, printerId: string, grantId: string) {
+    const expiresAt = this.now() + 120_000
+    const payload = Buffer.from(
+      JSON.stringify([appId, printerId, grantId, expiresAt]),
+    ).toString('base64url')
+    const signature = this.signCameraTicket(payload).toString('base64url')
+    return { url: '/camera-view#' + payload + '.' + signature, expiresAt }
+  }
+
+  async redeemCameraTicket(ticket: string) {
+    const match = /^([A-Za-z0-9_-]{1,260})\.([A-Za-z0-9_-]{43})$/.exec(ticket)
+    if (!match) return null
+    const payload = match[1]!
+    const signature = Buffer.from(match[2]!, 'base64url')
+    if (
+      signature.toString('base64url') !== match[2] ||
+      !timingSafeEqual(signature, this.signCameraTicket(payload))
+    )
+      return null
+    const [appId, printerId, grantId, expiresAt] = JSON.parse(
+      Buffer.from(payload, 'base64url').toString('utf8'),
+    ) as [string, string, string, number]
+    if (expiresAt <= this.now()) return null
+    const printer = await this.store.readPrinter?.(printerId)
+    if (!printer) return null
+    const grants = await this.store.effectiveGrants(appId)
+    const allowed = grants.some(
+      (grant) =>
+        grant.id === grantId &&
+        grant.scopes.includes('camera:view') &&
+        grant.farmId === printer.farmId &&
+        (grant.printerAssignmentId === null ||
+          grant.printerAssignmentId === printer.id),
+    )
+    return allowed && expiresAt > this.now() ? printer : null
   }
 
   async issue(

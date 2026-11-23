@@ -45,6 +45,10 @@
       "ok": true
     },
     {
+      "check": "browser_secrets_absent/browser-inspection-complete",
+      "ok": true
+    },
+    {
       "check": "browser_secrets_absent/responses-clean",
       "ok": true
     },

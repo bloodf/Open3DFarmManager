@@ -6,8 +6,8 @@ import {
   type AccountSessionState,
 } from '../utils/auth/session-contract.ts'
 
-export const inventoryUuid =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+import { inventoryUuid } from '../utils/inventory-uuid.ts'
+export { inventoryUuid } from '../utils/inventory-uuid.ts'
 export interface InventoryPageInput {
   sessionRecordId: string
   policy: SessionPolicy

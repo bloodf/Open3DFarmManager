@@ -247,8 +247,12 @@ test('switching to live keeps one card per printer', () => {
   )
   // Once the feed reports a printer, the live card is the only card.
   const liveRows = [
-    { assignment: { assignmentId: assignmentA } },
-    { assignment: { assignmentId: otherAssignment } },
+    { assignment: { assignmentId: assignmentA }, connection: 'authenticated' },
+    { assignment: { assignmentId: assignmentB }, connection: 'closed' },
+    {
+      assignment: { assignmentId: otherAssignment },
+      connection: 'authenticated',
+    },
   ]
   assert.deepEqual(
     offlineCards(liveRows, stored).map((state) => state.assignmentId),

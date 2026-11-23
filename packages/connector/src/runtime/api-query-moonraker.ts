@@ -25,12 +25,14 @@ export function moonrakerQueryClient(
       const path =
         method === 'server.files.list'
           ? '/server/files/list?root=gcodes'
-          : method === 'printer.objects.list'
-            ? '/printer/objects/list'
-            : method === 'server.files.get_directory' && validDirectory
-              ? '/server/files/directory?' +
-                new URLSearchParams({ path: String(directory) })
-              : undefined
+          : method === 'printer.objects.query.dispatch'
+            ? '/printer/objects/query?webhooks=state&print_stats=state'
+            : method === 'printer.objects.list'
+              ? '/printer/objects/list'
+              : method === 'server.files.get_directory' && validDirectory
+                ? '/server/files/directory?' +
+                  new URLSearchParams({ path: String(directory) })
+                : undefined
       if (!path) throw Error('Unsupported Moonraker query')
       const deadline = AbortSignal.any([
         ...(signal ? [signal] : []),

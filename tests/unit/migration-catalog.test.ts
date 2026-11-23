@@ -20,6 +20,15 @@ describe('migration catalog', () => {
     expect(repository[22]?.id).toBe('0023_connector_credential_renewals')
     expect(repository[24]?.id).toBe('0025_schema_reader')
     expect(repository[29]?.id).toBe('0030_signalling_successor_credentials')
+    expect(repository[94]?.id).toBe('0095_integration_dispatch_actions')
+    expect(repository[95]?.id).toBe('0096_integration_telemetry_reads')
+    expect(repository[96]?.id).toBe('0097_telemetry_transition_index')
+    expect(repository[97]?.id).toBe('0098_integration_alert_lifecycle')
+    expect(repository[103]?.id).toBe('0104_integration_alert_rules')
+    expect(repository[104]?.id).toBe(
+      '0105_integration_physical_spool_idempotency',
+    )
+    expect(repository[106]?.id).toBe('0107_tool_temperature')
     expect(migrationCatalog(pair)).toEqual(
       migrationCatalog([...pair].reverse()),
     )
@@ -29,6 +38,36 @@ describe('migration catalog', () => {
         pair.map((entry) => ({ ...entry, sql: entry.sql + '\n' })),
       )[0]?.checksum,
     ).not.toBe(original?.checksum)
+  })
+  test('extends both stored control allow-lists and guards capability rollback', async () => {
+    const repository = await loadMigrationCatalog()
+    const migration = repository[106]!
+    const priorCapabilities = repository[92]!.up
+      .split('ALTER TABLE')
+      .slice(1)
+      .join('ALTER TABLE')
+    const priorApiGuard = repository[94]!.up.split(
+      'CREATE OR REPLACE FUNCTION',
+    )[1]!
+    expect(migration.up).toContain(
+      priorCapabilities
+        .replace('BETWEEN 1 AND 32', 'BETWEEN 1 AND 33')
+        .replace(
+          '"set_temperature",',
+          '"set_temperature","set_tool_temperature",',
+        ),
+    )
+    expect(migration.up).toContain(
+      priorApiGuard.replace(
+        "'set_temperature',",
+        "'set_temperature','set_tool_temperature',",
+      ),
+    )
+    expect(migration.down).toContain(priorCapabilities)
+    expect(migration.down).toContain(priorApiGuard)
+    expect(migration.down).toContain(
+      "capability->'actions' ? 'set_tool_temperature'",
+    )
   })
   test('rejects missing pairs, gaps, duplicate numbers, names and empty SQL', () => {
     for (const sources of [

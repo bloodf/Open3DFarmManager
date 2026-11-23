@@ -1,0 +1,5399 @@
+{
+  "upstream": "Spoolman v0.27.1",
+  "image": "sha256:1ebb4f6a62c2e72a07f18b07ebfdbd96322f5bc2eb72570af3088f68d7c393b1",
+  "imageRef": "ghcr.io/donkie/spoolman@sha256:1ebb4f6a62c2e72a07f18b07ebfdbd96322f5bc2eb72570af3088f68d7c393b1",
+  "sourceRevision": "ff8efd517b76a4b2783f29c89e9b9fbcd8cd167b",
+  "casesSha256": "3d2636016e45d27f26f21c8ab7bcece126083dc5c1a4206503fc4d329ef30339",
+  "capturedAt": "2026-11-21T09:29:59.550Z",
+  "cases": [
+    {
+      "name": "vendor-list-empty",
+      "method": "GET",
+      "path": "/api/v1/vendor",
+      "status": 200,
+      "total": "0",
+      "response": []
+    },
+    {
+      "name": "vendor-create-full",
+      "method": "POST",
+      "path": "/api/v1/vendor",
+      "body": {
+        "name": "Polymaker",
+        "comment": "Shanghai",
+        "empty_spool_weight": 140,
+        "external_id": "polymaker"
+      },
+      "status": 200,
+      "total": null,
+      "response": {
+        "id": 1,
+        "registered": "2026-11-21T09:29:54Z",
+        "name": "Polymaker",
+        "comment": "Shanghai",
+        "empty_spool_weight": 140,
+        "external_id": "polymaker",
+        "extra": {}
+      }
+    },
+    {
+      "name": "vendor-create-minimal",
+      "method": "POST",
+      "path": "/api/v1/vendor",
+      "body": {
+        "name": "eSun"
+      },
+      "status": 200,
+      "total": null,
+      "response": {
+        "id": 2,
+        "registered": "2026-11-21T09:29:54Z",
+        "name": "eSun",
+        "extra": {}
+      }
+    },
+    {
+      "name": "vendor-create-empty-name",
+      "method": "POST",
+      "path": "/api/v1/vendor",
+      "body": {
+        "name": ""
+      },
+      "status": 200,
+      "total": null,
+      "response": {
+        "id": 3,
+        "registered": "2026-11-21T09:29:54Z",
+        "name": "",
+        "extra": {}
+      }
+    },
+    {
+      "name": "vendor-create-numeric-string-weight",
+      "method": "POST",
+      "path": "/api/v1/vendor",
+      "body": {
+        "name": "Prusament",
+        "empty_spool_weight": "201.5",
+        "ignored_field": true
+      },
+      "status": 200,
+      "total": null,
+      "response": {
+        "id": 4,
+        "registered": "2026-11-21T09:29:54Z",
+        "name": "Prusament",
+        "empty_spool_weight": 201.5,
+        "extra": {}
+      }
+    },
+    {
+      "name": "vendor-create-missing-name",
+      "method": "POST",
+      "path": "/api/v1/vendor",
+      "body": {
+        "comment": "x"
+      },
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "missing",
+            "loc": ["body", "name"],
+            "msg": "Field required",
+            "input": {
+              "comment": "x"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "vendor-create-name-too-long",
+      "method": "POST",
+      "path": "/api/v1/vendor",
+      "body": {
+        "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "string_too_long",
+            "loc": ["body", "name"],
+            "msg": "String should have at most 64 characters",
+            "input": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "ctx": {
+              "max_length": 64
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "vendor-create-name-wrong-type",
+      "method": "POST",
+      "path": "/api/v1/vendor",
+      "body": {
+        "name": 123
+      },
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "string_type",
+            "loc": ["body", "name"],
+            "msg": "Input should be a valid string",
+            "input": 123
+          }
+        ]
+      }
+    },
+    {
+      "name": "vendor-create-name-null",
+      "method": "POST",
+      "path": "/api/v1/vendor",
+      "body": {
+        "name": null
+      },
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "string_type",
+            "loc": ["body", "name"],
+            "msg": "Input should be a valid string",
+            "input": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "vendor-create-negative-weight",
+      "method": "POST",
+      "path": "/api/v1/vendor",
+      "body": {
+        "name": "a",
+        "empty_spool_weight": -1
+      },
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "greater_than_equal",
+            "loc": ["body", "empty_spool_weight"],
+            "msg": "Input should be greater than or equal to 0",
+            "input": -1,
+            "ctx": {
+              "ge": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "vendor-create-unparsable-weight",
+      "method": "POST",
+      "path": "/api/v1/vendor",
+      "body": {
+        "name": "a",
+        "empty_spool_weight": "heavy"
+      },
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "float_parsing",
+            "loc": ["body", "empty_spool_weight"],
+            "msg": "Input should be a valid number, unable to parse string as a number",
+            "input": "heavy"
+          }
+        ]
+      }
+    },
+    {
+      "name": "vendor-create-comment-too-long",
+      "method": "POST",
+      "path": "/api/v1/vendor",
+      "body": {
+        "name": "a",
+        "comment": "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "string_too_long",
+            "loc": ["body", "comment"],
+            "msg": "String should have at most 1024 characters",
+            "input": "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "ctx": {
+              "max_length": 1024
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "vendor-create-extra-not-dict",
+      "method": "POST",
+      "path": "/api/v1/vendor",
+      "body": {
+        "name": "a",
+        "extra": ["x"]
+      },
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "dict_type",
+            "loc": ["body", "extra"],
+            "msg": "Input should be a valid dictionary",
+            "input": ["x"]
+          }
+        ]
+      }
+    },
+    {
+      "name": "vendor-create-extra-value-not-string",
+      "method": "POST",
+      "path": "/api/v1/vendor",
+      "body": {
+        "name": "a",
+        "extra": {
+          "rating": 5
+        }
+      },
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "string_type",
+            "loc": ["body", "extra", "rating"],
+            "msg": "Input should be a valid string",
+            "input": 5
+          }
+        ]
+      }
+    },
+    {
+      "name": "vendor-create-several-errors",
+      "method": "POST",
+      "path": "/api/v1/vendor",
+      "body": {
+        "name": 7,
+        "empty_spool_weight": -2,
+        "external_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "string_type",
+            "loc": ["body", "name"],
+            "msg": "Input should be a valid string",
+            "input": 7
+          },
+          {
+            "type": "greater_than_equal",
+            "loc": ["body", "empty_spool_weight"],
+            "msg": "Input should be greater than or equal to 0",
+            "input": -2,
+            "ctx": {
+              "ge": 0
+            }
+          },
+          {
+            "type": "string_too_long",
+            "loc": ["body", "external_id"],
+            "msg": "String should have at most 256 characters",
+            "input": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "ctx": {
+              "max_length": 256
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "vendor-create-invalid-json",
+      "method": "POST",
+      "path": "/api/v1/vendor",
+      "rawBody": "{not json",
+      "contentType": "application/json",
+      "compare": "status-type",
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "json_invalid",
+            "loc": ["body", 1],
+            "msg": "JSON decode error",
+            "input": {},
+            "ctx": {
+              "error": "Expecting property name enclosed in double quotes"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "vendor-create-no-body",
+      "method": "POST",
+      "path": "/api/v1/vendor",
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "missing",
+            "loc": ["body"],
+            "msg": "Field required",
+            "input": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "vendor-create-array-body",
+      "method": "POST",
+      "path": "/api/v1/vendor",
+      "body": [
+        {
+          "name": "a"
+        }
+      ],
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "model_attributes_type",
+            "loc": ["body"],
+            "msg": "Input should be a valid dictionary or object to extract fields from",
+            "input": [
+              {
+                "name": "a"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "vendor-create-text-plain",
+      "method": "POST",
+      "path": "/api/v1/vendor",
+      "rawBody": "{\"name\":\"a\"}",
+      "contentType": "text/plain",
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "model_attributes_type",
+            "loc": ["body"],
+            "msg": "Input should be a valid dictionary or object to extract fields from",
+            "input": "{\"name\":\"a\"}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "vendor-create-unknown-extra",
+      "method": "POST",
+      "path": "/api/v1/vendor",
+      "body": {
+        "name": "a",
+        "extra": {
+          "rating": "5"
+        }
+      },
+      "status": 400,
+      "total": null,
+      "response": {
+        "message": "Unknown extra field rating."
+      }
+    },
+    {
+      "name": "field-vendor-rating",
+      "method": "POST",
+      "path": "/api/v1/field/vendor/rating",
+      "body": {
+        "name": "Rating",
+        "field_type": "integer"
+      },
+      "setup": "field",
+      "status": 200,
+      "total": null,
+      "response": [
+        {
+          "name": "Rating",
+          "order": 0,
+          "field_type": "integer",
+          "key": "rating",
+          "entity_type": "vendor"
+        }
+      ]
+    },
+    {
+      "name": "field-vendor-note",
+      "method": "POST",
+      "path": "/api/v1/field/vendor/note",
+      "body": {
+        "name": "Note",
+        "field_type": "text"
+      },
+      "setup": "field",
+      "status": 200,
+      "total": null,
+      "response": [
+        {
+          "name": "Rating",
+          "order": 0,
+          "field_type": "integer",
+          "key": "rating",
+          "entity_type": "vendor"
+        },
+        {
+          "name": "Note",
+          "order": 0,
+          "field_type": "text",
+          "key": "note",
+          "entity_type": "vendor"
+        }
+      ]
+    },
+    {
+      "name": "field-vendor-tags",
+      "method": "POST",
+      "path": "/api/v1/field/vendor/tags",
+      "body": {
+        "name": "Tags",
+        "field_type": "choice",
+        "choices": ["fast", "cheap", "good"],
+        "multi_choice": true
+      },
+      "setup": "field",
+      "status": 200,
+      "total": null,
+      "response": [
+        {
+          "name": "Rating",
+          "order": 0,
+          "field_type": "integer",
+          "key": "rating",
+          "entity_type": "vendor"
+        },
+        {
+          "name": "Note",
+          "order": 0,
+          "field_type": "text",
+          "key": "note",
+          "entity_type": "vendor"
+        },
+        {
+          "name": "Tags",
+          "order": 0,
+          "field_type": "choice",
+          "choices": ["fast", "cheap", "good"],
+          "multi_choice": true,
+          "key": "tags",
+          "entity_type": "vendor"
+        }
+      ]
+    },
+    {
+      "name": "field-vendor-span",
+      "method": "POST",
+      "path": "/api/v1/field/vendor/span",
+      "body": {
+        "name": "Span",
+        "field_type": "integer_range"
+      },
+      "setup": "field",
+      "status": 200,
+      "total": null,
+      "response": [
+        {
+          "name": "Rating",
+          "order": 0,
+          "field_type": "integer",
+          "key": "rating",
+          "entity_type": "vendor"
+        },
+        {
+          "name": "Note",
+          "order": 0,
+          "field_type": "text",
+          "key": "note",
+          "entity_type": "vendor"
+        },
+        {
+          "name": "Tags",
+          "order": 0,
+          "field_type": "choice",
+          "choices": ["fast", "cheap", "good"],
+          "multi_choice": true,
+          "key": "tags",
+          "entity_type": "vendor"
+        },
+        {
+          "name": "Span",
+          "order": 0,
+          "field_type": "integer_range",
+          "key": "span",
+          "entity_type": "vendor"
+        }
+      ]
+    },
+    {
+      "name": "vendor-create-with-extra",
+      "method": "POST",
+      "path": "/api/v1/vendor",
+      "body": {
+        "name": "Elegoo",
+        "extra": {
+          "rating": "5",
+          "note": "\"hello world\"",
+          "tags": "[\"fast\", \"good\"]",
+          "span": "[1, 9]"
+        }
+      },
+      "status": 200,
+      "total": null,
+      "response": {
+        "id": 5,
+        "registered": "2026-11-21T09:29:55Z",
+        "name": "Elegoo",
+        "extra": {
+          "rating": "5",
+          "note": "\"hello world\"",
+          "tags": "[\"fast\", \"good\"]",
+          "span": "[1, 9]"
+        }
+      }
+    },
+    {
+      "name": "vendor-create-extra-null-dropped",
+      "method": "POST",
+      "path": "/api/v1/vendor",
+      "body": {
+        "name": "Sunlu",
+        "extra": {
+          "rating": "2",
+          "note": null
+        }
+      },
+      "status": 200,
+      "total": null,
+      "response": {
+        "id": 6,
+        "registered": "2026-11-21T09:29:55Z",
+        "name": "Sunlu",
+        "extra": {
+          "rating": "2"
+        }
+      }
+    },
+    {
+      "name": "vendor-create-extra-invalid-json",
+      "method": "POST",
+      "path": "/api/v1/vendor",
+      "body": {
+        "name": "a",
+        "extra": {
+          "rating": "five"
+        }
+      },
+      "status": 400,
+      "total": null,
+      "response": {
+        "message": "Invalid extra field for key rating: Value is not valid JSON."
+      }
+    },
+    {
+      "name": "vendor-create-extra-wrong-type",
+      "method": "POST",
+      "path": "/api/v1/vendor",
+      "body": {
+        "name": "a",
+        "extra": {
+          "rating": "\"5\""
+        }
+      },
+      "status": 400,
+      "total": null,
+      "response": {
+        "message": "Invalid extra field for key rating: Value is not an integer."
+      }
+    },
+    {
+      "name": "vendor-create-extra-bool-not-int",
+      "method": "POST",
+      "path": "/api/v1/vendor",
+      "body": {
+        "name": "a",
+        "extra": {
+          "rating": "true"
+        }
+      },
+      "status": 400,
+      "total": null,
+      "response": {
+        "message": "Invalid extra field for key rating: Value is not an integer."
+      }
+    },
+    {
+      "name": "vendor-create-extra-bad-choice",
+      "method": "POST",
+      "path": "/api/v1/vendor",
+      "body": {
+        "name": "a",
+        "extra": {
+          "tags": "[\"slow\"]"
+        }
+      },
+      "status": 400,
+      "total": null,
+      "response": {
+        "message": "Invalid extra field for key tags: Value list contains invalid choices."
+      }
+    },
+    {
+      "name": "vendor-create-extra-bad-range",
+      "method": "POST",
+      "path": "/api/v1/vendor",
+      "body": {
+        "name": "a",
+        "extra": {
+          "span": "[1]"
+        }
+      },
+      "status": 400,
+      "total": null,
+      "response": {
+        "message": "Invalid extra field for key span: Value list must have exactly two values."
+      }
+    },
+    {
+      "name": "vendor-list-all",
+      "method": "GET",
+      "path": "/api/v1/vendor",
+      "status": 200,
+      "total": "6",
+      "response": [
+        {
+          "id": 1,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "Polymaker",
+          "comment": "Shanghai",
+          "empty_spool_weight": 140,
+          "external_id": "polymaker",
+          "extra": {}
+        },
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "eSun",
+          "extra": {}
+        },
+        {
+          "id": 3,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "",
+          "extra": {}
+        },
+        {
+          "id": 4,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "Prusament",
+          "empty_spool_weight": 201.5,
+          "extra": {}
+        },
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:55Z",
+          "name": "Elegoo",
+          "extra": {
+            "rating": "5",
+            "note": "\"hello world\"",
+            "tags": "[\"fast\", \"good\"]",
+            "span": "[1, 9]"
+          }
+        },
+        {
+          "id": 6,
+          "registered": "2026-11-21T09:29:55Z",
+          "name": "Sunlu",
+          "extra": {
+            "rating": "2"
+          }
+        }
+      ]
+    },
+    {
+      "name": "vendor-get",
+      "method": "GET",
+      "path": "/api/v1/vendor/1",
+      "status": 200,
+      "total": null,
+      "response": {
+        "id": 1,
+        "registered": "2026-11-21T09:29:54Z",
+        "name": "Polymaker",
+        "comment": "Shanghai",
+        "empty_spool_weight": 140,
+        "external_id": "polymaker",
+        "extra": {}
+      }
+    },
+    {
+      "name": "vendor-get-missing",
+      "method": "GET",
+      "path": "/api/v1/vendor/999",
+      "status": 404,
+      "total": null,
+      "response": {
+        "message": "No vendor with ID 999 found."
+      }
+    },
+    {
+      "name": "vendor-get-not-int",
+      "method": "GET",
+      "path": "/api/v1/vendor/abc",
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "int_parsing",
+            "loc": ["path", "vendor_id"],
+            "msg": "Input should be a valid integer, unable to parse string as an integer",
+            "input": "abc"
+          }
+        ]
+      }
+    },
+    {
+      "name": "vendor-get-signed",
+      "method": "GET",
+      "path": "/api/v1/vendor/+2",
+      "status": 200,
+      "total": null,
+      "response": {
+        "id": 2,
+        "registered": "2026-11-21T09:29:54Z",
+        "name": "eSun",
+        "extra": {}
+      }
+    },
+    {
+      "name": "vendor-filter-name-partial",
+      "method": "GET",
+      "path": "/api/v1/vendor?name=POLY",
+      "status": 200,
+      "total": "1",
+      "response": [
+        {
+          "id": 1,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "Polymaker",
+          "comment": "Shanghai",
+          "empty_spool_weight": 140,
+          "external_id": "polymaker",
+          "extra": {}
+        }
+      ]
+    },
+    {
+      "name": "vendor-filter-name-exact",
+      "method": "GET",
+      "path": "/api/v1/vendor?name=%22eSun%22",
+      "status": 200,
+      "total": "1",
+      "response": [
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "eSun",
+          "extra": {}
+        }
+      ]
+    },
+    {
+      "name": "vendor-filter-name-exact-miss",
+      "method": "GET",
+      "path": "/api/v1/vendor?name=%22esun%22",
+      "status": 200,
+      "total": "0",
+      "response": []
+    },
+    {
+      "name": "vendor-filter-name-multi",
+      "method": "GET",
+      "path": "/api/v1/vendor?name=elegoo,sun",
+      "status": 200,
+      "total": "3",
+      "response": [
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "eSun",
+          "extra": {}
+        },
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:55Z",
+          "name": "Elegoo",
+          "extra": {
+            "rating": "5",
+            "note": "\"hello world\"",
+            "tags": "[\"fast\", \"good\"]",
+            "span": "[1, 9]"
+          }
+        },
+        {
+          "id": 6,
+          "registered": "2026-11-21T09:29:55Z",
+          "name": "Sunlu",
+          "extra": {
+            "rating": "2"
+          }
+        }
+      ]
+    },
+    {
+      "name": "vendor-filter-name-empty",
+      "method": "GET",
+      "path": "/api/v1/vendor?name=",
+      "status": 200,
+      "total": "1",
+      "response": [
+        {
+          "id": 3,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "",
+          "extra": {}
+        }
+      ]
+    },
+    {
+      "name": "vendor-filter-name-wildcard",
+      "method": "GET",
+      "path": "/api/v1/vendor?name=e_un",
+      "status": 200,
+      "total": "1",
+      "response": [
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "eSun",
+          "extra": {}
+        }
+      ]
+    },
+    {
+      "name": "vendor-filter-name-last-wins",
+      "method": "GET",
+      "path": "/api/v1/vendor?name=zzz&name=poly",
+      "status": 200,
+      "total": "1",
+      "response": [
+        {
+          "id": 1,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "Polymaker",
+          "comment": "Shanghai",
+          "empty_spool_weight": 140,
+          "external_id": "polymaker",
+          "extra": {}
+        }
+      ]
+    },
+    {
+      "name": "vendor-filter-external-empty",
+      "method": "GET",
+      "path": "/api/v1/vendor?external_id=",
+      "status": 200,
+      "total": "5",
+      "response": [
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "eSun",
+          "extra": {}
+        },
+        {
+          "id": 3,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "",
+          "extra": {}
+        },
+        {
+          "id": 4,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "Prusament",
+          "empty_spool_weight": 201.5,
+          "extra": {}
+        },
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:55Z",
+          "name": "Elegoo",
+          "extra": {
+            "rating": "5",
+            "note": "\"hello world\"",
+            "tags": "[\"fast\", \"good\"]",
+            "span": "[1, 9]"
+          }
+        },
+        {
+          "id": 6,
+          "registered": "2026-11-21T09:29:55Z",
+          "name": "Sunlu",
+          "extra": {
+            "rating": "2"
+          }
+        }
+      ]
+    },
+    {
+      "name": "vendor-filter-external-exact",
+      "method": "GET",
+      "path": "/api/v1/vendor?external_id=%22polymaker%22",
+      "status": 200,
+      "total": "1",
+      "response": [
+        {
+          "id": 1,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "Polymaker",
+          "comment": "Shanghai",
+          "empty_spool_weight": 140,
+          "external_id": "polymaker",
+          "extra": {}
+        }
+      ]
+    },
+    {
+      "name": "vendor-sort-name-asc",
+      "method": "GET",
+      "path": "/api/v1/vendor?sort=name:asc",
+      "status": 200,
+      "total": "6",
+      "response": [
+        {
+          "id": 3,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "",
+          "extra": {}
+        },
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:55Z",
+          "name": "Elegoo",
+          "extra": {
+            "rating": "5",
+            "note": "\"hello world\"",
+            "tags": "[\"fast\", \"good\"]",
+            "span": "[1, 9]"
+          }
+        },
+        {
+          "id": 1,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "Polymaker",
+          "comment": "Shanghai",
+          "empty_spool_weight": 140,
+          "external_id": "polymaker",
+          "extra": {}
+        },
+        {
+          "id": 4,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "Prusament",
+          "empty_spool_weight": 201.5,
+          "extra": {}
+        },
+        {
+          "id": 6,
+          "registered": "2026-11-21T09:29:55Z",
+          "name": "Sunlu",
+          "extra": {
+            "rating": "2"
+          }
+        },
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "eSun",
+          "extra": {}
+        }
+      ]
+    },
+    {
+      "name": "vendor-sort-weight-desc-nulls-last",
+      "method": "GET",
+      "path": "/api/v1/vendor?sort=empty_spool_weight:desc",
+      "status": 200,
+      "total": "6",
+      "response": [
+        {
+          "id": 4,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "Prusament",
+          "empty_spool_weight": 201.5,
+          "extra": {}
+        },
+        {
+          "id": 1,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "Polymaker",
+          "comment": "Shanghai",
+          "empty_spool_weight": 140,
+          "external_id": "polymaker",
+          "extra": {}
+        },
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "eSun",
+          "extra": {}
+        },
+        {
+          "id": 3,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "",
+          "extra": {}
+        },
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:55Z",
+          "name": "Elegoo",
+          "extra": {
+            "rating": "5",
+            "note": "\"hello world\"",
+            "tags": "[\"fast\", \"good\"]",
+            "span": "[1, 9]"
+          }
+        },
+        {
+          "id": 6,
+          "registered": "2026-11-21T09:29:55Z",
+          "name": "Sunlu",
+          "extra": {
+            "rating": "2"
+          }
+        }
+      ]
+    },
+    {
+      "name": "vendor-sort-multi",
+      "method": "GET",
+      "path": "/api/v1/vendor?sort=empty_spool_weight:asc,%20name:DESC",
+      "status": 200,
+      "total": "6",
+      "response": [
+        {
+          "id": 1,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "Polymaker",
+          "comment": "Shanghai",
+          "empty_spool_weight": 140,
+          "external_id": "polymaker",
+          "extra": {}
+        },
+        {
+          "id": 4,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "Prusament",
+          "empty_spool_weight": 201.5,
+          "extra": {}
+        },
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "eSun",
+          "extra": {}
+        },
+        {
+          "id": 6,
+          "registered": "2026-11-21T09:29:55Z",
+          "name": "Sunlu",
+          "extra": {
+            "rating": "2"
+          }
+        },
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:55Z",
+          "name": "Elegoo",
+          "extra": {
+            "rating": "5",
+            "note": "\"hello world\"",
+            "tags": "[\"fast\", \"good\"]",
+            "span": "[1, 9]"
+          }
+        },
+        {
+          "id": 3,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "",
+          "extra": {}
+        }
+      ]
+    },
+    {
+      "name": "vendor-sort-no-direction",
+      "method": "GET",
+      "path": "/api/v1/vendor?sort=name",
+      "status": 400,
+      "total": null,
+      "response": {
+        "message": "Invalid sort 'name', expected the form 'field:asc' or 'field:desc'."
+      }
+    },
+    {
+      "name": "vendor-sort-bad-direction",
+      "method": "GET",
+      "path": "/api/v1/vendor?sort=name:up",
+      "status": 400,
+      "total": null,
+      "response": {
+        "message": "Invalid sort direction 'up' for field 'name', expected 'asc' or 'desc'."
+      }
+    },
+    {
+      "name": "vendor-sort-no-field",
+      "method": "GET",
+      "path": "/api/v1/vendor?sort=:asc",
+      "status": 400,
+      "total": null,
+      "response": {
+        "message": "Invalid sort ':asc', no field name was given."
+      }
+    },
+    {
+      "name": "vendor-sort-unknown-field",
+      "method": "GET",
+      "path": "/api/v1/vendor?sort=bogus:asc",
+      "status": 400,
+      "total": null,
+      "response": {
+        "message": "Invalid field name 'bogus', 'bogus' is not a valid field on 'Vendor'."
+      }
+    },
+    {
+      "name": "vendor-sort-nested-relation",
+      "method": "GET",
+      "path": "/api/v1/vendor?sort=vendor.name:asc",
+      "status": 400,
+      "total": null,
+      "response": {
+        "message": "Invalid field name 'vendor.name', 'vendor' is not a valid field on 'Vendor'."
+      }
+    },
+    {
+      "name": "vendor-sort-nested-column",
+      "method": "GET",
+      "path": "/api/v1/vendor?sort=name.x:asc",
+      "status": 400,
+      "total": null,
+      "response": {
+        "message": "Field 'name' does not have any nested fields"
+      }
+    },
+    {
+      "name": "vendor-sort-registered",
+      "method": "GET",
+      "path": "/api/v1/vendor?sort=registered:desc,id:desc",
+      "status": 200,
+      "total": "6",
+      "response": [
+        {
+          "id": 6,
+          "registered": "2026-11-21T09:29:55Z",
+          "name": "Sunlu",
+          "extra": {
+            "rating": "2"
+          }
+        },
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:55Z",
+          "name": "Elegoo",
+          "extra": {
+            "rating": "5",
+            "note": "\"hello world\"",
+            "tags": "[\"fast\", \"good\"]",
+            "span": "[1, 9]"
+          }
+        },
+        {
+          "id": 4,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "Prusament",
+          "empty_spool_weight": 201.5,
+          "extra": {}
+        },
+        {
+          "id": 3,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "",
+          "extra": {}
+        },
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "eSun",
+          "extra": {}
+        },
+        {
+          "id": 1,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "Polymaker",
+          "comment": "Shanghai",
+          "empty_spool_weight": 140,
+          "external_id": "polymaker",
+          "extra": {}
+        }
+      ]
+    },
+    {
+      "name": "vendor-page",
+      "method": "GET",
+      "path": "/api/v1/vendor?limit=2&offset=1&sort=id:asc",
+      "status": 200,
+      "total": "6",
+      "response": [
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "eSun",
+          "extra": {}
+        },
+        {
+          "id": 3,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "",
+          "extra": {}
+        }
+      ]
+    },
+    {
+      "name": "vendor-page-zero",
+      "method": "GET",
+      "path": "/api/v1/vendor?limit=0",
+      "status": 200,
+      "total": "6",
+      "response": []
+    },
+    {
+      "name": "vendor-page-negative-limit",
+      "method": "GET",
+      "path": "/api/v1/vendor?limit=-1&offset=2",
+      "status": 200,
+      "total": "6",
+      "response": [
+        {
+          "id": 3,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "",
+          "extra": {}
+        },
+        {
+          "id": 4,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "Prusament",
+          "empty_spool_weight": 201.5,
+          "extra": {}
+        },
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:55Z",
+          "name": "Elegoo",
+          "extra": {
+            "rating": "5",
+            "note": "\"hello world\"",
+            "tags": "[\"fast\", \"good\"]",
+            "span": "[1, 9]"
+          }
+        },
+        {
+          "id": 6,
+          "registered": "2026-11-21T09:29:55Z",
+          "name": "Sunlu",
+          "extra": {
+            "rating": "2"
+          }
+        }
+      ]
+    },
+    {
+      "name": "vendor-page-negative-offset",
+      "method": "GET",
+      "path": "/api/v1/vendor?limit=2&offset=-3",
+      "status": 200,
+      "total": "6",
+      "response": [
+        {
+          "id": 1,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "Polymaker",
+          "comment": "Shanghai",
+          "empty_spool_weight": 140,
+          "external_id": "polymaker",
+          "extra": {}
+        },
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "eSun",
+          "extra": {}
+        }
+      ]
+    },
+    {
+      "name": "vendor-offset-without-limit",
+      "method": "GET",
+      "path": "/api/v1/vendor?offset=3",
+      "status": 200,
+      "total": "6",
+      "response": [
+        {
+          "id": 1,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "Polymaker",
+          "comment": "Shanghai",
+          "empty_spool_weight": 140,
+          "external_id": "polymaker",
+          "extra": {}
+        },
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "eSun",
+          "extra": {}
+        },
+        {
+          "id": 3,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "",
+          "extra": {}
+        },
+        {
+          "id": 4,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "Prusament",
+          "empty_spool_weight": 201.5,
+          "extra": {}
+        },
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:55Z",
+          "name": "Elegoo",
+          "extra": {
+            "rating": "5",
+            "note": "\"hello world\"",
+            "tags": "[\"fast\", \"good\"]",
+            "span": "[1, 9]"
+          }
+        },
+        {
+          "id": 6,
+          "registered": "2026-11-21T09:29:55Z",
+          "name": "Sunlu",
+          "extra": {
+            "rating": "2"
+          }
+        }
+      ]
+    },
+    {
+      "name": "vendor-page-beyond",
+      "method": "GET",
+      "path": "/api/v1/vendor?limit=5&offset=50",
+      "status": 200,
+      "total": "6",
+      "response": []
+    },
+    {
+      "name": "vendor-limit-not-int",
+      "method": "GET",
+      "path": "/api/v1/vendor?limit=many",
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "int_parsing",
+            "loc": ["query", "limit"],
+            "msg": "Input should be a valid integer, unable to parse string as an integer",
+            "input": "many"
+          }
+        ]
+      }
+    },
+    {
+      "name": "vendor-limit-and-offset-not-int",
+      "method": "GET",
+      "path": "/api/v1/vendor?limit=1.5&offset=x",
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "int_parsing",
+            "loc": ["query", "limit"],
+            "msg": "Input should be a valid integer, unable to parse string as an integer",
+            "input": "1.5"
+          },
+          {
+            "type": "int_parsing",
+            "loc": ["query", "offset"],
+            "msg": "Input should be a valid integer, unable to parse string as an integer",
+            "input": "x"
+          }
+        ]
+      }
+    },
+    {
+      "name": "vendor-extra-int-exact",
+      "method": "GET",
+      "path": "/api/v1/vendor?extra.rating=5",
+      "status": 200,
+      "total": "1",
+      "response": [
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:55Z",
+          "name": "Elegoo",
+          "extra": {
+            "rating": "5",
+            "note": "\"hello world\"",
+            "tags": "[\"fast\", \"good\"]",
+            "span": "[1, 9]"
+          }
+        }
+      ]
+    },
+    {
+      "name": "vendor-extra-int-range",
+      "method": "GET",
+      "path": "/api/v1/vendor?extra.rating=1:3",
+      "status": 200,
+      "total": "1",
+      "response": [
+        {
+          "id": 6,
+          "registered": "2026-11-21T09:29:55Z",
+          "name": "Sunlu",
+          "extra": {
+            "rating": "2"
+          }
+        }
+      ]
+    },
+    {
+      "name": "vendor-extra-int-open-range",
+      "method": "GET",
+      "path": "/api/v1/vendor?extra.rating=3:",
+      "status": 200,
+      "total": "1",
+      "response": [
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:55Z",
+          "name": "Elegoo",
+          "extra": {
+            "rating": "5",
+            "note": "\"hello world\"",
+            "tags": "[\"fast\", \"good\"]",
+            "span": "[1, 9]"
+          }
+        }
+      ]
+    },
+    {
+      "name": "vendor-extra-int-invalid",
+      "method": "GET",
+      "path": "/api/v1/vendor?extra.rating=five",
+      "status": 400,
+      "total": null,
+      "response": {
+        "message": "Invalid integer filter value for 'rating': five"
+      }
+    },
+    {
+      "name": "vendor-extra-int-range-invalid",
+      "method": "GET",
+      "path": "/api/v1/vendor?extra.rating=a:b",
+      "status": 400,
+      "total": null,
+      "response": {
+        "message": "Invalid integer range filter value for 'rating': a:b"
+      }
+    },
+    {
+      "name": "vendor-extra-int-range-empty",
+      "method": "GET",
+      "path": "/api/v1/vendor?extra.rating=:",
+      "status": 400,
+      "total": null,
+      "response": {
+        "message": "Invalid integer range filter value for 'rating': :"
+      }
+    },
+    {
+      "name": "vendor-extra-empty",
+      "method": "GET",
+      "path": "/api/v1/vendor?extra.rating=",
+      "status": 200,
+      "total": "4",
+      "response": [
+        {
+          "id": 1,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "Polymaker",
+          "comment": "Shanghai",
+          "empty_spool_weight": 140,
+          "external_id": "polymaker",
+          "extra": {}
+        },
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "eSun",
+          "extra": {}
+        },
+        {
+          "id": 3,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "",
+          "extra": {}
+        },
+        {
+          "id": 4,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "Prusament",
+          "empty_spool_weight": 201.5,
+          "extra": {}
+        }
+      ]
+    },
+    {
+      "name": "vendor-extra-text-partial",
+      "method": "GET",
+      "path": "/api/v1/vendor?extra.note=WORLD",
+      "status": 200,
+      "total": "1",
+      "response": [
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:55Z",
+          "name": "Elegoo",
+          "extra": {
+            "rating": "5",
+            "note": "\"hello world\"",
+            "tags": "[\"fast\", \"good\"]",
+            "span": "[1, 9]"
+          }
+        }
+      ]
+    },
+    {
+      "name": "vendor-extra-text-exact",
+      "method": "GET",
+      "path": "/api/v1/vendor?extra.note=%22hello%20world%22",
+      "status": 200,
+      "total": "1",
+      "response": [
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:55Z",
+          "name": "Elegoo",
+          "extra": {
+            "rating": "5",
+            "note": "\"hello world\"",
+            "tags": "[\"fast\", \"good\"]",
+            "span": "[1, 9]"
+          }
+        }
+      ]
+    },
+    {
+      "name": "vendor-extra-choice-multi",
+      "method": "GET",
+      "path": "/api/v1/vendor?extra.tags=good",
+      "status": 200,
+      "total": "1",
+      "response": [
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:55Z",
+          "name": "Elegoo",
+          "extra": {
+            "rating": "5",
+            "note": "\"hello world\"",
+            "tags": "[\"fast\", \"good\"]",
+            "span": "[1, 9]"
+          }
+        }
+      ]
+    },
+    {
+      "name": "vendor-extra-range",
+      "method": "GET",
+      "path": "/api/v1/vendor?extra.span=0:10",
+      "status": 200,
+      "total": "1",
+      "response": [
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:55Z",
+          "name": "Elegoo",
+          "extra": {
+            "rating": "5",
+            "note": "\"hello world\"",
+            "tags": "[\"fast\", \"good\"]",
+            "span": "[1, 9]"
+          }
+        }
+      ]
+    },
+    {
+      "name": "vendor-extra-range-no-colon",
+      "method": "GET",
+      "path": "/api/v1/vendor?extra.span=5",
+      "status": 400,
+      "total": null,
+      "response": {
+        "message": "Invalid range filter value for 'span': 5. Expected '<min>:<max>'."
+      }
+    },
+    {
+      "name": "vendor-extra-unknown-ignored",
+      "method": "GET",
+      "path": "/api/v1/vendor?extra.nothing=1",
+      "status": 200,
+      "total": "6",
+      "response": [
+        {
+          "id": 1,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "Polymaker",
+          "comment": "Shanghai",
+          "empty_spool_weight": 140,
+          "external_id": "polymaker",
+          "extra": {}
+        },
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "eSun",
+          "extra": {}
+        },
+        {
+          "id": 3,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "",
+          "extra": {}
+        },
+        {
+          "id": 4,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "Prusament",
+          "empty_spool_weight": 201.5,
+          "extra": {}
+        },
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:55Z",
+          "name": "Elegoo",
+          "extra": {
+            "rating": "5",
+            "note": "\"hello world\"",
+            "tags": "[\"fast\", \"good\"]",
+            "span": "[1, 9]"
+          }
+        },
+        {
+          "id": 6,
+          "registered": "2026-11-21T09:29:55Z",
+          "name": "Sunlu",
+          "extra": {
+            "rating": "2"
+          }
+        }
+      ]
+    },
+    {
+      "name": "vendor-sort-extra",
+      "method": "GET",
+      "path": "/api/v1/vendor?sort=extra.rating:desc,name:asc",
+      "status": 200,
+      "total": "6",
+      "response": [
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:55Z",
+          "name": "Elegoo",
+          "extra": {
+            "rating": "5",
+            "note": "\"hello world\"",
+            "tags": "[\"fast\", \"good\"]",
+            "span": "[1, 9]"
+          }
+        },
+        {
+          "id": 6,
+          "registered": "2026-11-21T09:29:55Z",
+          "name": "Sunlu",
+          "extra": {
+            "rating": "2"
+          }
+        },
+        {
+          "id": 3,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "",
+          "extra": {}
+        },
+        {
+          "id": 1,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "Polymaker",
+          "comment": "Shanghai",
+          "empty_spool_weight": 140,
+          "external_id": "polymaker",
+          "extra": {}
+        },
+        {
+          "id": 4,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "Prusament",
+          "empty_spool_weight": 201.5,
+          "extra": {}
+        },
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "eSun",
+          "extra": {}
+        }
+      ]
+    },
+    {
+      "name": "vendor-sort-extra-unknown-ignored",
+      "method": "GET",
+      "path": "/api/v1/vendor?sort=extra.nothing:desc",
+      "status": 200,
+      "total": "6",
+      "response": [
+        {
+          "id": 1,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "Polymaker",
+          "comment": "Shanghai",
+          "empty_spool_weight": 140,
+          "external_id": "polymaker",
+          "extra": {}
+        },
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "eSun",
+          "extra": {}
+        },
+        {
+          "id": 3,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "",
+          "extra": {}
+        },
+        {
+          "id": 4,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "Prusament",
+          "empty_spool_weight": 201.5,
+          "extra": {}
+        },
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:55Z",
+          "name": "Elegoo",
+          "extra": {
+            "rating": "5",
+            "note": "\"hello world\"",
+            "tags": "[\"fast\", \"good\"]",
+            "span": "[1, 9]"
+          }
+        },
+        {
+          "id": 6,
+          "registered": "2026-11-21T09:29:55Z",
+          "name": "Sunlu",
+          "extra": {
+            "rating": "2"
+          }
+        }
+      ]
+    },
+    {
+      "name": "vendor-update",
+      "method": "PATCH",
+      "path": "/api/v1/vendor/1",
+      "body": {
+        "comment": null,
+        "empty_spool_weight": 200,
+        "external_id": "pm-2"
+      },
+      "status": 200,
+      "total": null,
+      "response": {
+        "id": 1,
+        "registered": "2026-11-21T09:29:54Z",
+        "name": "Polymaker",
+        "empty_spool_weight": 200,
+        "external_id": "pm-2",
+        "extra": {}
+      }
+    },
+    {
+      "name": "vendor-update-empty-body",
+      "method": "PATCH",
+      "path": "/api/v1/vendor/2",
+      "body": {},
+      "status": 200,
+      "total": null,
+      "response": {
+        "id": 2,
+        "registered": "2026-11-21T09:29:54Z",
+        "name": "eSun",
+        "extra": {}
+      }
+    },
+    {
+      "name": "vendor-update-name-null",
+      "method": "PATCH",
+      "path": "/api/v1/vendor/1",
+      "body": {
+        "name": null
+      },
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "value_error",
+            "loc": ["body", "name"],
+            "msg": "Value error, Value must not be None.",
+            "input": null,
+            "ctx": {
+              "error": {}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "vendor-update-path-and-body-errors",
+      "method": "PATCH",
+      "path": "/api/v1/vendor/x",
+      "body": {
+        "name": null,
+        "comment": 5
+      },
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "int_parsing",
+            "loc": ["path", "vendor_id"],
+            "msg": "Input should be a valid integer, unable to parse string as an integer",
+            "input": "x"
+          },
+          {
+            "type": "value_error",
+            "loc": ["body", "name"],
+            "msg": "Value error, Value must not be None.",
+            "input": null,
+            "ctx": {
+              "error": {}
+            }
+          },
+          {
+            "type": "string_type",
+            "loc": ["body", "comment"],
+            "msg": "Input should be a valid string",
+            "input": 5
+          }
+        ]
+      }
+    },
+    {
+      "name": "vendor-update-missing",
+      "method": "PATCH",
+      "path": "/api/v1/vendor/999",
+      "body": {
+        "name": "n"
+      },
+      "status": 404,
+      "total": null,
+      "response": {
+        "message": "No vendor with ID 999 found."
+      }
+    },
+    {
+      "name": "vendor-update-unknown-extra-before-404",
+      "method": "PATCH",
+      "path": "/api/v1/vendor/999",
+      "body": {
+        "extra": {
+          "nope": "1"
+        }
+      },
+      "status": 400,
+      "total": null,
+      "response": {
+        "message": "Unknown extra field nope."
+      }
+    },
+    {
+      "name": "vendor-update-extra-merge",
+      "method": "PATCH",
+      "path": "/api/v1/vendor/5",
+      "body": {
+        "extra": {
+          "note": null,
+          "rating": "4"
+        }
+      },
+      "status": 200,
+      "total": null,
+      "response": {
+        "id": 5,
+        "registered": "2026-11-21T09:29:55Z",
+        "name": "Elegoo",
+        "extra": {
+          "tags": "[\"fast\", \"good\"]",
+          "span": "[1, 9]",
+          "rating": "4"
+        }
+      }
+    },
+    {
+      "name": "vendor-method-not-allowed",
+      "method": "PUT",
+      "path": "/api/v1/vendor/1",
+      "body": {
+        "name": "x"
+      },
+      "status": 405,
+      "total": null,
+      "response": {
+        "detail": "Method Not Allowed"
+      }
+    },
+    {
+      "name": "vendor-collection-method-not-allowed",
+      "method": "DELETE",
+      "path": "/api/v1/vendor",
+      "status": 405,
+      "total": null,
+      "response": {
+        "detail": "Method Not Allowed"
+      }
+    },
+    {
+      "name": "filament-list-empty",
+      "method": "GET",
+      "path": "/api/v1/filament",
+      "status": 200,
+      "total": "0",
+      "response": []
+    },
+    {
+      "name": "filament-create-minimal",
+      "method": "POST",
+      "path": "/api/v1/filament",
+      "body": {
+        "density": 1.24,
+        "diameter": 1.75
+      },
+      "status": 200,
+      "total": null,
+      "response": {
+        "id": 1,
+        "registered": "2026-11-21T09:29:56Z",
+        "density": 1.24,
+        "diameter": 1.75,
+        "extra": {},
+        "tags": []
+      }
+    },
+    {
+      "name": "filament-create-full",
+      "method": "POST",
+      "path": "/api/v1/filament",
+      "body": {
+        "name": "PolyTerra Charcoal Black",
+        "vendor_id": 1,
+        "material": "PLA",
+        "price": 20,
+        "density": 1.24,
+        "diameter": 1.75,
+        "weight": 1000,
+        "article_number": "PM70820",
+        "comment": "matte",
+        "settings_extruder_temp": 210,
+        "settings_bed_temp": 60,
+        "color_hex": "#ff0000",
+        "external_id": "polymaker_pla"
+      },
+      "status": 200,
+      "total": null,
+      "response": {
+        "id": 2,
+        "registered": "2026-11-21T09:29:56Z",
+        "name": "PolyTerra Charcoal Black",
+        "vendor": {
+          "id": 1,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "Polymaker",
+          "empty_spool_weight": 200,
+          "external_id": "pm-2",
+          "extra": {}
+        },
+        "material": "PLA",
+        "price": 20,
+        "density": 1.24,
+        "diameter": 1.75,
+        "weight": 1000,
+        "spool_weight": 200,
+        "article_number": "PM70820",
+        "comment": "matte",
+        "settings_extruder_temp": 210,
+        "settings_bed_temp": 60,
+        "color_hex": "FF0000",
+        "external_id": "polymaker_pla",
+        "extra": {},
+        "tags": []
+      }
+    },
+    {
+      "name": "filament-create-vendor-weight-default",
+      "method": "POST",
+      "path": "/api/v1/filament",
+      "body": {
+        "name": "Fallback",
+        "vendor_id": 1,
+        "material": "PETG",
+        "density": 1.27,
+        "diameter": 1.75,
+        "color_hex": "00FF00"
+      },
+      "status": 200,
+      "total": null,
+      "response": {
+        "id": 3,
+        "registered": "2026-11-21T09:29:56Z",
+        "name": "Fallback",
+        "vendor": {
+          "id": 1,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "Polymaker",
+          "empty_spool_weight": 200,
+          "external_id": "pm-2",
+          "extra": {}
+        },
+        "material": "PETG",
+        "density": 1.27,
+        "diameter": 1.75,
+        "spool_weight": 200,
+        "color_hex": "00FF00",
+        "extra": {},
+        "tags": []
+      }
+    },
+    {
+      "name": "filament-create-explicit-spool-weight",
+      "method": "POST",
+      "path": "/api/v1/filament",
+      "body": {
+        "name": "Own spool",
+        "vendor_id": 1,
+        "material": "pla+",
+        "density": 1.24,
+        "diameter": 2.85,
+        "spool_weight": 0,
+        "price": 35.5,
+        "color_hex": "0000ff80"
+      },
+      "status": 200,
+      "total": null,
+      "response": {
+        "id": 4,
+        "registered": "2026-11-21T09:29:56Z",
+        "name": "Own spool",
+        "vendor": {
+          "id": 1,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "Polymaker",
+          "empty_spool_weight": 200,
+          "external_id": "pm-2",
+          "extra": {}
+        },
+        "material": "pla+",
+        "price": 35.5,
+        "density": 1.24,
+        "diameter": 2.85,
+        "spool_weight": 0,
+        "color_hex": "0000FF80",
+        "extra": {},
+        "tags": []
+      }
+    },
+    {
+      "name": "filament-create-multi-color",
+      "method": "POST",
+      "path": "/api/v1/filament",
+      "body": {
+        "name": "Rainbow",
+        "vendor_id": 2,
+        "material": "Silk PLA",
+        "density": 1.24,
+        "diameter": 1.75,
+        "multi_color_hexes": "#ff0000,00ff00,0000FF",
+        "multi_color_direction": "coaxial",
+        "settings_extruder_temp": "215"
+      },
+      "status": 200,
+      "total": null,
+      "response": {
+        "id": 5,
+        "registered": "2026-11-21T09:29:56Z",
+        "name": "Rainbow",
+        "vendor": {
+          "id": 2,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "eSun",
+          "extra": {}
+        },
+        "material": "Silk PLA",
+        "density": 1.24,
+        "diameter": 1.75,
+        "settings_extruder_temp": 215,
+        "multi_color_hexes": "FF0000,00FF00,0000FF",
+        "multi_color_direction": "coaxial",
+        "extra": {},
+        "tags": []
+      }
+    },
+    {
+      "name": "filament-create-missing-vendor",
+      "method": "POST",
+      "path": "/api/v1/filament",
+      "body": {
+        "vendor_id": 999,
+        "density": 1.24,
+        "diameter": 1.75
+      },
+      "status": 404,
+      "total": null,
+      "response": {
+        "message": "No vendor with ID 999 found."
+      }
+    },
+    {
+      "name": "filament-create-missing-density-diameter",
+      "method": "POST",
+      "path": "/api/v1/filament",
+      "body": {
+        "name": "x"
+      },
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "missing",
+            "loc": ["body", "density"],
+            "msg": "Field required",
+            "input": {
+              "name": "x"
+            }
+          },
+          {
+            "type": "missing",
+            "loc": ["body", "diameter"],
+            "msg": "Field required",
+            "input": {
+              "name": "x"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "filament-create-density-zero",
+      "method": "POST",
+      "path": "/api/v1/filament",
+      "body": {
+        "density": 0,
+        "diameter": 1.75
+      },
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "greater_than",
+            "loc": ["body", "density"],
+            "msg": "Input should be greater than 0",
+            "input": 0,
+            "ctx": {
+              "gt": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "filament-create-weight-zero",
+      "method": "POST",
+      "path": "/api/v1/filament",
+      "body": {
+        "density": 1,
+        "diameter": 1.75,
+        "weight": 0
+      },
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "greater_than",
+            "loc": ["body", "weight"],
+            "msg": "Input should be greater than 0",
+            "input": 0,
+            "ctx": {
+              "gt": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "filament-create-temp-fraction",
+      "method": "POST",
+      "path": "/api/v1/filament",
+      "body": {
+        "density": 1,
+        "diameter": 1.75,
+        "settings_extruder_temp": 210.5
+      },
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "int_from_float",
+            "loc": ["body", "settings_extruder_temp"],
+            "msg": "Input should be a valid integer, got a number with a fractional part",
+            "input": 210.5
+          }
+        ]
+      }
+    },
+    {
+      "name": "filament-create-temp-negative",
+      "method": "POST",
+      "path": "/api/v1/filament",
+      "body": {
+        "density": 1,
+        "diameter": 1.75,
+        "settings_bed_temp": -1
+      },
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "greater_than_equal",
+            "loc": ["body", "settings_bed_temp"],
+            "msg": "Input should be greater than or equal to 0",
+            "input": -1,
+            "ctx": {
+              "ge": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "filament-create-temp-string",
+      "method": "POST",
+      "path": "/api/v1/filament",
+      "body": {
+        "density": 1,
+        "diameter": 1.75,
+        "settings_bed_temp": "hot"
+      },
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "int_parsing",
+            "loc": ["body", "settings_bed_temp"],
+            "msg": "Input should be a valid integer, unable to parse string as an integer",
+            "input": "hot"
+          }
+        ]
+      }
+    },
+    {
+      "name": "filament-create-vendor-id-string",
+      "method": "POST",
+      "path": "/api/v1/filament",
+      "body": {
+        "density": 1,
+        "diameter": 1.75,
+        "vendor_id": "one"
+      },
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "int_parsing",
+            "loc": ["body", "vendor_id"],
+            "msg": "Input should be a valid integer, unable to parse string as an integer",
+            "input": "one"
+          }
+        ]
+      }
+    },
+    {
+      "name": "filament-create-bad-color-char",
+      "method": "POST",
+      "path": "/api/v1/filament",
+      "body": {
+        "density": 1,
+        "diameter": 1.75,
+        "color_hex": "GG0000"
+      },
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "value_error",
+            "loc": ["body", "color_hex"],
+            "msg": "Value error, Invalid character in color code.",
+            "input": "GG0000",
+            "ctx": {
+              "error": {}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "filament-create-bad-color-length",
+      "method": "POST",
+      "path": "/api/v1/filament",
+      "body": {
+        "density": 1,
+        "diameter": 1.75,
+        "color_hex": "FFF"
+      },
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "value_error",
+            "loc": ["body", "color_hex"],
+            "msg": "Value error, Color code must be 6 or 8 characters long.",
+            "input": "FFF",
+            "ctx": {
+              "error": {}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "filament-create-empty-color-is-null",
+      "method": "POST",
+      "path": "/api/v1/filament",
+      "body": {
+        "name": "No color",
+        "density": 1.1,
+        "diameter": 1.75,
+        "color_hex": ""
+      },
+      "status": 200,
+      "total": null,
+      "response": {
+        "id": 6,
+        "registered": "2026-11-21T09:29:57Z",
+        "name": "No color",
+        "density": 1.1,
+        "diameter": 1.75,
+        "extra": {},
+        "tags": []
+      }
+    },
+    {
+      "name": "filament-create-color-and-multi",
+      "method": "POST",
+      "path": "/api/v1/filament",
+      "body": {
+        "density": 1,
+        "diameter": 1.75,
+        "color_hex": "FF0000",
+        "multi_color_hexes": "FF0000,00FF00",
+        "multi_color_direction": "coaxial"
+      },
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "value_error",
+            "loc": ["body"],
+            "msg": "Value error, Cannot specify both color_hex and multi_color_hexes.",
+            "input": {
+              "density": 1,
+              "diameter": 1.75,
+              "color_hex": "FF0000",
+              "multi_color_hexes": "FF0000,00FF00",
+              "multi_color_direction": "coaxial"
+            },
+            "ctx": {
+              "error": {}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "filament-create-multi-single",
+      "method": "POST",
+      "path": "/api/v1/filament",
+      "body": {
+        "density": 1,
+        "diameter": 1.75,
+        "multi_color_hexes": "FF0000",
+        "multi_color_direction": "coaxial"
+      },
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "value_error",
+            "loc": ["body"],
+            "msg": "Value error, Must specify at least two colors in multi_color_hexes.",
+            "input": {
+              "density": 1,
+              "diameter": 1.75,
+              "multi_color_hexes": "FF0000",
+              "multi_color_direction": "coaxial"
+            },
+            "ctx": {
+              "error": {}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "filament-create-multi-no-direction",
+      "method": "POST",
+      "path": "/api/v1/filament",
+      "body": {
+        "density": 1,
+        "diameter": 1.75,
+        "multi_color_hexes": "FF0000,00FF00"
+      },
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "value_error",
+            "loc": ["body"],
+            "msg": "Value error, Multi-color filament must have multi_color_direction set.",
+            "input": {
+              "density": 1,
+              "diameter": 1.75,
+              "multi_color_hexes": "FF0000,00FF00"
+            },
+            "ctx": {
+              "error": {}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "filament-create-direction-no-multi",
+      "method": "POST",
+      "path": "/api/v1/filament",
+      "body": {
+        "density": 1,
+        "diameter": 1.75,
+        "multi_color_direction": "longitudinal"
+      },
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "value_error",
+            "loc": ["body"],
+            "msg": "Value error, Single-color filament must not have multi_color_direction set.",
+            "input": {
+              "density": 1,
+              "diameter": 1.75,
+              "multi_color_direction": "longitudinal"
+            },
+            "ctx": {
+              "error": {}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "filament-create-bad-direction",
+      "method": "POST",
+      "path": "/api/v1/filament",
+      "body": {
+        "density": 1,
+        "diameter": 1.75,
+        "multi_color_direction": "diagonal"
+      },
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "enum",
+            "loc": ["body", "multi_color_direction"],
+            "msg": "Input should be 'coaxial' or 'longitudinal'",
+            "input": "diagonal",
+            "ctx": {
+              "expected": "'coaxial' or 'longitudinal'"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "filament-create-bad-multi-part",
+      "method": "POST",
+      "path": "/api/v1/filament",
+      "body": {
+        "density": 1,
+        "diameter": 1.75,
+        "multi_color_hexes": "FF0000,,00FF00",
+        "multi_color_direction": "coaxial"
+      },
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "value_error",
+            "loc": ["body", "multi_color_hexes"],
+            "msg": "Value error, Color code must be 6 or 8 characters long.",
+            "input": "FF0000,,00FF00",
+            "ctx": {
+              "error": {}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "filament-create-field-and-color-errors",
+      "method": "POST",
+      "path": "/api/v1/filament",
+      "body": {
+        "diameter": -1,
+        "color_hex": "XYZXYZ",
+        "name": 5
+      },
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "string_type",
+            "loc": ["body", "name"],
+            "msg": "Input should be a valid string",
+            "input": 5
+          },
+          {
+            "type": "missing",
+            "loc": ["body", "density"],
+            "msg": "Field required",
+            "input": {
+              "diameter": -1,
+              "color_hex": "XYZXYZ",
+              "name": 5
+            }
+          },
+          {
+            "type": "greater_than",
+            "loc": ["body", "diameter"],
+            "msg": "Input should be greater than 0",
+            "input": -1,
+            "ctx": {
+              "gt": 0
+            }
+          },
+          {
+            "type": "value_error",
+            "loc": ["body", "color_hex"],
+            "msg": "Value error, Invalid character in color code.",
+            "input": "XYZXYZ",
+            "ctx": {
+              "error": {}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "filament-create-name-too-long",
+      "method": "POST",
+      "path": "/api/v1/filament",
+      "body": {
+        "density": 1,
+        "diameter": 1.75,
+        "name": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+        "material": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+        "article_number": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "string_too_long",
+            "loc": ["body", "name"],
+            "msg": "String should have at most 64 characters",
+            "input": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+            "ctx": {
+              "max_length": 64
+            }
+          },
+          {
+            "type": "string_too_long",
+            "loc": ["body", "material"],
+            "msg": "String should have at most 64 characters",
+            "input": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+            "ctx": {
+              "max_length": 64
+            }
+          },
+          {
+            "type": "string_too_long",
+            "loc": ["body", "article_number"],
+            "msg": "String should have at most 64 characters",
+            "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "ctx": {
+              "max_length": 64
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "field-filament-batch",
+      "method": "POST",
+      "path": "/api/v1/field/filament/batch",
+      "body": {
+        "name": "Batch",
+        "field_type": "text"
+      },
+      "setup": "field",
+      "status": 200,
+      "total": null,
+      "response": [
+        {
+          "name": "Batch",
+          "order": 0,
+          "field_type": "text",
+          "key": "batch",
+          "entity_type": "filament"
+        }
+      ]
+    },
+    {
+      "name": "field-filament-dry",
+      "method": "POST",
+      "path": "/api/v1/field/filament/dry",
+      "body": {
+        "name": "Dried",
+        "field_type": "boolean"
+      },
+      "setup": "field",
+      "status": 200,
+      "total": null,
+      "response": [
+        {
+          "name": "Batch",
+          "order": 0,
+          "field_type": "text",
+          "key": "batch",
+          "entity_type": "filament"
+        },
+        {
+          "name": "Dried",
+          "order": 0,
+          "field_type": "boolean",
+          "key": "dry",
+          "entity_type": "filament"
+        }
+      ]
+    },
+    {
+      "name": "field-filament-hours",
+      "method": "POST",
+      "path": "/api/v1/field/filament/hours",
+      "body": {
+        "name": "Hours",
+        "field_type": "float"
+      },
+      "setup": "field",
+      "status": 200,
+      "total": null,
+      "response": [
+        {
+          "name": "Batch",
+          "order": 0,
+          "field_type": "text",
+          "key": "batch",
+          "entity_type": "filament"
+        },
+        {
+          "name": "Dried",
+          "order": 0,
+          "field_type": "boolean",
+          "key": "dry",
+          "entity_type": "filament"
+        },
+        {
+          "name": "Hours",
+          "order": 0,
+          "field_type": "float",
+          "key": "hours",
+          "entity_type": "filament"
+        }
+      ]
+    },
+    {
+      "name": "filament-create-with-extra",
+      "method": "POST",
+      "path": "/api/v1/filament",
+      "body": {
+        "name": "Extra",
+        "density": 1.2,
+        "diameter": 1.75,
+        "material": "ABS",
+        "extra": {
+          "batch": "\"B-12\"",
+          "dry": "true",
+          "hours": "4.5"
+        }
+      },
+      "status": 200,
+      "total": null,
+      "response": {
+        "id": 7,
+        "registered": "2026-11-21T09:29:58Z",
+        "name": "Extra",
+        "material": "ABS",
+        "density": 1.2,
+        "diameter": 1.75,
+        "extra": {
+          "batch": "\"B-12\"",
+          "dry": "true",
+          "hours": "4.5"
+        },
+        "tags": []
+      }
+    },
+    {
+      "name": "filament-create-unknown-extra",
+      "method": "POST",
+      "path": "/api/v1/filament",
+      "body": {
+        "density": 1,
+        "diameter": 1.75,
+        "extra": {
+          "nope": "1"
+        }
+      },
+      "status": 400,
+      "total": null,
+      "response": {
+        "message": "Unknown extra field nope."
+      }
+    },
+    {
+      "name": "filament-list",
+      "method": "GET",
+      "path": "/api/v1/filament",
+      "status": 200,
+      "total": "7",
+      "response": [
+        {
+          "id": 1,
+          "registered": "2026-11-21T09:29:56Z",
+          "density": 1.24,
+          "diameter": 1.75,
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "PolyTerra Charcoal Black",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "PLA",
+          "price": 20,
+          "density": 1.24,
+          "diameter": 1.75,
+          "weight": 1000,
+          "spool_weight": 200,
+          "article_number": "PM70820",
+          "comment": "matte",
+          "settings_extruder_temp": 210,
+          "settings_bed_temp": 60,
+          "color_hex": "FF0000",
+          "external_id": "polymaker_pla",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 3,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Fallback",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "PETG",
+          "density": 1.27,
+          "diameter": 1.75,
+          "spool_weight": 200,
+          "color_hex": "00FF00",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 4,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Own spool",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "pla+",
+          "price": 35.5,
+          "density": 1.24,
+          "diameter": 2.85,
+          "spool_weight": 0,
+          "color_hex": "0000FF80",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Rainbow",
+          "vendor": {
+            "id": 2,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "eSun",
+            "extra": {}
+          },
+          "material": "Silk PLA",
+          "density": 1.24,
+          "diameter": 1.75,
+          "settings_extruder_temp": 215,
+          "multi_color_hexes": "FF0000,00FF00,0000FF",
+          "multi_color_direction": "coaxial",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 6,
+          "registered": "2026-11-21T09:29:57Z",
+          "name": "No color",
+          "density": 1.1,
+          "diameter": 1.75,
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 7,
+          "registered": "2026-11-21T09:29:58Z",
+          "name": "Extra",
+          "material": "ABS",
+          "density": 1.2,
+          "diameter": 1.75,
+          "extra": {
+            "batch": "\"B-12\"",
+            "dry": "true",
+            "hours": "4.5"
+          },
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "filament-get",
+      "method": "GET",
+      "path": "/api/v1/filament/2",
+      "status": 200,
+      "total": null,
+      "response": {
+        "id": 2,
+        "registered": "2026-11-21T09:29:56Z",
+        "name": "PolyTerra Charcoal Black",
+        "vendor": {
+          "id": 1,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "Polymaker",
+          "empty_spool_weight": 200,
+          "external_id": "pm-2",
+          "extra": {}
+        },
+        "material": "PLA",
+        "price": 20,
+        "density": 1.24,
+        "diameter": 1.75,
+        "weight": 1000,
+        "spool_weight": 200,
+        "article_number": "PM70820",
+        "comment": "matte",
+        "settings_extruder_temp": 210,
+        "settings_bed_temp": 60,
+        "color_hex": "FF0000",
+        "external_id": "polymaker_pla",
+        "extra": {},
+        "tags": []
+      }
+    },
+    {
+      "name": "filament-get-missing",
+      "method": "GET",
+      "path": "/api/v1/filament/999",
+      "status": 404,
+      "total": null,
+      "response": {
+        "message": "No filament with ID 999 found."
+      }
+    },
+    {
+      "name": "filament-get-not-int",
+      "method": "GET",
+      "path": "/api/v1/filament/two",
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "int_parsing",
+            "loc": ["path", "filament_id"],
+            "msg": "Input should be a valid integer, unable to parse string as an integer",
+            "input": "two"
+          }
+        ]
+      }
+    },
+    {
+      "name": "filament-filter-vendor-name",
+      "method": "GET",
+      "path": "/api/v1/filament?vendor.name=poly",
+      "status": 200,
+      "total": "3",
+      "response": [
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "PolyTerra Charcoal Black",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "PLA",
+          "price": 20,
+          "density": 1.24,
+          "diameter": 1.75,
+          "weight": 1000,
+          "spool_weight": 200,
+          "article_number": "PM70820",
+          "comment": "matte",
+          "settings_extruder_temp": 210,
+          "settings_bed_temp": 60,
+          "color_hex": "FF0000",
+          "external_id": "polymaker_pla",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 3,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Fallback",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "PETG",
+          "density": 1.27,
+          "diameter": 1.75,
+          "spool_weight": 200,
+          "color_hex": "00FF00",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 4,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Own spool",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "pla+",
+          "price": 35.5,
+          "density": 1.24,
+          "diameter": 2.85,
+          "spool_weight": 0,
+          "color_hex": "0000FF80",
+          "extra": {},
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "filament-filter-vendor-name-old",
+      "method": "GET",
+      "path": "/api/v1/filament?vendor_name=esun",
+      "status": 200,
+      "total": "1",
+      "response": [
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Rainbow",
+          "vendor": {
+            "id": 2,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "eSun",
+            "extra": {}
+          },
+          "material": "Silk PLA",
+          "density": 1.24,
+          "diameter": 1.75,
+          "settings_extruder_temp": 215,
+          "multi_color_hexes": "FF0000,00FF00,0000FF",
+          "multi_color_direction": "coaxial",
+          "extra": {},
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "filament-filter-vendor-name-empty",
+      "method": "GET",
+      "path": "/api/v1/filament?vendor.name=",
+      "status": 200,
+      "total": "0",
+      "response": []
+    },
+    {
+      "name": "filament-filter-vendor-id",
+      "method": "GET",
+      "path": "/api/v1/filament?vendor.id=1",
+      "status": 200,
+      "total": "3",
+      "response": [
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "PolyTerra Charcoal Black",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "PLA",
+          "price": 20,
+          "density": 1.24,
+          "diameter": 1.75,
+          "weight": 1000,
+          "spool_weight": 200,
+          "article_number": "PM70820",
+          "comment": "matte",
+          "settings_extruder_temp": 210,
+          "settings_bed_temp": 60,
+          "color_hex": "FF0000",
+          "external_id": "polymaker_pla",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 3,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Fallback",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "PETG",
+          "density": 1.27,
+          "diameter": 1.75,
+          "spool_weight": 200,
+          "color_hex": "00FF00",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 4,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Own spool",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "pla+",
+          "price": 35.5,
+          "density": 1.24,
+          "diameter": 2.85,
+          "spool_weight": 0,
+          "color_hex": "0000FF80",
+          "extra": {},
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "filament-filter-vendor-id-multi-none",
+      "method": "GET",
+      "path": "/api/v1/filament?vendor.id=2,-1",
+      "status": 200,
+      "total": "4",
+      "response": [
+        {
+          "id": 1,
+          "registered": "2026-11-21T09:29:56Z",
+          "density": 1.24,
+          "diameter": 1.75,
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Rainbow",
+          "vendor": {
+            "id": 2,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "eSun",
+            "extra": {}
+          },
+          "material": "Silk PLA",
+          "density": 1.24,
+          "diameter": 1.75,
+          "settings_extruder_temp": 215,
+          "multi_color_hexes": "FF0000,00FF00,0000FF",
+          "multi_color_direction": "coaxial",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 6,
+          "registered": "2026-11-21T09:29:57Z",
+          "name": "No color",
+          "density": 1.1,
+          "diameter": 1.75,
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 7,
+          "registered": "2026-11-21T09:29:58Z",
+          "name": "Extra",
+          "material": "ABS",
+          "density": 1.2,
+          "diameter": 1.75,
+          "extra": {
+            "batch": "\"B-12\"",
+            "dry": "true",
+            "hours": "4.5"
+          },
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "filament-filter-vendor-id-old",
+      "method": "GET",
+      "path": "/api/v1/filament?vendor_id=2",
+      "status": 200,
+      "total": "1",
+      "response": [
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Rainbow",
+          "vendor": {
+            "id": 2,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "eSun",
+            "extra": {}
+          },
+          "material": "Silk PLA",
+          "density": 1.24,
+          "diameter": 1.75,
+          "settings_extruder_temp": 215,
+          "multi_color_hexes": "FF0000,00FF00,0000FF",
+          "multi_color_direction": "coaxial",
+          "extra": {},
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "filament-filter-vendor-id-new-wins",
+      "method": "GET",
+      "path": "/api/v1/filament?vendor_id=2&vendor.id=1",
+      "status": 200,
+      "total": "3",
+      "response": [
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "PolyTerra Charcoal Black",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "PLA",
+          "price": 20,
+          "density": 1.24,
+          "diameter": 1.75,
+          "weight": 1000,
+          "spool_weight": 200,
+          "article_number": "PM70820",
+          "comment": "matte",
+          "settings_extruder_temp": 210,
+          "settings_bed_temp": 60,
+          "color_hex": "FF0000",
+          "external_id": "polymaker_pla",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 3,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Fallback",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "PETG",
+          "density": 1.27,
+          "diameter": 1.75,
+          "spool_weight": 200,
+          "color_hex": "00FF00",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 4,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Own spool",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "pla+",
+          "price": 35.5,
+          "density": 1.24,
+          "diameter": 2.85,
+          "spool_weight": 0,
+          "color_hex": "0000FF80",
+          "extra": {},
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "filament-filter-vendor-id-invalid",
+      "method": "GET",
+      "path": "/api/v1/filament?vendor.id=one",
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "string_pattern_mismatch",
+            "loc": ["query", "vendor.id"],
+            "msg": "String should match pattern '^-?\\d+(,-?\\d+)*$'",
+            "input": "one",
+            "ctx": {
+              "pattern": "^-?\\d+(,-?\\d+)*$"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "filament-filter-vendor-id-old-invalid",
+      "method": "GET",
+      "path": "/api/v1/filament?vendor_id=1,",
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "string_pattern_mismatch",
+            "loc": ["query", "vendor_id"],
+            "msg": "String should match pattern '^-?\\d+(,-?\\d+)*$'",
+            "input": "1,",
+            "ctx": {
+              "pattern": "^-?\\d+(,-?\\d+)*$"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "filament-filter-material",
+      "method": "GET",
+      "path": "/api/v1/filament?material=pla",
+      "status": 200,
+      "total": "3",
+      "response": [
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "PolyTerra Charcoal Black",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "PLA",
+          "price": 20,
+          "density": 1.24,
+          "diameter": 1.75,
+          "weight": 1000,
+          "spool_weight": 200,
+          "article_number": "PM70820",
+          "comment": "matte",
+          "settings_extruder_temp": 210,
+          "settings_bed_temp": 60,
+          "color_hex": "FF0000",
+          "external_id": "polymaker_pla",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 4,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Own spool",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "pla+",
+          "price": 35.5,
+          "density": 1.24,
+          "diameter": 2.85,
+          "spool_weight": 0,
+          "color_hex": "0000FF80",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Rainbow",
+          "vendor": {
+            "id": 2,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "eSun",
+            "extra": {}
+          },
+          "material": "Silk PLA",
+          "density": 1.24,
+          "diameter": 1.75,
+          "settings_extruder_temp": 215,
+          "multi_color_hexes": "FF0000,00FF00,0000FF",
+          "multi_color_direction": "coaxial",
+          "extra": {},
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "filament-filter-material-exact",
+      "method": "GET",
+      "path": "/api/v1/filament?material=%22PLA%22",
+      "status": 200,
+      "total": "1",
+      "response": [
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "PolyTerra Charcoal Black",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "PLA",
+          "price": 20,
+          "density": 1.24,
+          "diameter": 1.75,
+          "weight": 1000,
+          "spool_weight": 200,
+          "article_number": "PM70820",
+          "comment": "matte",
+          "settings_extruder_temp": 210,
+          "settings_bed_temp": 60,
+          "color_hex": "FF0000",
+          "external_id": "polymaker_pla",
+          "extra": {},
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "filament-filter-name-empty",
+      "method": "GET",
+      "path": "/api/v1/filament?name=",
+      "status": 200,
+      "total": "1",
+      "response": [
+        {
+          "id": 1,
+          "registered": "2026-11-21T09:29:56Z",
+          "density": 1.24,
+          "diameter": 1.75,
+          "extra": {},
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "filament-filter-article",
+      "method": "GET",
+      "path": "/api/v1/filament?article_number=pm7",
+      "status": 200,
+      "total": "1",
+      "response": [
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "PolyTerra Charcoal Black",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "PLA",
+          "price": 20,
+          "density": 1.24,
+          "diameter": 1.75,
+          "weight": 1000,
+          "spool_weight": 200,
+          "article_number": "PM70820",
+          "comment": "matte",
+          "settings_extruder_temp": 210,
+          "settings_bed_temp": 60,
+          "color_hex": "FF0000",
+          "external_id": "polymaker_pla",
+          "extra": {},
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "filament-filter-external-empty",
+      "method": "GET",
+      "path": "/api/v1/filament?external_id=",
+      "status": 200,
+      "total": "6",
+      "response": [
+        {
+          "id": 1,
+          "registered": "2026-11-21T09:29:56Z",
+          "density": 1.24,
+          "diameter": 1.75,
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 3,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Fallback",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "PETG",
+          "density": 1.27,
+          "diameter": 1.75,
+          "spool_weight": 200,
+          "color_hex": "00FF00",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 4,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Own spool",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "pla+",
+          "price": 35.5,
+          "density": 1.24,
+          "diameter": 2.85,
+          "spool_weight": 0,
+          "color_hex": "0000FF80",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Rainbow",
+          "vendor": {
+            "id": 2,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "eSun",
+            "extra": {}
+          },
+          "material": "Silk PLA",
+          "density": 1.24,
+          "diameter": 1.75,
+          "settings_extruder_temp": 215,
+          "multi_color_hexes": "FF0000,00FF00,0000FF",
+          "multi_color_direction": "coaxial",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 6,
+          "registered": "2026-11-21T09:29:57Z",
+          "name": "No color",
+          "density": 1.1,
+          "diameter": 1.75,
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 7,
+          "registered": "2026-11-21T09:29:58Z",
+          "name": "Extra",
+          "material": "ABS",
+          "density": 1.2,
+          "diameter": 1.75,
+          "extra": {
+            "batch": "\"B-12\"",
+            "dry": "true",
+            "hours": "4.5"
+          },
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "filament-filter-color",
+      "method": "GET",
+      "path": "/api/v1/filament?color_hex=FF0000",
+      "status": 200,
+      "total": "2",
+      "response": [
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "PolyTerra Charcoal Black",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "PLA",
+          "price": 20,
+          "density": 1.24,
+          "diameter": 1.75,
+          "weight": 1000,
+          "spool_weight": 200,
+          "article_number": "PM70820",
+          "comment": "matte",
+          "settings_extruder_temp": 210,
+          "settings_bed_temp": 60,
+          "color_hex": "FF0000",
+          "external_id": "polymaker_pla",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Rainbow",
+          "vendor": {
+            "id": 2,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "eSun",
+            "extra": {}
+          },
+          "material": "Silk PLA",
+          "density": 1.24,
+          "diameter": 1.75,
+          "settings_extruder_temp": 215,
+          "multi_color_hexes": "FF0000,00FF00,0000FF",
+          "multi_color_direction": "coaxial",
+          "extra": {},
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "filament-filter-color-hash-threshold",
+      "method": "GET",
+      "path": "/api/v1/filament?color_hex=%23ee1111&color_similarity_threshold=5",
+      "status": 200,
+      "total": "2",
+      "response": [
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "PolyTerra Charcoal Black",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "PLA",
+          "price": 20,
+          "density": 1.24,
+          "diameter": 1.75,
+          "weight": 1000,
+          "spool_weight": 200,
+          "article_number": "PM70820",
+          "comment": "matte",
+          "settings_extruder_temp": 210,
+          "settings_bed_temp": 60,
+          "color_hex": "FF0000",
+          "external_id": "polymaker_pla",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Rainbow",
+          "vendor": {
+            "id": 2,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "eSun",
+            "extra": {}
+          },
+          "material": "Silk PLA",
+          "density": 1.24,
+          "diameter": 1.75,
+          "settings_extruder_temp": 215,
+          "multi_color_hexes": "FF0000,00FF00,0000FF",
+          "multi_color_direction": "coaxial",
+          "extra": {},
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "filament-filter-color-wide",
+      "method": "GET",
+      "path": "/api/v1/filament?color_hex=00ff00&color_similarity_threshold=100",
+      "status": 200,
+      "total": "3",
+      "response": [
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "PolyTerra Charcoal Black",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "PLA",
+          "price": 20,
+          "density": 1.24,
+          "diameter": 1.75,
+          "weight": 1000,
+          "spool_weight": 200,
+          "article_number": "PM70820",
+          "comment": "matte",
+          "settings_extruder_temp": 210,
+          "settings_bed_temp": 60,
+          "color_hex": "FF0000",
+          "external_id": "polymaker_pla",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 3,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Fallback",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "PETG",
+          "density": 1.27,
+          "diameter": 1.75,
+          "spool_weight": 200,
+          "color_hex": "00FF00",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Rainbow",
+          "vendor": {
+            "id": 2,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "eSun",
+            "extra": {}
+          },
+          "material": "Silk PLA",
+          "density": 1.24,
+          "diameter": 1.75,
+          "settings_extruder_temp": 215,
+          "multi_color_hexes": "FF0000,00FF00,0000FF",
+          "multi_color_direction": "coaxial",
+          "extra": {},
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "filament-filter-threshold-invalid",
+      "method": "GET",
+      "path": "/api/v1/filament?color_hex=00ff00&color_similarity_threshold=close",
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "float_parsing",
+            "loc": ["query", "color_similarity_threshold"],
+            "msg": "Input should be a valid number, unable to parse string as a number",
+            "input": "close"
+          }
+        ]
+      }
+    },
+    {
+      "name": "filament-filter-tag-invalid",
+      "method": "GET",
+      "path": "/api/v1/filament?tag=zz",
+      "status": 400,
+      "total": null,
+      "response": {
+        "message": "\"zz\" is not a valid tag UID. A UID must be hexadecimal."
+      }
+    },
+    {
+      "name": "filament-filter-tag-odd",
+      "method": "GET",
+      "path": "/api/v1/filament?tag=04A",
+      "status": 400,
+      "total": null,
+      "response": {
+        "message": "A tag UID must contain a whole number of bytes (an even number of hex characters)."
+      }
+    },
+    {
+      "name": "filament-filter-tag-empty",
+      "method": "GET",
+      "path": "/api/v1/filament?tag=",
+      "status": 400,
+      "total": null,
+      "response": {
+        "message": "A tag UID must not be empty."
+      }
+    },
+    {
+      "name": "filament-filter-tag-valid",
+      "method": "GET",
+      "path": "/api/v1/filament?tag=04:a2:b3:c4",
+      "status": 200,
+      "total": "0",
+      "response": []
+    },
+    {
+      "name": "filament-filter-extra-text",
+      "method": "GET",
+      "path": "/api/v1/filament?extra.batch=b-1",
+      "status": 200,
+      "total": "1",
+      "response": [
+        {
+          "id": 7,
+          "registered": "2026-11-21T09:29:58Z",
+          "name": "Extra",
+          "material": "ABS",
+          "density": 1.2,
+          "diameter": 1.75,
+          "extra": {
+            "batch": "\"B-12\"",
+            "dry": "true",
+            "hours": "4.5"
+          },
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "filament-filter-extra-bool",
+      "method": "GET",
+      "path": "/api/v1/filament?extra.dry=TRUE",
+      "status": 200,
+      "total": "1",
+      "response": [
+        {
+          "id": 7,
+          "registered": "2026-11-21T09:29:58Z",
+          "name": "Extra",
+          "material": "ABS",
+          "density": 1.2,
+          "diameter": 1.75,
+          "extra": {
+            "batch": "\"B-12\"",
+            "dry": "true",
+            "hours": "4.5"
+          },
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "filament-filter-extra-bool-empty",
+      "method": "GET",
+      "path": "/api/v1/filament?extra.dry=",
+      "status": 200,
+      "total": "6",
+      "response": [
+        {
+          "id": 1,
+          "registered": "2026-11-21T09:29:56Z",
+          "density": 1.24,
+          "diameter": 1.75,
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "PolyTerra Charcoal Black",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "PLA",
+          "price": 20,
+          "density": 1.24,
+          "diameter": 1.75,
+          "weight": 1000,
+          "spool_weight": 200,
+          "article_number": "PM70820",
+          "comment": "matte",
+          "settings_extruder_temp": 210,
+          "settings_bed_temp": 60,
+          "color_hex": "FF0000",
+          "external_id": "polymaker_pla",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 3,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Fallback",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "PETG",
+          "density": 1.27,
+          "diameter": 1.75,
+          "spool_weight": 200,
+          "color_hex": "00FF00",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 4,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Own spool",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "pla+",
+          "price": 35.5,
+          "density": 1.24,
+          "diameter": 2.85,
+          "spool_weight": 0,
+          "color_hex": "0000FF80",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Rainbow",
+          "vendor": {
+            "id": 2,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "eSun",
+            "extra": {}
+          },
+          "material": "Silk PLA",
+          "density": 1.24,
+          "diameter": 1.75,
+          "settings_extruder_temp": 215,
+          "multi_color_hexes": "FF0000,00FF00,0000FF",
+          "multi_color_direction": "coaxial",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 6,
+          "registered": "2026-11-21T09:29:57Z",
+          "name": "No color",
+          "density": 1.1,
+          "diameter": 1.75,
+          "extra": {},
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "filament-filter-extra-bool-invalid",
+      "method": "GET",
+      "path": "/api/v1/filament?extra.dry=yes",
+      "status": 400,
+      "total": null,
+      "response": {
+        "message": "Invalid boolean filter value: 'yes'"
+      }
+    },
+    {
+      "name": "filament-filter-extra-float",
+      "method": "GET",
+      "path": "/api/v1/filament?extra.hours=4.50",
+      "status": 200,
+      "total": "1",
+      "response": [
+        {
+          "id": 7,
+          "registered": "2026-11-21T09:29:58Z",
+          "name": "Extra",
+          "material": "ABS",
+          "density": 1.2,
+          "diameter": 1.75,
+          "extra": {
+            "batch": "\"B-12\"",
+            "dry": "true",
+            "hours": "4.5"
+          },
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "filament-filter-extra-float-range",
+      "method": "GET",
+      "path": "/api/v1/filament?extra.hours=4:5",
+      "status": 200,
+      "total": "1",
+      "response": [
+        {
+          "id": 7,
+          "registered": "2026-11-21T09:29:58Z",
+          "name": "Extra",
+          "material": "ABS",
+          "density": 1.2,
+          "diameter": 1.75,
+          "extra": {
+            "batch": "\"B-12\"",
+            "dry": "true",
+            "hours": "4.5"
+          },
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "filament-sort-vendor-name",
+      "method": "GET",
+      "path": "/api/v1/filament?sort=vendor.name:asc,id:desc",
+      "status": 200,
+      "total": "7",
+      "response": [
+        {
+          "id": 4,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Own spool",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "pla+",
+          "price": 35.5,
+          "density": 1.24,
+          "diameter": 2.85,
+          "spool_weight": 0,
+          "color_hex": "0000FF80",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 3,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Fallback",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "PETG",
+          "density": 1.27,
+          "diameter": 1.75,
+          "spool_weight": 200,
+          "color_hex": "00FF00",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "PolyTerra Charcoal Black",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "PLA",
+          "price": 20,
+          "density": 1.24,
+          "diameter": 1.75,
+          "weight": 1000,
+          "spool_weight": 200,
+          "article_number": "PM70820",
+          "comment": "matte",
+          "settings_extruder_temp": 210,
+          "settings_bed_temp": 60,
+          "color_hex": "FF0000",
+          "external_id": "polymaker_pla",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Rainbow",
+          "vendor": {
+            "id": 2,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "eSun",
+            "extra": {}
+          },
+          "material": "Silk PLA",
+          "density": 1.24,
+          "diameter": 1.75,
+          "settings_extruder_temp": 215,
+          "multi_color_hexes": "FF0000,00FF00,0000FF",
+          "multi_color_direction": "coaxial",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 7,
+          "registered": "2026-11-21T09:29:58Z",
+          "name": "Extra",
+          "material": "ABS",
+          "density": 1.2,
+          "diameter": 1.75,
+          "extra": {
+            "batch": "\"B-12\"",
+            "dry": "true",
+            "hours": "4.5"
+          },
+          "tags": []
+        },
+        {
+          "id": 6,
+          "registered": "2026-11-21T09:29:57Z",
+          "name": "No color",
+          "density": 1.1,
+          "diameter": 1.75,
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 1,
+          "registered": "2026-11-21T09:29:56Z",
+          "density": 1.24,
+          "diameter": 1.75,
+          "extra": {},
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "filament-sort-vendor-relation-only",
+      "method": "GET",
+      "path": "/api/v1/filament?sort=vendor:asc",
+      "status": 400,
+      "total": null,
+      "response": {
+        "message": "No field specified for vendor"
+      }
+    },
+    {
+      "name": "filament-sort-vendor-unknown",
+      "method": "GET",
+      "path": "/api/v1/filament?sort=vendor.bogus:asc",
+      "status": 400,
+      "total": null,
+      "response": {
+        "message": "Invalid field name 'bogus', 'bogus' is not a valid field on 'Vendor'."
+      }
+    },
+    {
+      "name": "filament-sort-filament-relation",
+      "method": "GET",
+      "path": "/api/v1/filament?sort=filament.name:asc",
+      "status": 400,
+      "total": null,
+      "response": {
+        "message": "Invalid field name 'filament.name', 'filament' is not a valid field on 'Filament'."
+      }
+    },
+    {
+      "name": "filament-sort-price-desc",
+      "method": "GET",
+      "path": "/api/v1/filament?sort=price:desc",
+      "status": 200,
+      "total": "7",
+      "response": [
+        {
+          "id": 4,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Own spool",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "pla+",
+          "price": 35.5,
+          "density": 1.24,
+          "diameter": 2.85,
+          "spool_weight": 0,
+          "color_hex": "0000FF80",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "PolyTerra Charcoal Black",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "PLA",
+          "price": 20,
+          "density": 1.24,
+          "diameter": 1.75,
+          "weight": 1000,
+          "spool_weight": 200,
+          "article_number": "PM70820",
+          "comment": "matte",
+          "settings_extruder_temp": 210,
+          "settings_bed_temp": 60,
+          "color_hex": "FF0000",
+          "external_id": "polymaker_pla",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 1,
+          "registered": "2026-11-21T09:29:56Z",
+          "density": 1.24,
+          "diameter": 1.75,
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 3,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Fallback",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "PETG",
+          "density": 1.27,
+          "diameter": 1.75,
+          "spool_weight": 200,
+          "color_hex": "00FF00",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Rainbow",
+          "vendor": {
+            "id": 2,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "eSun",
+            "extra": {}
+          },
+          "material": "Silk PLA",
+          "density": 1.24,
+          "diameter": 1.75,
+          "settings_extruder_temp": 215,
+          "multi_color_hexes": "FF0000,00FF00,0000FF",
+          "multi_color_direction": "coaxial",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 6,
+          "registered": "2026-11-21T09:29:57Z",
+          "name": "No color",
+          "density": 1.1,
+          "diameter": 1.75,
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 7,
+          "registered": "2026-11-21T09:29:58Z",
+          "name": "Extra",
+          "material": "ABS",
+          "density": 1.2,
+          "diameter": 1.75,
+          "extra": {
+            "batch": "\"B-12\"",
+            "dry": "true",
+            "hours": "4.5"
+          },
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "filament-sort-material-asc",
+      "method": "GET",
+      "path": "/api/v1/filament?sort=material:asc",
+      "status": 200,
+      "total": "7",
+      "response": [
+        {
+          "id": 7,
+          "registered": "2026-11-21T09:29:58Z",
+          "name": "Extra",
+          "material": "ABS",
+          "density": 1.2,
+          "diameter": 1.75,
+          "extra": {
+            "batch": "\"B-12\"",
+            "dry": "true",
+            "hours": "4.5"
+          },
+          "tags": []
+        },
+        {
+          "id": 3,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Fallback",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "PETG",
+          "density": 1.27,
+          "diameter": 1.75,
+          "spool_weight": 200,
+          "color_hex": "00FF00",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "PolyTerra Charcoal Black",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "PLA",
+          "price": 20,
+          "density": 1.24,
+          "diameter": 1.75,
+          "weight": 1000,
+          "spool_weight": 200,
+          "article_number": "PM70820",
+          "comment": "matte",
+          "settings_extruder_temp": 210,
+          "settings_bed_temp": 60,
+          "color_hex": "FF0000",
+          "external_id": "polymaker_pla",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Rainbow",
+          "vendor": {
+            "id": 2,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "eSun",
+            "extra": {}
+          },
+          "material": "Silk PLA",
+          "density": 1.24,
+          "diameter": 1.75,
+          "settings_extruder_temp": 215,
+          "multi_color_hexes": "FF0000,00FF00,0000FF",
+          "multi_color_direction": "coaxial",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 4,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Own spool",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "pla+",
+          "price": 35.5,
+          "density": 1.24,
+          "diameter": 2.85,
+          "spool_weight": 0,
+          "color_hex": "0000FF80",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 1,
+          "registered": "2026-11-21T09:29:56Z",
+          "density": 1.24,
+          "diameter": 1.75,
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 6,
+          "registered": "2026-11-21T09:29:57Z",
+          "name": "No color",
+          "density": 1.1,
+          "diameter": 1.75,
+          "extra": {},
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "filament-sort-extra",
+      "method": "GET",
+      "path": "/api/v1/filament?sort=extra.hours:asc",
+      "status": 200,
+      "total": "7",
+      "response": [
+        {
+          "id": 7,
+          "registered": "2026-11-21T09:29:58Z",
+          "name": "Extra",
+          "material": "ABS",
+          "density": 1.2,
+          "diameter": 1.75,
+          "extra": {
+            "batch": "\"B-12\"",
+            "dry": "true",
+            "hours": "4.5"
+          },
+          "tags": []
+        },
+        {
+          "id": 1,
+          "registered": "2026-11-21T09:29:56Z",
+          "density": 1.24,
+          "diameter": 1.75,
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "PolyTerra Charcoal Black",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "PLA",
+          "price": 20,
+          "density": 1.24,
+          "diameter": 1.75,
+          "weight": 1000,
+          "spool_weight": 200,
+          "article_number": "PM70820",
+          "comment": "matte",
+          "settings_extruder_temp": 210,
+          "settings_bed_temp": 60,
+          "color_hex": "FF0000",
+          "external_id": "polymaker_pla",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 3,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Fallback",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "PETG",
+          "density": 1.27,
+          "diameter": 1.75,
+          "spool_weight": 200,
+          "color_hex": "00FF00",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 4,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Own spool",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "pla+",
+          "price": 35.5,
+          "density": 1.24,
+          "diameter": 2.85,
+          "spool_weight": 0,
+          "color_hex": "0000FF80",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Rainbow",
+          "vendor": {
+            "id": 2,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "eSun",
+            "extra": {}
+          },
+          "material": "Silk PLA",
+          "density": 1.24,
+          "diameter": 1.75,
+          "settings_extruder_temp": 215,
+          "multi_color_hexes": "FF0000,00FF00,0000FF",
+          "multi_color_direction": "coaxial",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 6,
+          "registered": "2026-11-21T09:29:57Z",
+          "name": "No color",
+          "density": 1.1,
+          "diameter": 1.75,
+          "extra": {},
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "filament-page",
+      "method": "GET",
+      "path": "/api/v1/filament?limit=2&offset=2",
+      "status": 200,
+      "total": "7",
+      "response": [
+        {
+          "id": 3,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Fallback",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "PETG",
+          "density": 1.27,
+          "diameter": 1.75,
+          "spool_weight": 200,
+          "color_hex": "00FF00",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 4,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Own spool",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "pla+",
+          "price": 35.5,
+          "density": 1.24,
+          "diameter": 2.85,
+          "spool_weight": 0,
+          "color_hex": "0000FF80",
+          "extra": {},
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "filament-page-filtered-count",
+      "method": "GET",
+      "path": "/api/v1/filament?vendor.id=1&limit=1",
+      "status": 200,
+      "total": "3",
+      "response": [
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "PolyTerra Charcoal Black",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "PLA",
+          "price": 20,
+          "density": 1.24,
+          "diameter": 1.75,
+          "weight": 1000,
+          "spool_weight": 200,
+          "article_number": "PM70820",
+          "comment": "matte",
+          "settings_extruder_temp": 210,
+          "settings_bed_temp": 60,
+          "color_hex": "FF0000",
+          "external_id": "polymaker_pla",
+          "extra": {},
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "filament-errors-combined",
+      "method": "GET",
+      "path": "/api/v1/filament?vendor.id=x&limit=y&color_similarity_threshold=z",
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "string_pattern_mismatch",
+            "loc": ["query", "vendor.id"],
+            "msg": "String should match pattern '^-?\\d+(,-?\\d+)*$'",
+            "input": "x",
+            "ctx": {
+              "pattern": "^-?\\d+(,-?\\d+)*$"
+            }
+          },
+          {
+            "type": "float_parsing",
+            "loc": ["query", "color_similarity_threshold"],
+            "msg": "Input should be a valid number, unable to parse string as a number",
+            "input": "z"
+          },
+          {
+            "type": "int_parsing",
+            "loc": ["query", "limit"],
+            "msg": "Input should be a valid integer, unable to parse string as an integer",
+            "input": "y"
+          }
+        ]
+      }
+    },
+    {
+      "name": "filament-update",
+      "method": "PATCH",
+      "path": "/api/v1/filament/2",
+      "body": {
+        "name": "Renamed",
+        "price": null,
+        "settings_bed_temp": 65,
+        "vendor_id": 2
+      },
+      "status": 200,
+      "total": null,
+      "response": {
+        "id": 2,
+        "registered": "2026-11-21T09:29:56Z",
+        "name": "Renamed",
+        "vendor": {
+          "id": 2,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "eSun",
+          "extra": {}
+        },
+        "material": "PLA",
+        "density": 1.24,
+        "diameter": 1.75,
+        "weight": 1000,
+        "spool_weight": 200,
+        "article_number": "PM70820",
+        "comment": "matte",
+        "settings_extruder_temp": 210,
+        "settings_bed_temp": 65,
+        "color_hex": "FF0000",
+        "external_id": "polymaker_pla",
+        "extra": {},
+        "tags": []
+      }
+    },
+    {
+      "name": "filament-update-to-multi",
+      "method": "PATCH",
+      "path": "/api/v1/filament/2",
+      "body": {
+        "color_hex": "",
+        "multi_color_hexes": "ff0000,00ff00",
+        "multi_color_direction": "longitudinal"
+      },
+      "status": 200,
+      "total": null,
+      "response": {
+        "id": 2,
+        "registered": "2026-11-21T09:29:56Z",
+        "name": "Renamed",
+        "vendor": {
+          "id": 2,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "eSun",
+          "extra": {}
+        },
+        "material": "PLA",
+        "density": 1.24,
+        "diameter": 1.75,
+        "weight": 1000,
+        "spool_weight": 200,
+        "article_number": "PM70820",
+        "comment": "matte",
+        "settings_extruder_temp": 210,
+        "settings_bed_temp": 65,
+        "multi_color_hexes": "FF0000,00FF00",
+        "multi_color_direction": "longitudinal",
+        "external_id": "polymaker_pla",
+        "extra": {},
+        "tags": []
+      }
+    },
+    {
+      "name": "filament-update-clear-vendor",
+      "method": "PATCH",
+      "path": "/api/v1/filament/3",
+      "body": {
+        "vendor_id": null
+      },
+      "status": 200,
+      "total": null,
+      "response": {
+        "id": 3,
+        "registered": "2026-11-21T09:29:56Z",
+        "name": "Fallback",
+        "material": "PETG",
+        "density": 1.27,
+        "diameter": 1.75,
+        "spool_weight": 200,
+        "color_hex": "00FF00",
+        "extra": {},
+        "tags": []
+      }
+    },
+    {
+      "name": "filament-update-density-null",
+      "method": "PATCH",
+      "path": "/api/v1/filament/2",
+      "body": {
+        "density": null
+      },
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "value_error",
+            "loc": ["body", "density"],
+            "msg": "Value error, Value must not be None.",
+            "input": null,
+            "ctx": {
+              "error": {}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "filament-update-diameter-zero",
+      "method": "PATCH",
+      "path": "/api/v1/filament/2",
+      "body": {
+        "diameter": 0
+      },
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "greater_than",
+            "loc": ["body", "diameter"],
+            "msg": "Input should be greater than 0",
+            "input": 0,
+            "ctx": {
+              "gt": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "filament-update-missing",
+      "method": "PATCH",
+      "path": "/api/v1/filament/999",
+      "body": {
+        "name": "x"
+      },
+      "status": 404,
+      "total": null,
+      "response": {
+        "message": "No filament with ID 999 found."
+      }
+    },
+    {
+      "name": "filament-update-missing-vendor",
+      "method": "PATCH",
+      "path": "/api/v1/filament/2",
+      "body": {
+        "vendor_id": 999
+      },
+      "status": 404,
+      "total": null,
+      "response": {
+        "message": "No vendor with ID 999 found."
+      }
+    },
+    {
+      "name": "filament-update-multi-without-direction",
+      "method": "PATCH",
+      "path": "/api/v1/filament/2",
+      "body": {
+        "multi_color_hexes": "FF0000,00FF00"
+      },
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "value_error",
+            "loc": ["body"],
+            "msg": "Value error, Multi-color filament must have multi_color_direction set.",
+            "input": {
+              "multi_color_hexes": "FF0000,00FF00"
+            },
+            "ctx": {
+              "error": {}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "filament-update-extra-merge",
+      "method": "PATCH",
+      "path": "/api/v1/filament/7",
+      "body": {
+        "extra": {
+          "batch": null,
+          "hours": "6"
+        }
+      },
+      "status": 200,
+      "total": null,
+      "response": {
+        "id": 7,
+        "registered": "2026-11-21T09:29:58Z",
+        "name": "Extra",
+        "material": "ABS",
+        "density": 1.2,
+        "diameter": 1.75,
+        "extra": {
+          "dry": "true",
+          "hours": "6"
+        },
+        "tags": []
+      }
+    },
+    {
+      "name": "filament-update-extra-invalid",
+      "method": "PATCH",
+      "path": "/api/v1/filament/7",
+      "body": {
+        "extra": {
+          "dry": "maybe"
+        }
+      },
+      "status": 400,
+      "total": null,
+      "response": {
+        "message": "Invalid extra field for key dry: Value is not valid JSON."
+      }
+    },
+    {
+      "name": "filament-update-path-invalid",
+      "method": "PATCH",
+      "path": "/api/v1/filament/x",
+      "body": {
+        "density": null
+      },
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "int_parsing",
+            "loc": ["path", "filament_id"],
+            "msg": "Input should be a valid integer, unable to parse string as an integer",
+            "input": "x"
+          },
+          {
+            "type": "value_error",
+            "loc": ["body", "density"],
+            "msg": "Value error, Value must not be None.",
+            "input": null,
+            "ctx": {
+              "error": {}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "filament-method-not-allowed",
+      "method": "POST",
+      "path": "/api/v1/filament/2",
+      "body": {
+        "density": 1
+      },
+      "status": 405,
+      "total": null,
+      "response": {
+        "detail": "Method Not Allowed"
+      }
+    },
+    {
+      "name": "filament-delete",
+      "method": "DELETE",
+      "path": "/api/v1/filament/1",
+      "status": 200,
+      "total": null,
+      "response": {
+        "message": "Success!"
+      }
+    },
+    {
+      "name": "filament-delete-again",
+      "method": "DELETE",
+      "path": "/api/v1/filament/1",
+      "status": 404,
+      "total": null,
+      "response": {
+        "message": "No filament with ID 1 found."
+      }
+    },
+    {
+      "name": "filament-delete-not-int",
+      "method": "DELETE",
+      "path": "/api/v1/filament/one",
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "int_parsing",
+            "loc": ["path", "filament_id"],
+            "msg": "Input should be a valid integer, unable to parse string as an integer",
+            "input": "one"
+          }
+        ]
+      }
+    },
+    {
+      "name": "spool-for-filament-4",
+      "method": "POST",
+      "path": "/api/v1/spool",
+      "body": {
+        "filament_id": 4
+      },
+      "setup": "spool",
+      "status": 200,
+      "total": null,
+      "response": {
+        "id": 1,
+        "registered": "2026-11-21T09:29:59Z",
+        "filament": {
+          "id": 4,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Own spool",
+          "vendor": {
+            "id": 1,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "Polymaker",
+            "empty_spool_weight": 200,
+            "external_id": "pm-2",
+            "extra": {}
+          },
+          "material": "pla+",
+          "price": 35.5,
+          "density": 1.24,
+          "diameter": 2.85,
+          "spool_weight": 0,
+          "color_hex": "0000FF80",
+          "extra": {},
+          "tags": []
+        },
+        "spool_weight": 0,
+        "used_weight": 0,
+        "used_length": 0,
+        "archived": false,
+        "extra": {},
+        "tags": []
+      }
+    },
+    {
+      "name": "filament-delete-with-spool",
+      "method": "DELETE",
+      "path": "/api/v1/filament/4",
+      "status": 403,
+      "total": null,
+      "response": {
+        "message": "Failed to delete filament, see server logs for more information."
+      }
+    },
+    {
+      "name": "filament-still-there",
+      "method": "GET",
+      "path": "/api/v1/filament/4",
+      "status": 200,
+      "total": null,
+      "response": {
+        "id": 4,
+        "registered": "2026-11-21T09:29:56Z",
+        "name": "Own spool",
+        "vendor": {
+          "id": 1,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "Polymaker",
+          "empty_spool_weight": 200,
+          "external_id": "pm-2",
+          "extra": {}
+        },
+        "material": "pla+",
+        "price": 35.5,
+        "density": 1.24,
+        "diameter": 2.85,
+        "spool_weight": 0,
+        "color_hex": "0000FF80",
+        "extra": {},
+        "tags": []
+      }
+    },
+    {
+      "name": "vendor-delete",
+      "method": "DELETE",
+      "path": "/api/v1/vendor/1",
+      "status": 200,
+      "total": null,
+      "response": {
+        "message": "Success!"
+      }
+    },
+    {
+      "name": "vendor-delete-again",
+      "method": "DELETE",
+      "path": "/api/v1/vendor/1",
+      "status": 404,
+      "total": null,
+      "response": {
+        "message": "No vendor with ID 1 found."
+      }
+    },
+    {
+      "name": "vendor-delete-not-int",
+      "method": "DELETE",
+      "path": "/api/v1/vendor/x",
+      "status": 422,
+      "total": null,
+      "response": {
+        "detail": [
+          {
+            "type": "int_parsing",
+            "loc": ["path", "vendor_id"],
+            "msg": "Input should be a valid integer, unable to parse string as an integer",
+            "input": "x"
+          }
+        ]
+      }
+    },
+    {
+      "name": "filament-vendor-cleared",
+      "method": "GET",
+      "path": "/api/v1/filament?sort=id:asc",
+      "status": 200,
+      "total": "6",
+      "response": [
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Renamed",
+          "vendor": {
+            "id": 2,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "eSun",
+            "extra": {}
+          },
+          "material": "PLA",
+          "density": 1.24,
+          "diameter": 1.75,
+          "weight": 1000,
+          "spool_weight": 200,
+          "article_number": "PM70820",
+          "comment": "matte",
+          "settings_extruder_temp": 210,
+          "settings_bed_temp": 65,
+          "multi_color_hexes": "FF0000,00FF00",
+          "multi_color_direction": "longitudinal",
+          "external_id": "polymaker_pla",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 3,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Fallback",
+          "material": "PETG",
+          "density": 1.27,
+          "diameter": 1.75,
+          "spool_weight": 200,
+          "color_hex": "00FF00",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 4,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Own spool",
+          "material": "pla+",
+          "price": 35.5,
+          "density": 1.24,
+          "diameter": 2.85,
+          "spool_weight": 0,
+          "color_hex": "0000FF80",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:56Z",
+          "name": "Rainbow",
+          "vendor": {
+            "id": 2,
+            "registered": "2026-11-21T09:29:54Z",
+            "name": "eSun",
+            "extra": {}
+          },
+          "material": "Silk PLA",
+          "density": 1.24,
+          "diameter": 1.75,
+          "settings_extruder_temp": 215,
+          "multi_color_hexes": "FF0000,00FF00,0000FF",
+          "multi_color_direction": "coaxial",
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 6,
+          "registered": "2026-11-21T09:29:57Z",
+          "name": "No color",
+          "density": 1.1,
+          "diameter": 1.75,
+          "extra": {},
+          "tags": []
+        },
+        {
+          "id": 7,
+          "registered": "2026-11-21T09:29:58Z",
+          "name": "Extra",
+          "material": "ABS",
+          "density": 1.2,
+          "diameter": 1.75,
+          "extra": {
+            "dry": "true",
+            "hours": "6"
+          },
+          "tags": []
+        }
+      ]
+    },
+    {
+      "name": "vendor-list-final",
+      "method": "GET",
+      "path": "/api/v1/vendor?sort=id:asc",
+      "status": 200,
+      "total": "5",
+      "response": [
+        {
+          "id": 2,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "eSun",
+          "extra": {}
+        },
+        {
+          "id": 3,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "",
+          "extra": {}
+        },
+        {
+          "id": 4,
+          "registered": "2026-11-21T09:29:54Z",
+          "name": "Prusament",
+          "empty_spool_weight": 201.5,
+          "extra": {}
+        },
+        {
+          "id": 5,
+          "registered": "2026-11-21T09:29:55Z",
+          "name": "Elegoo",
+          "extra": {
+            "rating": "4",
+            "tags": "[\"fast\", \"good\"]",
+            "span": "[1, 9]"
+          }
+        },
+        {
+          "id": 6,
+          "registered": "2026-11-21T09:29:55Z",
+          "name": "Sunlu",
+          "extra": {
+            "rating": "2"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -256,3 +256,23 @@ describe('configuration editor placement', () => {
     expect(dashboard).not.toContain('config-editor')
   })
 })
+
+describe('Bambu alarm status', () => {
+  it('renders current, unavailable, and cleared alarm states accessibly', async () => {
+    const file = '../printer-detail/BambuAlarmStatus.vue'
+    const active = await renderFarmComponent(file, {
+      message: 'Erro de impressão: 0300-8005.',
+    })
+    expect(active).toContain('role="status"')
+    expect(active).toContain('0300-8005')
+    const unavailable = await renderFarmComponent(file, {
+      message: 'Alertas ainda não informados pela impressora.',
+    })
+    expect(unavailable).toContain(
+      'Alertas ainda não informados pela impressora.',
+    )
+    expect(unavailable).not.toContain('0300-8005')
+    const cleared = await renderFarmComponent(file, { message: '' })
+    expect(cleared).toContain('Nenhum alerta informado.')
+  })
+})

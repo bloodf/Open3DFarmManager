@@ -28,7 +28,7 @@ The `gcode_line` request, `ledctrl`, `print_speed` and the report field names (`
 
 The printer detail page shows the nonzero `print.print_error` code and the codes in `print.hms` over the existing read-only detail stream. The print error is a 32-bit integer. Each HMS entry combines two 32-bit integers, `attr` and `code`. Codes are shown in hexadecimal without interpreting severity or changing the job state. See the [Bambu Studio issue with a captured print error](https://github.com/bambulab/BambuStudio/issues/4495) and the [bambu-printer-manager data dictionary](https://synman.github.io/bambu-printer-manager/data-dictionary/#error-handling-attributes).
 
-Partial reports preserve each alarm field independently. A report with `print_error: 0` clears the print error, and `hms: []` clears the HMS list. A disconnected detail stream discards its cached alarms. Coverage is **simulated** by the Bambu LAN browser journey in `tests/journey/bambu.spec.ts`.
+Partial reports preserve each alarm field independently. A report with `print_error: 0` clears the print error, and `hms: []` clears the HMS list. A disconnected detail stream discards its cached alarms and notifies subscribers that alarms are unknown. On connection it requests a full status report. Invalid HMS lists are marked unknown until a valid list arrives. Coverage is **simulated** by the Bambu LAN browser journey in `tests/journey/bambu.spec.ts`.
 
 ## Unsupported areas
 

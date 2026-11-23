@@ -1,5 +1,24 @@
 import { z } from 'zod'
 
+export const SpeedMode = z.enum(['silent', 'standard', 'sport', 'ludicrous'])
+export type SpeedMode = z.infer<typeof SpeedMode>
+export const SpeedModes = z
+  .array(SpeedMode)
+  .min(1)
+  .max(4)
+  .refine((modes) => new Set(modes).size === modes.length)
+
+/** Missing advertisements preserve support for all speed levels. */
+export function speedModeAllowed(
+  modes: readonly SpeedMode[] | undefined,
+  level: unknown,
+): boolean {
+  return (
+    modes === undefined ||
+    (typeof level === 'string' && modes.some((mode) => mode === level))
+  )
+}
+
 /** Lifecycle actions; the dashboard labels and state machine cover exactly these. */
 export const ControlAction = z.enum(['pause', 'resume', 'cancel'])
 export type ControlAction = z.infer<typeof ControlAction>
@@ -487,7 +506,7 @@ export const ControlArguments = z.discriminatedUnion('action', [
   z.strictObject({
     action: z.literal('set_speed'),
     args: z.strictObject({
-      level: z.enum(['silent', 'standard', 'sport', 'ludicrous']),
+      level: SpeedMode,
     }),
   }),
   z.strictObject({

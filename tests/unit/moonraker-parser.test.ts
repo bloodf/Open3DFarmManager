@@ -39,7 +39,7 @@ test.each([
   ['paused', 'paused'],
   ['error', 'error'],
   ['complete', 'idle'],
-  ['cancelled', 'idle'],
+  ['cancelled', 'unknown'],
 ] as const)('maps print status %s to %s', (upstream, normalized) => {
   expect(
     parseMoonrakerSnapshot(
@@ -151,7 +151,7 @@ test('server readiness requires both a connection and ready state', () => {
 
 test('projects the complete webhook and print-state matrix at progress boundaries', () => {
   const rows = [
-    ['ready', ['idle', 'printing', 'paused', 'error', 'idle', 'idle']],
+    ['ready', ['idle', 'printing', 'paused', 'error', 'idle', 'unknown']],
     [
       'startup',
       ['offline', 'offline', 'offline', 'offline', 'offline', 'offline'],

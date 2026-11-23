@@ -14,7 +14,7 @@ type WireState =
 
 const cases = [
   { wire: 'complete', outcome: 'completed', state: 'idle' },
-  { wire: 'cancelled', outcome: 'cancelled', state: 'idle' },
+  { wire: 'cancelled', outcome: 'cancelled', state: 'unknown' },
   { wire: 'error', outcome: 'failed', state: 'error' },
 ] as const
 

@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { readlinkSync } from 'node:fs'
-import { basename } from 'node:path'
+import {
+  closeSync,
+  openSync,
+  readSync,
+  readlinkSync,
+  realpathSync,
+} from 'node:fs'
 import { expect, type Locator, type Page } from '@playwright/test'
 
 async function frames(video: Locator) {
@@ -56,7 +61,30 @@ export async function assertCameraPlaying(input: {
   return { region, video }
 }
 
-function helperProcesses(helperPath: string) {
+/**
+ * True when the first NUL-terminated entry of /proc/<pid>/cmdline is exactly
+ * `path`. Reads at most path+1 bytes, so long command lines stay unbuffered.
+ */
+function argv0Is(pid: string, path: string) {
+  const expected = Buffer.from(`${path}\0`)
+  const actual = Buffer.alloc(expected.length)
+  const fd = openSync(`/proc/${pid}/cmdline`, 'r')
+  try {
+    return (
+      readSync(fd, actual, 0, actual.length, 0) === actual.length &&
+      actual.equals(expected)
+    )
+  } finally {
+    closeSync(fd)
+  }
+}
+
+/**
+ * Counts running ingest helpers. A real helper is its own executable. The
+ * repo's journey stand-in is a launcher that `exec -a <helper>`s Node, so its
+ * executable is Node and the helper path survives only as argv[0].
+ */
+export function helperProcesses(helperPath: string) {
   if (process.platform !== 'linux')
     return execFileSync('ps', ['-eo', 'args'], { encoding: 'utf8' })
       .split('\n')
@@ -64,15 +92,19 @@ function helperProcesses(helperPath: string) {
         (line) => line === helperPath || line.startsWith(helperPath + ' '),
       ).length
 
-  // Avoid buffering other processes' potentially long command lines.
-  const name = basename(helperPath).slice(0, 15)
-  return execFileSync('ps', ['-eo', 'pid=,comm='], { encoding: 'utf8' })
+  // Pids only: never buffer other processes' potentially long command lines.
+  // `comm` is no filter: Node names its main thread `MainThread`.
+  const nodeExe = realpathSync(process.execPath)
+  return execFileSync('ps', ['-eo', 'pid='], { encoding: 'utf8' })
     .split('\n')
-    .filter((line) => {
-      const [pid, command] = line.trim().split(/\s+/, 2)
-      if (command !== name) return false
+    .map((line) => line.trim())
+    .filter((pid) => {
+      if (!pid) return false
       try {
-        return readlinkSync(`/proc/${pid}/exe`) === helperPath
+        const exe = readlinkSync(`/proc/${pid}/exe`)
+        return (
+          exe === helperPath || (exe === nodeExe && argv0Is(pid, helperPath))
+        )
       } catch (error) {
         const code = (error as NodeJS.ErrnoException).code
         if (code === 'ENOENT' || code === 'ESRCH' || code === 'EACCES')

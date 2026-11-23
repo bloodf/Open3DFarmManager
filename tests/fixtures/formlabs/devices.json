@@ -1,0 +1,70 @@
+{
+  "count": 4,
+  "devices": [
+    {
+      "id": "fixture-4",
+      "product_name": "Form 4",
+      "status": "Synthetic vendor status",
+      "is_connected": true,
+      "connection_type": "ETHERNET",
+      "ip_address": "192.0.2.1",
+      "firmware_version": "1.17.1",
+      "is_remote_print_enabled": false,
+      "estimated_print_time_remaining_ms": 12500,
+      "tank_id": "fixture-tank",
+      "tank_material_code": "FLGPBK05",
+      "cartridge_data": {
+        "fixture-cartridge": {
+          "cartridgeMaterialCode": "FLGPBK05",
+          "cartridgeEstimatedVolumeDispensed_mL": 125.5,
+          "cartridgeOriginalVolume_mL": 1000
+        }
+      },
+      "ready_to_print_now": false
+    },
+    {
+      "id": "fixture-4l",
+      "product_name": "Form 4L",
+      "status": "Synthetic vendor status",
+      "is_connected": true,
+      "connection_type": "ETHERNET",
+      "ip_address": "192.0.2.1",
+      "firmware_version": "1.17.1",
+      "is_remote_print_enabled": false,
+      "estimated_print_time_remaining_ms": 0,
+      "tank_id": "",
+      "tank_material_code": "",
+      "cartridge_data": {},
+      "ready_to_print_now": false
+    },
+    {
+      "id": "fixture-studio",
+      "product_name": "Form Studio 1",
+      "firmware_version": "1.0.0",
+      "status": "Synthetic vendor status",
+      "is_connected": true,
+      "connection_type": "USB"
+    },
+    {
+      "id": "fixture-remote",
+      "product_name": "Form 4",
+      "status": "Synthetic vendor status",
+      "is_connected": true,
+      "connection_type": "REMOTE",
+      "ip_address": "192.0.2.1",
+      "firmware_version": "1.17.1",
+      "is_remote_print_enabled": false,
+      "estimated_print_time_remaining_ms": 12500,
+      "tank_id": "fixture-tank",
+      "tank_material_code": "FLGPBK05",
+      "cartridge_data": {
+        "fixture-cartridge": {
+          "cartridgeMaterialCode": "FLGPBK05",
+          "cartridgeEstimatedVolumeDispensed_mL": 125.5,
+          "cartridgeOriginalVolume_mL": 1000
+        }
+      },
+      "ready_to_print_now": false
+    }
+  ]
+}

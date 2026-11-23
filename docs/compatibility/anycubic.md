@@ -19,7 +19,11 @@ No HTTP handshake or command fallback is implemented.
 ## Remaining print time
 
 Simulator-only coverage for the generic Anycubic LAN adapter. The adapter reads
-`remain_time` in minutes from a print report or its `project` object. A valid
+`remain_time` as minutes from a print report or its `project` object. This is
+a simulator contract and an unverified assumption for hardware: the repository
+has no captured fixture or protocol evidence establishing the units. Both the
+generic Anycubic and Kobra X simulators use this assumption; Anycubic catalog
+entries remain simulated and unqualified for this behavior. A valid
 direct value takes precedence, including zero. If the direct value is invalid,
 the adapter can use a valid project value from the same report.
 

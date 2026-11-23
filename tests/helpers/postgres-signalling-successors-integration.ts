@@ -58,13 +58,14 @@ export async function testPostgresSignallingSuccessors(
     renewer: 'farm_connector_credential_renewer',
   } as const
   const pools: Sql[] = []
+  const rolePassword = randomUUID().replaceAll('-', '')
   const pool = (username: string) => {
     const sql = postgres({
       host: '127.0.0.1',
       port,
       database: 'fixture',
       username,
-      password: '',
+      password: rolePassword,
       ssl: false,
       max: 4,
       connect_timeout: 3,
@@ -79,6 +80,7 @@ export async function testPostgresSignallingSuccessors(
   try {
     for (const [name, login] of Object.entries(logins)) {
       await admin`CREATE ROLE ${admin(login)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS IN ROLE ${admin(parents[name as keyof typeof parents])}`
+      await admin.unsafe(`ALTER ROLE "${login}" PASSWORD '${rolePassword}'`)
       created.push(login)
     }
 

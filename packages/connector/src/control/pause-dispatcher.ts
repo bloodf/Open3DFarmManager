@@ -1,3 +1,8 @@
+import {
+  temperatureJournalAction,
+  toolTemperatureRefusal,
+} from './control-driver.ts'
+import { ToolHeaters } from '../../../farm-protocol/src/state.ts'
 import { authorityConfirmation } from '../auth/offline-authority.ts'
 import {
   controlWithinLimits,
@@ -10,6 +15,8 @@ import {
   controlRoleAllowed,
   controlTargetState,
   ControlResultCode,
+  ToolIndex,
+  ToolTemperatureArgs,
   type ControlAction,
   type ExtendedControlAction,
   type SpeedMode,
@@ -65,6 +72,7 @@ const Observation = z.strictObject({
   readyObservedMono: mono,
   printStateObservedMono: mono,
   receivedMono: mono,
+  toolHeaters: ToolHeaters.optional(),
   effect: z
     .discriminatedUnion('kind', [
       z.strictObject({
@@ -76,6 +84,12 @@ const Observation = z.strictObject({
         kind: z.literal('temperature'),
         heater: z.enum(['extruder', 'bed', 'chamber']),
         target_c: z.number().finite(),
+        observedMono: mono,
+      }),
+      z.strictObject({
+        kind: z.literal('tool-temperature'),
+        tool: ToolIndex,
+        target_c: z.number().int().nonnegative(),
         observedMono: mono,
       }),
       z.strictObject({
@@ -127,6 +141,12 @@ export function controlEffectMatches(
         effect.kind === 'file' &&
         (observation.printState === 'printing' ||
           observation.printState === 'paused')
+      )
+    case 'set_tool_temperature':
+      return (
+        effect.kind === 'tool-temperature' &&
+        effect.tool === args.tool &&
+        effect.target_c === args.target_c
       )
     case 'set_temperature':
       return (
@@ -427,6 +447,10 @@ export function createPauseDispatcher(config: {
         !controlWithinLimits(command.action, command.args, config.controlLimits)
       )
         return Promise.resolve({ kind: 'rejected', reason: 'invalid-command' })
+      const toolArgs =
+        command.action === 'set_tool_temperature'
+          ? ToolTemperatureArgs.parse(command.args)
+          : undefined
       const candidateMapping = readPrinterBinding(printerBinding)
       if (!candidateMapping)
         return Promise.resolve({ kind: 'rejected', reason: 'scope' })
@@ -649,11 +673,13 @@ export function createPauseDispatcher(config: {
         const now = sample()
         if (!now) return null
         const current = readObservation(printerBinding, capability, now)
+        if (toolArgs) resultCode = toolTemperatureRefusal(current, toolArgs)
         refusedBusy =
           !!current &&
           current.ready &&
           controlPrinterBusy(command.action, current.printState)
         if (
+          (toolArgs && resultCode) ||
           !current ||
           !current.ready ||
           !controlSourceState(command.action, current.printState) ||
@@ -686,7 +712,10 @@ export function createPauseDispatcher(config: {
           capability,
           now,
         )
+        if (toolArgs)
+          resultCode = toolTemperatureRefusal(finalObservation, toolArgs)
         if (
+          (toolArgs && resultCode) ||
           !finalObservation ||
           !finalObservation.ready ||
           !controlSourceState(command.action, finalObservation.printState) ||
@@ -747,7 +776,12 @@ export function createPauseDispatcher(config: {
           try {
             claiming = true
             claim = claimCommand(journal, {
-              command,
+              command: toolArgs
+                ? {
+                    ...command,
+                    ...temperatureJournalAction(toolArgs.target_c),
+                  }
+                : command,
               printerKey: mapping.printer_key,
               wireSha256: createHash('sha256')
                 .update(encodeCommandV2(command))

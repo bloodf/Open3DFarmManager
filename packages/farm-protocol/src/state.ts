@@ -2,6 +2,7 @@ import { z } from 'zod'
 import {
   ExtendedControlAction,
   SpeedModes,
+  ToolIndex,
   MACRO_PARAM_MAX_KEYS,
   MacroName,
   MacroParamName,
@@ -12,6 +13,21 @@ import {
   isWellFormedJsonString,
   PRINTER_STRING_MAX_UNITS,
 } from './string-bounds.ts'
+
+export const ToolHeaters = z
+  .array(
+    z.strictObject({
+      tool: ToolIndex,
+      maxC: z.number().int().nonnegative(),
+    }),
+  )
+  .min(1)
+  .max(4)
+  .refine(
+    (heaters) =>
+      new Set(heaters.map((heater) => heater.tool)).size === heaters.length,
+  )
+export type ToolHeaters = z.infer<typeof ToolHeaters>
 
 export const PRINTER_HMS_MAX_ENTRIES = 64
 
@@ -97,6 +113,7 @@ function printerStateSchema(legacy: boolean) {
         .refine((actions) => new Set(actions).size === actions.length)
         .optional(),
       speedModes: SpeedModes.optional(),
+      toolHeaters: ToolHeaters.optional(),
       identity: z
         .strictObject({
           vendor: text(255, 1).optional(),

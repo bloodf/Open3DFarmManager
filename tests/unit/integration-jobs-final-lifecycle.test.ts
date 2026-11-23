@@ -8,10 +8,7 @@ import { join } from 'node:path'
 import type { Sql } from 'postgres'
 import { expect, test } from 'vitest'
 import { listIntegrationJobs } from '../../apps/farm/server/utils/integration-read.ts'
-import {
-  integrationHistoryJobIds,
-  PostgresIntegrationJobDelivery,
-} from '../../apps/farm/server/storage/integration-jobs-history.ts'
+import { PostgresIntegrationJobDelivery } from '../../apps/farm/server/storage/integration-jobs-history.ts'
 import { startMoonrakerMock } from '../../packages/sim-tools/src/mocks/moonraker-mock.ts'
 import {
   API_ENVELOPE_ISSUER,
@@ -348,41 +345,37 @@ test.each([
         totalDurationSeconds: null,
         filamentUsage: null,
       }
-      const unscoped = await listIntegrationJobs(
-        (async () => [
-          historyRow,
-          { ...historyRow, id: '16', endedAt: last!.endedAt - 1 },
-        ]) as unknown as Sql,
-        {
-          farmWideFarmIds: [farmId],
-          assignmentIds: [],
-          printerId: null,
-          since: null,
-          until: null,
-          limit: 50,
-          cursor: null,
-        },
-        list,
-      )
-      expect(unscoped.data[0]).toMatchObject({ id: '17', outcome })
-      expect(unscoped.data[0]).not.toHaveProperty('jobId')
       const rows = [
         historyRow,
         { ...historyRow, id: '16', endedAt: last!.endedAt - 1 },
       ]
-      const ownLinks = await integrationHistoryJobIds(list, rows, appId)
-      const page = {
-        data: unscoped.data.map((entry) => {
-          const jobId = ownLinks.get(entry.id)
-          return jobId ? { ...entry, jobId } : entry
-        }),
+      const readRows = (async () => rows) as unknown as Sql
+      const input = {
+        farmWideFarmIds: [farmId],
+        assignmentIds: [],
+        printerId: null,
+        since: null,
+        until: null,
+        limit: 50,
+        cursor: null,
       }
-      expect(ownLinks).toEqual(new Map([['17', jobId]]))
-      expect(await integrationHistoryJobIds(list, rows, randomUUID())).toEqual(
-        new Map(),
+      const unscoped = await listIntegrationJobs(readRows, input, list)
+      expect(unscoped.data[0]).not.toHaveProperty('jobId')
+      const ownPage = await listIntegrationJobs(
+        readRows,
+        { ...input, appId },
+        list,
       )
-      expect(page.data[0]).toMatchObject({ id: '17', jobId, outcome })
-      expect(page.data[1]).not.toHaveProperty('jobId')
+      expect(ownPage.data[0]).toMatchObject({ id: '17', jobId, outcome })
+      expect(ownPage.data[1]).not.toHaveProperty('jobId')
+      const otherPage = await listIntegrationJobs(
+        readRows,
+        { ...input, appId: randomUUID() },
+        list,
+      )
+      expect(otherPage.data[0]).toMatchObject({ id: '17', outcome })
+      expect(otherPage.data[0]).not.toHaveProperty('jobId')
+      expect(otherPage.data[1]).not.toHaveProperty('jobId')
     } finally {
       abort.abort()
       try {

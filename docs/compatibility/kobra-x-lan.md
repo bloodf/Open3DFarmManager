@@ -551,7 +551,9 @@ The adapter must not depend on these until a capture exists. Each is also marked
 
 - S6: [Owner clean-room follow-up and synthetic vectors](https://github.com/bloodf/Open3DFarmManager/issues/363#issuecomment-6996775853).
 
-This document draws on S1 and S6. - S7: [stribor/anycubic_kobrax at 34955343](https://github.com/stribor/anycubic_kobrax/tree/34955343)
+This document also draws on S7 and S8 for camera behavior.
+
+- S7: [stribor/anycubic_kobrax at 34955343](https://github.com/stribor/anycubic_kobrax/tree/34955343)
 (MIT). Web camera commands and tokenized FLV URLs.
 
 - S8: [Grunna/ha-anycubic-kobra-x-lan at db9b2a8e](https://github.com/Grunna/ha-anycubic-kobra-x-lan/tree/db9b2a8e)

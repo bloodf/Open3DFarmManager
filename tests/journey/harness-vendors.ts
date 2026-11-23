@@ -18,12 +18,13 @@ import { startAnycubicSimulator } from '../../packages/sim-tools/src/anycubic-si
 import { createAnycubicDiscoverySimulator } from '../../packages/sim-tools/src/anycubic-discovery-sim.ts'
 import { startBambuSimulator } from '../../packages/sim-tools/src/bambu-simulator.ts'
 import { createCrealitySimulator } from '../../packages/sim-tools/src/creality-simulator.ts'
+import { startFormlabsJourneyFixture } from './formlabs-fixture.ts'
 import { startSdcpFixture } from './sdcp-fixture.ts'
 import { createJourneyCameraEncoder } from './camera-encoder.ts'
 import { startKobraBridgeSimulator } from './harness-kobralink-bridge.ts'
 
 export type VendorName =
-  'bambu' | 'creality' | 'anycubic' | 'kobralink' | 'sdcp'
+  'bambu' | 'creality' | 'anycubic' | 'kobralink' | 'sdcp' | 'formlabs'
 
 /** What a spec can do to the running simulated print. */
 export type VendorControls = Readonly<{
@@ -56,7 +57,7 @@ export type RuntimeScope = Readonly<{
 
 /** The Connector runtime file sections this vendor needs. */
 export type VendorRuntime = Readonly<{
-  version: 2 | 3 | 4 | 5 | 6
+  version: 2 | 3 | 4 | 5 | 6 | 7
   collection: Readonly<Record<string, unknown>>
   assignment: Readonly<Record<string, unknown>>
   /**
@@ -105,6 +106,7 @@ export type VendorSimulator = Readonly<{
 
 /** Moonraker is the harness default; everything else is a VendorName. */
 export const VENDOR_DESCRIPTIONS: Readonly<Record<VendorName, string>> = {
+  formlabs: 'Loopback Formlabs PreForm status simulator',
   sdcp: 'Loopback SDCP status simulator',
   bambu:
     'Loopback Bambu LAN MQTT/TLS simulator (packages/sim-tools), pinned TLS, printing at 25 %; control commands opt-in',
@@ -263,7 +265,39 @@ export async function startVendorSimulator(
     let controls: VendorControls
     let runtime: VendorSimulator['runtime']
 
-    if (name === 'sdcp') {
+    if (name === 'formlabs') {
+      const fixture = await startFormlabsJourneyFixture()
+      undo.push(fixture.close)
+      raw = fixture
+      const unsupported = () => {
+        throw new Error('Formlabs journey does not simulate print controls')
+      }
+      controls = {
+        setProgress: unsupported,
+        finishPrint: unsupported,
+        failPrint: unsupported,
+      }
+      runtime = async (scope) => ({
+        version: 7,
+        collection: {
+          version: 7,
+          allowedOrigins: [],
+          printers: [],
+          formlabs: {
+            printers: [
+              {
+                printerKey: scope.printerKey,
+                host: '127.0.0.1',
+                port: fixture.simulator.port,
+                deviceId: fixture.deviceId,
+              },
+            ],
+          },
+          limits: { staleAfterMs: 5000 },
+        },
+        assignment: { ...localAssignment(scope), backend: 'formlabs' },
+      })
+    } else if (name === 'sdcp') {
       const sim = await startSdcpFixture()
       undo.push(() => sim.close())
       raw = sim

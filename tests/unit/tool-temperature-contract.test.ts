@@ -82,7 +82,7 @@ test('UI lists only advertised tool inputs with their limits', () => {
       { tool: 0, maxC: 200 },
     ]),
   ).toEqual([
-    { tool: 3, maxC: 275, label: 'Ferramenta T3' },
-    { tool: 0, maxC: 200, label: 'Ferramenta T0' },
+    { tool: 3, maxC: 275, label: 'Ferramenta 4' },
+    { tool: 0, maxC: 200, label: 'Ferramenta 1' },
   ])
 })

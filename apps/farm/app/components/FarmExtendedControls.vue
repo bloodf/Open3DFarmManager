@@ -132,7 +132,7 @@ function submit(action: FarmExtendedAction, event: Event) {
             "
             @click="submitTool(heater, $event)"
           >
-            Definir temperatura
+            Definir temperatura da {{ heater.label }}
           </button>
         </div>
       </template>

@@ -12,6 +12,7 @@ import { type FarmRow } from '../../utils/farm-view.ts'
 import { macroArgs } from '../../utils/farm-macros.ts'
 import {
   controlStatusText,
+  extendedControlStatusText,
   liveControlActionAvailability,
 } from '../../utils/farm-control.ts'
 import { livePauseAvailability } from '../../utils/farm-pause.ts'
@@ -89,9 +90,7 @@ export function useFarmControls(
       return 'O estado da impressora deixou de estar ao vivo. Nenhum comando foi enviado.'
     }
     if (!['pause', 'resume', 'cancel'].includes(pauseTarget.value.action)) {
-      if (pauseState.value.kind === 'settled')
-        return lastControlResults.value[pauseTarget.value.assignmentId] ?? ''
-      return controlStatusText('pause', pauseState.value, pauseRemaining.value)
+      return extendedControlStatusText(pauseState.value, pauseRemaining.value)
     }
     return controlStatusText(
       pauseTarget.value.action as ControlAction,
@@ -224,13 +223,7 @@ export function useFarmControls(
         lastControlResults.value[pauseTarget.value.assignmentId] =
           state.kind === 'settled' &&
           !['pause', 'resume', 'cancel'].includes(pauseTarget.value.action)
-            ? {
-                applied: 'Comando confirmado pelo Connector.',
-                rejected: 'Comando recusado.',
-                'not-sent': 'Comando não enviado.',
-                'outcome-unknown':
-                  'Resultado desconhecido. Verifique a impressora antes de tentar novamente.',
-              }[state.outcome]
+            ? extendedControlStatusText(state, 0)
             : controlStatusText(
                 pauseTarget.value.action as ControlAction,
                 state,
@@ -323,6 +316,7 @@ export function useFarmControls(
     availability,
     pauseTarget,
     pauseState,
+    pauseLost,
     lastControlResults,
     pauseRemaining,
     pauseStatus,

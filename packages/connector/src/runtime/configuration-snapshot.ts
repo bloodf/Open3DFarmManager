@@ -29,6 +29,7 @@ const Runtime = z.looseObject({
       z.literal(8),
     ]),
     printers: z.array(Loose).optional(),
+    allowedOrigins: z.array(z.string()).optional(),
     drivers: z.array(Loose).optional(),
     formlabs: z.strictObject({ printers: z.array(Loose) }).optional(),
     sdcp: z.strictObject({ printers: z.array(Loose) }).optional(),
@@ -79,7 +80,13 @@ export function collectableRuntime(
     return {
       ...runtime,
       version: 1,
-      collection: { ...collection, version: 1 },
+      collection: {
+        ...collection,
+        version: 1,
+        allowedOrigins: collection.allowedOrigins?.filter(
+          (origin) => !origin.startsWith('ws:'),
+        ),
+      },
       assignments,
     }
   }

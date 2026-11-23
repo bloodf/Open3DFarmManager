@@ -83,8 +83,6 @@ export function createQidiCollection(input: {
             progress: status.virtualSdcard.progress,
             identity: {
               vendor: 'Qidi',
-              model: binding.expect.model,
-              firmware: binding.expect.firmware,
             },
             statusReason: binding.simulated
               ? 'qidi-simulated'

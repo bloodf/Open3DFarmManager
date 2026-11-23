@@ -21,7 +21,7 @@ const LocalOrigin = z
     }
   }, 'Canonical local IPv4 WebSocket origin required')
 
-const Binding = z.strictObject({
+export const Binding = z.strictObject({
   family: z.literal('phrozen'),
   printerKey: z.string().trim().min(1).max(128),
   origin: LocalOrigin,

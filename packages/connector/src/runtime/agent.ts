@@ -1,3 +1,4 @@
+import { moonrakerOrigins } from '../config/moonraker.ts'
 import { MAX_HEARTBEAT_HEALTH_BYTES } from '@open3dfarmmanager/farm-protocol'
 import { join, resolve } from 'node:path'
 import {
@@ -353,7 +354,7 @@ async function runConnectorAgentOnce(
         moonrakerPrinters.map((printer) => {
           const selected = validateMoonrakerInput({
             assignment: printer,
-            allowedOrigins: config.collection.allowedOrigins,
+            allowedOrigins: moonrakerOrigins(config.collection),
             limits: config.collection.limits,
           })
           return [

@@ -18,7 +18,7 @@ const LocalOrigin = z
     )
   }, 'Canonical local HTTP origin required')
 
-const Binding = z.strictObject({
+export const Binding = z.strictObject({
   family: z.literal('qidi'),
   printerKey: Key,
   origin: LocalOrigin,

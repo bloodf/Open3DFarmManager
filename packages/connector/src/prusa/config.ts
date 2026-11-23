@@ -9,6 +9,12 @@ import { isLocalFormlabsHost } from '../formlabs/index.ts'
 import { parseCollectorConfig as parseLegacy } from '../formlabs/config.ts'
 import { readSpoolmanAuthorization } from '../spoolman/credential.ts'
 
+import { Binding as QidiBinding, readQidiAuth } from '../qidi/config.ts'
+import { Binding as PhrozenBinding } from '../phrozen/config.ts'
+import {
+  FlashforgeBindingSchema,
+  readFlashforgeCredentials,
+} from '../flashforge/config.ts'
 const Key = z.string().trim().min(1).max(128)
 const LocalOrigin = z
   .string()
@@ -40,12 +46,19 @@ const Driver = z.strictObject({
   expect: z.strictObject({ serial: Key, printerType: Key }),
 })
 export type PrusaLinkBinding = z.infer<typeof Driver>
+const DriverBinding = z.discriminatedUnion('family', [
+  Driver,
+  QidiBinding,
+  PhrozenBinding,
+  FlashforgeBindingSchema,
+])
+const CollectorOrigin = z.union([LocalOrigin, PhrozenBinding.shape.origin])
 const Config = LocalCollectorConfigSchema.options[0]
   .omit({ bambu: true })
   .extend({
     version: z.literal(8),
-    allowedOrigins: z.array(LocalOrigin).min(1).max(16),
-    drivers: z.array(Driver).min(1).max(16),
+    allowedOrigins: z.array(CollectorOrigin).min(1).max(16),
+    drivers: z.array(DriverBinding).min(1).max(16),
   })
 export type PrusaCollectorConfig = z.infer<typeof Config>
 
@@ -70,7 +83,7 @@ export function parseCollectorConfig(input: unknown) {
   ]
   const endpoints = new Set<string>()
   for (const origin of targets) {
-    LocalOrigin.parse(origin)
+    CollectorOrigin.parse(origin)
     if (!allowed.has(origin)) throw Error('Collector origin is not allowlisted')
     const url = new URL(origin)
     endpoints.add(
@@ -82,8 +95,15 @@ export function parseCollectorConfig(input: unknown) {
     keys.size !== printers.length ||
     endpoints.size !== targets.length
   )
-    throw Error('Invalid PrusaLink collector capacity or duplicate target')
-  if (base.printers.length) parseLocalCollectorConfig({ ...base, version: 1 })
+    throw Error('Invalid driver collector capacity or duplicate target')
+  if (base.printers.length)
+    parseLocalCollectorConfig({
+      ...base,
+      version: 1,
+      allowedOrigins: base.allowedOrigins.filter(
+        (origin) => LocalOrigin.safeParse(origin).success,
+      ),
+    })
   if (
     base.spoolman?.credentialFile &&
     !readSpoolmanAuthorization(
@@ -92,7 +112,13 @@ export function parseCollectorConfig(input: unknown) {
     )
   )
     throw Error('Invalid private Spoolman credential')
-  for (const driver of drivers) readPrusaLinkApiKey(driver)
+  for (const printer of base.printers) LocalOrigin.parse(printer.origin)
+  if (base.spoolman) LocalOrigin.parse(base.spoolman.origin)
+  for (const driver of drivers) {
+    if (driver.family === 'prusa-link') readPrusaLinkApiKey(driver)
+    if (driver.family === 'qidi') readQidiAuth(driver)
+    if (driver.family === 'flashforge') readFlashforgeCredentials(driver)
+  }
   return config
 }
 

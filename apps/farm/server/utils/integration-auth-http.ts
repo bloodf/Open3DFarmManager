@@ -248,6 +248,22 @@ const policies: RoutePolicy[] = [
     path: /^\/(?:telemetry|health)\/[^/]+$/,
     scopes: ['printers:read'],
   },
+  { method: 'GET', path: /^\/alert-rules\/[^/]+$/, scopes: ['printers:read'] },
+  {
+    method: 'PATCH',
+    path: /^\/alert-rules\/[^/]+\/[^/]+$/,
+    scopes: ['alerts:manage'],
+  },
+  {
+    method: 'PUT',
+    path: /^\/notification-channels\/[^/]+$/,
+    scopes: ['alerts:manage'],
+  },
+  {
+    method: 'POST',
+    path: /^\/notification-channels\/[^/]+\/test$/,
+    scopes: ['alerts:manage'],
+  },
   { method: 'GET', path: /^\/alerts\/[^/]+$/, scopes: ['printers:read'] },
   {
     method: 'POST',

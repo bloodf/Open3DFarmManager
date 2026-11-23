@@ -518,6 +518,14 @@ export function createFarmSnapshotSource(input: {
         : {}),
       ...(parsedPrinter.data.fans ? { fans: parsedPrinter.data.fans } : {}),
       ...(parsedPrinter.data.light ? { light: parsedPrinter.data.light } : {}),
+      // The raw chamber reading is live evidence and stays current even when
+      // durable telemetry records are rate limited.
+      ...(parsedPrinter.data.chamberTemperatureCelsius === undefined
+        ? {}
+        : {
+            chamberTemperatureCelsius:
+              parsedPrinter.data.chamberTemperatureCelsius,
+          }),
       ...(parsedPrinter.data.progress === undefined
         ? {}
         : { progress: parsedPrinter.data.progress }),

@@ -49,7 +49,7 @@ if (
 const RETENTION_MS = 600_000
 const MAX_CAPACITY = 10_000
 const APPLICATION_ID = 0x4f334450
-const SCHEMA_VERSION = 18
+const SCHEMA_VERSION = 17
 const MAX_CLOCK_STEP_MS = RETENTION_MS + 1_000
 const reasons = [
   'guard-denied',
@@ -83,6 +83,7 @@ const holdsPrinterWhenUnconfirmed = new Set([
   'emergency_stop',
   'firmware_restart',
 ])
+const actionlessCommands = new Set(['confirm_collection'])
 const time = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
 const printerKey = z
   .string()
@@ -270,13 +271,9 @@ const configWriteActionSchema = bedMeshActionSchema.replace(
   "'bed_mesh'",
   "'bed_mesh','config_write'",
 )
-const previousActionSchemaV17 = configWriteActionSchema.replace(
+const actionSchema = configWriteActionSchema.replace(
   "'config_write'",
   "'config_write','start_library_print'",
-)
-const actionSchema = previousActionSchemaV17.replace(
-  "'start_library_print'",
-  "'start_library_print','confirm_collection'",
 )
 /**
  * Journals from the power, timelapse and console units were rebuilt from the
@@ -350,25 +347,6 @@ const previousSchema = schema.map((sql) =>
     'CREATE UNIQUE INDEX pause_active_',
   ),
 )
-function migrateActionTable(database: DatabaseSyncType) {
-  database.exec(
-    'ALTER TABLE control_command_actions RENAME TO legacy_control_command_actions',
-  )
-  database.exec(actionSchema)
-  database.exec(
-    'INSERT INTO control_command_actions SELECT * FROM legacy_control_command_actions',
-  )
-  database.exec('DROP TABLE legacy_control_command_actions')
-}
-
-function migrateActiveIndexes(database: DatabaseSyncType) {
-  database.exec(
-    'DROP INDEX pause_active_assignment; DROP INDEX pause_active_printer',
-  )
-  for (const name of ['pause_active_assignment', 'pause_active_printer'])
-    database.exec(schema.find((sql) => sql.startsWith(`CREATE INDEX ${name}`))!)
-}
-
 function privateEntry(path: string, directory: boolean) {
   const stat = lstatSync(path)
   if (
@@ -560,10 +538,7 @@ export function openCommandJournal(input: {
           )!,
         )
         database.exec(`PRAGMA user_version=${SCHEMA_VERSION}`)
-      } else if ((version === 16 || version === 17) && app === APPLICATION_ID) {
-        const expected = (version === 16 ? previousSchema : schema)
-          .map((sql) => (sql === actionSchema ? previousActionSchemaV17 : sql))
-          .sort()
+      } else if (version === 16 && app === APPLICATION_ID) {
         const definitions = database
           .prepare(
             "SELECT sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY sql",
@@ -571,12 +546,25 @@ export function openCommandJournal(input: {
           .all()
           .map((row) => row.sql)
         if (
-          definitions.length !== expected.length ||
-          definitions.some((sql, index) => sql !== expected[index])
+          definitions.length !== previousSchema.length ||
+          definitions.some(
+            (sql, index) => sql !== [...previousSchema].sort()[index],
+          )
         )
           throw new Error('Invalid command journal schema')
-        migrateActionTable(database)
-        if (version === 16) migrateActiveIndexes(database)
+        database.exec(
+          'DROP INDEX pause_active_assignment; DROP INDEX pause_active_printer',
+        )
+        database.exec(
+          schema.find((sql) =>
+            sql.startsWith('CREATE INDEX pause_active_assignment'),
+          )!,
+        )
+        database.exec(
+          schema.find((sql) =>
+            sql.startsWith('CREATE INDEX pause_active_printer'),
+          )!,
+        )
         database.exec(`PRAGMA user_version=${SCHEMA_VERSION}`)
       } else if (
         Object.hasOwn(previousActionSchemas, Number(version)) &&
@@ -600,8 +588,27 @@ export function openCommandJournal(input: {
           },
         )
         if (!matchesLegacy) throw new Error('Invalid command journal schema')
-        migrateActionTable(database)
-        migrateActiveIndexes(database)
+        database.exec(
+          'ALTER TABLE control_command_actions RENAME TO legacy_control_command_actions',
+        )
+        database.exec(actionSchema)
+        database.exec(
+          'INSERT INTO control_command_actions SELECT * FROM legacy_control_command_actions',
+        )
+        database.exec('DROP TABLE legacy_control_command_actions')
+        database.exec(
+          'DROP INDEX pause_active_assignment; DROP INDEX pause_active_printer',
+        )
+        database.exec(
+          schema.find((sql) =>
+            sql.startsWith('CREATE INDEX pause_active_assignment'),
+          )!,
+        )
+        database.exec(
+          schema.find((sql) =>
+            sql.startsWith('CREATE INDEX pause_active_printer'),
+          )!,
+        )
         database.exec(`PRAGMA user_version=${SCHEMA_VERSION}`)
       } else if (version !== SCHEMA_VERSION || app !== APPLICATION_ID)
         throw new Error('Unknown command journal version')
@@ -764,9 +771,9 @@ function claimRow(
         const recent = state.database
           .prepare(
             `SELECT count(*) AS n FROM pause_commands
-             JOIN control_command_actions USING (cmd_id)
+             LEFT JOIN control_command_actions USING (cmd_id)
              WHERE farm_id=? AND printer_key=?
-               AND (action='exclude_object')=?
+               AND (COALESCE(action,'')='exclude_object')=?
                AND CASE WHEN action='exclude_object' THEN write_started_at ELSE claimed_at END>?`,
           )
           .get(
@@ -812,9 +819,13 @@ function claimRow(
             'DELETE FROM control_command_actions WHERE cmd_id NOT IN (SELECT cmd_id FROM pause_commands)',
           )
           .run()
-        state.database
-          .prepare('INSERT INTO control_command_actions VALUES(?,?)')
-          .run(command.cmd_id, command.action)
+        // A plate confirmation is a local collection-journal write with no
+        // printer effect. The v17 action table predates it, so its row keeps
+        // replay protection, exclusion and the rate limit without an action.
+        if (!actionlessCommands.has(command.action))
+          state.database
+            .prepare('INSERT INTO control_command_actions VALUES(?,?)')
+            .run(command.cmd_id, command.action)
         return { ok: true }
       },
     )

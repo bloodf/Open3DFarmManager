@@ -109,7 +109,8 @@ export async function startConfigurator(input: {
   machinePost(path: string, body: unknown): Promise<unknown>
   /** Loopback discovery responder ports (info endpoints) per vendor. */
   probes: Readonly<{
-    creality?: number
+    creality?:
+      number | Readonly<{ https: number; http: number; caFile: string }>
     anycubic?: number
     bambuPort?: number
     kobraX?: Readonly<{ httpPort: number; mqttPort: number }>

@@ -22,12 +22,13 @@ export function statusJourney(name: StatusVendor) {
       const diagnostics = recordJourneyDiagnostics()
       diagnostics.watch('owner', page)
       page.context().on('page', (other) => diagnostics.watch('other', other))
-      // Connector, app and browser signalling evidence for a failed journey.
-      const attach = () =>
-        diagnostics.attach(testInfo, {
-          connector: journey.simulatorObservation(),
-          app: journey.appLog().slice(-6000),
-        })
+      const attach = async () => {
+        try {
+          await diagnostics.attach(testInfo)
+        } catch {
+          // Diagnostic failure must not mask the journey failure.
+        }
+      }
       try {
         const fixture = journey.vendor?.raw as Awaited<
           ReturnType<typeof startStatusFixture>
@@ -37,8 +38,10 @@ export function statusJourney(name: StatusVendor) {
         // inspector and detail page are therefore visited in turn on one page,
         // and each is checked while it holds the direct connection.
         let detailHref = ''
-        const openFarmSurfaces = async () => {
-          const row = await journey.openFarm(page)
+        const openFarmSurfaces = async (back = false) => {
+          const row = back
+            ? (await page.goBack(), journey.farmRow(page))
+            : await journey.openFarm(page)
           await page
             .getByRole('button', {
               name: new RegExp(`^Inspecionar journey-${name}\\b`),
@@ -104,8 +107,17 @@ export function statusJourney(name: StatusVendor) {
         await farmReadOnly(row, inspector)
         await detailReadOnly()
 
+        ;({ row, inspector } = await openFarmSurfaces(true))
+        await expect(
+          row.getByText(
+            'Conexão direta indisponível. Exibindo a última observação.',
+            { exact: true },
+          ),
+        ).toBeVisible({ timeout: 90_000 })
+        await expect(row.getByText(/Dados desatualizados/).first()).toBeVisible(
+          { timeout: 90_000 },
+        )
         fixture.recover()
-        ;({ row, inspector } = await openFarmSurfaces())
         await expect(
           row.getByText('Conexão direta autenticada', { exact: true }),
         ).toBeVisible({ timeout: 90_000 })

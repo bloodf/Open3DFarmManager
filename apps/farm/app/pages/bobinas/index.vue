@@ -428,6 +428,14 @@ watch(
   { flush: 'sync' },
 )
 
+watch(
+  () => route.query.q,
+  (query) => {
+    filters.q = typeof query === 'string' ? query : ''
+    void loadSpools()
+  },
+)
+
 onBeforeUnmount(() => {
   listController?.abort()
   scopeController.abort()

@@ -11,9 +11,6 @@ const RUNS_PER_PRINTER = 20
 
 /**
  * Reads the farm resin ledger for the Integration API.
- *
- * Needs `SELECT` on farm.resin_ledger_entries for the integration role; until
- * that grant exists every read fails and the route answers service-unavailable.
  */
 export function postgresResinReader(sql: Sql): IntegrationResinReader {
   return {
@@ -35,7 +32,8 @@ export function postgresResinReader(sql: Sql): IntegrationResinReader {
           volume_ml AS "volumeMl", layers::float8 AS layers, hours, source,
           recorded_at::float8 AS "recordedAt"
         FROM (
-          SELECT e.*, row_number() OVER (PARTITION BY e.printer_id ORDER BY e.recorded_at DESC, e.id DESC) AS position
+          SELECT e.id, e.printer_id, e.kind, e.target, e.name, e.volume_ml,
+            e.layers, e.hours, e.source, e.recorded_at, row_number() OVER (PARTITION BY e.printer_id ORDER BY e.recorded_at DESC, e.id DESC) AS position
           FROM farm.resin_ledger_entries e
           WHERE e.printer_id = ANY(${printers.map((p) => p.id)}::uuid[])
         ) ranked

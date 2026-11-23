@@ -12,6 +12,10 @@ const queryKeys = new Set(['farmId', 'limit', 'cursor'])
 /** A reading older than this is no longer treated as the current value. */
 export const ENVIRONMENT_STALE_AFTER_MS = 60_000
 
+export function observationIsStale(observedAt: number, now: number): boolean {
+  return now - observedAt > ENVIRONMENT_STALE_AFTER_MS
+}
+
 export type EnvironmentKind = 'temperature' | 'humidity' | 'air' | 'power'
 
 export type EnvironmentMeasurement =
@@ -56,8 +60,7 @@ function airMeasurement(
   const observedAt = state.observedAt
   if (state.state === 'offline' || state.linkHealth?.state === 'offline')
     return unknown('offline', observedAt)
-  if (now - observedAt > ENVIRONMENT_STALE_AFTER_MS)
-    return unknown('stale', observedAt)
+  if (observationIsStale(observedAt, now)) return unknown('stale', observedAt)
   const chamber = state.fans?.chamber
   if (chamber === undefined) return { kind: 'air', state: 'unsupported' }
   return {

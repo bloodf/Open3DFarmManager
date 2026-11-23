@@ -97,6 +97,44 @@ describe('GET /printers/status', () => {
     expect(idsReturned).toEqual([ids.printerA1, ids.printerA2])
     expect(idsReturned).not.toContain(ids.printerB1)
   })
+
+  it('applies disabled alert rules only to their farm', async () => {
+    const world = freshWorld()
+    const observedAt = Date.now()
+    for (const row of world.authStore.printers) {
+      row.state = {
+        printerKey: row.printerKey,
+        state: 'error',
+        progress: 0,
+        observedAt,
+      }
+      row.observedAt = observedAt
+    }
+    world.disabledAlertRules.push({ farmId: ids.farmA, kind: 'error' })
+    const app = world.addApp([
+      { farmId: ids.farmA, scopes: ['printers:read'] },
+      { farmId: ids.farmB, scopes: ['printers:read'] },
+    ])
+    const listed = await call({
+      method: 'GET',
+      path: '/printers/status',
+      token: await tokenFor(world, app),
+    })
+    expect(listed.status).toBe(200)
+    const { data } = listed.json as {
+      data: { printerId: string; alerts: { kind: string }[] }[]
+    }
+    expect(
+      data.map(({ printerId, alerts }) => [
+        printerId,
+        alerts.map(({ kind }) => kind),
+      ]),
+    ).toEqual([
+      [ids.printerA1, []],
+      [ids.printerA2, []],
+      [ids.printerB1, ['error']],
+    ])
+  })
 })
 
 describe('printer.alert.raised webhook', () => {

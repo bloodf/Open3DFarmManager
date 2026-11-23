@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync } from 'node:fs'
+import { chmodSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -181,6 +181,7 @@ it.each([
     const directory = mkdtempSync(
       join(process.env.OPENFARM_POWER_TEST_TMP ?? tmpdir(), 'power-journal-'),
     )
+    onTestFinished(() => rmSync(directory, { recursive: true, force: true }))
     chmodSync(directory, 0o700)
     closeCommandJournal(openCommandJournal({ directory, clock: Date.now }))
     const db = new DatabaseSync(join(directory, 'pause-commands.sqlite'))

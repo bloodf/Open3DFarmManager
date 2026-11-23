@@ -8,6 +8,7 @@
  *   --color-accent on --color-surface
  *   --color-on-accent on --color-accent
  *   --state-*-color on --color-surface (idle, printing, paused, error, offline, stale)
+ *   --kiosk-stale-color on the kiosk's dark canvas
  */
 
 :root,
@@ -37,6 +38,7 @@
   --state-offline-icon: 'offline';
   --state-stale-color: #5c6570;
   --state-stale-icon: 'stale';
+  --kiosk-stale-color: #f2cd81;
 
   /* Spacing scale */
   --space-1: 0.25rem;
@@ -91,6 +93,7 @@
     --state-error-color: #f0a0a0;
     --state-offline-color: #a8b0b8;
     --state-stale-color: #9aa3ad;
+    --kiosk-stale-color: #e0b35a;
   }
 }
 
@@ -112,4 +115,101 @@
   --state-error-color: #f0a0a0;
   --state-offline-color: #a8b0b8;
   --state-stale-color: #9aa3ad;
+  --kiosk-stale-color: #e0b35a;
+}
+
+/* Shared operations contract. State foregrounds are paired with soft fills. */
+:root,
+[data-theme='light'] {
+  --ops-action: #176544;
+  --ops-on-action: #ffffff;
+  --ops-canvas: #f4f5f3;
+  --ops-panel: #ffffff;
+  --ops-raised: #f0f3f1;
+  --ops-text: #202522;
+  --ops-muted: #4a5550;
+  --ops-border: #c5ccc7;
+  --ops-printing: #075985;
+  --ops-printing-bg: #e0f2fe;
+  --ops-attention: #854d0e;
+  --ops-attention-bg: #fef3c7;
+  --ops-fault: #9f1239;
+  --ops-fault-bg: #ffe4e6;
+  --ops-maintenance: #6b21a8;
+  --ops-maintenance-bg: #f3e8ff;
+  --ops-idle: #4a5550;
+  --ops-idle-bg: #f0f3f1;
+  --ops-offline: #4a5550;
+  --ops-offline-bg: #f0f3f1;
+  --ops-offline-stripe: #dce2de;
+  --ops-offline-hatch: repeating-linear-gradient(
+    135deg,
+    var(--ops-offline-bg) 0 6px,
+    var(--ops-offline-stripe) 6px 12px
+  );
+  --ops-space-1: 4px;
+  --ops-space-2: 8px;
+  --ops-space-3: 12px;
+  --ops-space-4: 16px;
+  --ops-space-5: 24px;
+  --ops-radius-sm: 3px;
+  --ops-radius-md: 4px;
+  --ops-radius-lg: 6px;
+  --ops-font-sans: var(--font-sans);
+  --ops-font-mono: var(--font-mono, ui-monospace, monospace);
+  --ops-text-label: 11px;
+  --ops-text-small: 12px;
+  --ops-text-body: 14px;
+  --ops-text-title: 18px;
+  --ops-text-value: 24px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --ops-action: #8dd9b1;
+    --ops-on-action: #181c19;
+    --ops-canvas: #181c19;
+    --ops-panel: #222826;
+    --ops-raised: #303833;
+    --ops-text: #e6ebe7;
+    --ops-muted: #b8c2bc;
+    --ops-border: #536058;
+    --ops-printing: #7dd3fc;
+    --ops-printing-bg: #12394c;
+    --ops-attention: #fcd34d;
+    --ops-attention-bg: #493615;
+    --ops-fault: #fda4af;
+    --ops-fault-bg: #4b202a;
+    --ops-maintenance: #d8b4fe;
+    --ops-maintenance-bg: #38244b;
+    --ops-idle: #b8c2bc;
+    --ops-idle-bg: #303833;
+    --ops-offline: #c4cec8;
+    --ops-offline-bg: #303833;
+    --ops-offline-stripe: #3c4740;
+  }
+}
+
+[data-theme='dark'] {
+  --ops-action: #8dd9b1;
+  --ops-on-action: #181c19;
+  --ops-canvas: #181c19;
+  --ops-panel: #222826;
+  --ops-raised: #303833;
+  --ops-text: #e6ebe7;
+  --ops-muted: #b8c2bc;
+  --ops-border: #536058;
+  --ops-printing: #7dd3fc;
+  --ops-printing-bg: #12394c;
+  --ops-attention: #fcd34d;
+  --ops-attention-bg: #493615;
+  --ops-fault: #fda4af;
+  --ops-fault-bg: #4b202a;
+  --ops-maintenance: #d8b4fe;
+  --ops-maintenance-bg: #38244b;
+  --ops-idle: #b8c2bc;
+  --ops-idle-bg: #303833;
+  --ops-offline: #c4cec8;
+  --ops-offline-bg: #303833;
+  --ops-offline-stripe: #3c4740;
 }

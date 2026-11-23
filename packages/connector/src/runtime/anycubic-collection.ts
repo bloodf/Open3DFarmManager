@@ -10,6 +10,8 @@ import { readPrivateJsonFile } from '../config/local.ts'
 import { PrinterState } from '../../../farm-protocol/src/state.ts'
 import type { RawPrinterObservation } from './farm-snapshot-provider.ts'
 
+const REPORT_FRESHNESS_MS = 5000
+
 export function createAnycubicCollection(input: {
   binding: AnycubicCollectorConfig['anycubic']['printers'][number]
   signal: AbortSignal
@@ -50,6 +52,7 @@ export function createAnycubicCollection(input: {
   if (typeof password !== 'string' || !password || password.length > 2048)
     throw Error('Invalid Anycubic credential file')
   let firmwareObservation: RawPrinterObservation['firmwareObservation']
+  let estimateActive = false
   let activeJob = false
   let activeFilename: string | undefined
   // Repeated in every observation until the next job starts, so a telemetry
@@ -61,6 +64,7 @@ export function createAnycubicCollection(input: {
   let times: Partial<Record<keyof PrinterState, number>> = {}
   const invalidate = () => {
     firmwareObservation = undefined
+    estimateActive = false
     activeJob = false
     activeFilename = undefined
     clearTimeout(timer)
@@ -97,13 +101,18 @@ export function createAnycubicCollection(input: {
       const now = performance.now()
       const firmware = mapAnycubicFirmware(JSON.parse(payload.toString('utf8')))
       if (firmware) firmwareObservation = { firmware, observedAtMonoMs: now }
-      if (report.kind === 'ignored' && !firmware) return
-      const state = (report as Record<string, unknown>).state
-      if (state === 'printing' || state === 'paused') {
+      const observation: Record<string, unknown> = report
+      const { kind, estimateBlocked, ...fields } = observation
+      if (kind === 'ignored' && !firmware) return
+      const state = fields.state
+      const printing = state === 'printing' || state === 'paused'
+      // An explicit phase can withdraw the estimate without ending the job.
+      if (state !== undefined || estimateBlocked) estimateActive = printing
+      if (printing) {
         activeJob = true
         // A new job starts: the previous end is no longer the last one.
         lastJob = undefined
-        const name = (report as Record<string, unknown>).filename
+        const name = fields.filename
         if (typeof name === 'string' && name && name.length <= 255)
           activeFilename = name
       } else if (
@@ -123,10 +132,21 @@ export function createAnycubicCollection(input: {
         activeJob = false
         activeFilename = undefined
       }
-      for (const [key, value] of Object.entries(
-        report as Record<string, unknown>,
-      )) {
-        if (key === 'kind') continue
+      const filenameChanged =
+        typeof fields.filename === 'string' &&
+        typeof values.filename === 'string' &&
+        fields.filename !== values.filename
+      const estimateAt = times.estimatedRemainingSeconds
+      if (
+        !estimateActive ||
+        filenameChanged ||
+        (estimateAt !== undefined && now - estimateAt >= REPORT_FRESHNESS_MS)
+      ) {
+        delete values.estimatedRemainingSeconds
+        delete times.estimatedRemainingSeconds
+      }
+      for (const [key, value] of Object.entries(fields)) {
+        if (key === 'estimatedRemainingSeconds' && !estimateActive) continue
         values[key] =
           key === 'progress'
             ? Number(value) / 100
@@ -135,7 +155,11 @@ export function createAnycubicCollection(input: {
               : value
         times[key as keyof PrinterState] = now
       }
-      if (!values.state) return
+      if (
+        !values.state ||
+        (values.state !== 'offline' && values.progress === undefined)
+      )
+        return
       const parsed = PrinterState.safeParse({
         ...values,
         ...(lastJob ? { lastJob } : {}),
@@ -157,7 +181,7 @@ export function createAnycubicCollection(input: {
       clearTimeout(timer)
       timer = setTimeout(
         invalidate,
-        Math.max(1, (times.state ?? now) + 5000 - now),
+        Math.max(1, (times.state ?? now) + REPORT_FRESHNESS_MS - now),
       )
     },
   })

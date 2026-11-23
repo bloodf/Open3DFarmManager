@@ -55,6 +55,7 @@ export async function startRtspCamera(input: {
   project: string
   port: number
   helper: string
+  builtHelperSha256?: string | undefined
   ledger(value: object): void
 }) {
   if (
@@ -62,8 +63,9 @@ export async function startRtspCamera(input: {
     !/^o3dfm-[a-z0-9-]{1,60}$/.test(input.project)
   )
     throw new Error('Invalid RTSP camera resource request')
-  // Compared with the tracked value above, not with operator input.
-  const helperSha256 = RTSP_HELPER_SHA256_LINUX_AMD64
+  // Only the runner's own mock-mode build may supply a fresh digest.
+  const helperSha256 =
+    (isMockSim() && input.builtHelperSha256) || RTSP_HELPER_SHA256_LINUX_AMD64
   if ((await sha256(input.helper)) !== helperSha256)
     throw new Error('Ingest helper SHA-256 differs from the reviewed build')
   const helperPath = join(input.workDir, 'rtsp-ingest')

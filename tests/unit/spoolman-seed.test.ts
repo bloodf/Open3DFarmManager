@@ -1,4 +1,5 @@
 import { expect, test } from 'vitest'
+import { onTestFinished, vi } from 'vitest'
 import { seedSpoolman } from '../../packages/sim-tools/src/spoolman.ts'
 import { serveTestServer } from './serve.ts'
 
@@ -87,9 +88,25 @@ test('reseed does not duplicate an archived seed spool', async () => {
 })
 
 test('seed refuses remote origins before issuing any request', async () => {
+  const nativeFetch = globalThis.fetch
+  const attempted: string[] = []
+  vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input instanceof Request ? input.url : input)
+    attempted.push(url)
+    if (
+      !url.startsWith('http://127.0.0.1:') &&
+      !url.startsWith('http://[::1]:')
+    )
+      return Promise.reject(new Error('Blocked off-fixture network attempt'))
+    return nativeFetch(input, init)
+  })
+  onTestFinished(() => {
+    vi.unstubAllGlobals()
+  })
   await expect(seedSpoolman('http://192.168.1.10:7912')).rejects.toThrow(
     'loopback',
   )
+  expect(attempted).toEqual([])
 })
 test('seed stops after an API failure', async () => {
   let calls = 0

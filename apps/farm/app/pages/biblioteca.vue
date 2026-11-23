@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { selectedFarm } from '../utils/farm-request-guard.ts'
+import { resolveFarmScope } from '../utils/farm-scope.ts'
+import { fetchFarmMemberships } from '../composables/useFarmMemberships.ts'
 import { formatWeight } from '../utils/ui-format.ts'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import Button from '../components/ui/Button.vue'
 import Card from '../components/ui/Card.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -33,13 +35,31 @@ import {
   type LibraryReplayAssignment,
 } from '../utils/library-replay.ts'
 
+definePageMeta({
+  key: (route) => JSON.stringify([route.path, { farm: route.query.farm }]),
+})
+
 type Settings = {
   storageMode: StorageMode
   quotaBytes: number
   retentionDays: number
 }
 
-const route = useRoute()
+const route = (() => {
+  try {
+    return (
+      useRoute() ?? {
+        // The standalone browser harness mounts pages without a Vue Router.
+        query: Object.fromEntries(new URLSearchParams(window.location.search)),
+      }
+    )
+  } catch {
+    // The standalone browser harness mounts pages without a Vue Router.
+    return {
+      query: Object.fromEntries(new URLSearchParams(window.location.search)),
+    }
+  }
+})()
 const farmId = ref('')
 const items = ref<LibraryItem[]>([])
 const nextCursor = ref<string | null>(null)
@@ -62,6 +82,7 @@ const loadingMore = ref(false)
 const error = ref('')
 const modeError = ref('')
 const noFarm = ref(false)
+const hasMemberships = ref(false)
 const status = ref('')
 const detailOpen = ref(false)
 const detailItem = ref<LibraryItem | null>(null)
@@ -151,12 +172,9 @@ async function start() {
   error.value = ''
   noFarm.value = false
   try {
-    const page = await $fetch<{ farms: { farmId: string }[] }>('/api/farms', {
-      query: { limit: 50 },
-      retry: 0,
-      timeout: 15_000,
-    })
-    farmId.value = selectedFarm(page.farms, route.query.farm)?.farmId ?? ''
+    const memberships = await fetchFarmMemberships({ timeout: 15_000 })
+    hasMemberships.value = memberships.length > 0
+    farmId.value = resolveFarmScope(memberships, route.query.farm)?.farmId ?? ''
     if (!farmId.value) {
       noFarm.value = true
       loading.value = false
@@ -245,8 +263,12 @@ onBeforeUnmount(() => controller?.abort())
 
     <EmptyState
       v-if="noFarm"
-      title="Nenhuma farm disponível"
-      description="Esta conta ainda não tem uma farm. Crie uma farm ou peça acesso para usar a biblioteca."
+      :title="hasMemberships ? 'Selecione uma farm' : 'Nenhuma farm disponível'"
+      :description="
+        hasMemberships
+          ? 'Escolha uma farm para continuar.'
+          : 'Crie uma farm ou solicite acesso à pessoa responsável.'
+      "
     >
       <NuxtLink to="/farm">Ir para farms</NuxtLink>
     </EmptyState>

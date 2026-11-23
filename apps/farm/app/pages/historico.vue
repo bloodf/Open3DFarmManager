@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { useFarmRoute } from '../composables/useFarmRoute.ts'
+import { resolveFarmScope } from '../utils/farm-scope.ts'
+import { fetchFarmMemberships } from '../composables/useFarmMemberships.ts'
 import ReplayAction from '../components/history/ReplayAction.vue'
 import { useReplayLive } from '../composables/useReplayLive.ts'
 import {
@@ -18,17 +21,21 @@ import {
   type JobHistoryItem,
 } from '../utils/job-history-view.ts'
 
+const { route, setFarmScope } = useFarmRoute()
 type Farm = { farmId: string }
 const farms = ref<Farm[]>([])
 const farmId = ref('')
 const printerKey = ref('')
+const outcome = ref('all')
 const jobs = ref<JobHistoryItem[]>([])
 const nextBefore = ref<string | null>(null)
 const pending = ref(true)
 const error = ref('')
 const errorSummary = ref<HTMLElement | null>(null)
 let generation = 0
+let readGeneration = 0
 let controller: AbortController | undefined
+let replayController: AbortController | undefined
 
 // Outcome tone reuses the printer-state colours; the label always carries it.
 const outcomeTone = {
@@ -37,7 +44,9 @@ const outcomeTone = {
   failed: 'error',
 } as const
 const rows = computed(() =>
-  jobs.value.map((job) => ({ ...jobHistoryRow(job), job })),
+  jobs.value
+    .filter((job) => outcome.value === 'all' || job.outcome === outcome.value)
+    .map((job) => ({ ...jobHistoryRow(job), job, farm: farmId.value })),
 )
 // Replay: printers and the live signed session are read when a row is opened.
 const live = useReplayLive(farmId)
@@ -47,31 +56,47 @@ const replayPrinters = computed(() =>
   libraryReplayPrinters(assignments.value, profiles.value, live.liveFor),
 )
 const replayRequest = { retry: 0, timeout: 15_000 }
-async function loadReplaySource(sha256: string) {
-  const selected = farmId.value
+async function loadReplaySource(sha256: string, selected: string) {
+  if (selected !== farmId.value) throw Error('Replay source changed')
+  const current = generation
+  replayController?.abort()
+  const signal = (replayController = new AbortController()).signal
   const base = `/api/farms/${selected}`
   const [found, printers, printerProfiles] = await Promise.all([
     $fetch<{ version: LibraryVersion }>(`${base}/library/replay-source`, {
       ...replayRequest,
+      signal,
       query: { sha256 },
     }),
     $fetch<{ printers: LibraryReplayAssignment[] }>(`${base}/printers`, {
       ...replayRequest,
+      signal,
       query: { limit: 50 },
     }),
     // Profiles only refine the compatibility check: replay works without them.
     $fetch<{ profiles: PrinterProfile[] }>(`${base}/printer-profiles`, {
       ...replayRequest,
+      signal,
       query: { limit: 50 },
     }).catch(() => ({ profiles: [] as PrinterProfile[] })),
   ])
-  if (selected !== farmId.value || found.version.sha256 !== sha256)
+  if (
+    signal.aborted ||
+    current !== generation ||
+    selected !== farmId.value ||
+    found.version.sha256 !== sha256
+  )
     throw Error('Replay source changed')
   assignments.value = printers.printers
   profiles.value = printerProfiles.profiles
   return libraryReplaySource(found.version)
 }
-function changeFarm() {
+function changeFarm(id: string) {
+  if (id === farmId.value) return
+  cancel()
+  farmId.value = id
+  jobs.value = []
+  nextBefore.value = null
   assignments.value = []
   profiles.value = []
   void loadJobs()
@@ -85,6 +110,12 @@ const status = computed(() =>
 )
 function cancel() {
   generation++
+  cancelRead()
+  replayController?.abort()
+  replayController = undefined
+}
+function cancelRead() {
+  readGeneration++
   controller?.abort()
   controller = undefined
 }
@@ -98,45 +129,48 @@ function failure(cause: unknown) {
     : 'Não foi possível consultar o histórico. Tente novamente.'
 }
 async function run<T>(request: (signal: AbortSignal) => Promise<T>) {
-  cancel()
-  const current = generation
+  cancelRead()
+  const current = readGeneration
   controller = new AbortController()
   pending.value = true
   error.value = ''
   try {
     const result = await request(controller.signal)
-    return current === generation ? result : undefined
+    return current === readGeneration ? result : undefined
   } catch (cause) {
-    if (current !== generation) return undefined
+    if (current !== readGeneration) return undefined
     // Never retain a stale authorized view after a failed request.
     jobs.value = []
     nextBefore.value = null
     error.value = failure(cause)
     await nextTick()
-    errorSummary.value?.focus()
+    if (current === readGeneration) errorSummary.value?.focus()
     return undefined
   } finally {
-    if (current === generation) pending.value = false
+    if (current === readGeneration) pending.value = false
   }
 }
 async function loadFarms() {
-  const page = await run((signal) =>
-    $fetch<{ farms: Farm[] }>('/api/farms', {
-      query: { limit: 50 },
-      signal,
-      retry: 0,
-      timeout: 15000,
-    }),
+  const memberships = await run((signal) =>
+    fetchFarmMemberships<Farm>({ signal, timeout: 15_000 }),
   )
-  farms.value = page?.farms ?? []
-  farmId.value = farms.value.length === 1 ? (farms.value[0]?.farmId ?? '') : ''
-  if (farmId.value) await loadJobs()
+  farms.value = memberships ?? []
+  const selected = resolveFarmScope(farms.value, route.query.farm)?.farmId ?? ''
+  if (selected === farmId.value && selected) await loadJobs()
+  else changeFarm(selected)
+}
+function selectFarm(event: Event) {
+  const id = (event.target as HTMLSelectElement).value
+  void setFarmScope(id)
 }
 async function loadJobs(before: string | null = null) {
   const selected = farmId.value
+  const scope = generation
   if (!selected) {
     jobs.value = []
     nextBefore.value = null
+    pending.value = false
+    error.value = ''
     return
   }
   const page = await run((signal) =>
@@ -157,17 +191,23 @@ async function loadJobs(before: string | null = null) {
       },
     ),
   )
-  if (!page || selected !== farmId.value) return
+  if (!page || scope !== generation || selected !== farmId.value) return
   jobs.value = before ? [...jobs.value, ...page.jobs] : page.jobs
   nextBefore.value = page.nextBefore
 }
+watch(
+  () => route.query.farm,
+  (id) => {
+    changeFarm(resolveFarmScope(farms.value, id)?.farmId ?? '')
+  },
+)
 onMounted(() => void loadFarms())
 onBeforeUnmount(cancel)
 </script>
 
 <template>
   <main id="conteudo" class="history-page">
-    <header class="page-header">
+    <header class="page-header" role="presentation">
       <p class="eyebrow">Open3DFarmManager</p>
       <h1>Histórico de trabalhos</h1>
       <p class="intro">
@@ -202,9 +242,9 @@ onBeforeUnmount(cancel)
           <label for="farm">Farm</label>
           <select
             id="farm"
-            v-model="farmId"
+            :value="farmId"
             :disabled="pending || !farms.length"
-            @change="changeFarm"
+            @change="selectFarm"
           >
             <option value="">Selecione</option>
             <option
@@ -227,6 +267,15 @@ onBeforeUnmount(cancel)
             :disabled="pending"
           />
         </div>
+        <div class="field">
+          <label for="outcome">Resultado dos trabalhos carregados</label>
+          <select id="outcome" v-model="outcome">
+            <option value="all">Todos</option>
+            <option value="completed">Concluído</option>
+            <option value="cancelled">Cancelado</option>
+            <option value="failed">Falhou</option>
+          </select>
+        </div>
         <Button type="submit" :disabled="pending || !farmId">
           Atualizar histórico
         </Button>
@@ -238,7 +287,7 @@ onBeforeUnmount(cancel)
     </div>
     <p v-else-if="pending" class="panel" role="status">{{ status }}</p>
     <EmptyState
-      v-else-if="!error && !rows.length"
+      v-else-if="!error && !jobs.length"
       :title="
         farmId
           ? 'Nenhum trabalho finalizado'
@@ -256,6 +305,46 @@ onBeforeUnmount(cancel)
     >
       <NuxtLink v-if="farmId" to="/impressoras">Ver impressoras</NuxtLink>
     </EmptyState>
+    <section
+      v-if="jobs.length"
+      class="results"
+      aria-labelledby="summary-heading"
+    >
+      <h2 id="summary-heading">Resultados dos trabalhos carregados</h2>
+      <p class="count">
+        Quantidade de trabalhos por resultado, nas páginas carregadas; não
+        representa todo o histórico.
+      </p>
+      <ul class="summary-list">
+        <li
+          v-for="kind in ['completed', 'cancelled', 'failed'] as const"
+          :key="kind"
+        >
+          {{
+            {
+              completed: 'Concluídos',
+              cancelled: 'Cancelados',
+              failed: 'Falharam',
+            }[kind]
+          }}:
+          <strong
+            >{{
+              jobs.filter((job) => job.outcome === kind).length
+            }}
+            trabalhos</strong
+          >
+        </li>
+      </ul>
+    </section>
+    <div v-if="jobs.length && !rows.length" class="panel">
+      <p>Nenhum trabalho carregado corresponde ao resultado selecionado.</p>
+      <Button
+        v-if="nextBefore"
+        :disabled="pending"
+        @click="loadJobs(nextBefore)"
+        >Carregar mais</Button
+      >
+    </div>
     <section
       v-if="rows.length"
       class="results"
@@ -302,7 +391,7 @@ onBeforeUnmount(cancel)
                     :key="`${farmId}:${row.id}`"
                     :job="row.job"
                     :load-source="
-                      () => loadReplaySource(row.job.librarySha256!)
+                      () => loadReplaySource(row.job.librarySha256!, row.farm)
                     "
                     :printers="replayPrinters"
                     :send="live.send"
@@ -415,6 +504,13 @@ input:disabled {
 .loading {
   display: grid;
   gap: var(--space-3);
+}
+.summary-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  padding: 0;
+  list-style: none;
 }
 .count {
   margin: 0 0 var(--space-3);

@@ -76,6 +76,7 @@ type Scope = {
   audience: string
   publicKey: unknown
   privateKey: CryptoKey
+  cameraPrinterId?: string
 }
 type Peer = Partial<Pick<ReadonlyBrowserPeer, 'diagnostics'>> & {
   answer(sdp: string): Promise<string>
@@ -182,6 +183,9 @@ export class AuthenticatedBrowserSignallingClient {
           farm_id: this.#scope.farmId,
           agent_id: this.#scope.agentId,
           key_id: this.#scope.keyId,
+          ...(this.#scope.cameraPrinterId
+            ? { camera_printer_id: this.#scope.cameraPrinterId }
+            : {}),
         })
       },
       onFrame: (frame) => this.frame(frame),
@@ -340,6 +344,7 @@ export class AuthenticatedBrowserSignallingClient {
         b.agent_id !== s.agentId ||
         b.account_id !== s.accountId ||
         b.key_id !== s.keyId ||
+        (b.v === 2 && b.camera_printer_id !== s.cameraPrinterId) ||
         b.origin !== s.origin ||
         b.audience !== s.audience ||
         b.browser_thumbprint !== this.#thumbprint ||

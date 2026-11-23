@@ -24,7 +24,7 @@ import type {
 } from '../../utils/spool-features-types.ts'
 
 const stock = ref<LowStockResponse | null>(null)
-const canWrite = ref(false)
+const canManage = ref(false)
 const busy = ref(false)
 const defaultInput = ref('')
 const defaultError = ref('')
@@ -38,7 +38,7 @@ async function load(farmId: string, current: () => boolean) {
   ])
   if (!current()) return
   stock.value = response
-  canWrite.value = spools.canWrite
+  canManage.value = spools.canManage
   defaultInput.value =
     response.defaultLowStockThresholdGrams === null
       ? ''
@@ -204,7 +204,7 @@ async function saveThreshold(item: LowStockItem) {
         description="Usado quando o filamento não tem limite próprio. Deixe vazio para desativar."
       >
         <form
-          v-if="canWrite"
+          v-if="canManage"
           class="feature-form"
           @submit.prevent="saveDefault"
         >
@@ -223,7 +223,7 @@ async function saveThreshold(item: LowStockItem) {
         <p v-if="defaultError" role="alert" class="error-line">
           {{ defaultError }}
         </p>
-        <p v-if="!canWrite" class="feature-muted">
+        <p v-if="!canManage" class="feature-muted">
           Limite padrão:
           {{ formatGrams(stock.defaultLowStockThresholdGrams) }}. Somente
           leitura.
@@ -246,13 +246,13 @@ async function saveThreshold(item: LowStockItem) {
             <td>{{ formatGrams(item.effectiveThresholdGrams) }}</td>
             <td>
               <StatusBadge
-                :tone="item.low ? 'error' : 'idle'"
+                :tone="item.low ? 'attention' : 'idle'"
                 :label="item.low ? 'Baixo' : 'OK'"
               />
             </td>
             <td>
               <input
-                v-if="canWrite"
+                v-if="canManage"
                 v-model="drafts[item.filamentId]"
                 type="text"
                 inputmode="decimal"
@@ -271,7 +271,7 @@ async function saveThreshold(item: LowStockItem) {
             </td>
             <td>
               <Button
-                v-if="canWrite"
+                v-if="canManage"
                 :disabled="busy"
                 :aria-label="`Salvar limite de ${itemName(item)}`"
                 @click="saveThreshold(item)"
@@ -310,7 +310,9 @@ async function saveThreshold(item: LowStockItem) {
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--color-border);
-  border-inline-start: var(--space-1) solid var(--printer-error);
+  border-inline-start: var(--ops-space-1) solid var(--ops-attention);
+  background: var(--ops-attention-bg);
+  color: var(--ops-attention);
   border-radius: var(--radius-sm);
 }
 .cell-input {

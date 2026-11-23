@@ -58,6 +58,9 @@ cleanup() {
 }
 finish() {
   status=$?
+  if ((status != 0)); then
+    dc logs --no-color browser 2>&1 | tee "$out/$scenario-browser.log" >&2 || true
+  fi
   cleanup || status=1
   if docker image inspect "$project-router" >/dev/null 2>&1; then
     docker image rm "$project-router" >/dev/null || status=1
@@ -69,9 +72,11 @@ trap finish EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 modules=$(realpath "$here/../../../node_modules")
-mkdir -p "$NETFAULT_NDC/node_modules"
-# Mount only node-datachannel and its runtime dependency into the router.
+mkdir -p "$NETFAULT_NDC/node_modules/@node-datachannel"
+# The probes use the pinned linux/amd64 glibc image. Ship the matching native
+# addon from npm's optional dependencies alongside the JS wrapper.
 cp -rL "$modules/node-datachannel" "$modules/detect-libc" "$NETFAULT_NDC/node_modules/"
+cp -rL "$modules/@node-datachannel/linux-x64-gnu" "$NETFAULT_NDC/node_modules/@node-datachannel/"
 printf '{"private":true}\n' > "$NETFAULT_NDC/package.json"
 chmod -R a+rX "$NETFAULT_NDC"
 router() { dc exec -T -e O="$NETFAULT_OCTET" router sh -euc "$1"; }
@@ -101,10 +106,15 @@ for run in $(seq 1 "$repeats"); do
     apply_fault
     # The lan namespace must not reach the host gateway on the lan bridge.
     dc exec -T lan-gw iptables -C OUTPUT -d "10.$NETFAULT_OCTET.32.1" -j DROP
-    result=$(dc --profile "$scenario" run --rm -T -e PROBE_BIND="$bind" connector | tail -1)
+    # The topology is already running with the fault applied. Starting
+    # dependencies again can recreate the router and discard those rules.
+    result=$(dc --profile "$scenario" run --no-deps --rm -T -e PROBE_BIND="$bind" connector | tail -1)
     # A crashed probe prints a stack trace, not a JSON object.
     [[ $result == '{'* ]] || { echo 'Probe produced no JSON' >&2; exit 1; }
-      RESULT="$result" SCENARIO="$scenario" BIND="$bind" node "$here/validate-result.mjs"
+    if ! RESULT="$result" SCENARIO="$scenario" BIND="$bind" node "$here/validate-result.mjs"; then
+      printf 'Probe result (%s, %s): %s\n' "$scenario" "$bind" "$result" >&2
+      exit 1
+    fi
     browser=$(dc logs --no-log-prefix browser | grep '"event":"channel"' | tail -1 || true)
     printf '{"scenario":"%s","run":%s,"connector":%s,"browser":%s}\n' \
       "$scenario" "$run" "$result" "${browser:-null}" | tee -a "$out/$scenario.jsonl"

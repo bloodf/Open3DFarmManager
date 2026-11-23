@@ -1,9 +1,10 @@
 <script setup lang="ts">
+import type { ReplaySend } from '../../utils/replay-live.ts'
 import { computed, ref, watch } from 'vue'
 import Dialog from '../ui/Dialog.vue'
 import Button from '../ui/Button.vue'
-import type { LibraryPrintArgs } from '../../../../../packages/farm-protocol/src/control-actions.ts'
 import { locationLabel, safeColour } from '../../utils/library-view.ts'
+import { replayOutcomeLocks } from '../../utils/replay-outcome.ts'
 import {
   GROUP_LABELS,
   buildArgs,
@@ -20,13 +21,14 @@ import {
 } from '../../utils/replay-view.ts'
 
 const props = defineProps<{
+  itemId?: string
   source: ReplaySource
   printers: readonly ReplayPrinter[]
   /** Printer of the original job; preselected when it can still be used. */
   preferredPrinter?: string
   preferredPlate?: number
   /** Sends the signed `start_library_print` over the live session. Never retried here. */
-  send: (printerKey: string, args: LibraryPrintArgs) => Promise<ReplayResult>
+  send: ReplaySend
 }>()
 const open = defineModel<boolean>({ required: true })
 
@@ -64,9 +66,10 @@ const outcome = computed(() =>
   result.value ? replayOutcomeText(result.value) : '',
 )
 const reasons = computed(() => result.value?.reasons ?? [])
+const outcomeLockKey = () => props.itemId ?? props.source.sha256
 
 function reset() {
-  result.value = null
+  result.value = replayOutcomeLocks.get(outcomeLockKey())
   bedClear.value = false
   selectedKey.value = defaultPrinter(groups.value, props.preferredPrinter)
   plate.value = Math.min(
@@ -75,7 +78,7 @@ function reset() {
   )
 }
 watch(
-  [() => open.value, () => props.source.sha256],
+  [() => open.value, () => outcomeLockKey(), () => props.source.sha256],
   ([isOpen]) => {
     if (isOpen) reset()
   },
@@ -110,8 +113,14 @@ async function confirm() {
   const printer = selected.value
   if (!printer || problem.value || sending.value || result.value) return
   sending.value = true
+  const { sha256, versionId } = props.source
+  const itemId = props.itemId
+  const lockKey = outcomeLockKey()
+  const chosenPlate = plate.value
+  const chosenMapping = mapping.value.join(',')
+  let settled: ReplayResult
   try {
-    result.value = await props.send(
+    settled = await props.send(
       printer.key,
       buildArgs({
         printer,
@@ -120,13 +129,29 @@ async function confirm() {
         mapping: mapping.value,
         bedClear: bedClear.value,
       }),
+      () =>
+        open.value &&
+        props.itemId === itemId &&
+        props.source.sha256 === sha256 &&
+        props.source.versionId === versionId &&
+        selectedKey.value === printer.key &&
+        plate.value === chosenPlate &&
+        mapping.value.join(',') === chosenMapping &&
+        !problem.value,
+      versionId,
     )
   } catch {
-    // The command may have left the browser: report it as uncertain, never resend.
-    result.value = { outcome: 'outcome-unknown' }
+    settled = { outcome: 'outcome-unknown' }
   } finally {
     sending.value = false
   }
+  replayOutcomeLocks.record(lockKey, settled)
+  if (outcomeLockKey() === lockKey) result.value = settled
+}
+
+function confirmPrinterChecked() {
+  replayOutcomeLocks.confirmPrinterChecked(outcomeLockKey())
+  result.value = null
 }
 </script>
 
@@ -243,6 +268,15 @@ async function confirm() {
       <ul v-if="reasons.length">
         <li v-for="reason in reasons" :key="reason">{{ reason }}</li>
       </ul>
+    </div>
+    <div v-if="result?.outcome === 'outcome-unknown'">
+      <p>
+        Verifique a impressora. Se a impressão não começou, confirme abaixo para
+        liberar uma nova tentativa.
+      </p>
+      <Button @click="confirmPrinterChecked"
+        >Confirmei que a impressão não começou</Button
+      >
     </div>
     <Button :disabled="!!problem || sending || result !== null" @click="confirm"
       >Imprimir de novo</Button

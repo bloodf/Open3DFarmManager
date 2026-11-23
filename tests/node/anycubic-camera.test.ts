@@ -189,9 +189,15 @@ async function assertFlvCapture(
       if (kind === 'stock') assert.equal(sim.captures, 2)
     } finally {
       controller.abort()
-      await iterator?.return?.()
-      if (kind === 'stock') assert.equal(sim.stops, sim.captures)
-      await sim.close()
+      try {
+        await iterator?.return?.()
+      } finally {
+        try {
+          if (kind === 'stock') assert.equal(sim.stops, sim.captures)
+        } finally {
+          await sim.close()
+        }
+      }
     }
   }
 }

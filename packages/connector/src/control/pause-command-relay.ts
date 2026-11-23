@@ -525,16 +525,33 @@ export function createPauseCommandRelay(
     )
     return peer.attempt
   }
+  function libraryRefusalCode(reason: PauseDispatchReason): ControlResultCode {
+    switch (reason) {
+      case 'signature':
+      case 'scope':
+      case 'state':
+      case 'busy':
+        return reason
+      default:
+        return 'guard-denied'
+    }
+  }
   async function runCommand(
     peer: Peer,
     wire: string,
     commandId: string,
+    libraryStart: boolean,
   ): Promise<PauseRelayOutcome> {
     const decision = await peer.gate
     const handle = peer.handle
     if (!decision.ok || !handle || peer.sealed) {
       rejected++
-      deliverResult(peer, commandId, 'rejected')
+      deliverResult(
+        peer,
+        commandId,
+        'rejected',
+        libraryStart ? 'guard-denied' : undefined,
+      )
       return 'rejected'
     }
     commands++
@@ -550,12 +567,12 @@ export function createPauseCommandRelay(
     else if (outcome === 'outcome-unknown') outcomeUnknown++
     else if (outcome === 'not-sent') notSent++
     else rejected++
-    deliverResult(
-      peer,
-      commandId,
-      outcome,
-      'code' in result ? result.code : undefined,
-    )
+    const driverCode = 'code' in result ? result.code : undefined
+    const code =
+      libraryStart && (outcome === 'not-sent' || outcome === 'rejected')
+        ? (driverCode ?? libraryRefusalCode(result.reason))
+        : driverCode
+    deliverResult(peer, commandId, outcome, code)
     return outcome
   }
   function commandPeer(input: {
@@ -567,8 +584,11 @@ export function createPauseCommandRelay(
     // One command per peer. The first outcome is replayed, never re-dispatched.
     if (peer.command) return peer.command
     let commandId: string
+    let libraryStart: boolean
     try {
-      commandId = decodeCommandV2(input.wire).cmd_id
+      const command = decodeCommandV2(input.wire)
+      commandId = command.cmd_id
+      libraryStart = command.action === 'start_library_print'
     } catch {
       // Without a decoded command id there is no correlation for a result frame.
       lastReason = 'invalid-command'
@@ -583,7 +603,12 @@ export function createPauseCommandRelay(
       lastReason = 'busy'
       rejected++
       peer.command = Promise.resolve('rejected')
-      deliverResult(peer, commandId, 'rejected')
+      deliverResult(
+        peer,
+        commandId,
+        'rejected',
+        libraryStart ? 'busy' : undefined,
+      )
       return peer.command
     }
     // Reserved before any await: a reentrant command replays this promise.
@@ -593,7 +618,7 @@ export function createPauseCommandRelay(
     })
     peer.command = reserved
     running++
-    const work = track(runCommand(peer, input.wire, commandId))
+    const work = track(runCommand(peer, input.wire, commandId, libraryStart))
     void work.then(
       (outcome) => {
         running--

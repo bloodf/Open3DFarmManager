@@ -1,7 +1,11 @@
 import type { MacroParamMap } from '../moonraker/control-macros.ts'
-import { readPrinterBinding } from '../control/printer-binding.ts'
+import {
+  readPrinterBinding,
+  type PrinterBinding,
+} from '../control/printer-binding.ts'
 import { receiveApiCommand } from './api-command.ts'
 import {
+  ApiResinReplay,
   decodeApiEnvelopeFrame,
   encodeApiEnvelopeResultFrame,
 } from '../../../farm-protocol/src/api-envelope.ts'
@@ -46,6 +50,8 @@ import { createPauseDriverRouter } from './pause-driver-router.ts'
 import { createFileTargets } from './file-targets.ts'
 import type { FileUploadTarget } from './file-upload.ts'
 import { withLibraryPrint } from './library-print-start.ts'
+import { withCollectionHold } from '../control/queue-collection-hold.ts'
+import type { QueueCollectionJournal } from '../control/queue-collection-journal.ts'
 import { runSignallingLifecycle } from './signalling.ts'
 
 export type PauseControlDiagnostic =
@@ -98,7 +104,7 @@ function label(reason: string): string {
   return /^[a-zA-Z0-9:_-]{1,80}$/.test(reason) ? reason : 'unclassified'
 }
 
-function refuseApiCommand(
+export function refuseApiCommand(
   frame: Parameters<typeof receiveApiCommand>[1],
   inbox: Parameters<typeof receiveApiCommand>[2],
   code: 'printer-busy' | 'not-ready' | 'unsupported',
@@ -112,6 +118,10 @@ function refuseApiCommand(
         cmd_id: envelope.cmd_id,
         outcome: 'refused',
         refusal_code: code,
+        ...(code === 'unsupported' &&
+        ApiResinReplay.safeParse(envelope.action).success
+          ? { detail: 'resin-artifact-dispatch-unavailable' }
+          : {}),
         at: Date.now(),
       }),
     )
@@ -167,8 +177,18 @@ type PauseControlInput = {
   ) => Parameters<typeof receiveApiCommand>[0]['libraryPrint']
   /** Remembers what a library start printed so the finished job links to it (#385). */
   libraryLinks?: Parameters<typeof receiveApiCommand>[0]['libraryLinks']
+  resinCapabilities?: Parameters<
+    typeof receiveApiCommand
+  >[0]['resinCapabilities']
   /** True while local storage is degraded: commands are refused with `storage`. */
   storageDegraded?: () => boolean
+  speedModesFor?: (
+    printerKey: string,
+  ) =>
+    | readonly import('../../../farm-protocol/src/control-actions.ts').SpeedMode[]
+    | undefined
+  /** Durable bed-collection hold: OpenFarm starts wait for `confirm_collection`. */
+  collection?: QueueCollectionJournal
   /** Transport seam for tests. Defaults to the authenticated pause client. */
   createClient?: (
     scope: PauseConnectorSignallingScope,
@@ -306,6 +326,7 @@ async function runAssignmentControl(
           backend: 'bambu',
           host: bambu.host,
           serial: bambu.serial,
+          port: bambu.ftpsPort,
           accessCode: readBambuCredentials(bambu).password,
           trust: {
             ...(bambu.caFile
@@ -367,7 +388,43 @@ async function runAssignmentControl(
     // The browser path starts library prints with the same starter as the
     // API path (#386); the API path keeps the plain router and its own steps.
     const libraryPrint = input.libraryPrint?.(assignmentId)
-    const browserDriver = withLibraryPrint(router, {
+    const collectionKey = (binding: PrinterBinding) =>
+      binding === printerBinding
+        ? readPrinterBinding(binding)?.printer_key
+        : undefined
+    const hold = <D extends typeof router>(driver: D, api = false): D =>
+      input.collection
+        ? withCollectionHold(driver, {
+            journal: input.collection,
+            printerKey: collectionKey,
+            requireInitialClearance(binding) {
+              const mapping = readPrinterBinding(binding)
+              const collection = config.collection
+              return (
+                api &&
+                binding === printerBinding &&
+                !!mapping &&
+                'printers' in collection &&
+                collection.printers.some(
+                  (printer) =>
+                    printer.printerKey === mapping.printer_key &&
+                    printer.origin === mapping.moonraker_origin,
+                )
+              )
+            },
+          })
+        : driver
+    // The same locally observed printer state supplies both advertised modes and the guard.
+    const speedDriver = {
+      ...router,
+      speedModes(binding: PrinterBinding) {
+        const mapping =
+          binding === printerBinding ? readPrinterBinding(binding) : null
+        return mapping ? input.speedModesFor?.(mapping.printer_key) : undefined
+      },
+    }
+    const apiDriver = hold(speedDriver, true)
+    const libraryDriver = withLibraryPrint(speedDriver, {
       starter: libraryPrint,
       targetFor(binding) {
         const mapping = readPrinterBinding(binding)
@@ -378,11 +435,13 @@ async function runAssignmentControl(
           return undefined
         }
       },
-      remember(binding, link) {
+      remember(binding, link, sentAt) {
         const mapping = readPrinterBinding(binding)
-        if (mapping) input.libraryLinks?.remember(mapping.printer_key, link)
+        if (mapping)
+          input.libraryLinks?.remember(mapping.printer_key, link, sentAt)
       },
     })
+    const browserDriver = hold(libraryDriver)
     input.onMacroParams?.((id) => {
       const binding = config.bindingFor(id)
       return binding ? router.macroParams?.(binding) : undefined
@@ -392,15 +451,17 @@ async function runAssignmentControl(
       return binding ? router.macros?.(binding) : undefined
     })
     if (input.onControls) {
-      input.onControls((id) => {
+      const readControls = (id: string) => {
         const binding = config.bindingFor(id)
         return binding ? browserDriver.controls(binding) : []
-      })
+      }
+      input.onControls(readControls)
       try {
         await router.detect(printerBinding, input.signal)
       } catch {
         // Failed detection retains the driver's conservative capabilities.
       }
+      input.onControls(readControls)
     }
     relay = createPauseCommandRelay({
       authority: {
@@ -437,7 +498,10 @@ async function runAssignmentControl(
           keys: trustedKeys,
           journal,
           clock,
-          driver: router,
+          driver: apiDriver,
+          ...(input.resinCapabilities
+            ? { resinCapabilities: input.resinCapabilities }
+            : {}),
           ...(libraryPrint ? { libraryPrint } : {}),
           ...(input.libraryLinks ? { libraryLinks: input.libraryLinks } : {}),
           jobFiles: {
@@ -451,6 +515,8 @@ async function runAssignmentControl(
             if (
               !observation ||
               observation.receivedMono > now ||
+              observation.readyObservedMono > observation.receivedMono ||
+              observation.printStateObservedMono > observation.receivedMono ||
               now - observation.readyObservedMono > maxAge ||
               now - observation.printStateObservedMono > maxAge
             )

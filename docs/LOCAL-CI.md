@@ -10,7 +10,7 @@ bash scripts/test-local-ci.sh
 bash scripts/local-ci.sh code
 ```
 
-The code job requires pnpm 12.18.0, Node 24.22.3, existing workspace dependencies,
+The code job requires npm, a Node version accepted by the root `engines` range (`^22.22.3 || >=24.22.2 <25`), existing workspace dependencies,
 Chromium and its operating-system libraries. Install browser prerequisites
 separately; this runner never installs operating-system packages. Like
 `.github/workflows/ci.yml`, it uses a frozen dependency install with scripts
@@ -32,15 +32,15 @@ overridable with `E2E_PORT`; both accept an integer from 1 to 65535).
 Build the app first, then run these cases on their own:
 
 ```sh
-pnpm exec playwright test --config playwright.farm-view.config.ts
+npx playwright test --config playwright.farm-view.config.ts
 ```
 
 `packages/webrtc-experiment` has its own typecheck and test scripts, and neither
 `check:all` nor the workflow runs them. Run the package scripts yourself:
 
 ```sh
-pnpm --dir packages/webrtc-experiment run typecheck
-pnpm --dir packages/webrtc-experiment run test
+npm run typecheck --workspace packages/webrtc-experiment
+npm run test --workspace packages/webrtc-experiment
 ```
 
 The transport and interop cases launch Playwright's Chromium. Neither path is a

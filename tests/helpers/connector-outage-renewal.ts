@@ -214,10 +214,12 @@ export async function credentialRenewalAcrossOutage(input: {
     onPid: (pid) => input.ledger({ resource: 'connector-process', pid }),
   })
   try {
-    const rows = async () =>
-      (await admin`SELECT payload FROM farm.telemetry_events WHERE agent_id=${agentId}::uuid`) as unknown as {
-        payload: { state?: { progress: number } }
-      }[]
+    // A heartbeat may drain before the renewed subscription snapshot.
+    const rows = () =>
+      admin<{ payload: { state: { progress: number } } }[]>`
+        SELECT payload FROM farm.telemetry_events
+        WHERE agent_id=${agentId}::uuid AND payload->>'kind' = 'printer-state'
+      `
     const expected = () => [...pushed, ...moon.baselines.slice(baselinesBefore)]
     const drained = () =>
       until(
@@ -271,8 +273,13 @@ export async function credentialRenewalAcrossOutage(input: {
     }
     assert.ok(renewed.approval.expires_at > expiresAt, 'successor persisted')
     assert.notEqual(renewed.approval.device_token, claimed.device_token)
+    await until(
+      () => moon.baselines.length >= baselinesBefore + 2,
+      30000,
+      'renewed Connector resubscribed to Moonraker',
+    )
     await drained()
-    const stored = (await rows()).map((r) => r.payload.state?.progress ?? -1)
+    const stored = (await rows()).map((r) => r.payload.state.progress)
     const sort = (v: number[]) => [...v].sort((a, b) => a - b)
     assert.deepEqual(sort(stored), sort(expected()), 'exactly once, no loss')
     assert.ok(connector.running, 'Connector survived the renewal outage')

@@ -4,7 +4,7 @@
  * aggregates. Pagination is over whole groups.
  */
 import type { Spool, SpoolFilament, SpoolVendor } from '../scope.ts'
-import { spoolmanDateTime } from './compat.ts'
+import { pyFloatText, spoolmanDateTime } from './compat.ts'
 import { ID_LIST, patternIssue } from './filament.ts'
 import { stringFilter } from './listing.ts'
 import {
@@ -111,23 +111,21 @@ export const groupModule: LegacyApiModule = {
     if (!['filament', 'vendor', 'material', 'location', 'extra'].includes(axis))
       return message(
         400,
-        `Invalid group_by '${groupBy}', expected filament, vendor, material, location or extra.<key>.`,
+        `Invalid group_by field '${groupBy}'. Must be one of ['filament', 'location', 'material', 'vendor'] or 'extra.<spool extra field key>'.`,
       )
     const extraKey = axis === 'extra' ? groupBy.slice(6) : null
     if (extraKey !== null) {
       const defs = await repo.extraFields.list('spool')
       if (!defs.ok) return defs
       const def = defs.value.find((f) => f.key === extraKey)
-      if (
-        !def ||
-        !(
-          def.fieldType === 'text' ||
-          (def.fieldType === 'choice' && !def.multiChoice)
-        )
-      )
+      if (!def) return message(400, `Unknown spool extra field '${extraKey}'.`)
+      if (!(
+        def.fieldType === 'text' ||
+        (def.fieldType === 'choice' && !def.multiChoice)
+      ))
         return message(
           400,
-          `Cannot group by '${groupBy}': only text and single-choice spool extra fields can be grouped.`,
+          `Spool extra field '${extraKey}' does not hold a single plain value. Only text and single-choice fields do.`,
         )
     }
     const spoolFilters = [
@@ -137,10 +135,15 @@ export const groupModule: LegacyApiModule = {
       'last_used',
       'registered',
     ].filter((key) => q(key) !== null)
+    if (includeEmpty && axis !== 'filament' && axis !== 'vendor')
+      return message(
+        400,
+        `include_empty is only supported when grouping by filament or vendor, not by '${groupBy}'.`,
+      )
     if (includeEmpty && spoolFilters.length)
       return message(
         400,
-        `include_empty cannot be combined with filters on spools themselves (${spoolFilters.join(', ')}).`,
+        `include_empty cannot be combined with filters on the spools themselves (${spoolFilters.join(', ')}); a filament with no spools has no value for them.`,
       )
 
     const vendors = await loadAll((page) => repo.vendors.list(page))
@@ -204,6 +207,10 @@ export const groupModule: LegacyApiModule = {
         (byRegistered && !byRegistered(spool.registeredAt))
       )
         continue
+      // With include_empty the vendor axis lists manufacturers: filaments
+      // without one form no group.
+      if (includeEmpty && axis === 'vendor' && filament.vendorId === null)
+        continue
       const entry =
         axis === 'filament'
           ? entryFor(String(filament.id), { filament })
@@ -225,18 +232,23 @@ export const groupModule: LegacyApiModule = {
       for (const filament of hydrated.values())
         if (filamentMatches(filament))
           entryFor(String(filament.id), { filament })
-    if (includeEmpty && axis === 'vendor')
-      for (const filament of hydrated.values())
-        if (
-          filament.vendorId !== null &&
-          filament.vendor &&
-          filamentMatches(filament)
-        ) {
-          const entry = entryFor(String(filament.vendorId), {
-            vendor: filament.vendor,
-          })
-          entry.filaments.add(filament.id)
-        }
+    if (includeEmpty && axis === 'vendor') {
+      // Vendors first, their filaments hanging off by outer joins: a
+      // manufacturer without filaments is a group of zero, unless a filament
+      // filter is given (that drops it, as the WHERE does upstream).
+      const filamentLevel =
+        filamentIds || byName || byMaterial || byDirection ? true : false
+      for (const vendor of vendors.value) {
+        if (vendorIds && !vendorIds.includes(vendor.id)) continue
+        if (byVendorName && !byVendorName(vendor.name)) continue
+        const own = [...hydrated.values()].filter(
+          (f) => f.vendorId === vendor.id && filamentMatches(f),
+        )
+        if (filamentLevel && own.length === 0) continue
+        const entry = entryFor(String(vendor.id), { vendor })
+        for (const filament of own) entry.filaments.add(filament.id)
+      }
+    }
 
     const total = (entry: Entry) =>
       entry.spools.reduce<number | null>((sum, spool) => {
@@ -282,7 +294,16 @@ export const groupModule: LegacyApiModule = {
       const get = Object.hasOwn(getters, name) ? getters[name] : undefined
       if (get) sortKeys.push({ get, desc })
     }
-    sortKeys.push({ get: title, desc: false })
+    // No usable sort key: order by title. Either way the grouped column breaks
+    // ties (ids numerically, the rest as text; a missing key first).
+    if (sortKeys.length === 0) sortKeys.push({ get: title, desc: false })
+    const keyOrder = (a: Entry, b: Entry) => {
+      if (a.key === null || b.key === null)
+        return a.key === b.key ? 0 : a.key === null ? -1 : 1
+      return axis === 'filament' || axis === 'vendor'
+        ? Number(a.key) - Number(b.key)
+        : compare(a.key, b.key)
+    }
     const ordered = [...entries.values()].sort((a, b) => {
       for (const { get, desc } of sortKeys) {
         const x = get(a)
@@ -297,7 +318,7 @@ export const groupModule: LegacyApiModule = {
             : compare(String(x), String(y))
         if (d !== 0) return desc ? -d : d
       }
-      return 0
+      return keyOrder(a, b)
     })
 
     const totalSpools = ordered.reduce((n, e) => n + e.spools.length, 0)
@@ -315,16 +336,16 @@ export const groupModule: LegacyApiModule = {
       const last = lastUsed(entry)
       const out: Record<string, unknown> = {
         group_by: groupBy,
-        key: entry.key,
+        ...(entry.key === null ? {} : { key: entry.key }),
         spool_count: entry.spools.length,
         in_use_count: entry.spools.filter((s) => s.usedWeight > 0).length,
       }
-      if (sum !== null) out['total_remaining_weight'] = sum
+      out['total_remaining_weight'] = sum ?? 0
       if (last !== null) out['last_used'] = spoolmanDateTime(last)
       if (axis === 'filament' && entry.filament)
         out['filament'] = filamentJson(entry.filament, entry.filament.vendor)
-      if (axis === 'vendor' && entry.vendor) {
-        out['vendor'] = vendorJson(entry.vendor)
+      if (axis === 'vendor') {
+        if (entry.vendor) out['vendor'] = vendorJson(entry.vendor)
         out['filament_count'] = entry.filaments.size
       }
       if (preview && axis === 'filament' && entry.filament) {
@@ -364,7 +385,7 @@ export const groupModule: LegacyApiModule = {
     return respond(200, body, {
       'x-total-count': String(ordered.length),
       'x-total-spools': String(totalSpools),
-      'x-total-remaining-weight': String(totalRemaining),
+      'x-total-remaining-weight': pyFloatText(totalRemaining),
     })
   },
 }

@@ -17,7 +17,7 @@ import {
   spawn,
   type ChildProcess,
 } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { appendFileSync, existsSync, rmSync } from 'node:fs'
 import { copyFile, mkdir, readFile, rm, statfs } from 'node:fs/promises'
@@ -41,6 +41,8 @@ const env = process.env
 const checkout = new URL('..', import.meta.url).pathname.replace(/\/$/, '')
 if (process.argv.length === 3 && process.argv[2] === '--all')
   process.exit(await runAllAcceptance(checkout))
+if (process.argv.length === 3 && process.argv[2] === '--network-fault')
+  process.exit(await runAllAcceptance(checkout, { networkFaultOnly: true }))
 const pgDocker = env.OPENFARM_PG === 'docker'
 const image = env.RTC_FARM_TEST_IMAGE
 const dbPort =
@@ -86,7 +88,9 @@ const camera = scenarios.some((row) => row.resources?.includes('rtsp-camera'))
   : undefined
 if (
   camera &&
-  (!isAbsolute(camera.helper) ||
+  ((!camera.helper && isDockerSim()) ||
+    (camera.helper && !isAbsolute(camera.helper)) ||
+    (snapshotCamera && !camera.helper) ||
     (!snapshotCamera &&
       (!Number.isInteger(camera.port) ||
         camera.port < 1024 ||
@@ -117,7 +121,11 @@ const ledger = (value: object) => {
 
 const docker = async (...args: string[]) =>
   (
-    await exec('docker', args, { timeout: 60000, maxBuffer: 1024 * 1024 })
+    await exec('docker', args, {
+      timeout: 60000,
+      maxBuffer: 1024 * 1024,
+      env: { ...process.env, POSTGRES_PASSWORD: dbPassword },
+    })
   ).stdout.trim()
 
 // Children get an allowlisted environment, never the caller's secrets.
@@ -129,6 +137,10 @@ const ALLOWED_ENV = [
   'LC_ALL',
   'TZ',
   'PLAYWRIGHT_BROWSERS_PATH',
+  'OPENFARM_BROWSER',
+  'OPENFARM_CHROME_PATH',
+  'LD_LIBRARY_PATH',
+  'FONTCONFIG_FILE',
   'XDG_CACHE_HOME',
 ]
 const childEnv: NodeJS.ProcessEnv = Object.fromEntries(
@@ -157,6 +169,7 @@ const stopGroup = (child: ChildProcess | undefined) => {
 // signal: best-effort synchronous cleanup of exactly this run, then exit.
 let interrupted = false
 let localDb: Awaited<ReturnType<typeof startLocalPostgres>> | undefined
+let dbPassword = randomBytes(32).toString('hex')
 const interrupt = () => {
   if (interrupted) {
     signalGroup(current, 'SIGKILL')
@@ -287,7 +300,7 @@ try {
       ...['--tmpfs', '/tmp:rw,mode=1777'],
       ...['-p', `127.0.0.1:${dbPort}:5432`],
       ...['-e', 'POSTGRES_USER=fixture', '-e', 'POSTGRES_DB=fixture'],
-      ...['-e', 'POSTGRES_HOST_AUTH_METHOD=trust'],
+      ...['-e', 'POSTGRES_PASSWORD'],
       ...['-e', 'PGDATA=/var/lib/postgresql/data/pgdata'],
       image,
     )
@@ -301,13 +314,14 @@ try {
     )
   } else {
     localDb = await startLocalPostgres({ workDir, port: dbPort, ledger })
+    dbPassword = localDb.password
   }
   sql = postgres({
     host: '127.0.0.1',
     port: dbPort,
     database: 'fixture',
     username: 'fixture',
-    password: '',
+    password: dbPassword,
     ssl: false,
     max: 2,
     connect_timeout: 3,
@@ -329,6 +343,25 @@ try {
   )
   await sql.end({ timeout: 3 })
   sql = undefined
+
+  if (
+    scenarios.some(({ env }) => env.SIGNALLING_HTTPS_RTC_PACKAGED === 'yes')
+  ) {
+    assert.equal(
+      await run(
+        'build-connector',
+        'npm',
+        ['run', 'build', '-w', '@open3dfarmmanager/connector'],
+        {
+          cwd: checkout,
+          env: childEnv,
+          timeoutMs: 120000,
+        },
+      ),
+      0,
+      'Connector build failed',
+    )
+  }
 
   // Sealed signalling build layer, entirely inside the private work directory.
   const layer = join(workDir, 'layer')
@@ -382,7 +415,36 @@ try {
     'Layer seal failed',
   )
 
-  if (camera)
+  if (camera) {
+    let builtHelperSha256: string | undefined
+    if (!camera.helper) {
+      camera.helper = join(workDir, 'built-rtsp-ingest')
+      assert.equal(
+        await run(
+          'build-rtsp-helper',
+          'go',
+          [
+            'build',
+            '-mod=readonly',
+            '-trimpath',
+            '-buildvcs=false',
+            '-o',
+            camera.helper,
+            './cmd/rtsp-ingest',
+          ],
+          {
+            cwd: join(checkout, 'tools/rtsp-ingest'),
+            env: { ...env, CGO_ENABLED: '0' },
+            timeoutMs: 300000,
+          },
+        ),
+        0,
+        'RTSP helper build failed',
+      )
+      builtHelperSha256 = createHash('sha256')
+        .update(await readFile(camera.helper))
+        .digest('hex')
+    }
     rtsp = snapshotCamera
       ? await startSnapshotCamera({
           workDir,
@@ -395,8 +457,10 @@ try {
           project: name + '-rtsp',
           port: camera.port,
           helper: camera.helper,
+          builtHelperSha256,
           ledger,
         })
+  }
   for (let attempt = 1; attempt <= runs; attempt++)
     for (const scenario of scenarios) {
       const rowLedger = join(workDir, `${attempt}-${scenario.name}.ledger`)
@@ -412,6 +476,7 @@ try {
             ...(scenario.resources?.includes('rtsp-camera') ? rtsp?.env : {}),
             SIGNALLING_HTTPS_DISPOSABLE: 'yes',
             SIGNALLING_HTTPS_PORT: String(dbPort),
+            PGPASSWORD: dbPassword,
             SIGNALLING_HTTPS_LEDGER: rowLedger,
             SIGNALLING_HTTPS_LAYER: layer,
           },

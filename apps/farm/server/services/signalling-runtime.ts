@@ -1,4 +1,5 @@
 import {
+  API_DISPATCH_QUERY_SUPPORT_HEADER,
   API_QUERY_SUPPORT_HEADER,
   MAX_API_QUERY_ITEMS,
   MAX_API_QUERY_RESULT_BYTES,
@@ -148,6 +149,7 @@ interface Connection {
   readonly start: SignallingClockSample
   lastSample: SignallingClockSample
   readonly supportsApiQueries: boolean
+  readonly supportsDispatchQueries: boolean
   readonly inboxId: string
   inboxGeneration: number
   state: State
@@ -299,6 +301,7 @@ export class SignallingRuntime {
     } as const
     if (
       !connection?.supportsApiQueries ||
+      (input.kind === 'dispatch' && !connection.supportsDispatchQueries) ||
       this.#apiIdentity(connection)?.farm_id !== farmId ||
       signal?.aborted ||
       this.#apiQueries.size >= 32 ||
@@ -482,6 +485,8 @@ export class SignallingRuntime {
           role === 'connector' &&
           mode === 'read-only' &&
           inspected.headers.get(API_QUERY_SUPPORT_HEADER) === '1',
+        supportsDispatchQueries:
+          inspected.headers.get(API_DISPATCH_QUERY_SUPPORT_HEADER) === '1',
         inboxId: randomUUID(),
         inboxGeneration: 0,
         state:
@@ -773,7 +778,12 @@ export class SignallingRuntime {
               )
             : await openReadOnlyNegotiation(
                 this.#coordinator,
-                scope,
+                {
+                  ...scope,
+                  ...(control.camera_printer_id
+                    ? { cameraPrinterId: control.camera_printer_id }
+                    : {}),
+                },
                 this.#endpoint(connection),
               )
         if (!opened || !this.#owned(connection)) {

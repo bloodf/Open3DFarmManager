@@ -3,7 +3,7 @@
   "image": "sha256:1ebb4f6a62c2e72a07f18b07ebfdbd96322f5bc2eb72570af3088f68d7c393b1",
   "imageRef": "ghcr.io/donkie/spoolman@sha256:1ebb4f6a62c2e72a07f18b07ebfdbd96322f5bc2eb72570af3088f68d7c393b1",
   "sourceRevision": "ff8efd517b76a4b2783f29c89e9b9fbcd8cd167b",
-  "casesSha256": "3d479dfce543250e86d223235047d3d408ca34506ee6952c39a684d10ae3c1f7",
+  "casesSha256": "967e4dfb1e4f20a3b128917a929b5e35afd6036228822b9a2907c55bb2b79354",
   "capturedAt": "2026-11-21T10:11:04.010Z",
   "cases": [
     {

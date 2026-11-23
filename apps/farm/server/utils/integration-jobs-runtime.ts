@@ -1,4 +1,6 @@
 import postgres from 'postgres'
+import { PostgresFleetMode } from '../storage/fleet-mode-postgres.ts'
+import { integrationAuthPool } from './integration-auth-runtime.ts'
 import { useRuntimeConfig } from 'nuxt/server'
 import { z } from 'zod'
 import {
@@ -14,7 +16,7 @@ import {
   IntegrationJobsService,
 } from '../services/integration-jobs.ts'
 import { PostgresIntegrationAudit } from '../storage/integration-audit-postgres.ts'
-import { PostgresIntegrationDelivery } from '../storage/integration-delivery-postgres.ts'
+import { PostgresIntegrationJobDelivery } from '../storage/integration-jobs-history.ts'
 import { PostgresIntegrationJobs } from '../storage/integration-jobs-postgres.ts'
 import { PostgresIntegrationActions } from '../storage/integration-actions-postgres.ts'
 import { PostgresIntegrationApprovals } from '../storage/integration-approval-postgres.ts'
@@ -112,7 +114,7 @@ export async function integrationJobsRuntime() {
       search_path: 'pg_catalog',
     },
   })
-  const deliveryStore = new PostgresIntegrationDelivery(pool)
+  const deliveryStore = new PostgresIntegrationJobDelivery(pool)
   const delivery = signer
     ? new IntegrationDeliveryService({
         store: deliveryStore,
@@ -128,6 +130,9 @@ export async function integrationJobsRuntime() {
   const library = new IntegrationLibraryService(libraryStore)
   const service = new IntegrationJobsService({
     store: new PostgresIntegrationJobs(pool),
+    fleetMode: async (id) =>
+      (await new PostgresFleetMode(integrationAuthPool()).read(id))?.mode ??
+      'in-service',
     library: {
       version: (id) => library.version(id),
       recordReplay: (entry) => library.recordReplay(entry),

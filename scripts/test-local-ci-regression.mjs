@@ -15,6 +15,14 @@ import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
 
 const source = fileURLToPath(new URL('../', import.meta.url))
+test('check:all includes the security and helper gates', () => {
+  const scripts = JSON.parse(
+    readFileSync(join(source, 'package.json'), 'utf8'),
+  ).scripts
+  assert.match(scripts['check:all'], /test-local-ci-regression/)
+  assert.match(scripts['check:all'], /test:postgres/)
+  assert.match(scripts['check:all'], /test:go/)
+})
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'open3d-selftest-regression-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
@@ -22,6 +30,7 @@ function fixture(t) {
     'scripts/test-local-ci.sh',
     'scripts/local-ci.sh',
     'scripts/klipper-diagnostics.mjs',
+    'packages/sim-tools/src/mocks/env.ts',
     '.github/workflows/ci.yml',
     'apps/farm/Dockerfile',
     'package.json',

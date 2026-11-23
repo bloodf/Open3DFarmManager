@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { ReplaySend } from '../../utils/replay-live.ts'
 import { formatDateTime } from '../../utils/ui-format.ts'
 import { computed, ref, watch } from 'vue'
 import Dialog from '../ui/Dialog.vue'
@@ -29,10 +30,7 @@ const props = defineProps<{
   connectors: readonly { agentId: string }[]
   /** Replay needs a live session: without both props the button is not shown. */
   replayPrinters?: readonly ReplayPrinter[]
-  replaySend?: (
-    printerKey: string,
-    args: LibraryPrintArgs,
-  ) => Promise<ReplayResult>
+  replaySend?: ReplaySend
 }>()
 const emit = defineEmits<{ (e: 'changed'): void }>()
 const open = defineModel<boolean>({ required: true })
@@ -45,12 +43,45 @@ const selectedVersion = ref('')
 const plate = ref('1')
 const pendingDelete = ref('')
 const replaying = ref(false)
-const replayVersion = ref<LibraryVersion>()
-const canReplay = (v: LibraryVersion) =>
-  !!props.replaySend && !!props.replayPrinters && v.deletedAt === null
+type ReplayableVersion = LibraryVersion & { kind: 'gcode' | '3mf' }
+const replayVersion = ref<ReplayableVersion>()
+const replayItemId = ref('')
+const replayPlate = ref(1)
+const canReplay = (v: LibraryVersion): v is ReplayableVersion =>
+  v.kind !== 'resin' &&
+  !!props.replaySend &&
+  !!props.replayPrinters &&
+  v.deletedAt === null
 function replay(v: LibraryVersion) {
+  if (!canReplay(v)) return
   replayVersion.value = v
+  replayItemId.value = props.item?.id ?? ''
+  replayPlate.value = Number(plate.value)
   replaying.value = true
+}
+
+async function sendReplay(
+  printerKey: string,
+  args: LibraryPrintArgs,
+  selectionCurrent?: () => boolean,
+): Promise<ReplayResult> {
+  const versionId = replayVersion.value?.id
+  const itemId = replayItemId.value
+  const stillSelected = () =>
+    props.item?.id === itemId &&
+    replayVersion.value?.id === versionId &&
+    versions.value.some(
+      (entry) =>
+        entry.kind !== 'resin' &&
+        entry.id === versionId &&
+        entry.sha256 === args.sha256 &&
+        entry.deletedAt === null &&
+        entry.purgedAt === null,
+    ) &&
+    (selectionCurrent?.() ?? true)
+  if (!props.replaySend || !stillSelected())
+    return { outcome: 'not-sent', code: 'stale-selection' }
+  return props.replaySend(printerKey, args, stillSelected, versionId)
 }
 
 const current = computed(
@@ -67,6 +98,7 @@ const columns = [
   { id: 'status', label: 'Situação' },
   { id: 'actions', label: 'Ações' },
 ]
+let loadRequest = 0
 const rows = computed(() =>
   versions.value.map((v) => ({
     id: v.id,
@@ -83,29 +115,51 @@ const rows = computed(() =>
 )
 
 async function load() {
-  if (!props.item) return
+  const request = ++loadRequest
+  const item = props.item
+  const farmId = props.farmId
+  if (!item) {
+    loading.value = false
+    return
+  }
   loading.value = true
   error.value = ''
   try {
     const body = await $fetch<{ versions: LibraryVersion[] }>(
-      `/api/farms/${props.farmId}/library/items/${props.item.id}/versions`,
+      `/api/farms/${farmId}/library/items/${item.id}/versions`,
       { retry: 0, timeout: 15_000 },
     )
+    if (
+      request !== loadRequest ||
+      props.item?.id !== item.id ||
+      props.farmId !== farmId
+    )
+      return
     versions.value = body.versions
     selectedVersion.value = body.versions[0]?.id ?? ''
     plate.value = '1'
   } catch {
+    if (
+      request !== loadRequest ||
+      props.item?.id !== item.id ||
+      props.farmId !== farmId
+    )
+      return
     error.value = 'Não foi possível carregar o histórico de versões.'
   } finally {
-    loading.value = false
+    if (request === loadRequest) loading.value = false
   }
 }
 watch(
-  () => [open.value, props.item?.id] as const,
+  () => [open.value, props.item?.id, props.farmId] as const,
   ([isOpen]) => {
     status.value = ''
     pendingDelete.value = ''
     if (isOpen) void load()
+    else {
+      loadRequest += 1
+      loading.value = false
+    }
   },
 )
 
@@ -156,7 +210,11 @@ async function uploaded() {
           </option>
         </select>
       </div>
-      <p class="note">
+      <p v-if="current.kind === 'resin'" class="note">
+        Perfil de impressão informado no envio:
+        {{ current.metadata.resinProfile ?? 'não informado' }}.
+      </p>
+      <p v-else class="note">
         Os metadados abaixo vêm do arquivo da versão v{{
           current.versionNumber
         }}
@@ -208,7 +266,10 @@ async function uploaded() {
   <ReplayDialog
     v-if="replayVersion && replayPrinters && replaySend"
     v-model="replaying"
+    :item-id="replayItemId"
+    :preferred-plate="replayPlate"
     :source="{
+      versionId: replayVersion.id,
       sha256: replayVersion.sha256,
       name: replayVersion.originalName,
       kind: replayVersion.kind,
@@ -219,7 +280,7 @@ async function uploaded() {
       purged: replayVersion.purgedAt !== null,
     }"
     :printers="replayPrinters"
-    :send="replaySend"
+    :send="sendReplay"
   />
 </template>
 

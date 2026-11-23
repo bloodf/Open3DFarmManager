@@ -239,14 +239,8 @@ export function createExternalFilamentModule(
       const snapshot = catalog.snapshot
       if (path === '/api/v1/external/material') {
         if (!snapshot) return respond(500, 'Internal Server Error')
-        return respond(
-          200,
-          snapshot.materials.map((item) =>
-            Object.fromEntries(
-              Object.entries(item).filter(([, value]) => value !== null),
-            ),
-          ),
-        )
+        // Upstream serves its cache file: the parsed models, nulls included.
+        return respond(200, snapshot.materials)
       }
       if (path.endsWith('/filament')) {
         if (!snapshot) return respond(500, 'Internal Server Error')

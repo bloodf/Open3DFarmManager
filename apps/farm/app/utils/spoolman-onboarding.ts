@@ -7,6 +7,7 @@ export type SpoolmanConnectorResult = {
   /** `failed` means the Connector could not be reached to run the test. */
   status: SpoolmanStatus | 'failed'
   configured: boolean
+  outcome?: 'unknown'
 }
 
 const VALIDATION_ERROR =
@@ -63,6 +64,8 @@ export function describeSpoolmanStatus(
   }
 }
 export function describeSpoolmanResult(result: SpoolmanConnectorResult) {
+  if (result.outcome === 'unknown')
+    return 'O resultado da configuração é desconhecido. Verifique o Connector antes de tentar novamente.'
   switch (result.status) {
     case 'reachable':
       return result.configured
@@ -160,6 +163,7 @@ export async function configureSpoolmanOnConnectors(input: {
   for (const agentId of input.agentIds) {
     if (input.signal.aborted) break
     let session: SpoolmanSession | undefined
+    let commitStarted = false
     try {
       session = await input.openSession(agentId, input.signal)
       const operationId = crypto.randomUUID()
@@ -193,6 +197,7 @@ export async function configureSpoolmanOnConnectors(input: {
         continue
       }
       const ready = prepared as Extract<SpoolmanOutcome, { kind: 'prepared' }>
+      commitStarted = true
       const committed = await session.commit({
         operationId,
         target: input.target,
@@ -221,7 +226,12 @@ export async function configureSpoolmanOnConnectors(input: {
         .catch(() => {})
       done({ agentId, status: 'reachable', configured: true })
     } catch {
-      done({ agentId, status: 'failed', configured: false })
+      done({
+        agentId,
+        status: 'failed',
+        configured: false,
+        ...(commitStarted ? { outcome: 'unknown' as const } : {}),
+      })
     } finally {
       session?.close()
     }

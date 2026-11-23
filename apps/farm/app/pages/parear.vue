@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { useFarmRoute } from '../composables/useFarmRoute.ts'
+import { fetchFarmSelectionPage } from '../composables/useFarmMemberships.ts'
+import { resolveFarmScope } from '../utils/farm-scope.ts'
 import {
   normalizePairingCode,
   PairingApprovalRequest,
@@ -13,6 +16,7 @@ import OnboardingPage from '../components/onboarding/OnboardingPage.vue'
 import OnboardingPanel from '../components/onboarding/OnboardingPanel.vue'
 const farms = ref<{ farmId: string }[]>([])
 const farmId = ref('')
+const { route, setFarmScope } = useFarmRoute()
 const nextFarm = ref<string | null>(null)
 const code = ref('')
 const fingerprint = ref('')
@@ -49,19 +53,16 @@ async function start() {
       retry: 0,
       timeout: 10000,
     })
-    const page = await $fetch<{
-      farms: { farmId: string }[]
-      nextAfter: string | null
-    }>('/api/farms', {
+    const page = await fetchFarmSelectionPage(route.query.farm, {
       signal: controller.signal,
-      query: { limit: 50 },
-      retry: 0,
-      timeout: 10000,
     })
     if (current !== generation) return
     farms.value = page.farms
+    farmId.value =
+      resolveFarmScope(page.farms, route.query.farm, !!page.nextAfter)
+        ?.farmId ?? ''
     ready.value = true
-    nextFarm.value = page.nextAfter
+    nextFarm.value = page.nextAfter ?? null
   } catch {
     if (current !== generation) return
     clear()
@@ -71,6 +72,18 @@ async function start() {
   } finally {
     loading.value = false
   }
+}
+watch(
+  () => route.query.farm,
+  (requested) => {
+    farmId.value =
+      resolveFarmScope(farms.value, requested, !!nextFarm.value)?.farmId ?? ''
+    confirmed.value = false
+  },
+)
+function switchFarm() {
+  confirmed.value = false
+  void setFarmScope(farmId.value)
 }
 onMounted(start)
 async function nextFarmPage() {
@@ -218,7 +231,7 @@ onBeforeRouteLeave(clear)
             :aria-describedby="describedBy"
             :disabled="!ready || pending"
             required
-            @change="confirmed = false"
+            @change="switchFarm"
           >
             <option value="">Selecione</option>
             <option

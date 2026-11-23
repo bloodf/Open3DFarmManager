@@ -6,7 +6,9 @@
  * A hex code (`#ff0000`) also runs the color-similarity search over filaments.
  */
 import type { Spool, SpoolFilament, SpoolVendor } from '../scope.ts'
-import { similarColorIds } from './color.ts'
+import { escapeLike, sqliteLike } from './compat.ts'
+import { deltaE, hexToRgb, rgbToLab, similarColorIds } from './color.ts'
+import { CSS_COLORS } from './css-colors.ts'
 import {
   extraOf,
   filamentJson,
@@ -29,48 +31,105 @@ import {
   type Issue,
 } from './validation.ts'
 
-type Candidate = [field: string, text: string | null | undefined]
-
-/** Text of a text/choice extra value, `null` for anything else. */
-function extraTexts(extra: Record<string, unknown>): Candidate[] {
-  const out: Candidate[] = []
-  for (const [key, raw] of Object.entries(extraOf(extra))) {
-    try {
-      const value: unknown = JSON.parse(raw)
-      if (typeof value === 'string') out.push([`extra.${key}`, value])
-      else if (
-        Array.isArray(value) &&
-        value.every((v) => typeof v === 'string')
-      )
-        out.push([`extra.${key}`, value.join(' ')])
-    } catch {
-      // Not JSON text: never a searchable value.
-    }
+/** Upstream rank buckets: lower sorts first, a substring hit ranks one worse. */
+/** Upstream `resolve_color`: a hex code or CSS color name as `RRGGBB`. */
+function resolveColor(query: string): string | null {
+  const normalized = query.trim().toLowerCase().replaceAll(' ', '')
+  const hex = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/.exec(normalized)
+  if (hex) {
+    const digits = hex[1]!
+    return digits.length === 3 ? [...digits].map((c) => c + c).join('') : digits
   }
+  return Object.hasOwn(CSS_COLORS, normalized) ? CSS_COLORS[normalized]! : null
+}
+
+const RANK_ID_OR_COLOR = -1
+const BASE_NATIVE = 0
+const BASE_VENDOR = 2
+const BASE_EXTRA = 4
+const WEAK_PENALTY = 1
+/** Candidate rows ranked per entity (newest first), and terms honoured. */
+const CANDIDATE_CAP = 200
+const MAX_TERMS = 8
+
+/** `(label, value, base rank)` as upstream's `_classify_match` takes them. */
+type Field = readonly [
+  label: string,
+  value: string | null | undefined,
+  base: number,
+]
+
+const splitTerms = (q: string): string[] => {
+  const terms: string[] = []
+  for (const raw of q.toLowerCase().split(/\s+/u).filter(Boolean))
+    if (!terms.includes(raw)) terms.push(raw)
+  return terms.slice(0, MAX_TERMS)
+}
+
+/** SQL `ilike '%term%' escape '/'` on SQLite: ASCII case-insensitive. */
+const ilike = (value: string | null | undefined, term: string) =>
+  !!value && sqliteLike(value, `%${escapeLike(term)}%`, '/')
+
+/**
+ * `(match_field, rank)` when every term is found in some field: the field is
+ * the best hit across terms, the rank the worst term's rank.
+ */
+function classify(
+  terms: readonly string[],
+  fields: readonly Field[],
+): { field: string; rank: number } | null {
+  let best: { field: string; rank: number } | null = null
+  let worst = RANK_ID_OR_COLOR
+  for (const term of terms) {
+    let termBest: { field: string; rank: number } | null = null
+    for (const [label, value, base] of fields) {
+      if (!value) continue
+      const lowered = value.toLowerCase()
+      if (!lowered.includes(term)) continue
+      const rank = lowered.startsWith(term) ? base : base + WEAK_PENALTY
+      if (termBest === null || rank < termBest.rank)
+        termBest = { field: label, rank }
+    }
+    if (termBest === null) return null
+    worst = Math.max(worst, termBest.rank)
+    if (best === null || termBest.rank < best.rank) best = termBest
+  }
+  return best ? { field: best.field, rank: worst } : null
+}
+
+/** Stored (JSON text) values of the text and choice extra fields. */
+function extraFields(
+  extra: Record<string, unknown>,
+  keys: ReadonlySet<string>,
+): Field[] {
+  const out: Field[] = []
+  for (const [key, value] of Object.entries(extraOf(extra)).sort(([x], [y]) =>
+    x < y ? -1 : x > y ? 1 : 0,
+  ))
+    if (keys.has(key)) out.push([`extra.${key}`, value, BASE_EXTRA])
   return out
 }
 
-/** Field of the first term when every term matches somewhere, else `null`. */
-function matchField(terms: readonly string[], candidates: Candidate[]) {
-  const lowered = candidates.map(
-    ([field, text]) => [field, (text ?? '').toLowerCase()] as const,
+/** Every term appears in a native column, the extra values or `more`. */
+const everyTermHits = (
+  terms: readonly string[],
+  columns: readonly (string | null | undefined)[],
+  extra: Record<string, unknown>,
+  keys: ReadonlySet<string>,
+) =>
+  terms.every(
+    (term) =>
+      columns.some((value) => ilike(value, term)) ||
+      extraFields(extra, keys).some(([, value]) => ilike(value, term)),
   )
-  let first: string | null = null
-  let rank = 2
-  for (const [index, term] of terms.entries()) {
-    const hit = lowered.find(([, text]) => text.includes(term))
-    if (!hit) return null
-    if (index === 0) {
-      first = hit[0]
-      rank = hit[1] === term ? 0 : hit[1].startsWith(term) ? 1 : 2
-    }
-  }
-  return first === null ? null : { field: first, rank }
-}
 
-const remaining = (spool: Spool, filament: SpoolFilament) => {
-  const base = spool.initialWeight ?? filament.weight
-  return base === null ? null : Math.max(base - spool.usedWeight, 0)
+const remaining = (
+  weight: number | null,
+  used: number,
+  filament: SpoolFilament,
+) => {
+  const base = weight ?? filament.weight
+  return base === null ? null : Math.max(base - used, 0)
 }
 
 const present = (entries: [string, unknown][]) =>
@@ -135,73 +194,169 @@ export const searchModule: LegacyApiModule = {
     }
     if (issues.length || q === null) return unprocessable(issues)
 
-    const terms = q.toLowerCase().split(/\s+/u).filter(Boolean)
+    const terms = splitTerms(q.trim())
+    if (terms.length === 0)
+      return respond(200, {
+        spools: [],
+        filaments: [],
+        vendors: [],
+        is_color_query: false,
+      })
     const vendors = await loadAll((page) => repo.vendors.list(page))
     if (!vendors.ok) return vendors
     const filaments = await loadAll((page) => repo.filaments.list(page))
     if (!filaments.ok) return filaments
     const spools = await loadAll((page) => repo.spools.list(page))
     if (!spools.ok) return spools
+    const textKeys = async (entity: 'vendor' | 'filament' | 'spool') => {
+      const defs = await repo.extraFields.list(entity)
+      return defs.ok
+        ? ({
+            ok: true,
+            value: new Set(
+              defs.value
+                .filter(
+                  (d) => d.fieldType === 'text' || d.fieldType === 'choice',
+                )
+                .map((d) => d.key),
+            ),
+          } as const)
+        : defs
+    }
+    const spoolKeys = await textKeys('spool')
+    if (!spoolKeys.ok) return spoolKeys
+    const filamentKeys = await textKeys('filament')
+    if (!filamentKeys.ok) return filamentKeys
+    const vendorKeys = await textKeys('vendor')
+    if (!vendorKeys.ok) return vendorKeys
     const vendorById = new Map<number, SpoolVendor>(
       vendors.value.map((v) => [v.id, v]),
     )
     const filamentById = new Map(filaments.value.map((f) => [f.id, f]))
     const vendorOf = (f: SpoolFilament) =>
       f.vendorId === null ? null : (vendorById.get(f.vendorId) ?? null)
-
-    const ranked = <T extends { id: number }>(
-      rows: { row: T; field: string; rank: number }[],
+    const newestFirst = <T extends { id: number }>(rows: readonly T[]) =>
+      [...rows].sort((x, y) => y.id - x.id).slice(0, CANDIDATE_CAP)
+    const ordered = <T extends { id: number }>(
+      hits: { row: T; field: string; rank: number; order?: number }[],
     ) =>
-      rows
-        .sort((a, b) => a.rank - b.rank || a.row.id - b.row.id)
+      hits
+        .sort(
+          (x, y) =>
+            x.rank - y.rank ||
+            (x.order ?? 0) - (y.order ?? 0) ||
+            x.row.id - y.row.id,
+        )
         .slice(0, limit)
 
     const spoolHits: { row: Spool; field: string; rank: number }[] = []
-    const numeric = /^\d+$/.test(q.trim()) ? Number(q.trim()) : null
-    for (const spool of spools.value) {
-      if (spool.archived && !allowArchived) continue
-      if (numeric !== null && spool.id === numeric) {
-        spoolHits.push({ row: spool, field: 'id', rank: 0 })
+    for (const spool of newestFirst(
+      spools.value.filter((s) => allowArchived || !s.archived),
+    )) {
+      if (
+        !everyTermHits(
+          terms,
+          [spool.comment, spool.location, spool.lotNr],
+          spool.extra,
+          spoolKeys.value,
+        )
+      )
         continue
-      }
-      const hit = matchField(terms, [
-        ['comment', spool.comment],
-        ['location', spool.location],
-        ['lot_nr', spool.lotNr],
-        ...extraTexts(spool.extra),
+      const hit = classify(terms, [
+        ['comment', spool.comment, BASE_NATIVE],
+        ['location', spool.location, BASE_NATIVE],
+        ['lot_nr', spool.lotNr, BASE_NATIVE],
+        ...extraFields(spool.extra, spoolKeys.value),
       ])
       if (hit) spoolHits.push({ row: spool, field: hit.field, rank: hit.rank })
     }
+    let spoolResults = ordered(spoolHits)
 
-    const isColor = /^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(q.trim())
-    const colorIds = isColor
-      ? (similarColorIds(filaments.value, q.trim(), threshold) ??
-        new Set<number>())
-      : new Set<number>()
-    const filamentHits: { row: SpoolFilament; field: string; rank: number }[] =
-      []
-    for (const filament of filaments.value) {
-      const hit = matchField(terms, [
-        ['name', filament.name],
-        ['material', filament.material],
-        ['article_number', filament.articleNumber],
-        ['comment', filament.comment],
-        ['external_id', filament.externalId],
-        ...extraTexts(filament.extra),
-        ['vendor.name', vendorOf(filament)?.name],
+    const colorHex = resolveColor(q)
+    const colorHits: {
+      row: SpoolFilament
+      field: string
+      rank: number
+      order: number
+    }[] = []
+    if (colorHex !== null) {
+      const ids = similarColorIds(filaments.value, colorHex, threshold)
+      const target = rgbToLab(hexToRgb(colorHex) ?? [0, 0, 0])
+      const distance = (f: SpoolFilament) => {
+        const colors =
+          f.colorHex !== null
+            ? [f.colorHex]
+            : f.multiColorHexes !== null
+              ? f.multiColorHexes.split(',')
+              : []
+        return colors.length === 0
+          ? Infinity
+          : Math.min(
+              ...colors.map((c) =>
+                deltaE(target, rgbToLab(hexToRgb(c) ?? [0, 0, 0])),
+              ),
+            )
+      }
+      const matched = filaments.value
+        .filter((f) => ids?.has(f.id))
+        .sort((x, y) => distance(x) - distance(y))
+        .slice(0, limit)
+      matched.forEach((row, order) =>
+        colorHits.push({ row, field: 'color', rank: RANK_ID_OR_COLOR, order }),
+      )
+    }
+    const claimed = new Set(colorHits.map((h) => h.row.id))
+    const filamentHits = [...colorHits]
+    for (const filament of newestFirst(filaments.value)) {
+      if (claimed.has(filament.id)) continue
+      const vendor = vendorOf(filament)
+      if (
+        !everyTermHits(
+          terms,
+          [
+            filament.name,
+            filament.material,
+            filament.articleNumber,
+            filament.comment,
+            vendor?.name,
+          ],
+          filament.extra,
+          filamentKeys.value,
+        )
+      )
+        continue
+      const hit = classify(terms, [
+        ['name', filament.name, BASE_NATIVE],
+        ['material', filament.material, BASE_NATIVE],
+        ['article_number', filament.articleNumber, BASE_NATIVE],
+        ['comment', filament.comment, BASE_NATIVE],
+        ['vendor.name', vendor?.name, BASE_VENDOR],
+        ...extraFields(filament.extra, filamentKeys.value),
       ])
       if (hit)
-        filamentHits.push({ row: filament, field: hit.field, rank: hit.rank })
-      else if (colorIds.has(filament.id))
-        filamentHits.push({ row: filament, field: 'color', rank: 3 })
+        filamentHits.push({
+          row: filament,
+          field: hit.field,
+          rank: hit.rank,
+          order: 0,
+        })
     }
 
     const vendorHits: { row: SpoolVendor; field: string; rank: number }[] = []
-    for (const vendor of vendors.value) {
-      const hit = matchField(terms, [
-        ['name', vendor.name],
-        ['comment', vendor.comment],
-        ...extraTexts(vendor.extra),
+    for (const vendor of newestFirst(vendors.value)) {
+      if (
+        !everyTermHits(
+          terms,
+          [vendor.name, vendor.comment],
+          vendor.extra,
+          vendorKeys.value,
+        )
+      )
+        continue
+      const hit = classify(terms, [
+        ['name', vendor.name, BASE_NATIVE],
+        ['comment', vendor.comment, BASE_NATIVE],
+        ...extraFields(vendor.extra, vendorKeys.value),
       ])
       if (hit)
         vendorHits.push({ row: vendor, field: hit.field, rank: hit.rank })
@@ -214,8 +369,44 @@ export const searchModule: LegacyApiModule = {
         )
         .sort((a, b) => a.id - b.id)
 
+    const filamentResults = ordered(filamentHits).map(({ row, field }) => {
+      const own = perFilament > 0 ? spoolsOf(row) : []
+      return present([
+        ['filament', filamentJson(row, vendorOf(row))],
+        ['match_field', field],
+        [
+          'spools',
+          perFilament > 0
+            ? own.slice(0, perFilament).map((s) =>
+                present([
+                  ['id', s.id],
+                  [
+                    'remaining_weight',
+                    remaining(s.initialWeight, s.usedWeight, row),
+                  ],
+                  ['location', s.location],
+                  ['archived', s.archived],
+                ]),
+              )
+            : null,
+        ],
+        ['spool_count', perFilament > 0 ? own.length : null],
+      ])
+    })
+
+    // A numeric query puts the spool with that exact id first.
+    const trimmed = q.trim()
+    if (/^[0-9]+$/.test(trimmed)) {
+      const exact = spools.value.find((s) => s.id === Number(trimmed))
+      if (exact && (allowArchived || !exact.archived))
+        spoolResults = [
+          { row: exact, field: 'id', rank: -1 },
+          ...spoolResults.filter((h) => h.row.id !== exact.id),
+        ].slice(0, limit)
+    }
+
     return respond(200, {
-      spools: ranked(spoolHits).flatMap(({ row, field }) => {
+      spools: spoolResults.flatMap(({ row, field }) => {
         const filament = filamentById.get(row.filamentId)
         return filament
           ? [
@@ -226,32 +417,12 @@ export const searchModule: LegacyApiModule = {
             ]
           : []
       }),
-      filaments: ranked(filamentHits).map(({ row, field }) => {
-        const own = perFilament > 0 ? spoolsOf(row) : []
-        return present([
-          ['filament', filamentJson(row, vendorOf(row))],
-          ['match_field', field],
-          ['spool_count', perFilament > 0 ? own.length : null],
-          [
-            'spools',
-            perFilament > 0
-              ? own.slice(0, perFilament).map((s) =>
-                  present([
-                    ['id', s.id],
-                    ['archived', s.archived],
-                    ['location', s.location],
-                    ['remaining_weight', remaining(s, row)],
-                  ]),
-                )
-              : null,
-          ],
-        ])
-      }),
-      vendors: ranked(vendorHits).map(({ row, field }) => ({
+      filaments: filamentResults,
+      vendors: ordered(vendorHits).map(({ row, field }) => ({
         vendor: vendorJson(row),
         match_field: field,
       })),
-      is_color_query: isColor,
+      is_color_query: colorHex !== null,
     })
   },
 }

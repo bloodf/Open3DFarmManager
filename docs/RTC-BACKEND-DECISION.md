@@ -44,11 +44,9 @@ No WebSocket or HTTP command or media relay is built, by decision.
 
 `werift` (pure TypeScript: ICE, DTLS, SCTP data channels, RTP/RTCP, H.264
 payloading) is the only candidate that could remove the native dependency while
-keeping a direct, DTLS-pinned peer. Adopting it needs a dependency change, which
-is blocked on the npm migration (only the named manifests and the npm lock may
-change then). No `werift` code was added, and no werift limit has been measured:
-this checkout has no installed dependencies and no external network access, and
-a test against an unmeasured backend would prove nothing.
+keeping a direct, DTLS-pinned peer. Adopting it would require a dependency change and renewed security and
+interoperability review. No `werift` code was added, and no werift limit has
+been measured; this document records a candidate, not an adopted backend.
 
 ### Connector requirements to check against `werift`
 

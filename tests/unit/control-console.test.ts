@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 import { randomUUID } from 'node:crypto'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, onTestFinished } from 'vitest'
 import {
   ControlArguments,
   ExtendedControlAction,
@@ -525,6 +525,7 @@ describe('command journal', () => {
     (version) => {
       // Scratch directory under the OS temp area; left in place on purpose.
       const directory = mkdtempSync(join(tmpdir(), 'console-journal-'))
+      onTestFinished(() => rmSync(directory, { recursive: true, force: true }))
       closeCommandJournal(openCommandJournal({ directory, clock: Date.now }))
       const path = join(directory, 'pause-commands.sqlite')
       const db = new DatabaseSync(path)

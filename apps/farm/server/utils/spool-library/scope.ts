@@ -182,8 +182,15 @@ export interface SpoolLibraryRepository {
     list(entity: SpoolEntityType): Promise<Result<SpoolExtraFieldDefinition[]>>
     /** Insert or replace one definition (key and entity identify it). */
     upsert(definition: SpoolExtraFieldDefinition): Promise<Result<true>>
-    /** Remove a definition and its value from every record of that entity. */
-    delete(entity: SpoolEntityType, key: string): Promise<Result<true>>
+    /**
+     * Remove a definition and its value from every record of that entity
+     * (`keepValues` leaves the records' values alone).
+     */
+    delete(
+      entity: SpoolEntityType,
+      key: string,
+      keepValues?: boolean,
+    ): Promise<Result<true>>
   }
   /** Settings the farm has set; unset keys are absent (Spoolman `/setting`). */
   readonly settings: {

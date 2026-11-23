@@ -247,6 +247,8 @@ export async function connectKobraX(options: {
     snapshot: state.snapshot,
     control,
     facts: facts.get,
+    /** Unscoped telemetry hint. It confers no capture ownership and is never
+     * used by the Connector's passive camera source. */
     cameraUrl: state.cameraUrl,
     fingerprint: () => pin,
     /** Identity the printer proved through recovery; never the credentials. */

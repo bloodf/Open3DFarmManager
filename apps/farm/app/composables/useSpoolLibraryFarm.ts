@@ -1,4 +1,6 @@
-import { ref, watch } from 'vue'
+import { computed, ref } from 'vue'
+import { fetchFarmMemberships } from './useFarmMemberships.ts'
+import { farmLocation, resolveFarmScope } from '../utils/farm-scope.ts'
 
 export interface FarmSummary {
   farmId: string
@@ -9,33 +11,20 @@ export function useSpoolLibraryFarm() {
   const router = useRouter()
 
   const farms = ref<FarmSummary[]>([])
-  const farmId = ref('')
+  const farmId = computed(
+    () => resolveFarmScope(farms.value, route.query.farm)?.farmId ?? '',
+  )
   const loadingFarm = ref(true)
   const farmLoadError = ref('')
   const signInRequired = ref(false)
-  const noFarm = ref(false)
-
-  function requestedFarm(): string {
-    const raw = route.query.farm
-    return typeof raw === 'string' ? raw : ''
-  }
+  const noFarm = computed(() => !farmId.value)
 
   async function loadFarms() {
     loadingFarm.value = true
     farmLoadError.value = ''
     signInRequired.value = false
-    noFarm.value = false
     try {
-      const page = await $fetch<{ farms: FarmSummary[] }>('/api/farms', {
-        query: { limit: 50 },
-        retry: 0,
-        timeout: 15_000,
-      })
-      farms.value = page.farms
-      const preferred = requestedFarm()
-      const matched = page.farms.find((farm) => farm.farmId === preferred)
-      farmId.value = matched?.farmId ?? page.farms[0]?.farmId ?? ''
-      if (!farmId.value) noFarm.value = true
+      farms.value = await fetchFarmMemberships({ timeout: 15_000 })
     } catch (cause) {
       const code =
         cause && typeof cause === 'object' && 'statusCode' in cause
@@ -52,20 +41,13 @@ export function useSpoolLibraryFarm() {
   }
 
   function selectFarm(nextFarmId: string) {
-    if (!nextFarmId || nextFarmId === farmId.value) return
-    farmId.value = nextFarmId
-    void router.replace({ query: { ...route.query, farm: nextFarmId } })
+    if (!farms.value.some((farm) => farm.farmId === nextFarmId)) return
+    if (nextFarmId === route.query.farm) return
+    void router.replace({
+      ...farmLocation(route.path, nextFarmId, route.query),
+      hash: route.hash,
+    })
   }
-
-  watch(
-    () => route.query.farm,
-    (next) => {
-      if (typeof next !== 'string' || !next) return
-      if (farms.value.some((farm) => farm.farmId === next)) {
-        farmId.value = next
-      }
-    },
-  )
 
   return {
     farms,

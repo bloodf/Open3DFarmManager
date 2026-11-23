@@ -3,6 +3,8 @@ import { z } from 'zod'
 /** Read-only spool summary mirrored from Spoolman. Display evidence only. */
 export const MAX_INVENTORY_SPOOLS = 8
 export const SpoolSummary = z.strictObject({
+  /** Spoolman ID, scoped to the Connector's configured Spoolman service. */
+  spoolId: z.number().int().positive().safe().optional(),
   name: z.string().max(32).nullable(),
   material: z.string().max(16).nullable(),
   colorHex: z

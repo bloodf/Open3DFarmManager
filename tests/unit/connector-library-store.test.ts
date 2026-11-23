@@ -1,14 +1,8 @@
 import { createHash } from 'node:crypto'
-import {
-  mkdir,
-  mkdtemp,
-  readdir,
-  stat,
-  utimes,
-  writeFile,
-} from 'node:fs/promises'
+import { mkdtemp, rm, readdir, stat, utimes, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { describe, expect, test } from 'vitest'
+import { tmpdir } from 'node:os'
+import { afterEach, describe, expect, test } from 'vitest'
 import {
   createLibraryStore,
   LibraryStoreError,
@@ -33,6 +27,15 @@ const PNG = Buffer.concat([
 ]).toString('base64')
 
 let counter = 0
+const directories = new Set<string>()
+afterEach(async () => {
+  await Promise.all(
+    [...directories].map((directory) =>
+      rm(directory, { recursive: true, force: true }),
+    ),
+  )
+  directories.clear()
+})
 const meta = (name: string, over: Partial<VersionMeta> = {}): VersionMeta => ({
   version_id: `v${++counter}`,
   item_id: 'item1',
@@ -42,12 +45,9 @@ const meta = (name: string, over: Partial<VersionMeta> = {}): VersionMeta => ({
   ...over,
 })
 
-/** Real directory under the worktree's ignored `.data/`; nothing else is touched. */
 async function open(options: Partial<LibraryStoreOptions> = {}) {
-  await mkdir(join(process.cwd(), '.data'), { recursive: true })
-  const directory = await mkdtemp(
-    join(process.cwd(), '.data', 'connector-library-'),
-  )
+  const directory = await mkdtemp(join(tmpdir(), 'connector-library-'))
+  directories.add(directory)
   let now = 1_800_000_000_000
   const clock = { now: () => now, advance: (ms: number) => (now += ms) }
   const store = await createLibraryStore({
@@ -270,7 +270,7 @@ describe('quota', () => {
 
 describe('retention (same rules as server mode)', () => {
   test('keep-newest-N soft-deletes older versions, then the window purges unpinned ones', async () => {
-    const { store, clock } = await open({ keepVersions: 1 })
+    const { store, directory, clock } = await open({ keepVersions: 1 })
     const v1 = meta('v1.gcode', { version_number: 1 })
     const v2 = meta('v2.gcode', { version_number: 2 })
     await store.put(bytes('one'), { meta: v1 })
@@ -294,6 +294,7 @@ describe('retention (same rules as server mode)', () => {
       (await store.list()).map((f) => [f.name, f.state]),
     )
     expect(states).toEqual({ 'v1.gcode': 'removed', 'v2.gcode': 'stored' })
+    expect(await stored(directory)).toEqual([sha('two')])
   })
 
   test('pinned versions are never trimmed or purged; identical bytes uploaded again restore a removed version', async () => {

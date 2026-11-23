@@ -135,7 +135,9 @@ it('polls every 5 s and requests the screen wake lock', async () => {
   expect(page).toContain('setInterval(poll, KIOSK_POLL_MS)')
   expect(page).toContain('statusSummaryPath(farmId)')
   expect(page).not.toContain('/printer-states')
-  expect(page).toContain('background: #0b0d10')
+  expect(page).toContain('background: var(--color-surface)')
+  expect(page).toContain('color: var(--color-text)')
+  expect(page).not.toContain('background: #0b0d10')
 })
 
 it('shows displayName when present and falls back to printerKey', async () => {

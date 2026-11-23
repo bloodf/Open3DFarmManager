@@ -1,0 +1,46 @@
+import { expect, test } from '@playwright/test'
+import { journeyEnabled, startJourneyHarness } from './harness.ts'
+import type { startSdcpFixture } from './sdcp-fixture.ts'
+
+if (journeyEnabled())
+  test('SDCP status becomes stale and recovers without controls', async ({
+    browser,
+  }) => {
+    test.setTimeout(300_000)
+    const journey = await startJourneyHarness({ browser, simulator: 'sdcp' })
+    try {
+      const sim = journey.vendor?.raw as Awaited<
+        ReturnType<typeof startSdcpFixture>
+      >
+      await journey.expectLiveTelemetry()
+      const row = journey.farmRow()
+      await expect(row).toContainText('Imprimindo')
+      await journey.expectProgress(0.25)
+      await expect(
+        row.getByRole('button', { name: /^(Pausar|Retomar|Cancelar)$/ }),
+      ).toHaveCount(0)
+      await expect(
+        row.getByRole('button', { name: 'Pausar impressão' }),
+      ).toHaveCount(0)
+      sim.setOnline(false)
+      await expect(
+        row.getByText(
+          'Conexão direta indisponível. Exibindo a última observação.',
+          { exact: true },
+        ),
+      ).toBeVisible({ timeout: 90_000 })
+      await expect(row.getByText(/Dados desatualizados/).first()).toBeVisible()
+      await expect(
+        row.getByRole('button', { name: 'Pausar impressão' }),
+      ).toHaveCount(0)
+      sim.setProgress(40)
+      sim.setOnline(true)
+      await expect(
+        row.getByText('Conexão direta autenticada', { exact: true }),
+      ).toBeVisible({ timeout: 90_000 })
+      await journey.expectProgress(0.4)
+      await expect(row).toContainText('Imprimindo')
+    } finally {
+      await journey.close()
+    }
+  })

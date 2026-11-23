@@ -1,4 +1,5 @@
 import WebSocket from 'ws'
+import { resolveCrealityEndpoint } from '../discovery/creality.ts'
 import { decodeCrealityStatus } from './index.ts'
 import {
   controlTargetState,
@@ -49,7 +50,8 @@ export function openFixedCrealityControl(input: {
   let sentMono = 0
   let notify: (() => void) | undefined
   const controller = new AbortController()
-  const failure = () => new Error('Creality control unavailable')
+  let failureReason = 'Creality control unavailable'
+  const failure = () => new Error(failureReason)
   function current() {
     if (
       stopped ||
@@ -69,38 +71,55 @@ export function openFixedCrealityControl(input: {
     notify?.()
   }
   const lifetime = setTimeout(stop, 30000)
-  const host = local.host.includes(':') ? `[${local.host}]` : local.host
-  const socket = new WebSocket(`ws://${host}:${local.port}`, {
-    maxPayload: 65536,
-    handshakeTimeout: timeoutMs,
-    perMessageDeflate: false,
-  })
+  let socket: WebSocket | undefined
   const transport = {
     async publish(payload: unknown, guard: () => boolean) {
-      if (socket.readyState !== WebSocket.OPEN || !guard()) throw failure()
+      if (!socket || socket.readyState !== WebSocket.OPEN || !guard())
+        throw failure()
       socket.send(JSON.stringify(payload))
     },
     close() {
-      if (socket.readyState === WebSocket.CLOSED) return Promise.resolve()
+      if (!socket || socket.readyState === WebSocket.CLOSED)
+        return Promise.resolve()
       return new Promise<void>((resolve) => {
-        socket.once('close', resolve)
-        socket.terminate()
+        socket!.once('close', resolve)
+        socket!.terminate()
       })
     },
   }
-  controller.signal.addEventListener('abort', () => socket.terminate(), {
+  controller.signal.addEventListener('abort', () => socket?.terminate(), {
     once: true,
   })
-  socket.on('error', stop)
-  socket.on('close', stop)
-  socket.on('message', (data, binary) => {
+  async function connect() {
+    try {
+      const endpoint = await resolveCrealityEndpoint(local!)
+      if (stopped) return
+      const host = local!.host.includes(':') ? `[${local!.host}]` : local!.host
+      socket = new WebSocket(
+        `${endpoint.secure ? 'wss' : 'ws'}://${host}:${endpoint.port}`,
+        {
+          ...(endpoint.ca ? { ca: endpoint.ca } : {}),
+          maxPayload: 65536,
+          handshakeTimeout: timeoutMs,
+          perMessageDeflate: false,
+        },
+      )
+      socket.on('error', stop)
+      socket.on('close', stop)
+      socket.on('message', onMessage)
+    } catch (error) {
+      failureReason = error instanceof Error ? error.message : String(error)
+      stop()
+    }
+  }
+  function onMessage(data: WebSocket.RawData, binary: boolean) {
     if (stopped || binary) return
     const report = decodeCrealityStatus(data.toString())
     if (!report?.state) return
     const now = input.clock.monotonicNow()
     latest = Object.freeze({
-      assignmentId: mapping.assignment_id,
-      printerKey: mapping.printer_key,
+      assignmentId: mapping!.assignment_id,
+      printerKey: mapping!.printer_key,
       connectionGeneration: input.connectionGeneration,
       sequence: ++sequence,
       ready: report.state !== 'error',
@@ -114,7 +133,8 @@ export function openFixedCrealityControl(input: {
     })
     input.publish(latest)
     notify?.()
-  })
+  }
+  void connect()
   input.signal.addEventListener('abort', stop, { once: true })
   if (input.signal.aborted) stop()
   function wait(predicate: () => boolean): Promise<void> {

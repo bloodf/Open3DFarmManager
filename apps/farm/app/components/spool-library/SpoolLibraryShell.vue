@@ -18,6 +18,7 @@ const props = defineProps<{
     | 'stock'
     | 'drying'
     | 'labels'
+    | 'finder'
     | 'reports'
   title: string
   description: string
@@ -83,6 +84,11 @@ const navLinks = computed(() => {
       id: 'labels' as const,
       to: { path: '/bobinas/etiquetas', query },
       label: 'Etiquetas',
+    },
+    {
+      id: 'finder' as const,
+      to: { path: '/bobinas/localizar', query },
+      label: 'Localizar',
     },
     {
       id: 'reports' as const,
@@ -165,8 +171,12 @@ function onFarmChange(event: Event) {
 
     <EmptyState
       v-else-if="noFarm"
-      title="Nenhuma farm disponível"
-      description="Esta conta ainda não tem uma farm para gerenciar bobinas. Crie uma farm ou peça acesso."
+      :title="farms.length ? 'Selecione uma farm' : 'Nenhuma farm disponível'"
+      :description="
+        farms.length
+          ? 'Escolha uma farm para gerenciar bobinas.'
+          : 'Esta conta ainda não tem uma farm para gerenciar bobinas. Crie uma farm ou peça acesso.'
+      "
     >
       <NuxtLink to="/farm" class="cta">Ir para farms</NuxtLink>
     </EmptyState>

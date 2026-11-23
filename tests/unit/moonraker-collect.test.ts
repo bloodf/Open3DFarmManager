@@ -203,6 +203,14 @@ function launch(args: string[], auditPath?: string) {
     // fails at once with the CLI's output.
     async until(predicate: (text: string) => boolean) {
       while (!predicate(output)) {
+        if (child.signalCode !== null) {
+          // A signal leaves exitCode null, but close still drains the output.
+          await stdout
+          if (predicate(output)) return
+          throw new Error(
+            `CLI exited before the fixture condition: signal=${child.signalCode}, output=${output.slice(-2000)}`,
+          )
+        }
         if (child.exitCode !== null) {
           // Output written just before exit may still be in the pipe.
           await stdout
@@ -215,6 +223,9 @@ function launch(args: string[], auditPath?: string) {
       }
     },
     finish,
+    kill(signal: NodeJS.Signals = 'SIGKILL') {
+      child.kill(signal)
+    },
     async stop() {
       if (child.exitCode === null) child.kill('SIGTERM')
       return finish()
@@ -227,6 +238,29 @@ function launch(args: string[], auditPath?: string) {
 }
 const queued = (text: string) =>
   text.split('\n').filter((line) => line.includes('"kind":"queued"')).length
+
+test('CLI output wait rejects after a signal closes stdout', async () => {
+  const service = await loopback({ hangUpgrade: true })
+  const temp = temporary()
+  const job = launch([
+    'collect',
+    '--config',
+    config(temp.path, service.origin),
+    '--data-dir',
+    join(temp.path, 'data'),
+  ])
+  try {
+    const waiting = job.until((text) => text.includes('never-produced-marker'))
+    job.kill('SIGKILL')
+    await expect(waiting).rejects.toThrow(
+      'CLI exited before the fixture condition',
+    )
+  } finally {
+    await job.close()
+    await service.close()
+    temp.close()
+  }
+})
 
 test('actual Node CLI persists opaque-key snapshots and FIFO deltas before queued diagnostics', async () => {
   const service = await loopback()

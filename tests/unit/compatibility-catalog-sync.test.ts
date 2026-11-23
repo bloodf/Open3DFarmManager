@@ -299,12 +299,11 @@ describe('sincronização do catálogo de compatibilidade', () => {
       ).toThrow(/Unsupported Bambu camera model/)
   })
 
-  it('mantém a câmera Bambu desconhecida nos modelos fora do seletor', () => {
-    expect(statusOf('bambu-a2l', 'camera')).toBe('unknown')
-    expect(statusOf('bambu-x2d', 'camera')).toBe('unknown')
-    expect(statusOf('bambu-h2c', 'camera')).toBe('simulated')
-    expect(statusOf('bambu-p2s', 'camera')).toBe('simulated')
-    expect(statusOf('bambu-h2s', 'camera')).toBe('simulated')
+  it('mantém câmera sem evidência simulada para modelos Bambu RTSPS e não mapeados', () => {
+    for (const product of bambuCatalog) {
+      expect(product.capabilities.camera, product.id).toBe('unknown')
+      expect(product.controlAreas.webcams, product.id).toBe('unknown')
+    }
   })
 
   it('liga materiais Bambu aos comandos AMS e à leitura de bandejas', () => {

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useFarmRoute } from '../composables/useFarmRoute.ts'
 import { formatNumber } from '../utils/ui-format.ts'
 import {
   computed,
@@ -17,6 +18,7 @@ import StaleNotice from '../components/ui/StaleNotice.vue'
 import { useFarmView } from '../composables/useFarmView.ts'
 import {
   filesAvailability,
+  printableEntry,
   printableFile,
   validateUpload,
 } from '../utils/files-view.ts'
@@ -31,10 +33,19 @@ import {
 } from '../utils/webrtc/farm-pause-control.ts'
 import { createFarmStatusKeyResolver } from '../utils/webrtc/farm-status-key-resolver.ts'
 
-const { state, ready, now, discover, selectFarm, selectKey } = useFarmView()
+const { route, setFarmScope } = useFarmRoute()
+const { state, ready, now, discover, selectFarm, selectKey } = useFarmView({
+  requestedFarm: () => route.query.farm,
+})
+
 const printer = ref('')
 const files = shallowRef<PrinterFile[]>([])
 const selected = ref('')
+const selectedPrintable = computed(() =>
+  files.value.some(
+    (file) => file.name === selected.value && printableEntry(file),
+  ),
+)
 const upload = shallowRef<File | null>(null)
 const operation = shallowRef<FilesState>({ kind: 'idle' })
 const enabled = ref(false)
@@ -236,7 +247,7 @@ watch([selected, manualName], () => {
 })
 function chooseFarm(event: Event) {
   if (event.target instanceof HTMLSelectElement)
-    void selectFarm(event.target.value)
+    setFarmScope(event.target.value)
 }
 function chooseKey(event: Event) {
   if (event.target instanceof HTMLSelectElement) selectKey(event.target.value)
@@ -265,11 +276,7 @@ function startStored() {
   void session.start(name)
 }
 function start() {
-  if (
-    !confirmed.value ||
-    !files.value.some((file) => file.name === selected.value)
-  )
-    return
+  if (!confirmed.value || !selectedPrintable.value) return
   confirmed.value = false
   void session.start(selected.value)
 }
@@ -594,22 +601,24 @@ onBeforeUnmount(() => {
                   v-for="file in files"
                   :key="file.name"
                   :value="file.name"
-                  :disabled="!printableFile(file.name)"
+                  :disabled="!printableEntry(file)"
                 >
-                  {{ file.name }} ({{ formatNumber(file.size) }}
-                  bytes)
+                  {{ file.name }} ({{ formatNumber(file.size) }} bytes){{
+                    file.printUnsupported ? ' · Impressão indisponível' : ''
+                  }}
                 </option>
               </select>
               <span id="files-existing-hint" class="hint"
-                >Subpastas não são aceitas pelo comando de impressão
-                atual.</span
+                >Selecione um arquivo habilitado para impressão.</span
               >
             </div>
             <label class="confirmation"
               ><input
                 v-model="confirmed"
                 type="checkbox"
-                :disabled="busy || !selected || !availability.available"
+                :disabled="
+                  busy || !selectedPrintable || !availability.available
+                "
               /><span
                 >Conferi o arquivo {{ selected || 'selecionado' }} e a
                 impressora {{ row?.assignment.printerKey }}. Quero iniciar esta
@@ -620,7 +629,10 @@ onBeforeUnmount(() => {
               <Button
                 type="submit"
                 :disabled="
-                  busy || !availability.available || !selected || !confirmed
+                  busy ||
+                  !availability.available ||
+                  !selectedPrintable ||
+                  !confirmed
                 "
               >
                 Iniciar impressão

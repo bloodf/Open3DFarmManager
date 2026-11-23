@@ -1,3 +1,4 @@
+import { Readable } from 'node:stream'
 import type { Sql } from 'postgres'
 import type {
   IntegrationLibraryStore,
@@ -10,7 +11,7 @@ import type {
 import type { StorageMode } from '../utils/library/quota.ts'
 
 const versionColumns = (sql: Sql) =>
-  sql`v.id::text AS "id", v.item_id::text AS "itemId", v.version_number AS "versionNumber", v.sha256, v.size_bytes::float8 AS "sizeBytes", v.storage_location AS "storageLocation", v.original_name AS "originalName", v.kind, v.plate_count AS "plateCount", v.created_at::float8 AS "createdAt"`
+  sql`v.id::text AS "id", v.item_id::text AS "itemId", v.version_number AS "versionNumber", v.sha256, v.size_bytes::float8 AS "sizeBytes", v.storage_location AS "storageLocation", v.original_name AS "originalName", v.kind, v.metadata->>'resinProfile' AS "resinProfile", v.plate_count AS "plateCount", v.created_at::float8 AS "createdAt"`
 
 interface VersionRow extends LibraryVersionView {
   farmId: string
@@ -70,7 +71,8 @@ export class PostgresIntegrationLibrary implements IntegrationLibraryStore {
         sizeBytes: row.sizeBytes,
         storageLocation: asMode(row.storageLocation),
         originalName: row.originalName,
-        kind: row.kind,
+        kind: row.resinProfile == null ? row.kind : 'resin',
+        ...(row.resinProfile == null ? {} : { resinProfile: row.resinProfile }),
         plateCount: row.plateCount,
         createdAt: row.createdAt,
       },
@@ -124,12 +126,16 @@ export class PostgresIntegrationLibrary implements IntegrationLibraryStore {
         originalName: string
         storageLocation: string
         plateCount: number
+        resinProfile: string | null
       }[]
     >`
-      SELECT id::text AS "id", farm_id::text AS "farmId", sha256, size_bytes::float8 AS "sizeBytes",
-        original_name AS "originalName", storage_location AS "storageLocation", plate_count AS "plateCount"
-      FROM farm.library_versions
-      WHERE id = ${versionId}::uuid AND deleted_at IS NULL`
+      SELECT v.id::text AS "id", v.farm_id::text AS "farmId", v.sha256, v.size_bytes::float8 AS "sizeBytes",
+        v.original_name AS "originalName", v.storage_location AS "storageLocation", v.plate_count AS "plateCount",
+        v.metadata->>'resinProfile' AS "resinProfile"
+      FROM farm.library_versions v
+      JOIN farm.library_blobs b ON b.farm_id = v.farm_id AND b.sha256 = v.sha256
+        AND b.storage_location = v.storage_location AND b.location_agent_id = v.location_agent_id
+      WHERE v.id = ${versionId}::uuid AND v.deleted_at IS NULL AND b.purged_at IS NULL`
     const row = rows[0]
     if (!row) return null
     return {
@@ -138,12 +144,36 @@ export class PostgresIntegrationLibrary implements IntegrationLibraryStore {
       sha256: row.sha256,
       sizeBytes: row.sizeBytes,
       displayName: row.originalName,
+      ...(row.resinProfile === null ? {} : { resinProfile: row.resinProfile }),
       storageMode: asMode(row.storageLocation),
       plateCount: row.plateCount,
     }
   }
 
-  async retain() {}
+  async retain(
+    sha256: string,
+    bytes: Uint8Array,
+    mode: StorageMode,
+    target?: { farmId: string; agentId: string | null },
+  ) {
+    if (!target) return
+    const { libraryRuntime } = await import('../utils/library/runtime.ts')
+    const { blobs, relay } = await libraryRuntime()
+    const body = Readable.from([bytes])
+    const options = { maxBytes: bytes.length }
+    const stored =
+      mode === 'server'
+        ? await blobs?.put(body, options)
+        : target.agentId &&
+          (await relay?.put({
+            ...options,
+            body,
+            farmId: target.farmId,
+            agentId: target.agentId,
+          }))
+    if (!stored || stored.sha256 !== sha256 || stored.size !== bytes.length)
+      throw new Error('Resin artifact storage unavailable')
+  }
 
   async addVersion(version: NewLibraryVersion) {
     await this.sql.begin(async (tx) => {
@@ -154,9 +184,12 @@ export class PostgresIntegrationLibrary implements IntegrationLibraryStore {
         INSERT INTO farm.library_blobs (farm_id, sha256, size_bytes, storage_location, agent_id, created_at)
         VALUES (${version.farmId}::uuid, ${version.sha256}, ${version.sizeBytes}, ${version.storageLocation}, ${version.agentId}, ${version.createdAt})
         ON CONFLICT DO NOTHING`
+      // The existing kind constraint only permits G-code and 3MF. The
+      // immutable profile in version metadata identifies the resin artifact.
+      const storedKind = version.kind === 'resin' ? '3mf' : version.kind
       await tx`
         INSERT INTO farm.library_versions (id, farm_id, item_id, version_number, sha256, size_bytes, storage_location, agent_id, original_name, kind, plate_count, metadata, notes, uploaded_by, created_at)
-        VALUES (${version.id}::uuid, ${version.farmId}::uuid, ${version.itemId}::uuid, ${version.versionNumber}, ${version.sha256}, ${version.sizeBytes}, ${version.storageLocation}, ${version.agentId}, ${version.originalName}, ${version.kind}, ${version.plateCount}, '{}'::jsonb, '', 'integration', ${version.createdAt})`
+        VALUES (${version.id}::uuid, ${version.farmId}::uuid, ${version.itemId}::uuid, ${version.versionNumber}, ${version.sha256}, ${version.sizeBytes}, ${version.storageLocation}, ${version.agentId}, ${version.originalName}, ${storedKind}, ${version.plateCount}, ${tx.json(version.resinProfile === undefined ? {} : { resinProfile: version.resinProfile })}, '', 'integration', ${version.createdAt})`
     })
     const item = await this.getItem(version.itemId)
     if (!item) throw new Error('library version was not stored')

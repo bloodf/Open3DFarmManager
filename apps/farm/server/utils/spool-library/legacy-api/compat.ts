@@ -145,3 +145,14 @@ export function spoolmanDateTime(ms: number): string {
 
 /** Character count as Python `len(str)` (code points). */
 export const pyLen = (text: string) => [...text].length
+
+/** Python `repr(float)`: `150.0`, `1e-05`, shortest round-trip digits. */
+export function pyFloatText(value: number): string {
+  if (Number.isInteger(value) && Math.abs(value) < 1e16) return `${value}.0`
+  const text = String(value)
+  if (!/e/.test(text)) return text
+  const [mantissa = '', exponent = '0'] = text.split('e')
+  const sign = exponent.startsWith('-') ? '-' : '+'
+  const digits = exponent.replace(/^[-+]/, '').padStart(2, '0')
+  return `${mantissa}e${sign}${digits}`
+}

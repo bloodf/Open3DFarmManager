@@ -84,11 +84,15 @@ export const tooShort = (loc: Loc, input: unknown, min = 1): Issue => ({
 export const jsonText = (status: number, text: string) =>
   respond(status, JSON.stringify(text), { 'content-type': 'application/json' })
 
-/** Sorted distinct strings, ascending by code point. */
+/**
+ * Distinct strings in order of first appearance: upstream selects DISTINCT
+ * without an order, so the first record to hold a value lists it.
+ */
 export function distinct(
   values: Iterable<string | null | undefined>,
 ): string[] {
   const seen = new Set<string>()
-  for (const value of values) if (value) seen.add(value)
-  return [...seen].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+  for (const value of values)
+    if (value !== null && value !== undefined) seen.add(value)
+  return [...seen]
 }

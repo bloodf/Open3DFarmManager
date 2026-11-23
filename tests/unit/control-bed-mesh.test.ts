@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 import { randomBytes, randomUUID } from 'node:crypto'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, onTestFinished } from 'vitest'
 import {
   ControlArguments,
   ExtendedControlAction,
@@ -445,6 +445,7 @@ describe('command journal', () => {
   it('migrates a v6 journal and records bed_mesh', () => {
     // Scratch directory under the OS temp area; left in place on purpose.
     const directory = mkdtempSync(join(tmpdir(), 'bed-mesh-journal-'))
+    onTestFinished(() => rmSync(directory, { recursive: true, force: true }))
     closeCommandJournal(openCommandJournal({ directory, clock: Date.now }))
     const db = new DatabaseSync(join(directory, 'pause-commands.sqlite'))
     try {
@@ -480,6 +481,7 @@ describe('bed_mesh rate limit', () => {
   it('accepts one dispatch per printer a minute and leaves other actions alone', () => {
     // Scratch directory under the OS temp area; left in place on purpose.
     const directory = mkdtempSync(join(tmpdir(), 'bed-mesh-rate-'))
+    onTestFinished(() => rmSync(directory, { recursive: true, force: true }))
     let now = 1000
     const journal = openCommandJournal({ directory, clock: () => now })
     const scope = {

@@ -25,20 +25,20 @@ RUN curl -fsSL --retry 3 \
 
 COPY --from=go /usr/local/go /usr/local/go
 ENV PATH="/usr/local/go/bin:${PATH}" GOTOOLCHAIN=local
+RUN mkdir -p /workspace && chown node:node /workspace
 WORKDIR /workspace
-COPY package.json package-lock.json .npmrc ./
-COPY apps/farm/package.json apps/farm/package.json
-COPY packages/connector/package.json packages/connector/package.json
-COPY packages/farm-protocol/package.json packages/farm-protocol/package.json
-COPY packages/shared/package.json packages/shared/package.json
-COPY packages/sim-cams/package.json packages/sim-cams/package.json
-COPY packages/sim-tools/package.json packages/sim-tools/package.json
-COPY packages/webrtc-experiment/package.json packages/webrtc-experiment/package.json
+USER node
+COPY --chown=node:node package.json package-lock.json .npmrc ./
+COPY --chown=node:node apps/farm/package.json apps/farm/package.json
+COPY --chown=node:node packages/connector/package.json packages/connector/package.json
+COPY --chown=node:node packages/farm-protocol/package.json packages/farm-protocol/package.json
+COPY --chown=node:node packages/shared/package.json packages/shared/package.json
+COPY --chown=node:node packages/sim-cams/package.json packages/sim-cams/package.json
+COPY --chown=node:node packages/sim-tools/package.json packages/sim-tools/package.json
+COPY --chown=node:node packages/webrtc-experiment/package.json packages/webrtc-experiment/package.json
 RUN npm ci --ignore-scripts && npm cache clean --force
-COPY . .
+COPY --chown=node:node . .
 # Non-root so permission-based refusals (e.g. mode 0500 directories) match the host suite.
 # The Node suite uses git ls-files. Index the source snapshot as the runtime user.
-RUN chown -R node:node /workspace
-USER node
 RUN git init --quiet && git add --all
 CMD ["npm", "run", "check:all"]

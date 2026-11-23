@@ -131,9 +131,12 @@ export async function startFarmApp(
     // farm workspace resolves instead of assuming apps/farm/node_modules.
     const nuxt = await resolveNuxtInstall(farm)
     await symlink(nuxt.nodeModules, join(layer, 'node_modules'), 'dir')
+    // The account plugin makes the client entry async. On loopback it can
+    // run before Nuxt's inline runtime config, so keep the default deferred
+    // entry in the journey build.
     await writeFile(
       join(layer, 'nuxt.config.ts'),
-      `export default defineNuxtConfig({ extends: ${JSON.stringify(farm)}, srcDir: ${JSON.stringify(join(farm, 'app'))}, runtimeConfig: { connectorSignalling: { enabled: true } }, nitro: { preset: 'node-server', output: { dir: ${JSON.stringify(built)} } } })\n`,
+      `export default defineNuxtConfig({ extends: ${JSON.stringify(farm)}, srcDir: ${JSON.stringify(join(farm, 'app'))}, runtimeConfig: { connectorSignalling: { enabled: true } }, nitro: { preset: 'node-server', ignore: ['plugins/pre-hydration.ts'], experimental: { websocket: true }, output: { dir: ${JSON.stringify(built)} } } })\n`,
       { mode: 0o600 },
     )
     const buildEnv = {
@@ -363,6 +366,14 @@ export async function startFarmApp(
       NUXT_JOB_HISTORY_DATABASE_URL: database.url('farm_job_history_reader'),
       NUXT_LIBRARY_ENABLED: 'true',
       NUXT_LIBRARY_DATABASE_URL: database.url('farm_library'),
+      NUXT_SPOOL_LIBRARY_ENABLED: 'true',
+      NUXT_SPOOL_LIBRARY_DATABASE_URL: database.url('farm_spool_library'),
+      NUXT_SPOOL_LIBRARY_IMPORT_ENABLED: 'true',
+      NUXT_SPOOL_LIBRARY_IMPORT_DATABASE_URL: database.url('farm_spool_import'),
+      NUXT_SPOOL_FEATURES_ENABLED: 'true',
+      NUXT_SPOOL_FEATURES_DATABASE_URL: database.url('farm_spool_features'),
+      NUXT_SPOOL_USAGE_ENABLED: 'true',
+      NUXT_SPOOL_USAGE_DATABASE_URL: database.url('farm_spool_usage'),
       NUXT_LIBRARY_DIRECTORY: join(directory, 'library'),
       NUXT_PRINTER_STATES_ENABLED: 'true',
       NUXT_PRINTER_STATES_DATABASE_URL: database.url(

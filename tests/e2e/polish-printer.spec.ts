@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
+import { setPolishTheme } from '../helpers/polish-theme.ts'
+import { mockShellApi } from '../helpers/shell-api.ts'
 
 // Isolated UI checks for the printer detail screen on mocked /api routes. No
 // real printer, database, auth service or external network is involved: every
@@ -40,6 +42,7 @@ async function mockApi(page: Page, scenario: Scenario) {
     (url) => !['127.0.0.1', 'localhost'].includes(url.hostname),
     (route) => route.abort(),
   )
+  await mockShellApi(page, farm)
   await page.route('**/api/auth/me', async (route) => {
     if (scenario === 'sign-in') return route.fulfill({ status: 401, json: {} })
     if (scenario === 'error') return route.fulfill({ status: 503, json: {} })
@@ -114,7 +117,7 @@ async function open(
   theme: (typeof themes)[number],
 ) {
   await page.setViewportSize(viewport)
-  await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+  await setPolishTheme(page, theme)
   await mockApi(page, scenario)
   await page.goto(`/impressoras/${keyFor(scenario)}`)
   await settle(page, scenario)

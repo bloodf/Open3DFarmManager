@@ -104,6 +104,11 @@ export type MigrationAction =
   { kind: 'up' } | { kind: 'down'; expectedLastId: string }
 
 const LIBRARY_UPGRADE_ID = '0080_integration_library_api'
+const RETENTION_ID = '0090_review_601_retention'
+const SHIPPED_RETENTION_DOWN_SHA256 =
+  '4718704b51280aee8d4312a136c7b376d5b4569ab1ae7b38de209cf97c3f95e1'
+const RETENTION_CLOCK_DECLARATION =
+  '  now_ms bigint := floor(extract(epoch FROM pg_catalog.clock_timestamp()) * 1000)::bigint;'
 
 // Shipped 0080 matches pg_get_constraintdef text that contains IN.
 // PostgreSQL stores that IN-list as "= ANY", so the drop misses the
@@ -120,6 +125,18 @@ export function executableMigrationSql(
   direction: 'up' | 'down',
 ): string {
   const sql = direction === 'up' ? migration.up : migration.down
+  if (migration.id === RETENTION_ID && direction === 'down') {
+    if (
+      createHash('sha256').update(sql).digest('hex') !==
+      SHIPPED_RETENTION_DOWN_SHA256
+    )
+      throw new Error(`Shipped ${RETENTION_ID} down SQL changed`)
+    // The shipped rollback uses network_deleted without declaring it.
+    return sql.replace(
+      RETENTION_CLOCK_DECLARATION,
+      `${RETENTION_CLOCK_DECLARATION}\n  network_deleted integer;`,
+    )
+  }
   if (migration.id !== LIBRARY_UPGRADE_ID || direction !== 'up') return sql
   let next = sql
   for (const pattern of SHIPPED_CONSTRAINT_LOOKUPS) {

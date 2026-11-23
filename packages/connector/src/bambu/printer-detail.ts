@@ -95,6 +95,8 @@ function mergeAms(previous: unknown, next: unknown): Raw {
 /** Pure accumulator: raw MQTT reports in, validated `detail.update` frames out. */
 export function createBambuDetailState(printerKey: string) {
   let print: Raw = {}
+  let printError: string | undefined
+  let hms: string[] | undefined
   let seq = 0
   return {
     /** Undefined for reports that carry no print telemetry (version, upgrade). */
@@ -103,6 +105,11 @@ export function createBambuDetailState(printerKey: string) {
       const decoded = decodeBambuReport(text)
       if (decoded.kind !== 'observation') return undefined
       const delta = object(object(JSON.parse(text)).print)
+      if (decoded.alarmDelta) {
+        if (decoded.alarmDelta.printError !== undefined)
+          printError = decoded.alarmDelta.printError
+        if ('hms' in decoded.alarmDelta) hms = decoded.alarmDelta.hms
+      }
       print = {
         ...print,
         ...delta,
@@ -114,6 +121,8 @@ export function createBambuDetailState(printerKey: string) {
     },
     reset() {
       print = {}
+      printError = undefined
+      hms = undefined
     },
     /** Latest raw `print` object, for Connector-side refusals. */
     get print(): Readonly<Raw> {
@@ -173,7 +182,14 @@ export function createBambuDetailState(printerKey: string) {
           ...(speedFactor === undefined ? {} : { speedFactor }),
           print: {
             state: observed.state ?? 'unknown',
-            message: '',
+            message: [
+              printError && `Erro de impressão: ${printError}.`,
+              hms?.length && `Códigos HMS informados: ${hms.join(', ')}.`,
+              (printError === undefined || hms === undefined) &&
+                'Alertas ainda não informados pela impressora.',
+            ]
+              .filter(Boolean)
+              .join(' '),
             // The report carries remaining time, not elapsed time.
             elapsedSeconds: 0,
             ...(observed.filename ? { file: observed.filename } : {}),
@@ -362,7 +378,7 @@ export type BambuDetailListener = (frame: unknown) => void
 
 /**
  * One lazy, reference-counted MQTT report connection per printer. It exists
- * only while a browser session watches. It is read-only: nothing is published.
+ * only while a browser session watches. It publishes read-only status requests.
  */
 export function createBambuDetailStream(input: {
   binding: BambuBinding
@@ -379,6 +395,8 @@ export function createBambuDetailStream(input: {
   let latest: unknown
   let timer: ReturnType<typeof setTimeout> | undefined
   let lastUpdate = -Infinity
+  let restartTimer: ReturnType<typeof setTimeout> | undefined
+  let restartDelay = 1000
 
   const emit = (frame: unknown) => {
     for (const listener of [...listeners]) listener(frame)
@@ -398,6 +416,10 @@ export function createBambuDetailStream(input: {
       trust,
       port: binding.ftpsPort,
     })
+  }
+  function begin() {
+    lifetime = new AbortController()
+    start(lifetime.signal)
   }
   function start(signal: AbortSignal) {
     const publishLatest = () => {
@@ -426,9 +448,28 @@ export function createBambuDetailStream(input: {
         maxReconnects: 5,
       },
       onConnection(connection: 'connected' | 'disconnected' | 'closed') {
-        if (connection === 'connected') return
+        if (signal.aborted) return
+        if (connection === 'connected') {
+          restartDelay = 1000
+          return
+        }
+        clearTimeout(timer)
+        timer = undefined
         state.reset()
-        latest = undefined
+        latest = state.frame()
+        if (connection === 'closed' && lifetime?.signal === signal) {
+          const previous = lifetime
+          lifetime = undefined
+          previous.abort()
+          if (listeners.size && !restartTimer) {
+            restartTimer = setTimeout(() => {
+              restartTimer = undefined
+              if (listeners.size && !lifetime) begin()
+            }, restartDelay)
+            restartDelay = Math.min(restartDelay * 2, 30000)
+          }
+        }
+        if (latest) emit(latest)
       },
       onReport(payload: Buffer) {
         if (signal.aborted || !state.ingest(payload) || timer) return
@@ -441,10 +482,7 @@ export function createBambuDetailStream(input: {
   return {
     subscribe(listener: BambuDetailListener) {
       listeners.add(listener)
-      if (!lifetime) {
-        lifetime = new AbortController()
-        start(lifetime.signal)
-      }
+      if (!lifetime && !restartTimer) begin()
       if (latest) listener(latest)
       let stopped = false
       return () => {
@@ -454,6 +492,9 @@ export function createBambuDetailStream(input: {
         if (listeners.size) return
         clearTimeout(timer)
         timer = undefined
+        clearTimeout(restartTimer)
+        restartTimer = undefined
+        restartDelay = 1000
         lifetime?.abort()
         lifetime = undefined
         latest = undefined

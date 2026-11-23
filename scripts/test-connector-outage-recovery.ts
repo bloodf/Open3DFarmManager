@@ -9,7 +9,7 @@
 //     OUTAGE_TEST_WORK_ROOT required); a freeze is `docker pause`.
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { appendFileSync } from 'node:fs'
 import {
   access,
@@ -138,6 +138,7 @@ const disk = async () =>
 const startedAt = performance.now()
 let container: string | undefined
 let local: Awaited<ReturnType<typeof startLocalPostgres>> | undefined
+let dbPassword = randomBytes(32).toString('hex')
 let faultProxy: ReturnType<typeof createNetFaultProxy> | undefined
 let dbStall:
   Parameters<typeof runConnectorOutageScenarios>[0]['dbStall'] | undefined
@@ -161,7 +162,7 @@ try {
       ...['--tmpfs', '/tmp:rw,mode=1777'],
       ...['-p', `127.0.0.1:${ports.db}:5432`],
       ...['-e', 'POSTGRES_USER=fixture', '-e', 'POSTGRES_DB=fixture'],
-      ...['-e', 'POSTGRES_HOST_AUTH_METHOD=trust'],
+      ...['-e', `POSTGRES_PASSWORD=${dbPassword}`],
       ...['-e', 'PGDATA=/var/lib/postgresql/data/pgdata'],
       image!,
     )
@@ -185,6 +186,7 @@ try {
       port: realDbPort,
       ledger,
     })
+    dbPassword = local.password
     // The fault proxy fronts the cluster: a blackhole freezes every connection,
     // established or new, like `docker pause`, and releases queued bytes on resume.
     faultProxy = createNetFaultProxy()
@@ -204,7 +206,7 @@ try {
     port: ports.db,
     database: 'fixture',
     username: 'fixture',
-    password: '',
+    password: dbPassword,
     ssl: false,
     max: 4,
     connect_timeout: 3,
@@ -223,6 +225,7 @@ try {
   assert.equal(validateMigrationHistory(catalog, [...journal]), catalog.length)
   report = await runConnectorOutageScenarios({
     admin: sql,
+    fixturePassword: dbPassword,
     ports,
     workDir,
     dbStall: dbStall!,

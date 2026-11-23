@@ -172,6 +172,19 @@ export function createBambuTransport(options: BambuTransportOptions) {
               () => {},
             )
         }
+        client.publish(
+          `device/${serial}/request`,
+          JSON.stringify({
+            pushing: {
+              command: 'pushall',
+              sequence_id: '0',
+              version: 1,
+              push_target: 1,
+            },
+          }),
+          { qos: 0, retain: false },
+          () => {},
+        )
         clearInterval(versionTimer)
         readVersion()
         versionTimer = setInterval(readVersion, 600_000)

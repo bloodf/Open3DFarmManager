@@ -84,9 +84,9 @@ try {
     process.execPath,
     ['scripts/migrate-disposable-db.ts', 'up'],
     {
-      PGPASSWORD: database.password,
       MIGRATION_SYNTHETIC_TEST_DISPOSABLE: 'yes',
       MIGRATION_SYNTHETIC_TEST_PORT: String(dbPort),
+      PGPASSWORD: database.password,
     },
   )
   assert.equal(migrated, 0, 'Migrations failed')

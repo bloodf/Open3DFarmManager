@@ -182,6 +182,11 @@ type PauseControlInput = {
   >[0]['resinCapabilities']
   /** True while local storage is degraded: commands are refused with `storage`. */
   storageDegraded?: () => boolean
+  speedModesFor?: (
+    printerKey: string,
+  ) =>
+    | readonly import('../../../farm-protocol/src/control-actions.ts').SpeedMode[]
+    | undefined
   /** Durable bed-collection hold: OpenFarm starts wait for `confirm_collection`. */
   collection?: QueueCollectionJournal
   /** Transport seam for tests. Defaults to the authenticated pause client. */
@@ -409,8 +414,17 @@ async function runAssignmentControl(
             },
           })
         : driver
-    const apiDriver = hold(router, true)
-    const libraryDriver = withLibraryPrint(router, {
+    // The same locally observed printer state supplies both advertised modes and the guard.
+    const speedDriver = {
+      ...router,
+      speedModes(binding: PrinterBinding) {
+        const mapping =
+          binding === printerBinding ? readPrinterBinding(binding) : null
+        return mapping ? input.speedModesFor?.(mapping.printer_key) : undefined
+      },
+    }
+    const apiDriver = hold(speedDriver, true)
+    const libraryDriver = withLibraryPrint(speedDriver, {
       starter: libraryPrint,
       targetFor(binding) {
         const mapping = readPrinterBinding(binding)

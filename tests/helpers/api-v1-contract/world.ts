@@ -456,6 +456,7 @@ export class World {
     actedAt: number
     silencedUntil: number | null
   }[] = []
+  telemetryFixture: { states: unknown[]; transitions: unknown[] } | null = null
   cameraEnabled = false
   readonly faults = new Set<Fault>()
   readonly config: {
@@ -835,6 +836,14 @@ export class World {
         ]
       }
       if (text.includes('farm.telemetry_events')) {
+        if (this.telemetryFixture) {
+          if (text.includes("'printer-transition'"))
+            return this.telemetryFixture.transitions.map((payload) => ({
+              payload,
+            }))
+          if (text.includes('DESC, event_id DESC LIMIT 1')) return []
+          return this.telemetryFixture.states.map((payload) => ({ payload }))
+        }
         if (!text.includes("'printer-state'") || !text.includes('LIMIT ?'))
           return []
         const [farmId, agentId, printerKey, since, until] = v

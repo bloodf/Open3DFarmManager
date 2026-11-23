@@ -61,9 +61,8 @@ async function serveGcode(certPath: string, keyPath: string) {
 
 test.use({ actionTimeout: 30_000, navigationTimeout: 30_000 })
 
-// GET /jobs omits the requester's app ID when correlating history to jobs.
 if (journeyEnabled())
-  test.fixme('jornada FullFarmManager: trabalho da API, histórico e confirmação da placa', async ({
+  test('jornada FullFarmManager: trabalho da API, histórico e confirmação da placa', async ({
     browser,
   }) => {
     test.setTimeout(10 * 60_000)

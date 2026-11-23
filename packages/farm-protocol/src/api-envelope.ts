@@ -3,7 +3,7 @@ import { canonicalize } from './canonical.ts'
 import { parseBoundedJson } from './json.ts'
 import { base64url, decodeBase64url } from './encoding.ts'
 import { BrowserDeviceUuid } from './browser-device-proof.ts'
-import { ControlArguments } from './control-actions.ts'
+import { CollectionArguments, ControlArguments } from './control-actions.ts'
 
 /**
  * Command envelope for API-submitted jobs and actions: the server-to-Connector
@@ -62,10 +62,54 @@ export const API_ENVELOPE_ACTIONS = [
   'unload_filament',
   'start_library_print',
 ] as const
-export const ApiEnvelopeAction = ControlArguments.refine((value) =>
-  (API_ENVELOPE_ACTIONS as readonly string[]).includes(value.action),
-)
-export type ApiEnvelopeAction = z.infer<typeof ControlArguments>
+export const ApiRunAction = z.strictObject({
+  action: z.enum(['job_pause', 'job_resume', 'job_cancel']),
+  args: z.strictObject({ expectedRunId: uuid }),
+})
+export const ApiPlateAction = z.strictObject({
+  action: z.literal('confirm_collection'),
+  args: CollectionArguments,
+})
+export const ApiEnvelopeAction = z.union([
+  ApiRunAction,
+  ApiPlateAction,
+  ControlArguments.refine((value) =>
+    (API_ENVELOPE_ACTIONS as readonly string[]).includes(value.action),
+  ),
+])
+export type ApiEnvelopeAction = z.infer<typeof ApiEnvelopeAction>
+
+export const API_RUN_CONTROLS = {
+  job_pause: 'pause',
+  job_resume: 'resume',
+  job_cancel: 'cancel',
+} as const
+
+export const ApiEnvelopeScope = z.enum([
+  'jobs:start',
+  'jobs:write',
+  'control:basic',
+  'control:extended',
+  'plates:confirm',
+])
+
+export function scopeForApiAction(action: ApiEnvelopeAction['action']) {
+  switch (action) {
+    case 'confirm_collection':
+      return 'plates:confirm'
+    case 'start_library_print':
+      return 'jobs:write'
+    case 'job_pause':
+    case 'job_resume':
+    case 'job_cancel':
+    case 'pause':
+    case 'resume':
+    case 'cancel':
+      return 'control:basic'
+    default:
+      return 'control:extended'
+  }
+}
 
 export const ApiEnvelopeJob = z.strictObject({
   file_url: httpsUrl,
@@ -99,9 +143,7 @@ const common = {
   // Roll out Connector support before issuing these fields: older strict V1
   // parsers reject them. Connectors use the authenticated inbox scope for
   // legacy envelopes and require both signed claims when either is present.
-  scope: z
-    .enum(['jobs:start', 'jobs:write', 'control:basic', 'control:extended'])
-    .optional(),
+  scope: ApiEnvelopeScope.optional(),
   /** Issuance-time authority epoch, revalidated by the delivery claim. */
   grant_epoch: time.optional(),
 }

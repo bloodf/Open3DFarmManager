@@ -18,6 +18,8 @@ const id = useId()
 <style scoped>
 meter {
   display: block;
+  inline-size: 100%;
   max-inline-size: 100%;
+  accent-color: var(--ops-action);
 }
 </style>

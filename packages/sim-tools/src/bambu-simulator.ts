@@ -141,7 +141,7 @@ export async function startBambuSimulator({
     ams_mapping?: unknown
     use_ams?: unknown
   }[] = []
-  // Read-only queries (get_version). Kept apart from `requests`: the connector's telemetry
+  // Read-only queries (pushall and get_version). Kept apart from `requests`: the connector's telemetry
   // transport asks for the version as soon as it subscribes, concurrently with the first report,
   // so mixing it into `requests` makes "no command was sent" checks depend on socket timing.
   const queries: { command: string; sequence_id: string }[] = []
@@ -212,6 +212,14 @@ export async function startBambuSimulator({
     onPublish: async (msg) => {
       if (msg.topic !== requestTopic) throw new Error('Invalid request topic')
       const value = JSON.parse(msg.payload.toString('utf8'))
+      if (value?.pushing?.command === 'pushall') {
+        queries.push({
+          command: 'pushall',
+          sequence_id: value.pushing.sequence_id,
+        })
+        emitCurrentReport()
+        return
+      }
       if (value?.info?.command === 'get_version') {
         queries.push({
           command: 'get_version',

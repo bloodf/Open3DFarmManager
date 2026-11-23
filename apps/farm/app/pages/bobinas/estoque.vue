@@ -246,7 +246,7 @@ async function saveThreshold(item: LowStockItem) {
             <td>{{ formatGrams(item.effectiveThresholdGrams) }}</td>
             <td>
               <StatusBadge
-                :tone="item.low ? 'error' : 'idle'"
+                :tone="item.low ? 'attention' : 'idle'"
                 :label="item.low ? 'Baixo' : 'OK'"
               />
             </td>
@@ -310,7 +310,9 @@ async function saveThreshold(item: LowStockItem) {
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--color-border);
-  border-inline-start: var(--space-1) solid var(--printer-error);
+  border-inline-start: var(--ops-space-1) solid var(--ops-attention);
+  background: var(--ops-attention-bg);
+  color: var(--ops-attention);
   border-radius: var(--radius-sm);
 }
 .cell-input {

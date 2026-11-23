@@ -4,11 +4,26 @@ import {
 } from '../../../farm-protocol/src/control-actions.ts'
 import type { PauseDriver, PauseRpcResult } from './pause-dispatcher.ts'
 import type { PrinterBinding } from './printer-binding.ts'
-import type { QueueCollectionJournal } from './queue-collection-journal.ts'
+import { awaitsCollection } from './queue-collection.ts'
+import {
+  INITIAL_COLLECTION_ATTEMPT,
+  type QueueCollectionJournal,
+} from './queue-collection-journal.ts'
 
 /** Starts OpenFarm sends to a printer: each is held while the bed is occupied. */
 export const COLLECTION_HELD_ACTIONS: ReadonlySet<ExtendedControlAction> =
   new Set(['start_print', 'start_library_print'])
+
+export type PlateStartRefusal = 'awaiting-collection' | 'plate-state-uncertain'
+
+export interface PlateStartGuard {
+  apiCollectionRefusal?: (
+    binding: PrinterBinding,
+    attempt: string,
+  ) => string | null
+  confirmApiCollection?: (binding: PrinterBinding, attempt: string) => void
+  plateStartRefusal?: (binding: PrinterBinding) => PlateStartRefusal | null
+}
 
 function refused(message: string, awaiting: boolean): Error {
   return Object.assign(new Error(message), {
@@ -35,22 +50,68 @@ export function withCollectionHold<D extends PauseDriver>(
     journal: QueueCollectionJournal
     printerKey(binding: PrinterBinding): string | undefined
     clock?: () => number
+    /** Require a recorded clearance before the first supported API start. */
+    requireInitialClearance?: (binding: PrinterBinding) => boolean
   },
-): D {
+): D & PlateStartGuard {
   const execute = driver.execute?.bind(driver)
   if (!execute) return driver
   const wall = config.clock ?? Date.now
   const controls = (binding: PrinterBinding) =>
     driver.controls?.(binding) ?? (['pause'] as const)
-  function held(key: string): boolean {
+  function plateStartRefusal(
+    binding: PrinterBinding,
+  ): PlateStartRefusal | null {
+    const key = config.printerKey(binding)
+    if (key === undefined) return 'plate-state-uncertain'
     try {
-      return config.journal.blocked(key)
+      const state = config.journal.read(key)
+      if (awaitsCollection(state)) return 'awaiting-collection'
+      if (
+        state.dispatchedAt !== undefined ||
+        (state.attempts.length === 0 &&
+          config.requireInitialClearance?.(binding))
+      )
+        return 'plate-state-uncertain'
+      return null
     } catch {
-      return true
+      return 'plate-state-uncertain'
     }
   }
   return Object.freeze({
     ...driver,
+    plateStartRefusal,
+    apiCollectionRefusal(binding: PrinterBinding, attempt: string) {
+      const key = config.printerKey(binding)
+      if (key === undefined) return 'plate-state-uncertain'
+      try {
+        const state = config.journal.read(key)
+        if (state.dispatchedAt !== undefined) return 'plate-state-uncertain'
+        const current =
+          state.attempts.findLast(
+            (entry) => entry.status === 'awaiting-collection',
+          ) ?? state.attempts.at(-1)
+        if (!current)
+          return attempt === INITIAL_COLLECTION_ATTEMPT &&
+            config.requireInitialClearance?.(binding)
+            ? null
+            : 'plate-state-uncertain'
+        return current.id === attempt ? null : 'plate-attempt-mismatch'
+      } catch {
+        return 'plate-state-uncertain'
+      }
+    },
+    confirmApiCollection(binding: PrinterBinding, attempt: string) {
+      const key = config.printerKey(binding)
+      if (key === undefined) throw new Error('Printer mapping unavailable')
+      // The exact attempt was verified on the same stack as this durable write.
+      if (
+        attempt === INITIAL_COLLECTION_ATTEMPT &&
+        config.journal.read(key).attempts.length === 0
+      )
+        config.journal.confirmInitial(key)
+      else config.journal.confirmThrough(key, Number(attempt))
+    },
     controls(binding: PrinterBinding): readonly ExtendedControlAction[] {
       const base = controls(binding)
       const key = config.printerKey(binding)
@@ -86,25 +147,20 @@ export function withCollectionHold<D extends PauseDriver>(
       }
       if (!COLLECTION_HELD_ACTIONS.has(action))
         return execute(action, args, request)
-      if (key === undefined || held(key)) {
-        let awaiting = false
-        try {
-          awaiting =
-            key !== undefined && config.journal.awaiting(key).length > 0
-        } catch {
-          /* fail closed */
-        }
+      const refusal = plateStartRefusal(request.binding)
+      if (key === undefined || refusal) {
         throw refused(
-          awaiting
+          refusal === 'awaiting-collection'
             ? 'Printer awaiting collection'
             : 'Printer start outcome uncertain',
-          awaiting,
+          refusal === 'awaiting-collection',
         )
       }
       return execute(action, args, {
         ...request,
         beforeSend() {
-          if (!request.beforeSend() || held(key)) return false
+          if (!request.beforeSend() || plateStartRefusal(request.binding))
+            return false
           try {
             config.journal.dispatched(key, wall())
           } catch {
@@ -114,5 +170,5 @@ export function withCollectionHold<D extends PauseDriver>(
         },
       })
     },
-  }) as D
+  }) as D & PlateStartGuard
 }

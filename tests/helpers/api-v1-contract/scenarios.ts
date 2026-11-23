@@ -97,7 +97,138 @@ async function asApp(
   return send({ ...input(app), token })
 }
 
+function dispatchFixture(view: 'eligibility' | 'plate'): Fixture {
+  const request = (id: string, printerId: string = P): CallInput => ({
+    method: 'GET',
+    path: `/jobs/${id}/${view}?printerId=${printerId}`,
+  })
+  const failure = (
+    error: 'unsupported' | 'connector-unavailable' | 'connector-timeout',
+  ) => ({
+    name: error,
+    run: (world: World) => {
+      world.inbox = { kind: 'error', error }
+      return asApp(world, farm(['jobs:read']), (app) =>
+        request(world.seedJob(app).id),
+      )
+    },
+  })
+  return {
+    scopes: ['jobs:read'],
+    success: '200',
+    valid: (world, app) => {
+      world.inbox = {
+        kind: 'dispatch',
+        data: [
+          {
+            printerState: 'idle',
+            plateState: 'operator-confirmed',
+            attemptId: '100',
+            observedAt: 200,
+          },
+        ],
+        nextOffset: null,
+      }
+      return request(world.seedJob(app).id)
+    },
+    bad: (world, app) => request(world.seedJob(app).id, 'invalid'),
+    missing: () => request(ids.unknown),
+    fault: 'jobs-runtime',
+    extra: {
+      '422': [failure('unsupported')],
+      '503': [failure('connector-unavailable')],
+      '504': [failure('connector-timeout')],
+    },
+  }
+}
+
 export const fixtures: Record<string, Fixture> = {
+  'GET /alerts/{printerId}': {
+    scopes: ['printers:read'],
+    success: '200',
+    valid: () => ({ method: 'GET', path: `/alerts/${P}` }),
+    bad: () => ({ method: 'GET', path: `/alerts/${P}?unexpected=1` }),
+    missing: () => ({ method: 'GET', path: `/alerts/${ids.unknown}` }),
+    printerPath: true,
+    fault: 'pool',
+  },
+  'POST /alerts/{printerId}/{alertId}': {
+    scopes: ['alerts:write'],
+    success: '200',
+    valid: () => ({
+      method: 'POST',
+      path: `/alerts/${P}/${ids.alertA}`,
+      body: { action: 'acknowledge' },
+    }),
+    bad: () => ({
+      method: 'POST',
+      path: `/alerts/${P}/${ids.alertA}`,
+      body: { action: 'silence', until: 0 },
+    }),
+    missing: () => ({
+      method: 'POST',
+      path: `/alerts/${P}/${ids.unknown}`,
+      body: { action: 'acknowledge' },
+    }),
+    printerPath: true,
+    fault: 'pool',
+    more: [
+      {
+        name: 'silence until a future timestamp',
+        run: (world) =>
+          asApp(world, farm(['alerts:write']), () => ({
+            method: 'POST',
+            path: `/alerts/${P}/${ids.alertA}`,
+            body: { action: 'silence', until: Date.now() + 60_000 },
+          })),
+      },
+    ],
+  },
+  'GET /camera/{printerId}': {
+    scopes: ['camera:view'],
+    success: '200',
+    valid: (world) => {
+      world.cameraEnabled = true
+      return { method: 'GET', path: `/camera/${P}` }
+    },
+    bad: () => ({ method: 'GET', path: `/camera/${P}?unexpected=1` }),
+    missing: () => ({ method: 'GET', path: `/camera/${ids.unknown}` }),
+    printerPath: true,
+    fault: 'pool',
+    extra: {
+      '404': [
+        {
+          name: 'camera is absent from the heartbeat',
+          run: (world) =>
+            asApp(world, farm(['camera:view']), () => ({
+              method: 'GET',
+              path: `/camera/${P}`,
+            })),
+        },
+      ],
+    },
+  },
+  'GET /health/{printerId}': {
+    scopes: ['printers:read'],
+    success: '200',
+    valid: () => ({ method: 'GET', path: `/health/${P}` }),
+    bad: () => ({ method: 'GET', path: `/health/${P}?unexpected=1` }),
+    missing: () => ({ method: 'GET', path: `/health/${ids.unknown}` }),
+    printerPath: true,
+    fault: 'pool',
+  },
+  'GET /telemetry/{printerId}': {
+    scopes: ['printers:read'],
+    success: '200',
+    valid: (world) => ({
+      method: 'GET',
+      path: `/telemetry/${P}?since=${world.clock}&until=${world.clock + 1000}`,
+    }),
+    bad: () => ({ method: 'GET', path: `/telemetry/${P}?limit=0` }),
+    missing: () => ({ method: 'GET', path: `/telemetry/${ids.unknown}` }),
+    printerPath: true,
+    fault: 'pool',
+  },
   'GET /openapi.json': {
     scopes: [],
     success: '200',
@@ -184,6 +315,69 @@ export const fixtures: Record<string, Fixture> = {
       path: `/printers/status?farmId=${ids.unknown}`,
     }),
     fault: 'printers',
+  },
+  'GET /printers/readiness': {
+    scopes: ['printers:read'],
+    success: '200',
+    valid: () => ({ method: 'GET', path: '/printers/readiness?limit=1' }),
+    more: [
+      {
+        name: 'second page through nextCursor',
+        run: async (world) => {
+          const app = world.addApp(farm(['printers:read']))
+          const token = await tokenFor(world, app)
+          const first = await send({
+            method: 'GET',
+            path: '/printers/readiness?limit=1',
+            token,
+          })
+          const cursor = (first.result.json as { nextCursor: string })
+            .nextCursor
+          return send({
+            method: 'GET',
+            path: `/printers/readiness?limit=1&cursor=${cursor}`,
+            token,
+          })
+        },
+      },
+      {
+        name: 'printer-scoped grant lists only its printer',
+        run: (world) =>
+          asApp(world, [{ scopes: ['printers:read'], printerId: P }], () => ({
+            method: 'GET',
+            path: '/printers/readiness',
+          })),
+      },
+    ],
+    bad: () => ({ method: 'GET', path: '/printers/readiness?limit=0' }),
+    missing: () => ({
+      method: 'GET',
+      path: `/printers/readiness?farmId=${ids.unknown}`,
+    }),
+    fault: 'printers',
+  },
+  'GET /printers/{printerId}/capabilities': {
+    scopes: ['printers:read'],
+    success: '200',
+    printerPath: true,
+    valid: () => ({ method: 'GET', path: `/printers/${P}/capabilities` }),
+    missing: () => ({
+      method: 'GET',
+      path: `/printers/${ids.unknown}/capabilities`,
+    }),
+    fault: 'printers',
+    extra: {
+      '404': [
+        {
+          name: 'malformed printer id',
+          run: (world) =>
+            asApp(world, farm(['printers:read']), () => ({
+              method: 'GET',
+              path: '/printers/not-a-uuid/capabilities',
+            })),
+        },
+      ],
+    },
   },
   'GET /printers/{printerId}/status': {
     scopes: ['printers:read'],
@@ -624,6 +818,218 @@ export const fixtures: Record<string, Fixture> = {
     }),
     fault: 'pool',
   },
+  'GET /inventory/spools': {
+    scopes: ['inventory:read'],
+    success: '200',
+    valid: () => ({ method: 'GET', path: '/inventory/spools?limit=1' }),
+    more: [
+      {
+        name: 'second page through nextCursor',
+        run: async (world) => {
+          const app = world.addApp(farm(['inventory:read']))
+          const token = await tokenFor(world, app)
+          const first = await send({
+            method: 'GET',
+            path: '/inventory/spools?limit=1',
+            token,
+          })
+          const cursor = (first.result.json as { nextCursor: string })
+            .nextCursor
+          return send({
+            method: 'GET',
+            path: `/inventory/spools?limit=1&cursor=${cursor}`,
+            token,
+          })
+        },
+      },
+    ],
+    bad: () => ({ method: 'GET', path: '/inventory/spools?cursor=nope' }),
+    missing: () => ({
+      method: 'GET',
+      path: `/inventory/spools?farmId=${ids.unknown}`,
+    }),
+    fault: 'pool',
+  },
+  'GET /inventory/spools/search': {
+    scopes: ['inventory:read'],
+    success: '200',
+    valid: () => ({
+      method: 'GET',
+      path: '/inventory/spools/search?color=%23ff0000&material=PLA&availability=any&minRemainingGrams=0',
+    }),
+    bad: () => ({
+      method: 'GET',
+      path: '/inventory/spools/search?color=red',
+    }),
+    missing: () => ({
+      method: 'GET',
+      path: `/inventory/spools/search?farmId=${ids.unknown}`,
+    }),
+    fault: 'pool',
+  },
+  'GET /inventory/spools/usage': {
+    scopes: ['inventory:read'],
+    success: '200',
+    valid: () => ({
+      method: 'GET',
+      path: '/inventory/spools/usage?jobId=101&limit=1',
+    }),
+    more: [
+      {
+        name: 'second page through nextCursor',
+        run: async (world) => {
+          const app = world.addApp(farm(['inventory:read']))
+          const token = await tokenFor(world, app)
+          const first = await send({
+            method: 'GET',
+            path: '/inventory/spools/usage?jobId=101&limit=1',
+            token,
+          })
+          const cursor = (first.result.json as { nextCursor: string })
+            .nextCursor
+          return send({
+            method: 'GET',
+            path: `/inventory/spools/usage?jobId=101&limit=1&cursor=${cursor}`,
+            token,
+          })
+        },
+      },
+    ],
+    bad: () => ({ method: 'GET', path: '/inventory/spools/usage' }),
+    missing: () => ({
+      method: 'GET',
+      path: `/inventory/spools/usage?jobId=101&farmId=${ids.unknown}`,
+    }),
+    fault: 'pool',
+  },
+  'GET /environment/measurements': {
+    scopes: ['environment:read'],
+    success: '200',
+    valid: () => ({ method: 'GET', path: '/environment/measurements?limit=1' }),
+    more: [
+      {
+        name: 'second page through nextCursor',
+        run: async (world) => {
+          const app = world.addApp(farm(['environment:read']))
+          const token = await tokenFor(world, app)
+          const first = await send({
+            method: 'GET',
+            path: '/environment/measurements?limit=1',
+            token,
+          })
+          const cursor = (first.result.json as { nextCursor: string })
+            .nextCursor
+          return send({
+            method: 'GET',
+            path: `/environment/measurements?limit=1&cursor=${cursor}`,
+            token,
+          })
+        },
+      },
+    ],
+    bad: () => ({ method: 'GET', path: '/environment/measurements?limit=0' }),
+    missing: () => ({
+      method: 'GET',
+      path: `/environment/measurements?farmId=${ids.unknown}`,
+    }),
+    fault: 'printers',
+  },
+  'GET /resin/lots': {
+    scopes: ['inventory:read'],
+    success: '200',
+    valid: () => ({ method: 'GET', path: '/resin/lots?limit=1' }),
+    more: [
+      {
+        name: 'second page through nextCursor',
+        run: async (world) => {
+          const app = world.addApp(farm(['inventory:read']))
+          const token = await tokenFor(world, app)
+          const first = await send({
+            method: 'GET',
+            path: '/resin/lots?limit=1',
+            token,
+          })
+          const cursor = (first.result.json as { nextCursor: string })
+            .nextCursor
+          return send({
+            method: 'GET',
+            path: `/resin/lots?limit=1&cursor=${cursor}`,
+            token,
+          })
+        },
+      },
+    ],
+    bad: () => ({ method: 'GET', path: '/resin/lots?limit=0' }),
+    missing: () => ({
+      method: 'GET',
+      path: `/resin/lots?farmId=${ids.unknown}`,
+    }),
+    fault: 'pool',
+  },
+  'GET /resin/usage': {
+    scopes: ['inventory:read'],
+    success: '200',
+    valid: () => ({ method: 'GET', path: '/resin/usage?limit=1' }),
+    more: [
+      {
+        name: 'second page through nextCursor',
+        run: async (world) => {
+          const app = world.addApp(farm(['inventory:read']))
+          const token = await tokenFor(world, app)
+          const first = await send({
+            method: 'GET',
+            path: '/resin/usage?limit=1',
+            token,
+          })
+          const cursor = (first.result.json as { nextCursor: string })
+            .nextCursor
+          return send({
+            method: 'GET',
+            path: `/resin/usage?limit=1&cursor=${cursor}`,
+            token,
+          })
+        },
+      },
+    ],
+    bad: () => ({ method: 'GET', path: '/resin/usage?limit=0' }),
+    missing: () => ({
+      method: 'GET',
+      path: `/resin/usage?farmId=${ids.unknown}`,
+    }),
+    fault: 'pool',
+  },
+  'GET /resin/vats': {
+    scopes: ['inventory:read'],
+    success: '200',
+    valid: () => ({ method: 'GET', path: '/resin/vats?limit=1' }),
+    more: [
+      {
+        name: 'second page through nextCursor',
+        run: async (world) => {
+          const app = world.addApp(farm(['inventory:read']))
+          const token = await tokenFor(world, app)
+          const first = await send({
+            method: 'GET',
+            path: '/resin/vats?limit=1',
+            token,
+          })
+          const cursor = (first.result.json as { nextCursor: string })
+            .nextCursor
+          return send({
+            method: 'GET',
+            path: `/resin/vats?limit=1&cursor=${cursor}`,
+            token,
+          })
+        },
+      },
+    ],
+    bad: () => ({ method: 'GET', path: '/resin/vats?limit=0' }),
+    missing: () => ({
+      method: 'GET',
+      path: `/resin/vats?farmId=${ids.unknown}`,
+    }),
+    fault: 'pool',
+  },
   'GET /jobs': {
     scopes: ['jobs:read'],
     success: '200',
@@ -661,6 +1067,119 @@ export const fixtures: Record<string, Fixture> = {
     missing: () => ({ method: 'GET', path: `/jobs?farmId=${ids.unknown}` }),
     fault: 'pool',
   },
+  'POST /jobs/{jobId}/actions': {
+    scopes: ['control:basic', 'plates:confirm'],
+    success: '202',
+    valid: (world, app) => {
+      const job = world.seedJob(app, {}, { status: 'started' })
+      return {
+        method: 'POST',
+        path: `/jobs/${job.id}/actions`,
+        ...json({ action: 'cancel', args: {} }),
+      }
+    },
+    more: [
+      {
+        name: 'repeat a plate acknowledgement with the same key',
+        run: async (world) => {
+          const app = world.addApp(farm(['plates:confirm']))
+          const token = await tokenFor(world, app)
+          const job = world.seedJob(app)
+          const input = {
+            method: 'POST',
+            path: `/jobs/${job.id}/actions`,
+            ...json({ action: 'confirm_collection', args: { attempt: '123' } }),
+            token,
+          }
+          const first = await send(input)
+          const second = await send(input)
+          if (
+            first.result.headers.get('location') !==
+            second.result.headers.get('location')
+          )
+            throw new Error('Action replay changed the resource')
+          return second
+        },
+      },
+    ],
+    bad: (world, app) => ({
+      method: 'POST',
+      path: `/jobs/${world.seedJob(app).id}/actions`,
+      body: { action: 'pause', args: {} },
+    }),
+    missing: () => ({
+      method: 'POST',
+      path: `/jobs/${ids.unknown}/actions`,
+      ...json({ action: 'pause', args: {} }),
+    }),
+    fault: 'jobs-runtime',
+    extra: {
+      '409': [
+        {
+          name: 'a key is scoped to its original job',
+          run: async (world) => {
+            const app = world.addApp(farm(['plates:confirm']))
+            const token = await tokenFor(world, app)
+            const input = {
+              method: 'POST',
+              ...json({
+                action: 'confirm_collection',
+                args: { attempt: '123' },
+              }),
+              token,
+            }
+            await send({
+              ...input,
+              path: `/jobs/${world.seedJob(app).id}/actions`,
+            })
+            return send({
+              ...input,
+              path: `/jobs/${world.seedJob(app).id}/actions`,
+            })
+          },
+        },
+      ],
+      '413': [
+        {
+          name: 'bounded JSON request',
+          run: (world) =>
+            asApp(world, farm(['plates:confirm']), (app) => ({
+              method: 'POST',
+              path: `/jobs/${world.seedJob(app).id}/actions`,
+              ...json({ data: 'a'.repeat(17 * 1024) }),
+            })),
+        },
+      ],
+      '415': [
+        {
+          name: 'unsupported media type',
+          run: (world) =>
+            asApp(world, farm(['plates:confirm']), (app) => ({
+              method: 'POST',
+              path: `/jobs/${world.seedJob(app).id}/actions`,
+              headers: { 'content-type': 'text/plain' },
+              body: '{}',
+            })),
+        },
+      ],
+      '422': [
+        {
+          name: 'expected run cannot be supplied by the caller',
+          run: (world) =>
+            asApp(world, farm(['control:basic']), (app) => ({
+              method: 'POST',
+              path: `/jobs/${world.seedJob(app, {}, { status: 'started' }).id}/actions`,
+              ...json({
+                action: 'cancel',
+                args: { expectedRunId: ids.unknown },
+              }),
+            })),
+        },
+      ],
+    },
+  },
+  'GET /jobs/{jobId}/eligibility': dispatchFixture('eligibility'),
+  'GET /jobs/{jobId}/plate': dispatchFixture('plate'),
   'GET /jobs/{jobId}': {
     scopes: ['jobs:read'],
     success: '200',

@@ -1,7 +1,23 @@
 import { describe, expect, it } from 'vitest'
 import { parseTemperatureFields } from '../../packages/connector/src/moonraker/temperature-observation'
+import { parseToolStatus } from '../../packages/connector/src/moonraker/discovery-parse'
 
 describe('parseTemperatureFields', () => {
+  it('keeps the farm and discovery projections aligned for the same tool status', () => {
+    const status = {
+      toolhead: { extruder: 'extruder2' },
+      extruder: { temperature: 215 },
+      extruder2: { temperature: -500 },
+    }
+
+    const observation = parseTemperatureFields(status, true)
+    const discovery = parseToolStatus(status)
+
+    expect(observation.tool).toEqual({ kind: 'invalid' })
+    expect(discovery.activeObject).toBe('extruder2')
+    expect(discovery.tools.find((tool) => tool.active)?.celsius).toBeNull()
+  })
+
   it.each([
     [
       { extruder: { temperature: 0 }, heater_bed: { temperature: 205 } },

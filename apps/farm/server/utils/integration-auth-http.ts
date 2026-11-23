@@ -214,7 +214,7 @@ const policies: RoutePolicy[] = [
   },
   {
     method: 'GET',
-    path: /^\/printers(?:\/status|\/[^/]+\/status)?$/,
+    path: /^\/printers(?:\/status|\/readiness|\/[^/]+\/(?:status|capabilities))?$/,
     scopes: ['printers:read'],
   },
   { method: 'GET', path: /^\/printers\/[^/]+\/files$/, scopes: ['files:read'] },
@@ -229,7 +229,33 @@ const policies: RoutePolicy[] = [
     path: /^\/printers\/[^/]+\/actions$/,
     scopes: ['control:basic', 'control:extended'],
   },
-  { method: 'GET', path: /^\/inventory$/, scopes: ['inventory:read'] },
+  {
+    method: 'GET',
+    path: /^\/(?:telemetry|health)\/[^/]+$/,
+    scopes: ['printers:read'],
+  },
+  { method: 'GET', path: /^\/alerts\/[^/]+$/, scopes: ['printers:read'] },
+  {
+    method: 'POST',
+    path: /^\/alerts\/[^/]+\/[^/]+$/,
+    scopes: ['alerts:write'],
+  },
+  { method: 'GET', path: /^\/camera\/[^/]+$/, scopes: ['camera:view'] },
+  {
+    method: 'GET',
+    path: /^\/inventory(?:\/spools(?:\/(?:search|usage))?)?$/,
+    scopes: ['inventory:read'],
+  },
+  {
+    method: 'GET',
+    path: /^\/resin\/(?:lots|vats|usage)$/,
+    scopes: ['inventory:read'],
+  },
+  {
+    method: 'GET',
+    path: /^\/environment\/measurements$/,
+    scopes: ['environment:read'],
+  },
   { method: 'GET', path: /^\/library$/, scopes: ['library:read'] },
   { method: 'POST', path: /^\/library$/, scopes: ['library:write'] },
   {
@@ -243,6 +269,16 @@ const policies: RoutePolicy[] = [
     scopes: ['library:write'],
   },
   { method: 'GET', path: /^\/library\/[^/]+$/, scopes: ['library:read'] },
+  {
+    method: 'GET',
+    path: /^\/jobs\/[^/]+\/(eligibility|plate)$/,
+    scopes: ['jobs:read', 'jobs:start'],
+  },
+  {
+    method: 'POST',
+    path: /^\/jobs\/[^/]+\/actions$/,
+    scopes: ['control:basic', 'plates:confirm'],
+  },
   { method: 'GET', path: /^\/jobs$/, scopes: ['jobs:read'] },
   {
     method: 'GET',
@@ -252,7 +288,7 @@ const policies: RoutePolicy[] = [
   {
     method: 'GET',
     path: /^\/actions\/[^/]+$/,
-    scopes: ['control:basic', 'control:extended'],
+    scopes: ['control:basic', 'control:extended', 'plates:confirm'],
   },
   { method: 'GET', path: /^\/webhooks$/, scopes: ['events:subscribe'] },
   {
@@ -413,7 +449,7 @@ export async function authorizeIntegrationRequest(
         return integrationProblem('insufficient-scope', headers)
       if (replay) scopes = [...scopes, 'jobs:write']
     }
-    if (method === 'POST' && path.endsWith('/actions')) {
+    if (method === 'POST' && /^\/printers\/[^/]+\/actions$/.test(path)) {
       const scope = await readActionScope(request)
       if (
         scope === 'invalid-request' ||
@@ -430,7 +466,11 @@ export async function authorizeIntegrationRequest(
     const farms = [
       '/printers',
       '/printers/status',
+      '/printers/readiness',
       '/inventory',
+      '/inventory/spools',
+      '/inventory/spools/search',
+      '/inventory/spools/usage',
       '/jobs',
       '/library',
       '/library/settings',
@@ -467,7 +507,8 @@ export async function authorizeIntegrationRequest(
           grant.printerAssignmentId === printerId,
       )
       .filter(
-        (grant) => path !== '/inventory' || grant.printerAssignmentId === null,
+        (grant) =>
+          !path.startsWith('/inventory') || grant.printerAssignmentId === null,
       )
       .map((grant) => ({
         ...grant,

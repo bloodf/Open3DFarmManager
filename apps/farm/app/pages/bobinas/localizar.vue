@@ -18,23 +18,33 @@ import {
 import { loadFinderSpools } from '../../components/spool-finder/finder-load.ts'
 import {
   fetchSpools,
+  featureFetch,
   useSpoolFeaturePage,
 } from '../../composables/useSpoolFeaturePage.ts'
 import {
   extractApiError,
   spoolDisplayTitle,
 } from '../../utils/spool-library-format.ts'
+import type { SlotAssignment } from '../../utils/spool-features-types.ts'
 import type { SpoolItem } from '../../utils/spool-library-types.ts'
 
 const spools = ref<SpoolItem[]>([])
 const canWrite = ref(false)
+const assignments = ref<SlotAssignment[] | null>(null)
 const filters = ref<FinderFilters>({ ...EMPTY_FINDER_FILTERS })
 
 async function load(id: string, current: () => boolean) {
-  const list = await loadFinderSpools(id, current, fetchSpools)
+  assignments.value = null
+  const [list, slots] = await Promise.all([
+    loadFinderSpools(id, current, fetchSpools),
+    featureFetch<{ assignments: SlotAssignment[] }>(id, 'slots').catch(
+      () => null,
+    ),
+  ])
   if (!list) return
   spools.value = list.items
   canWrite.value = list.canWrite
+  assignments.value = slots?.assignments ?? null
 }
 
 const page = useSpoolFeaturePage(load)
@@ -52,14 +62,30 @@ const {
 } = page
 
 const columns = [
+  { id: 'rank', label: 'Ordem' },
   { id: 'spool', label: 'Bobina' },
   { id: 'color', label: 'Cor' },
   { id: 'material', label: 'Material' },
   { id: 'location', label: 'Local' },
   { id: 'remaining', label: 'Restante' },
+  { id: 'loaded', label: 'Em uso' },
 ] as const
 
-const results = computed(() => filterSpools(spools.value, filters.value))
+const results = computed(() =>
+  filterSpools(spools.value, filters.value).sort(
+    (a, b) =>
+      (b.remaining_weight ?? -1) - (a.remaining_weight ?? -1) || a.id - b.id,
+  ),
+)
+function loadedState(id: number): string {
+  if (!assignments.value) return 'Não informado'
+  const active = assignments.value.filter(
+    (item) => item.spoolId === id && item.unassignedAt === null,
+  )
+  return active.length
+    ? `Atribuída a ${active.map((item) => item.printerId).join(', ')}`
+    : 'Não atribuída'
+}
 const materials = computed(() =>
   distinctValues(spools.value.map((spool) => spool.filament.material)),
 )
@@ -220,7 +246,7 @@ async function scan() {
 
       <FeaturePanel
         title="Buscar bobinas"
-        description="Combine os filtros para achar a bobina certa."
+        description="Combine os filtros para achar a bobina certa. Os resultados aparecem por quantidade restante, da maior para a menor."
       >
         <form
           class="feature-form"
@@ -310,7 +336,8 @@ async function scan() {
           "
         />
         <FeatureTable v-else caption="Bobinas encontradas" :columns="columns">
-          <tr v-for="spool in results" :key="spool.id">
+          <tr v-for="(spool, index) in results" :key="spool.id">
+            <td>{{ index + 1 }}</td>
             <td>
               #{{ spool.id }} · {{ spoolDisplayTitle(spool) }}
               <span v-if="spool.archived"> (arquivada)</span>
@@ -319,6 +346,7 @@ async function scan() {
             <td>{{ spool.filament.material ?? 'Não informado' }}</td>
             <td>{{ spool.location || 'Sem local' }}</td>
             <td>{{ grams(spool.remaining_weight) }}</td>
+            <td>{{ loadedState(spool.id) }}</td>
           </tr>
         </FeatureTable>
       </FeaturePanel>

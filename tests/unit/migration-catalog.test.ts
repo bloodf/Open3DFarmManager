@@ -20,6 +20,10 @@ describe('migration catalog', () => {
     expect(repository[22]?.id).toBe('0023_connector_credential_renewals')
     expect(repository[24]?.id).toBe('0025_schema_reader')
     expect(repository[29]?.id).toBe('0030_signalling_successor_credentials')
+    expect(repository[94]?.id).toBe('0095_integration_dispatch_actions')
+    expect(repository[95]?.id).toBe('0096_integration_telemetry_reads')
+    expect(repository[96]?.id).toBe('0097_telemetry_transition_index')
+    expect(repository[97]?.id).toBe('0098_integration_alert_lifecycle')
     expect(migrationCatalog(pair)).toEqual(
       migrationCatalog([...pair].reverse()),
     )

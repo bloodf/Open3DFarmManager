@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import postgres, { type Sql } from 'postgres'
 import { IntegrationAppsService } from '../apps/farm/server/services/integration-apps.ts'
 import { PostgresIntegrationApps } from '../apps/farm/server/storage/integration-apps-postgres.ts'
+import { INITIAL_COLLECTION_ATTEMPT } from '../packages/connector/src/control/queue-collection-journal.ts'
 import { loadOrCreateIdentity } from '../packages/connector/src/identity/store.ts'
 import { syntheticBambuCertificate } from '../infra/sandbox/bambu-synthetic-identity.ts'
 import { API_ENVELOPE_ISSUER } from '../packages/farm-protocol/src/api-envelope.ts'
@@ -169,6 +170,26 @@ export async function seedSandbox(
         key_set: keySet,
       }),
     )
+    // The sandbox provisions an empty simulated Klipper bed. Keep any
+    // existing journal so reseeding cannot clear a later simulated run.
+    try {
+      await writeFile(
+        join(connectorData, 'queue-collection.json'),
+        JSON.stringify({
+          version: 1,
+          printers: {
+            [printerKeys[0]!]: {
+              attempts: [
+                { id: INITIAL_COLLECTION_ATTEMPT, status: 'collected' },
+              ],
+            },
+          },
+        }),
+        { mode: 0o600, flag: 'wx' },
+      )
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    }
     await write('runtime.json', {
       version: 3,
       collection: {

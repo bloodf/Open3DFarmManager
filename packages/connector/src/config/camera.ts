@@ -58,6 +58,19 @@ const Executable = z.strictObject({
   path: z.string().refine(isAbsolute),
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
 })
+const BambuSource = z.strictObject({
+  kind: z.literal('bambu-lan'),
+  model: z.string().min(1).max(64),
+  address: z.string().refine(localAddress),
+  port: z.number().int().min(1).max(65535).optional(),
+  ffmpeg: Executable,
+  credentialFile: z.string().refine(isAbsolute),
+  caFile: z.string().refine(isAbsolute).optional(),
+  pinSha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
+})
 const CameraRuntime = z.strictObject({
   helper: Executable,
   maxSessions: z.number().int().min(1).max(4).default(1),
@@ -76,6 +89,7 @@ const CameraRuntime = z.strictObject({
               .max(2048)
               .regex(/^\/(?!\/)[^#@\\\s]*$/),
           }),
+          BambuSource,
           MjpegSource('creality-mjpeg'),
           MjpegSource('anycubic-rinkhals'),
         ]),

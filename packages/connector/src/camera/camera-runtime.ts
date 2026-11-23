@@ -222,11 +222,12 @@ export async function createCameraMediaFactory(input: {
       const entry = camera.source
       if (!('kind' in entry)) return []
       const { address: host, port } = entry
+      const endpoint = { host, ...(port === undefined ? {} : { port }) }
       let source: AnycubicCameraSource
       if (entry.kind === 'anycubic-rinkhals') {
-        source = { kind: 'rinkhals', host, port }
+        source = { kind: 'rinkhals', ...endpoint }
       } else if (entry.kind === 'kobra-x-flv') {
-        source = { kind: entry.kind, host, port, path: entry.path }
+        source = { kind: entry.kind, ...endpoint, path: entry.path }
       } else {
         return []
       }

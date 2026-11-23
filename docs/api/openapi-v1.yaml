@@ -696,6 +696,112 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /alert-rules/{farmId}:
+    get:
+      operationId: listFarmAlertRules
+      summary: List farm alert rules
+      description: Requires a farm-wide grant. Rules default to enabled.
+      security:
+        - clientCredentials: ['printers:read']
+      parameters:
+        - in: path
+          name: farmId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Effective farm rule settings
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [farmId, rules]
+                properties:
+                  farmId: { type: string, format: uuid }
+                  rules:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FarmAlertRule'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /alert-rules/{farmId}/{kind}:
+    patch:
+      operationId: updateFarmAlertRule
+      summary: Update a farm alert rule
+      description: Requires a farm-wide grant issued by a current farm owner and usable without interactive approval.
+      security:
+        - clientCredentials: ['alerts:manage']
+      parameters:
+        - in: path
+          name: farmId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: kind
+          required: true
+          schema:
+            {
+              type: string,
+              enum:
+                [
+                  error,
+                  connector-storage-degraded,
+                  offline-or-stale,
+                  paused,
+                  finished-bed-clear,
+                  low-slot,
+                  firmware-update,
+                ],
+            }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        '200':
+          description: Saved rule
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FarmAlertRule'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /alerts/{printerId}:
     get:
       operationId: listPrinterAlerts
@@ -1787,6 +1893,115 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /notification-channels/{farmId}:
+    put:
+      operationId: configureFarmNotificationChannel
+      summary: Configure a farm notification webhook
+      description: Requires a farm-wide grant issued by a current farm owner and usable without interactive approval. Each app has one channel per farm.
+      security:
+        - clientCredentials: ['alerts:manage']
+      parameters:
+        - in: path
+          name: farmId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [url, secret]
+              properties:
+                url:
+                  {
+                    type: string,
+                    format: uri,
+                    maxLength: 2048,
+                    writeOnly: true,
+                  }
+                secret:
+                  {
+                    type: string,
+                    minLength: 32,
+                    maxLength: 256,
+                    writeOnly: true,
+                  }
+      responses:
+        '200':
+          description: Saved channel confirmation
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [farmId, configured]
+                properties:
+                  farmId: { type: string, format: uuid }
+                  configured: { type: boolean, const: true }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /notification-channels/{farmId}/test:
+    post:
+      operationId: testFarmNotificationChannel
+      summary: Test the app’s configured farm notification webhook
+      description: Requires a farm-wide grant issued by a current farm owner and usable without interactive approval. Sends at most one signed POST to a public HTTPS destination.
+      security:
+        - clientCredentials: ['alerts:manage']
+      parameters:
+        - in: path
+          name: farmId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Delivery outcome. A 2xx from the receiver means delivered.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    required: [attempted, status]
+                    properties:
+                      attempted: { type: boolean, const: true }
+                      status: { type: string, enum: [delivered, failed] }
+                  - type: object
+                    required: [attempted, status]
+                    properties:
+                      attempted: { type: boolean, const: false }
+                      status: { type: string, const: not-run }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /resin/lots:
     get:
       operationId: listResinLots
@@ -2430,7 +2645,7 @@ components:
             camera:view: Open the camera view for a granted printer.
             inventory:write: Register and withdraw physical spools.
             environment:control: Control drying programs, smart plugs and extraction.
-            alerts:manage: Change alert rules and test notification channels.
+            alerts:manage: Change alert rules and configure or test notification channels.
   parameters:
     PrinterId:
       name: printerId
@@ -2687,6 +2902,26 @@ components:
         10 seconds, is retried with exponential backoff until the retry window
         ends; the event is then dead and not delivered again.
   schemas:
+    FarmAlertRule:
+      type: object
+      required: [kind, label, enabled]
+      properties:
+        kind:
+          {
+            type: string,
+            enum:
+              [
+                error,
+                connector-storage-degraded,
+                offline-or-stale,
+                paused,
+                finished-bed-clear,
+                low-slot,
+                firmware-update,
+              ],
+          }
+        label: { type: string }
+        enabled: { type: boolean }
     Uuid:
       type: string
       format: uuid

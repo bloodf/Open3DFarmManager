@@ -294,6 +294,42 @@ if (journeyEnabled())
       harness = undefined
     })
 
+    test('exibe e limpa alertas Bambu LAN simulados no navegador', async () => {
+      const journey = started()
+      const page = journey.ownerPage
+      journey.setTelemetryUpload(false)
+      await page.goto(
+        journey.origin +
+          '/impressoras/' +
+          encodeURIComponent(journey.printerKey),
+        { waitUntil: 'domcontentloaded' },
+      )
+      const alerts = page.getByRole('status', { name: 'Alertas Bambu Lab' })
+      await expect(alerts).toBeAttached({ timeout: 60_000 })
+      await expect(alerts).toBeEmpty()
+      const commandCount = simulator().requests.length
+      const running = page.getByText('Imprimindo', { exact: true }).first()
+      await expect(running).toBeVisible()
+
+      simulator().control.setAlarmReport({
+        print_error: 0x03008005,
+        hms: [{ attr: 0x07002100, code: 0x00020004 }],
+      })
+      await expect(alerts).toHaveText(
+        'Erro de impressão: 0300-8005. Códigos HMS informados: 0700-2100-0002-0004.',
+      )
+      await expect(running).toBeVisible()
+
+      simulator().control.setAlarmReport({ print_error: 0 })
+      await expect(alerts).toHaveText(
+        'Códigos HMS informados: 0700-2100-0002-0004.',
+      )
+      simulator().control.setAlarmReport({ hms: [] })
+      await expect(alerts).toBeEmpty()
+      await expect(running).toBeVisible()
+      expect(simulator().requests).toHaveLength(commandCount)
+    })
+
     test('completa a jornada Bambu no navegador com resultados confirmados ou desconhecidos', async () => {
       // Thirteen Connector sessions, each opened only after the previous one
       // closed (about 30 s apart), plus a timed print and its history entry.

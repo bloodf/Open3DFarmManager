@@ -143,6 +143,27 @@ function dispatchFixture(view: 'eligibility' | 'plate'): Fixture {
 }
 
 export const fixtures: Record<string, Fixture> = {
+  'GET /health/{printerId}': {
+    scopes: ['printers:read'],
+    success: '200',
+    valid: () => ({ method: 'GET', path: `/health/${P}` }),
+    bad: () => ({ method: 'GET', path: `/health/${P}?unexpected=1` }),
+    missing: () => ({ method: 'GET', path: `/health/${ids.unknown}` }),
+    printerPath: true,
+    fault: 'pool',
+  },
+  'GET /telemetry/{printerId}': {
+    scopes: ['printers:read'],
+    success: '200',
+    valid: (world) => ({
+      method: 'GET',
+      path: `/telemetry/${P}?since=${world.clock}&until=${world.clock + 1000}`,
+    }),
+    bad: () => ({ method: 'GET', path: `/telemetry/${P}?limit=0` }),
+    missing: () => ({ method: 'GET', path: `/telemetry/${ids.unknown}` }),
+    printerPath: true,
+    fault: 'pool',
+  },
   'GET /openapi.json': {
     scopes: [],
     success: '200',

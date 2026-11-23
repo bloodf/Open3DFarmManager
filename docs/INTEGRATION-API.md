@@ -74,6 +74,24 @@ curl -u "$CLIENT_ID:$CLIENT_SECRET" \
   "$OPENFARM_URL/api/integrations/v1/oauth/token"
 ```
 
+## Observed telemetry and health
+
+`GET /telemetry/{printerId}` requires `printers:read` on the assignment. It returns
+at most 500 observed samples over a window of at most seven days (`since` is
+inclusive and `until` exclusive, in Unix milliseconds). The default window is
+one day and default limit is 100. `truncated` signals that more observations
+exist; `until` is the end of the returned window. When timestamps tie at
+the limit, reduce the window and do not treat truncation as a complete export. State intervals use `gap` for
+offline or observations older than two minutes. Metrics include explicit units;
+missing values, including run energy, remain unknown. Raw payloads and local
+camera URLs are never returned. The `events` array contains up to 500 observed
+state transitions with timestamps and states; `eventsTruncated` signals that
+additional transitions were omitted.
+
+`GET /health/{printerId}` requires the same grant and reports heartbeat freshness,
+assignment connection state and degraded reasons. A stale or absent heartbeat is
+unknown, not evidence that a printer is idle. Both endpoints are read-only.
+
 ## Read printers, state and inventory
 
 Use `GET /printers` with `printers:read`; follow the opaque `nextCursor` as

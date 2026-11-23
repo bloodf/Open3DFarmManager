@@ -195,7 +195,8 @@ function checkRoute(file: string, text: string): string | undefined {
     file.startsWith(`${server}/api/integrations/v1/`) &&
     /event\.context\.integrationAuth/.test(text) &&
     (called(parsed, 'utils/integration-read.ts', 'inventoryGrantFarms') ||
-      called(parsed, 'utils/integration-read.ts', 'jobGrantScope'))
+      called(parsed, 'utils/integration-read.ts', 'jobGrantScope') ||
+      called(parsed, 'utils/integration-telemetry.ts', 'authorizedPrinter'))
   )
     return
   if (file in EXEMPT) return
@@ -253,6 +254,13 @@ function functionBody(module: string, name: string): string {
   )
   return declaration.body.getText(tree)
 }
+
+test('telemetry and health guard checks the printer grant', () => {
+  assert.match(
+    functionBody('utils/integration-telemetry.ts', 'authorizedPrinter'),
+    /integrationGrantFor\(principal, 'printers:read', row\.farmId, row\.id\)/,
+  )
+})
 
 test('recognised guards retain their session and scope checks', () => {
   const direct = Object.entries(GUARDS).flatMap(([module, names]) =>

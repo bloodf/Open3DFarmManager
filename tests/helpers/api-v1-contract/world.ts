@@ -659,6 +659,23 @@ export class World {
     const fn = async (strings: TemplateStringsArray, ...v: unknown[]) => {
       if (this.faults.has('pool')) throw new Error('pool down')
       const text = strings.join('?')
+      if (text.includes('farm.connector_heartbeats')) return []
+      if (text.includes('farm.telemetry_events')) {
+        if (!text.includes("'printer-state'") || !text.includes('LIMIT ?'))
+          return []
+        const [farmId, agentId, printerKey, since, until] = v
+        return this.authStore.printers
+          .filter(
+            (row) =>
+              row.farmId === farmId &&
+              row.agentId === agentId &&
+              row.printerKey === printerKey &&
+              row.observedAt !== null &&
+              row.observedAt >= Number(since) &&
+              row.observedAt < Number(until),
+          )
+          .map((row) => ({ payload: { state: row.state } }))
+      }
       if (text.includes('farm.connector_inventory_snapshots')) {
         const [farmIds, posFarm, , posConnector, limit] = v as [
           string[],

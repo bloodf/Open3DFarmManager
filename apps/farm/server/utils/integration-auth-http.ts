@@ -229,6 +229,11 @@ const policies: RoutePolicy[] = [
     path: /^\/printers\/[^/]+\/actions$/,
     scopes: ['control:basic', 'control:extended'],
   },
+  {
+    method: 'GET',
+    path: /^\/(?:telemetry|health)\/[^/]+$/,
+    scopes: ['printers:read'],
+  },
   { method: 'GET', path: /^\/inventory$/, scopes: ['inventory:read'] },
   {
     method: 'GET',

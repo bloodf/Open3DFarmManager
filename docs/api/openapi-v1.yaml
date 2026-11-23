@@ -655,6 +655,44 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /health/{printerId}:
+    get:
+      operationId: getPrinterHealth
+      summary: Read assignment and Connector health
+      description: Heartbeat freshness and assignment connectivity for a granted printer. Stale heartbeats are unknown, not idle.
+      security:
+        - clientCredentials: ['printers:read']
+      parameters:
+        - in: path
+          name: printerId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Connector and assignment health with degraded reasons
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [printerId, connector, assignment, degraded, reasons]
+                properties:
+                  printerId: { type: string, format: uuid }
+                  connector: { type: string, enum: [connected, unknown] }
+                  assignment:
+                    {
+                      type: string,
+                      enum: [connected, reconnecting, offline, unknown],
+                    }
+                  degraded: { type: boolean }
+                  reasons: { type: array, items: { type: string } }
+                  observedAt: { type: integer, description: Unix milliseconds }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /inventory:
     get:
       operationId: listInventory
@@ -1424,6 +1462,130 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /telemetry/{printerId}:
+    get:
+      operationId: getPrinterTelemetry
+      summary: Read bounded observed printer history
+      description: Up to seven days of observations. Offline and stale periods are gaps; missing measurements are unknown.
+      security:
+        - clientCredentials: ['printers:read']
+      parameters:
+        - in: path
+          name: printerId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: since
+          schema: { type: integer, minimum: 0 }
+          description: Inclusive Unix milliseconds; defaults to one day before until.
+        - in: query
+          name: until
+          schema: { type: integer, minimum: 0 }
+          description: Exclusive Unix milliseconds; defaults to now.
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+      responses:
+        '200':
+          description: Observed metrics and state intervals, with truncation indicated
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  [
+                    since,
+                    until,
+                    truncated,
+                    metrics,
+                    intervals,
+                    events,
+                    eventsTruncated,
+                  ]
+                properties:
+                  since: { type: integer }
+                  until: { type: integer }
+                  truncated: { type: boolean }
+                  metrics:
+                    type: array
+                    items:
+                      type: object
+                      required: [observedAt]
+                      properties:
+                        observedAt:
+                          { type: integer, description: Unix milliseconds }
+                        currentLayer: { type: integer, minimum: 0 }
+                        totalLayer: { type: integer, minimum: 0 }
+                        progress:
+                          type: object
+                          required: [value, unit]
+                          properties:
+                            value: { type: number, minimum: 0, maximum: 1 }
+                            unit: { const: ratio }
+                        toolTemperature:
+                          type: object
+                          required: [value, unit]
+                          properties:
+                            value: { type: number }
+                            unit: { const: '°C' }
+                        bedTemperature:
+                          type: object
+                          required: [value, unit]
+                          properties:
+                            value: { type: number }
+                            unit: { const: '°C' }
+                        chamberFan:
+                          type: object
+                          required: [value, unit]
+                          properties:
+                            value: { type: integer, minimum: 0, maximum: 100 }
+                            unit: { const: '%' }
+                        elapsed:
+                          type: object
+                          required: [value, unit]
+                          properties:
+                            value: { type: number, minimum: 0 }
+                            unit: { const: s }
+                  eventsTruncated: { type: boolean }
+                  events:
+                    type: array
+                    description: Observed printer state transitions, with no raw protocol details.
+                    items:
+                      type: object
+                      required: [observedAt, from, to]
+                      properties:
+                        observedAt:
+                          { type: integer, description: Unix milliseconds }
+                        from:
+                          {
+                            type: string,
+                            enum: [idle, printing, paused, error, offline],
+                          }
+                        to:
+                          {
+                            type: string,
+                            enum: [idle, printing, paused, error, offline],
+                          }
+                  intervals:
+                    type: array
+                    items:
+                      type: object
+                      required: [from, until, state]
+                      properties:
+                        from: { type: integer }
+                        until: { type: integer }
+                        state:
+                          {
+                            type: string,
+                            enum: [idle, printing, paused, error, gap],
+                          }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /webhooks:
     get:
       operationId: listWebhooks

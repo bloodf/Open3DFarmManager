@@ -44,20 +44,23 @@ test(
       name: 'sandbox-launch-716',
       isolated: true,
       through: false,
+      additionalScramRoles: ['sandbox_bootstrap'],
     })
     if (previousProvider !== undefined)
       process.env.OPENFARM_PG = previousProvider
     let sql: ReturnType<typeof postgres> | undefined
     try {
       const admin = await pg.start()
-      await admin`CREATE ROLE sandbox_bootstrap LOGIN SUPERUSER PASSWORD 'fixture-password'`
+      await admin.unsafe(
+        `CREATE ROLE sandbox_bootstrap LOGIN SUPERUSER PASSWORD '${pg.password}'`,
+      )
       await admin`CREATE DATABASE sandbox OWNER sandbox_bootstrap`
       sql = postgres({
         host: '127.0.0.1',
         port: pg.port,
         database: 'sandbox',
         username: 'sandbox_bootstrap',
-        password: 'fixture-password',
+        password: pg.password,
         ssl: false,
         max: 1,
       })
@@ -75,7 +78,7 @@ test(
       })
       mkdirSync(state, { recursive: true, mode: 0o700 })
       writeFileSync(join(state, 'client.json'), '{"clientId":"preserved"}')
-      writeFileSync(join(state, 'db-password'), 'fixture-password')
+      writeFileSync(join(state, 'db-password'), pg.password)
       const bin = join(root, 'bin')
       mkdirSync(bin)
       const log = join(root, 'calls')

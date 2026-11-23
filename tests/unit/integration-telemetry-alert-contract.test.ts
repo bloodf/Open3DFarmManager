@@ -100,3 +100,25 @@ test('alert actions affect only the acting app', async () => {
     needsAttention: false,
   })
 })
+
+test('repeated alert actions retain one state row per app', async () => {
+  const { freshWorld, ids } =
+    await import('../helpers/api-v1-contract/world.ts')
+  const { tokenFor } = await import('../helpers/api-v1-contract/scenarios.ts')
+  const { call } = await import('../helpers/api-v1-contract/router.ts')
+  const world = freshWorld()
+  const app = world.addApp([{ scopes: ['printers:read', 'alerts:write'] }])
+  const token = await tokenFor(world, app)
+  const path = `/alerts/${ids.printerA1}/${ids.alertA}`
+  const until = Date.now() + 60_000
+  for (const body of [
+    { action: 'silence', until },
+    { action: 'acknowledge' },
+    { action: 'silence', until: until + 10_000 },
+    { action: 'acknowledge' },
+  ]) {
+    const response = await call({ method: 'POST', path, token, body })
+    expect(response.status).toBe(200)
+  }
+  expect(world.alertActionCount).toBe(1)
+})

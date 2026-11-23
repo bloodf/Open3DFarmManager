@@ -9,7 +9,7 @@ const emit = defineEmits<{ navigate: [] }>()
       v-for="link in links"
       :key="link.to"
       :to="link.to"
-      :aria-current="path === link.to ? 'page' : undefined"
+      :aria-current="path === link.to.split('?')[0] ? 'page' : undefined"
       @click="emit('navigate')"
     >
       {{ link.label }}

@@ -125,6 +125,14 @@ const pageLinks = computed(() => [
     ? [{ to: '/sair', label: 'Sair da conta' }]
     : [{ to: '/entrar', label: 'Entrar' }]),
 ])
+const scopedPageLinks = computed(() =>
+  pageLinks.value.map((link) => ({
+    ...link,
+    to: selectedFarmId.value
+      ? `${link.to}?farm=${encodeURIComponent(selectedFarmId.value)}`
+      : link.to,
+  })),
+)
 
 const modules = [
   {
@@ -192,7 +200,7 @@ const paletteGroups = computed(() => {
   return [
     {
       label: 'Páginas',
-      items: pageLinks.value.filter(({ label }) => matches(label)),
+      items: scopedPageLinks.value.filter(({ label }) => matches(label)),
     },
     {
       label: 'Impressoras',
@@ -398,7 +406,10 @@ async function refreshAccount() {
         <NuxtLink
           v-for="item in modules"
           :key="item.to"
-          :to="item.to"
+          :to="{
+            path: item.to,
+            query: selectedFarmId ? { farm: selectedFarmId } : {},
+          }"
           :aria-current="
             item.paths.some(
               (path) =>
@@ -427,7 +438,10 @@ async function refreshAccount() {
         <NuxtLink
           v-for="link in links"
           :key="link.to"
-          :to="link.to"
+          :to="{
+            path: link.to,
+            query: selectedFarmId ? { farm: selectedFarmId } : {},
+          }"
           :aria-current="route.path === link.to ? 'page' : undefined"
         >
           {{ link.label }}
@@ -476,7 +490,7 @@ async function refreshAccount() {
     </footer>
     <Dialog v-model="drawer" class="drawer" title="Menu">
       <ShellNavigation
-        :links="pageLinks"
+        :links="scopedPageLinks"
         :path="route.path"
         @navigate="drawer = false"
       />

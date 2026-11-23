@@ -134,6 +134,7 @@ export function createAnycubicCollection(input: {
       }
       const filenameChanged =
         typeof fields.filename === 'string' &&
+        typeof values.filename === 'string' &&
         fields.filename !== values.filename
       const estimateAt = times.estimatedRemainingSeconds
       if (

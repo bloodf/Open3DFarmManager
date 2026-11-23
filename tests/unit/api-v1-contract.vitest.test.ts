@@ -16,11 +16,6 @@ vi.mock('../../apps/farm/server/utils/integration-auth-runtime.ts', async () =>
 vi.mock('../../apps/farm/server/utils/integration-jobs-runtime.ts', async () =>
   (await import('../helpers/api-v1-contract/mocks.ts')).jobsRuntime(),
 )
-vi.mock('../../apps/farm/server/services/spool-usage.ts', async (original) =>
-  (await import('../helpers/api-v1-contract/mocks.ts')).spoolUsage(
-    original as never,
-  ),
-)
 vi.mock(
   '../../apps/farm/server/services/signalling-runtime-bootstrap.ts',
   async () =>

@@ -397,7 +397,7 @@ test('discovery keeps the fields a Snapmaker U1 subscription already selected', 
     onComplete: (value) => seen.push(value),
   })
   try {
-    await until(() => seen.some((o) => o.activeToolQuery))
+    await until(() => seen.length >= 2)
     const objects = queries(service.rpcs)[0]?.params?.objects
     for (const name of ['extruder', 'extruder1', 'extruder2', 'extruder3'])
       assert.deepEqual(objects?.[name], ['temperature', 'target'], name)
@@ -409,3 +409,86 @@ test('discovery keeps the fields a Snapmaker U1 subscription already selected', 
     await service.stop()
   }
 })
+
+for (const discoveryTiming of ['before subscribe', 'after subscribe']) {
+  test(`Snapmaker U1 observes T2 on connect and reconnect with discovery ${discoveryTiming}`, async () => {
+    const objects = [
+      'toolhead',
+      'extruder',
+      'extruder1',
+      'extruder2',
+      'extruder3',
+    ]
+    let replyToDiscovery: (() => void) | undefined
+    let connectedSocket: WsTestSocket | undefined
+    const service = await moonraker(objects, {
+      list(socket, rpc) {
+        connectedSocket = socket
+        replyToDiscovery = () =>
+          socket.send(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              id: rpc.id,
+              result: { objects },
+            }),
+          )
+        if (discoveryTiming === 'before subscribe') replyToDiscovery()
+      },
+      status: (rpc) =>
+        rpc.params?.objects?.toolhead?.includes('extruder')
+          ? {
+              toolhead: { extruder: 'extruder2' },
+              extruder: { temperature: 210 },
+              extruder2: { temperature: 245 },
+            }
+          : {},
+    })
+    const controller = new AbortController()
+    const observations: RawMoonrakerObservation[] = []
+    const subscription = createMoonrakerSubscription({
+      assignment: {
+        printerKey: 'snapmaker-u1',
+        model: 'Snapmaker U1',
+        origin: service.origin,
+      },
+      allowedOrigins: [service.origin],
+      limits,
+      discoverObjects: true,
+      onEvent() {},
+      onRawObservation(value) {
+        observations.push(value)
+      },
+      signal: controller.signal,
+    })
+    try {
+      const reading = { kind: 'reading', celsius: 245 }
+      let previousEpoch: RawMoonrakerObservation['epoch'] | undefined
+      for (let connection = 0; connection < 2; connection++) {
+        const start = observations.length
+        await until(() => observations.length > start)
+        const first = observations[start]
+        assert.ok(first)
+        assert.notEqual(first.epoch, previousEpoch)
+        assert.deepEqual(first.temperatureObservation?.fields.tool, reading)
+        previousEpoch = first.epoch
+        if (discoveryTiming === 'after subscribe') {
+          assert.ok(replyToDiscovery)
+          replyToDiscovery()
+          await until(() => observations.length >= start + 3)
+          // A status delta precedes the complete extension observation.
+          assert.deepEqual(
+            observations[start + 2]?.temperatureObservation?.fields.tool,
+            reading,
+          )
+        }
+        assert.equal(queries(service.rpcs).length, 0)
+        assert.ok(connectedSocket)
+        connectedSocket.terminate()
+      }
+    } finally {
+      controller.abort()
+      await subscription.done
+      await service.stop()
+    }
+  })
+}

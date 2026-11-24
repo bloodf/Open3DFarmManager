@@ -1,6 +1,7 @@
 // Live side of replay: what the signed session knows about each printer and
 // signed `start_library_print` sessions used by replay.
 import type { LibraryPrintArgs } from '../../../../packages/farm-protocol/src/control-actions.ts'
+import { controlObservationState } from '../../../../packages/farm-protocol/src/control-actions.ts'
 import { controlActionAvailability, type Clock } from './farm-control.ts'
 import type { FarmKeyState, FarmRow } from './farm-view.ts'
 import type { ReplayPrinter, ReplayResult } from './replay-view.ts'
@@ -29,7 +30,7 @@ export function liveReplayInfo(
       online &&
       controlActionAvailability('start_print', row, keys, controlEnabled, now)
         .available,
-    ...(state ? { state: state.state } : {}),
+    ...(state ? { state: controlObservationState(state) } : {}),
     ...(vendor ? { backend: vendor } : {}),
     materials: (state?.materials ?? []).map((m) => ({
       slot: m.slot,

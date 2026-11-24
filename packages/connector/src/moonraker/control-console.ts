@@ -15,6 +15,8 @@ export type ConsoleRefusalCode =
   | 'unknown-state'
   | 'not-allowed'
   | 'rate'
+  | 'unhomed'
+  | 'limit'
 /**
  * The dispatcher reads `refusal` and reports a not-sent result with that
  * reason: a refusal wrote nothing, so it must never read as an unknown outcome.
@@ -28,12 +30,25 @@ const DISPATCH_REASON: Readonly<
   unsupported: 'unsupported-action',
   'unknown-state': 'state',
   rate: 'state',
+  unhomed: 'state',
+  limit: 'invalid-command',
 }
+const REFUSAL_MESSAGE: Record<ConsoleRefusalCode, string> = {
+  invalid: 'Linha de G-code inválida.',
+  disabled: 'Console de G-code desativado.',
+  unsupported: 'Console de G-code indisponível para esta impressora.',
+  'unknown-state': 'Não foi possível confirmar o estado da impressora.',
+  'not-allowed': 'Comando de G-code não permitido ou não reconhecido.',
+  rate: 'Limite de comandos do console atingido.',
+  unhomed: 'Eixo não referenciado.',
+  limit: 'Comando excede os limites de segurança.',
+}
+
 export class ConsoleRefusal extends Error {
   readonly code: ConsoleRefusalCode
   readonly refusal: 'state' | 'unsupported-action' | 'invalid-command'
   constructor(code: ConsoleRefusalCode) {
-    super(`Console refused: ${code}`)
+    super(REFUSAL_MESSAGE[code])
     this.name = 'ConsoleRefusal'
     this.code = code
     this.refusal = DISPATCH_REASON[code]
@@ -119,72 +134,58 @@ export function consoleAllowedWhilePrinting(line: string): boolean {
   }
 }
 
-/** Any line the console may send while the printer is stopped. */
+/** Classify only effects that can be bounded or are on the tuning allow-list. */
+export function idleConsoleClass(line: string): 'safe' | 'guarded' | 'refused' {
+  const parts = tokens(line)
+  if (!parts) return 'refused'
+  const command = parts[0]!.toUpperCase()
+  // QUERY_* is a legacy active-print rule. At idle, an arbitrary name with
+  // that prefix could be a macro, so only known query commands qualify.
+  if (
+    (!command.startsWith('QUERY_') ||
+      [
+        'QUERY_ENDSTOPS',
+        'QUERY_PROBE',
+        'QUERY_FILAMENT_SENSOR',
+        'QUERY_ADC',
+      ].includes(command)) &&
+    consoleAllowedWhilePrinting(line)
+  )
+    return 'safe'
+  if (command === 'M118' && parts.length > 1) return 'safe'
+  if (
+    [
+      'G0',
+      'G1',
+      'G28',
+      'BED_MESH_CALIBRATE',
+      'M104',
+      'M109',
+      'M140',
+      'M190',
+    ].includes(command)
+  )
+    return 'guarded'
+  return 'refused'
+}
+
+/**
+ * Any line the console may send while the printer is stopped. `classified`
+ * admits a line the caller has its own guard for (the U1 tool selection).
+ */
 export function consoleAllowedWhenStopped(
   line: string,
   additionalRefused?: readonly string[],
+  classified?: (line: string) => boolean,
 ): boolean {
   const parts = tokens(line)
   if (!parts) return false
   const command = parts[0]!.toUpperCase()
-  return !ALWAYS_REFUSED.has(command) && !additionalRefused?.includes(command)
-}
-
-/** Only a single, explicit axis and feed can be checked without interpreting a program. */
-export function classifyIdleConsole(
-  line: string,
-):
-  | { kind: 'safe' }
-  | { kind: 'home'; axes: ('x' | 'y' | 'z')[] }
-  | { kind: 'move'; axis: 'x' | 'y' | 'z' | 'e'; value: number; feed: number }
-  | { kind: 'tool' }
-  | { kind: 'unknown' } {
-  const parts = tokens(line)
-  if (!parts) return { kind: 'unknown' }
-  const [word, ...params] = parts
-  const command = word!.toUpperCase()
-  if (/^T[0-3]$/.test(command) && params.length === 0) return { kind: 'tool' }
-  if (command === 'G28') {
-    // Bare axis letters only; `G28 X0` or repeats stay unclassified.
-    const axes = params.map((param) => param.toLowerCase())
-    const valid = axes.every(
-      (axis) => axis === 'x' || axis === 'y' || axis === 'z',
-    )
-    if (!valid || new Set(axes).size !== axes.length) return { kind: 'unknown' }
-    return {
-      kind: 'home',
-      axes: axes.length ? (axes as ('x' | 'y' | 'z')[]) : ['x', 'y', 'z'],
-    }
-  }
-  if (command === 'G0' || command === 'G1') {
-    if (params.length !== 2) return { kind: 'unknown' }
-    const axis = /^([XYZE])(-?\d+(?:\.\d+)?)$/i.exec(params[0]!)
-    const feed = /^F(\d+(?:\.\d+)?)$/i.exec(params[1]!)
-    if (!axis || !feed) return { kind: 'unknown' }
-    const value = Number(axis[2])
-    const speed = Number(feed[1])
-    if (
-      !Number.isFinite(value) ||
-      !Number.isFinite(speed) ||
-      speed <= 0 ||
-      speed > 9000
-    )
-      return { kind: 'unknown' }
-    const letter = axis[1]!.toLowerCase()
-    if (letter !== 'x' && letter !== 'y' && letter !== 'z' && letter !== 'e')
-      return { kind: 'unknown' }
-    return { kind: 'move', axis: letter, value, feed: speed }
-  }
-  if (command === 'M118') return { kind: 'safe' }
-  if (
-    (command === 'M104' || command === 'M140') &&
-    params.length === 1 &&
-    /^S0(?:\.0+)?$/i.test(params[0]!)
+  return (
+    !ALWAYS_REFUSED.has(command) &&
+    !additionalRefused?.includes(command) &&
+    (idleConsoleClass(line) !== 'refused' || classified?.(line) === true)
   )
-    return { kind: 'safe' }
-  return consoleAllowedWhilePrinting(line)
-    ? { kind: 'safe' }
-    : { kind: 'unknown' }
 }
 
 const PrintState = z.enum([
@@ -233,12 +234,13 @@ export function parseConsoleState(result: unknown): ConsoleState {
 
 /**
  * Throws a ConsoleRefusal unless the line may be sent in this state: any valid
- * line when stopped, the tuning allow-list while printing or paused.
+ * classified line when stopped, the tuning allow-list while printing or paused.
  */
 export function refuseConsole(
   args: Record<string, unknown>,
   state: ConsoleState | undefined,
   additionalRefused?: readonly string[],
+  classified?: (line: string) => boolean,
 ): string {
   const parsed = z.strictObject({ line: GcodeLine }).safeParse(args)
   if (!parsed.success) throw new ConsoleRefusal('invalid')
@@ -250,7 +252,7 @@ export function refuseConsole(
   if (
     !(active
       ? consoleAllowedWhilePrinting(line)
-      : consoleAllowedWhenStopped(line, additionalRefused))
+      : consoleAllowedWhenStopped(line, additionalRefused, classified))
   )
     throw new ConsoleRefusal('not-allowed')
   return line

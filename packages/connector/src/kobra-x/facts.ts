@@ -17,15 +17,10 @@ const preparing = new Set([
   'nozzle_cooling_off',
 ])
 
-/** A `print` report state that names where a job stands. */
-export function isKobraXJobPhase(state: string | undefined) {
+export function isKobraXActivePhase(phase: unknown): phase is string {
   return (
-    state !== undefined &&
-    (state === 'printing' ||
-      state === 'paused' ||
-      state === 'finished' ||
-      state === 'stoped' ||
-      preparing.has(state))
+    typeof phase === 'string' &&
+    (phase === 'printing' || phase === 'paused' || preparing.has(phase))
   )
 }
 
@@ -188,11 +183,7 @@ export function createKobraXFacts() {
         next.filename = data.filename.slice(0, 255)
       if (typeof data.taskid === 'string') next.taskId = data.taskid
       if (typeof phase === 'string') {
-        if (
-          phase === 'printing' ||
-          phase === 'paused' ||
-          preparing.has(phase)
-        ) {
+        if (isKobraXActivePhase(phase)) {
           next.jobActive = true
           next.jobPhase = phase
         } else if (phase === 'finished' || phase === 'stoped') {

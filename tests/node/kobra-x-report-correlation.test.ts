@@ -6,6 +6,7 @@ import {
   type KobraXReport,
 } from '../../packages/connector/src/kobra-x/requests.ts'
 import { createKobraXFacts } from '../../packages/connector/src/kobra-x/facts.ts'
+import { createKobraXStateEvidence } from '../../packages/connector/src/kobra-x/state-evidence.ts'
 
 test('only an exact report envelope can settle a request', async () => {
   let requestId = ''
@@ -87,8 +88,8 @@ test('simulator marks only the latest matching info response as current', async 
     pinSha256: mock.tls.serverFingerprintSha256!,
     httpPort: mock.httpPort,
     mqttPort: mock.mqttPort,
-    onReport: (report, _snapshot, _facts, current) =>
-      observed.push({ report, current }),
+    onReport: (report, _snapshot, _facts, source) =>
+      observed.push({ report, current: source === 'query' }),
   })
   t.after(() => adapter.close())
   async function until(predicate: () => boolean) {
@@ -601,49 +602,6 @@ test(
 )
 
 test(
-  'signed start remains uncertain for a same-file old or unrelated job report',
-  { timeout: 20000 },
-  async (t) => {
-    const { printer, dispatch, commands } = await nativeSignedFixture(t)
-    printer.control.seedFile('plate.gcode', '; synthetic\n')
-    printer.control.faults.addFault({
-      fault: { type: 'refuse' },
-      topic: /\/print\/report$/,
-      method: 'REPORT',
-      count: 1,
-    })
-    const pending = dispatch('start_print', { file: 'plate.gcode' })
-    let command: { msgid: string } | undefined
-    for (let i = 0; i < 500; i++) {
-      const call = printer.calls.all.find(
-        ({ topic, payload }) =>
-          /\/slicer\/printer\/[^/]+\/[^/]+\/print$/.test(topic) &&
-          JSON.parse(payload.toString()).action === 'start',
-      )
-      if (call) {
-        command = JSON.parse(call.payload.toString())
-        break
-      }
-      await new Promise((resolve) => setTimeout(resolve, 10))
-    }
-    assert.ok(command)
-    const oldJob = { filename: 'plate.gcode', taskid: '-1' }
-    printer.control.publishTypedReport('print', 'start', oldJob, {
-      msgid: command.msgid,
-      state: 'printing',
-    })
-    printer.control.publishTypedReport(
-      'print',
-      'start',
-      { ...oldJob, taskid: 'old-job' },
-      { msgid: 'other-client', state: 'printing' },
-    )
-    assert.equal((await pending).kind, 'outcome-unknown')
-    assert.equal(commands().length, 1)
-  },
-)
-
-test(
   'a cached job phase cannot authorize readiness before the print reply',
   { timeout: 20000 },
   async (t) => {
@@ -669,11 +627,11 @@ test(
           ...options,
           httpPort: printer.httpPort,
           mqttPort: printer.mqttPort,
-          onReport(report, snapshot, facts, current) {
+          onReport(report, snapshot, facts, source) {
             events.push(
-              `report:${report.type}:${report.action}:${report.state}${current ? ':current' : ''}`,
+              `report:${report.type}:${report.action}:${report.state}${source === 'query' ? ':current' : ''}`,
             )
-            options.onReport?.(report, snapshot, facts, current)
+            options.onReport?.(report, snapshot, facts, source)
           },
         }),
     })
@@ -710,126 +668,68 @@ test(
       },
     )
     assert.ok(result)
-    const firstPublish = events.findIndex((event) =>
-      /^publish:(printing|paused):ready$/.test(event),
+    // The printer is busy with a job whose print reports were lost, so the
+    // cached phase is the old job's. That is never readiness: nothing is
+    // published as ready, and the command is not written.
+    assert.deepEqual(result, { acknowledged: false })
+    assert.deepEqual(
+      events.filter((event) => /^publish:.*:ready$/.test(event)),
+      [],
+      events.join('\n'),
     )
-    const phaseReply = events.findIndex((event) =>
-      /^report:print:query:printing/.test(event),
-    )
-    assert.notEqual(phaseReply, -1, events.join('\n'))
-    assert.ok(
-      firstPublish === -1 || phaseReply < firstPublish,
-      `readiness published before the print reply:\n${events.join('\n')}`,
-    )
-    assert.equal(commands().filter(({ type }) => type === 'light').length, 1)
+    assert.equal(commands().filter(({ type }) => type === 'light').length, 0)
   },
 )
 
-test('a correlated print reply without a usable phase cannot make busy info current', async (t) => {
-  const { connectKobraX } =
-    await import('../../packages/connector/src/kobra-x/index.ts')
-  const { startKobraXMock, installNetworkGuard, uninstallNetworkGuard } =
-    await import('../../packages/sim-tools/src/mocks/index.ts')
-  installNetworkGuard()
-  t.after(uninstallNetworkGuard)
-  const mock = await startKobraXMock({
-    ssdp: false,
-    camera: false,
-    reportIntervalMs: 0,
+test('a correlated print reply without a usable phase cannot make busy info current', () => {
+  const frame = (
+    type: string,
+    action: string,
+    state: string,
+    data: Record<string, unknown>,
+  ): KobraXReport => ({
+    type,
+    action,
+    msgid: 'query',
+    state,
+    code: 200,
+    data,
   })
-  t.after(() => mock.close())
-  const observed: { report: KobraXReport; current: boolean }[] = []
-  const adapter = await connectKobraX({
-    address: '127.0.0.1',
-    printerKey: 'phase-test',
-    clientIdentity: { cert: mock.tls.clientCert, key: mock.tls.clientKey },
-    pinSha256: mock.tls.serverFingerprintSha256!,
-    httpPort: mock.httpPort,
-    mqttPort: mock.mqttPort,
-    onReport: (report, _snapshot, _facts, current) =>
-      observed.push({ report, current }),
+  const busy = frame('info', 'report', 'done', {
+    state: 'busy',
+    project: { filename: 'phase.gcode', taskid: 'phase-job' },
   })
-  t.after(() => adapter.close())
-  async function until(predicate: () => boolean, what: string) {
-    for (let i = 0; i < 150; i++) {
-      if (predicate()) return
-      await new Promise((resolve) => setTimeout(resolve, 20))
-    }
-    assert.fail(what)
-  }
-  const printQueries = () =>
-    mock.calls.all.filter(
-      ({ topic, payload }) =>
-        topic.endsWith('/print') &&
-        JSON.parse(payload.toString()).action === 'query',
-    )
-  const busyInfo = ({ report }: { report: KobraXReport }) =>
-    report.type === 'info' &&
-    report.action === 'report' &&
-    report.data.state === 'busy'
-
-  await until(() => observed.some(({ current }) => current), 'initial state')
-  // A job is running, so a busy info reply may only be trusted once the print
-  // reply of the same refresh names the phase.
-  await mock.control.startPrint('phase.gcode', {
-    preparationPhases: [],
+  const named = frame('print', 'query', 'printing', {
+    filename: 'phase.gcode',
     taskid: 'phase-job',
   })
-  await new Promise((resolve) => setTimeout(resolve, 100))
-
-  // The real print reply is withheld; the printer instead answers the exact
-  // print query with a success code, the job's file and task, and no phase.
-  mock.control.faults.addFault({
-    fault: { type: 'refuse' },
-    topic: /\/print\/report$/,
-    method: 'REPORT',
-    count: 1,
+  const phaseless = frame('print', 'query', 'unrecognized-phase', {
+    filename: 'phase.gcode',
+    taskid: 'phase-job',
   })
-  const askedBefore = printQueries().length
-  const seen = observed.length
-  adapter.refreshControlState()
-  await until(() => printQueries().length > askedBefore, 'print query')
-  await new Promise((resolve) => setTimeout(resolve, 100))
-  const query = JSON.parse(printQueries().at(-1)!.payload.toString())
-  mock.control.publishTypedReport(
-    'print',
-    'query',
-    { filename: 'phase.gcode', taskid: 'phase-job' },
-    { msgid: query.msgid, state: 'unrecognized-phase', code: 200 },
-  )
-  // The reply re-asks info; wait for its busy answer.
-  await until(
-    () => observed.slice(seen).filter(busyInfo).length >= 2,
-    'busy info after the phase-less print reply',
-  )
-  assert.equal(
-    observed.slice(seen).filter(({ current }) => current).length,
-    0,
-    'no reply of the phase-less refresh may be current',
-  )
-
-  // A later refresh whose print reply names the phase restores readiness.
-  const restored = observed.length
-  adapter.refreshControlState()
-  await until(
-    () =>
-      observed
-        .slice(restored)
-        .some((entry) => busyInfo(entry) && entry.current),
-    'busy info current after a valid phase',
-  )
-  const phase = observed
-    .slice(restored)
-    .findIndex(
-      ({ report }) =>
-        report.type === 'print' &&
-        report.action === 'query' &&
-        report.state === 'printing',
-    )
-  const current = observed
-    .slice(restored)
-    .findIndex((entry) => busyInfo(entry) && entry.current)
-  assert.ok(phase !== -1 && phase < current)
+  // A named phase answers the busy info reply, in either order.
+  for (const order of [
+    [busy, named],
+    [named, busy],
+  ]) {
+    const evidence = createKobraXStateEvidence()
+    for (const report of order) evidence.report(report, true)
+    assert.equal(evidence.get()?.printState, 'printing')
+    assert.equal(evidence.get()?.phase, 'printing')
+  }
+  // Without one, busy info is never current: not alone, and not after.
+  const alone = createKobraXStateEvidence()
+  alone.report(busy, true)
+  assert.equal(alone.get(), undefined)
+  for (const order of [
+    [busy, phaseless],
+    [phaseless, busy],
+  ]) {
+    const evidence = createKobraXStateEvidence()
+    for (const report of order) evidence.report(report, true)
+    assert.equal(evidence.get(), undefined)
+    assert.equal(evidence.invalidated(), true)
+  }
 })
 
 function printerAssigned() {

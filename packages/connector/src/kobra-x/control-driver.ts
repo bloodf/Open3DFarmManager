@@ -1,4 +1,7 @@
-import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
+import {
+  controlSourceState,
+  type ExtendedControlAction,
+} from '../../../farm-protocol/src/control-actions.ts'
 import { readKobraClientCertMaterial } from '../config/kobra-x-cert.ts'
 import type {
   ControlObservation,
@@ -17,6 +20,7 @@ import {
   KOBRA_X_REPORT_WAIT_MS,
   KOBRA_X_SIGNED_ACTIONS,
 } from './control-support.ts'
+import { createKobraXStateEvidence } from './state-evidence.ts'
 
 export { KOBRA_X_SIGNED_ACTIONS }
 
@@ -81,20 +85,23 @@ export function openFixedKobraXControl(input: {
   let closing: Promise<void> | undefined
   let stopped = false
   let attempted = false
+  let commandSent = false
   let latest: ControlObservation | undefined
-  let confirmed: ControlObservation | undefined
-  let filename: string | undefined
+  let readConfirmation: (() => ControlObservation | undefined) | undefined
+  const stateEvidence = createKobraXStateEvidence()
   let currentFacts: KobraXFacts | undefined
-  let activeAction: ExtendedControlAction | undefined
-  let activeArgs: Record<string, unknown> = {}
-  let currentEffect: ControlObservation['effect']
-  let ready = false
-  let effectCaptured = false
-  let confirmedTaskId: string | undefined
-  let verifiedTaskId: string | undefined
   let sequence = 0
   let notify: (() => void) | undefined
-  const reportTimes = new WeakMap<KobraXReport, number>()
+  const otherEffects = new Map<string, { report: KobraXReport; time: number }>()
+  let watchEffect: ((report: KobraXReport) => void) | undefined
+  const effectReports = new Map<
+    string,
+    {
+      report: KobraXReport
+      source: 'query' | 'request'
+      time: number
+    }
+  >()
   const failure = () => new Error('Kobra X control unavailable')
   function stop() {
     if (stopped) return
@@ -143,20 +150,22 @@ export function openFixedKobraXControl(input: {
       (action === 'start_print' && args.ams_mapping !== undefined)
     )
       await waitFor(() => !!currentFacts?.boxes.length)
-    const previousTaskId = currentFacts?.taskId
-    activeAction = action
-    activeArgs = args
     let sent = false
+    let baseline: ReturnType<typeof stateEvidence.get>
     const outcome = await adapter.control.execute(action, args, {
       signal: request.signal,
       beforeSend() {
         if (
           stopped ||
+          !latest?.ready ||
+          !controlSourceState(action, latest.printState) ||
           request.signal.aborted ||
           readKobraXPrinterBinding(input.binding) !== local
         )
           return false
+        baseline = stateEvidence.get()
         sent = request.beforeSend()
+        commandSent = sent
         return sent
       },
     })
@@ -178,56 +187,135 @@ export function openFixedKobraXControl(input: {
         })
       return { acknowledged: false }
     }
-    const effectAt = reportTimes.get(outcome.report)
-    if (effectAt === undefined || stopped || request.signal.aborted)
+    // Telemetry that changed because the command worked is expected here and
+    // may have invalidated the pre-send evidence. Confirmation below never
+    // reuses it: it waits for fresh correlated replies to new state queries.
+    if (stopped || request.signal.aborted || !baseline)
       return { acknowledged: false }
-    const effect = reportedEffect(action, args, outcome.report, effectAt)
-    effectCaptured = true
-    const startedTaskId =
-      typeof outcome.report.data.taskid === 'string'
-        ? outcome.report.data.taskid
-        : undefined
-    if (
-      action === 'start_print' &&
-      (!startedTaskId ||
-        startedTaskId === '-1' ||
-        startedTaskId === previousTaskId)
-    )
-      return { acknowledged: false }
-    if (
-      effect ||
-      action === 'start_print' ||
-      action === 'pause' ||
-      action === 'resume' ||
-      action === 'cancel'
-    ) {
-      // The effect report need not say whether the printer is still ready.
-      // Ask for current state once, without resending the command.
-      const before = sequence
-      adapter.refreshControlState()
-      await waitFor(
-        () =>
-          !!latest &&
-          latest.sequence > before &&
-          (action !== 'start_print' ||
-            (latest.printState === 'printing' &&
-              filename === args.file &&
-              verifiedTaskId === startedTaskId)),
+
+    const commandReport = outcome.report
+    const effectType = commandReport.type
+    const stateAction =
+      action === 'pause' || action === 'resume' || action === 'cancel'
+    const refreshEffect =
+      !stateAction &&
+      action !== 'start_print' &&
+      (effectType === 'tempature' ||
+        effectType === 'multiColorBox' ||
+        effectType === 'print')
+    const initialEffect = effectReports.get(effectType)
+    const checkEffect =
+      stateAction || action === 'start_print'
+        ? undefined
+        : outcome.effectMatches
+    let effectChanged =
+      !!checkEffect &&
+      !!initialEffect &&
+      (reportRefusal(initialEffect.report) !== null ||
+        !checkEffect(initialEffect.report))
+    const checkReport = (report: KobraXReport) => {
+      if (
+        report.type === effectType &&
+        checkEffect &&
+        (reportRefusal(report) !== null || !checkEffect(report))
       )
-      if (latest) {
-        confirmedTaskId = startedTaskId
-        confirmed = {
+        effectChanged = true
+    }
+    if (!stateAction && action !== 'start_print') {
+      const other = otherEffects.get(effectType)
+      if (other && initialEffect && other.time >= initialEffect.time)
+        checkReport(other.report)
+      watchEffect = checkReport
+    }
+
+    readConfirmation = () => {
+      const job = stateEvidence.get()
+      if (!latest || !job || effectChanged || stopped || request.signal.aborted)
+        return
+      if (action === 'start_print') {
+        // The command report only narrows the match (it can block a start, never
+        // prove one): the evidence is the post-send idle-to-printing transition.
+        const taskId = commandReport.data.taskid
+        const wasIdle =
+          baseline?.printState === 'idle' ||
+          baseline?.printState === 'cancelled'
+        if (
+          !wasIdle ||
+          job.phase !== 'printing' ||
+          job.filename !== args.file ||
+          (typeof taskId === 'string' &&
+            taskId !== '-1' &&
+            job.taskId !== taskId)
+        )
+          return
+        return {
           ...latest,
-          effect:
-            action === 'start_print' && filename !== undefined
-              ? { kind: 'file', filename, observedMono: latest.receivedMono }
-              : currentEffect,
+          effect: {
+            kind: 'file',
+            filename: job.filename!,
+            observedMono: latest.receivedMono,
+          },
         }
       }
-    } else {
-      confirmed = latest
+      if (stateAction) {
+        const target =
+          action === 'pause'
+            ? 'paused'
+            : action === 'resume'
+              ? 'printing'
+              : 'idle'
+        if (
+          job.printState !== target &&
+          !(action === 'cancel' && job.printState === 'cancelled')
+        )
+          return
+        if (
+          action !== 'cancel' &&
+          baseline?.taskId &&
+          job.taskId !== baseline.taskId
+        )
+          return
+        return action === 'cancel'
+          ? { ...latest, printState: 'cancelled' }
+          : latest
+      }
+      const observation = effectReports.get(effectType)
+      if (
+        !observation ||
+        (refreshEffect && observation.source !== 'query') ||
+        !checkEffect?.(observation.report)
+      )
+        return
+      const effect = reportedEffect(
+        action,
+        args,
+        observation.report,
+        observation.time,
+      )
+      if (!effect) return
+      return {
+        ...latest,
+        effect,
+        receivedMono: Math.max(latest.receivedMono, observation.time),
+      }
     }
-    return { acknowledged: !!confirmed }
+
+    stateEvidence.reset()
+    latest = undefined
+    if (refreshEffect) effectReports.delete(effectType)
+    adapter.refreshControlState(refreshEffect ? effectType : undefined)
+    try {
+      await waitFor(
+        () =>
+          effectChanged ||
+          !!readConfirmation?.() ||
+          (action === 'start_print' &&
+            stateEvidence.get()?.phase === 'printing'),
+      )
+    } catch {
+      return { acknowledged: false }
+    }
+    return { acknowledged: !!readConfirmation() }
   }
 
   const driver: PauseDriver = {
@@ -235,6 +323,7 @@ export function openFixedKobraXControl(input: {
     pauseOnce: (request) =>
       send(request.action ?? 'pause', request.args ?? {}, request),
     async waitForPaused({ binding, after, signal }) {
+      const confirmed = readConfirmation?.()
       if (
         binding !== input.binding ||
         signal.aborted ||
@@ -242,14 +331,7 @@ export function openFixedKobraXControl(input: {
         !confirmed ||
         confirmed.sequence <= after.sequence ||
         confirmed.connectionGeneration !== after.connectionGeneration ||
-        confirmed.receivedMono <= after.sentMono ||
-        latest?.printState !== confirmed.printState ||
-        !ready ||
-        (confirmed.effect?.kind === 'file' &&
-          verifiedTaskId !== confirmedTaskId) ||
-        (confirmed.effect !== undefined &&
-          confirmed.effect.kind !== 'file' &&
-          currentEffect !== confirmed.effect)
+        confirmed.receivedMono <= after.sentMono
       )
         return null
       // The dispatcher aborts its command signal before persisting a confirmed
@@ -275,125 +357,42 @@ export function openFixedKobraXControl(input: {
         reconnectMs: 0,
         signal: input.signal,
         onDisconnect: stop,
-        onReport(report, snapshot, facts, currentStateQuery) {
+        onReport(report, _snapshot, facts, source) {
           if (stopped) return
           currentFacts = facts
           const now = input.clock.monotonicNow()
-          reportTimes.set(report, now)
-          const { type, data, state, action } = report
-          const successful = reportRefusal(report) === null
+          watchEffect?.(report)
           if (
-            !successful ||
-            ((type === 'info' || type === 'status') &&
-              ((data.state === 'busy' && latest?.printState === 'idle') ||
-                (data.state === 'free' &&
-                  (latest?.printState === 'printing' ||
-                    latest?.printState === 'paused')))) ||
-            (type === 'print' &&
-              ((state === 'printing' && latest?.printState !== 'printing') ||
-                (state === 'paused' && latest?.printState !== 'paused') ||
-                ((state === 'finished' || state === 'stoped') &&
-                  latest?.printState !== 'idle' &&
-                  latest?.printState !== 'cancelled')))
-          )
-            ready = false
-          if (currentStateQuery)
-            ready =
-              successful &&
-              (report.code === 0 || report.code === 200) &&
-              state === 'done' &&
-              (data.state === 'free' || data.state === 'busy') &&
-              (data.project == null ||
-                (typeof data.project === 'object' &&
-                  !Array.isArray(data.project)))
-          if (currentStateQuery && ready) {
-            const project = record(data.project)
-            verifiedTaskId =
-              typeof project.taskid === 'string' ? project.taskid : undefined
-          }
-          if (activeAction && successful) {
-            if (
-              effectCaptured &&
-              type === 'multiColorBox' &&
-              (activeAction === 'load_filament' ||
-                activeAction === 'unload_filament')
+            ['print', 'tempature', 'fan', 'light', 'multiColorBox'].includes(
+              report.type,
             )
-              currentEffect = undefined
-            const nextEffect = reportedEffect(
-              activeAction,
-              activeArgs,
-              report,
-              now,
-            )
-            if (
-              nextEffect &&
-              !(
-                effectCaptured &&
-                type === 'multiColorBox' &&
-                (activeAction === 'load_filament' ||
-                  activeAction === 'unload_filament')
-              )
-            )
-              currentEffect = nextEffect
+          ) {
+            if (source === 'other')
+              otherEffects.set(report.type, { report, time: now })
+            else effectReports.set(report.type, { report, source, time: now })
           }
-          if (!ready && latest?.ready) {
-            latest = { ...latest, ready: false }
-            input.publish(latest)
-          }
-          if (!successful) {
-            if (latest) {
-              latest = { ...latest, ready: false }
-              input.publish(latest)
-            }
-            notify?.()
-            return
-          }
-          let printState: ControlObservation['printState'] | undefined
-          if (type === 'print' && action !== 'getSliceParam') {
-            if (state === 'stoped')
-              printState =
-                reportRefusal(report) === null ? 'cancelled' : 'error'
-            else if (state === 'finished') printState = 'idle'
-            else if (state === 'paused' || state === 'printing')
-              printState = state
-            else if (state && state === facts.jobPhase && facts.jobActive)
-              printState = 'printing'
-          } else if (type === 'info' || type === 'status') {
-            if (data.state === 'free' && !facts.jobActive)
-              printState =
-                snapshot.state === 'error'
-                  ? 'error'
-                  : latest?.printState === 'cancelled' ||
-                      (activeAction === 'cancel' && effectCaptured)
-                    ? 'cancelled'
-                    : 'idle'
-            if (data.state === 'busy')
-              printState =
-                facts.jobActive && facts.jobPhase
-                  ? snapshot.state === 'paused'
-                    ? 'paused'
-                    : 'printing'
-                  : 'unknown'
-          }
-          if (printState && currentStateQuery && ready) {
-            const project = record(data.project)
-            filename =
-              typeof project.filename === 'string'
-                ? project.filename
-                : undefined
-            latest = {
+          if (
+            (source !== 'request' || reportRefusal(report) !== null) &&
+            stateEvidence.report(report, source === 'query')
+          ) {
+            const evidence = stateEvidence.get()
+            latest = evidence && {
               assignmentId,
               printerKey,
-              printState,
+              printState: evidence.printState,
               connectionGeneration: input.connectionGeneration,
               sequence: ++sequence,
-              ready:
-                ready && printState !== 'error' && printState !== 'unknown',
+              ready: true,
               readyObservedMono: now,
               printStateObservedMono: now,
               receivedMono: now,
             }
-            input.publish(latest)
+            // After the send, the printer changing state is the command's own
+            // effect. Confirmation never reuses the pre-send evidence, so a
+            // contradiction only keeps it from confirming. Withdrawing the
+            // observation would void a command that was already sent.
+            if (latest || (stateEvidence.invalidated() && !commandSent))
+              input.publish(latest ?? null)
           }
           notify?.()
         },
@@ -402,9 +401,7 @@ export function openFixedKobraXControl(input: {
         await adapter.close()
         throw failure()
       }
-      await waitFor(
-        () => !!latest?.ready && ready && currentFacts?.infoState !== undefined,
-      )
+      await waitFor(() => !!latest)
     },
     async close() {
       input.signal.removeEventListener('abort', stop)

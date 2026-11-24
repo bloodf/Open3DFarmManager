@@ -480,6 +480,9 @@ async function runConnectorAgentOnce(
     return undefined
   })
   let snapshots: ReturnType<typeof createFarmSnapshotSource> | undefined
+  let spoolMembership:
+    | ReturnType<typeof import('./api-query.ts').createSpoolMembershipReader>
+    | undefined
   try {
     // One startup probe of the native RTC module. Without it the agent keeps
     // collecting and reporting but offers no browser RTC session.
@@ -692,13 +695,18 @@ async function runConnectorAgentOnce(
       const { FarmStatusSender } =
         await import('../webrtc/farm-status-sender.ts')
       const { runSignallingLifecycle } = await import('./signalling.ts')
-      const { answerApiQuery, createApiQueryReader } =
-        await import('./api-query.ts')
+      const {
+        answerApiQuery,
+        createApiQueryReader,
+        createSpoolMembershipReader,
+      } = await import('./api-query.ts')
       const signalling = config.signalling
+      spoolMembership = createSpoolMembershipReader()
       const readApiQuery = createApiQueryReader(
         config,
         input.dataDirectory,
         collection,
+        spoolMembership.read,
       )
       const source = snapshots
       const detailSourceFor = detailSources.sourceFor
@@ -1133,6 +1141,7 @@ async function runConnectorAgentOnce(
         ...(input.onInventory || snapshots
           ? {
               onInventory(value: SpoolmanSnapshot) {
+                spoolMembership?.update(value)
                 snapshots?.setInventory(value)
                 input.onInventory?.(value)
               },

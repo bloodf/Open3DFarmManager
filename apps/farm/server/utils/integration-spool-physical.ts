@@ -1,7 +1,10 @@
 import { createHash } from 'node:crypto'
 import type { Sql, TransactionSql } from 'postgres'
 import { z } from 'zod'
-import { hasCurrentSpoolObservation } from '../storage/postgres-inventory-snapshot.ts'
+import {
+  type ReadSpoolMembership,
+  hasCurrentSpoolObservation,
+} from '../storage/postgres-inventory-snapshot.ts'
 
 const recordId = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER)
 const location = z
@@ -98,6 +101,7 @@ export function registerPhysicalSpool(
   access: Access,
   input: z.infer<typeof registration>,
   key: string,
+  readMembership?: ReadSpoolMembership,
 ) {
   return authorized(sql, access, async (tx) => {
     const hash = createHash('sha256')
@@ -149,7 +153,12 @@ export function registerPhysicalSpool(
         LIMIT 1`
       if (duplicate) return { outcome: 'already-bound' as const }
       if (
-        !(await hasCurrentSpoolObservation(tx, access.farmId, input.spoolman))
+        !(await hasCurrentSpoolObservation(
+          tx,
+          access.farmId,
+          input.spoolman,
+          readMembership,
+        ))
       )
         return { outcome: 'spool-not-observed' as const }
     }

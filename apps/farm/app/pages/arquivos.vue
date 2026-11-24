@@ -32,6 +32,7 @@ import {
   type FarmPauseControl,
 } from '../utils/webrtc/farm-pause-control.ts'
 import { createFarmStatusKeyResolver } from '../utils/webrtc/farm-status-key-resolver.ts'
+import { pauseResultDriverFamilyFromIdentity } from '../utils/webrtc/pause-command-client.ts'
 
 const { route, setFarmScope } = useFarmRoute()
 const { state, ready, now, discover, selectFarm, selectKey } = useFarmView({
@@ -167,6 +168,9 @@ async function connect(signal: AbortSignal): Promise<FarmPauseControl> {
         keyId,
         agentId: target.assignment.agentId,
         assignmentId: target.assignment.assignmentId,
+        driverFamily: pauseResultDriverFamilyFromIdentity(
+          target.observation?.state.identity,
+        ),
         async resolveKey(keySignal) {
           const key = await resolver({
             scope,

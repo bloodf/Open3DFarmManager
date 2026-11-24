@@ -135,6 +135,7 @@ export function classifyIdleConsole(
   line: string,
 ):
   | { kind: 'safe' }
+  | { kind: 'home'; axes: ('x' | 'y' | 'z')[] }
   | { kind: 'move'; axis: 'x' | 'y' | 'z' | 'e'; value: number; feed: number }
   | { kind: 'tool' }
   | { kind: 'unknown' } {
@@ -143,6 +144,18 @@ export function classifyIdleConsole(
   const [word, ...params] = parts
   const command = word!.toUpperCase()
   if (/^T[0-3]$/.test(command) && params.length === 0) return { kind: 'tool' }
+  if (command === 'G28') {
+    // Bare axis letters only; `G28 X0` or repeats stay unclassified.
+    const axes = params.map((param) => param.toLowerCase())
+    const valid = axes.every(
+      (axis) => axis === 'x' || axis === 'y' || axis === 'z',
+    )
+    if (!valid || new Set(axes).size !== axes.length) return { kind: 'unknown' }
+    return {
+      kind: 'home',
+      axes: axes.length ? (axes as ('x' | 'y' | 'z')[]) : ['x', 'y', 'z'],
+    }
+  }
   if (command === 'G0' || command === 'G1') {
     if (params.length !== 2) return { kind: 'unknown' }
     const axis = /^([XYZE])(-?\d+(?:\.\d+)?)$/i.exec(params[0]!)

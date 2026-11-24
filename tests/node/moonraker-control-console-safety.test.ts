@@ -127,18 +127,72 @@ test('idle console refuses unclassified and unsafe movement while preserving que
   assert.deepEqual(remote.control.gcodeScripts, ['M105'])
 })
 
-test('idle console refuses raw motion and preserves queries', async (t) => {
-  const { remote, run, applied } = await world(t)
-  for (const line of [
-    'G1 X10 F300',
-    'G1 X100 F300',
-    'G1 E5 F300',
-    'G28',
-    'T0',
-  ]) {
+const RAW_MOTION = [
+  ['G0 X10 F300', 'G1 X10 F300', 'G1 X100 F300', 'G1 Z-5 F300', 'G1 E5 F300'],
+  [
+    'G1 X10 Y10 F300',
+    'G1 X10 F99999',
+    'G91',
+    'G92 X0',
+    'M84',
+    'UNTRUSTED_MACRO',
+  ],
+]
+
+for (const u1 of [true, false])
+  for (const [part, lines] of RAW_MOTION.entries())
+    test(`idle console refuses raw motion and macros without writing (${u1 ? 'U1' : 'generic'} ${part + 1})`, async (t) => {
+      const { remote, run, applied } = await world(t, {}, true, u1)
+      for (const line of lines) {
+        const result = await run('gcode', { line })
+        assert.equal(result.kind, 'not-sent', JSON.stringify({ line, result }))
+      }
+      assert.deepEqual(remote.control.gcodeScripts, [])
+      if (u1) await applied('gcode', { line: 'M105' })
+      else await run('gcode', { line: 'M105' })
+      assert.deepEqual(remote.control.gcodeScripts, ['M105'])
+    })
+
+test('idle console homes through the structured home script', async (t) => {
+  const { remote, run } = await world(t, { homedAxes: '' }, true, false)
+  // The generic dispatch harness never confirms extended actions: the home
+  // action itself reports the same unknown outcome as the console line.
+  for (const line of ['G28', 'G28 X Y'])
+    assert.notEqual((await run('gcode', { line })).kind, 'not-sent')
+  assert.deepEqual(remote.control.gcodeScripts, ['G28 X Y Z', 'G28 X Y'])
+})
+
+test('idle U1 console homing keeps the XY pairing and Z-only checks', async (t) => {
+  const { remote, run, applied } = await world(t, { homedAxes: '' })
+  for (const line of ['G28 X', 'G28 Z', 'G28 X0', 'G28 X X']) {
     const result = await run('gcode', { line })
     assert.equal(result.kind, 'not-sent', JSON.stringify({ line, result }))
   }
-  await applied('gcode', { line: 'M105' })
-  assert.deepEqual(remote.control.gcodeScripts, ['M105'])
+  assert.deepEqual(remote.control.gcodeScripts, [])
+  await applied('gcode', { line: 'G28 X Y' })
+  await applied('gcode', { line: 'G28 Z' })
+  assert.deepEqual(remote.control.gcodeScripts, ['G28 X Y', 'G28 Z'])
+})
+
+test('idle U1 console tool selection still needs homed axes and an idle printer', async (t) => {
+  const { remote, run, applied } = await world(t, { homedAxes: '' })
+  const early = await run('gcode', { line: 'T2' })
+  assert.equal(early.kind, 'not-sent', JSON.stringify(early))
+  await applied('gcode', { line: 'G28' })
+  await applied('gcode', { line: 'T2' })
+  assert.equal(remote.control.model().activeTool, 2)
+  assert.deepEqual(remote.control.gcodeScripts, ['G28 X Y Z', 'T2 A0'])
+  remote.control.update({ state: 'printing' })
+  for (const line of ['G28', 'T0', 'G1 X10 F300']) {
+    const result = await run('gcode', { line })
+    assert.equal(result.kind, 'not-sent', JSON.stringify({ line, result }))
+  }
+  assert.equal(remote.control.gcodeScripts.length, 2)
+})
+
+test('idle generic console refuses a tool macro it cannot classify', async (t) => {
+  const { remote, run } = await world(t, {}, true, false)
+  const result = await run('gcode', { line: 'T0' })
+  assert.equal(result.kind, 'not-sent', JSON.stringify(result))
+  assert.deepEqual(remote.control.gcodeScripts, [])
 })

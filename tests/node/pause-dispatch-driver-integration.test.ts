@@ -34,6 +34,10 @@ import {
   uninstallNetworkGuard,
 } from '../../packages/sim-tools/src/mocks/network-guard.ts'
 import type { ExtendedControlAction } from '../../packages/farm-protocol/src/control-actions.ts'
+import {
+  kobraXControls,
+  type KobraXControlEvidence,
+} from '../../packages/connector/src/kobra-x/control-support.ts'
 import { createHash } from 'node:crypto'
 
 // Dispatch, driver and command deadlines run on clocks the tests control: wall
@@ -457,7 +461,13 @@ for (const fault of ['lost-ack', 'disconnect'] as const) {
   )
 }
 
-async function nativeSignedFixture(t: test.TestContext) {
+async function nativeSignedFixture(
+  t: test.TestContext,
+  extra: {
+    mock?: Parameters<typeof startKobraXMock>[0]
+    evidence?: () => KobraXControlEvidence | undefined
+  } = {},
+) {
   installNetworkGuard()
   t.after(uninstallNetworkGuard)
   const printer = await startKobraXMock({
@@ -467,6 +477,7 @@ async function nativeSignedFixture(t: test.TestContext) {
     preparationPhases: [],
     requireMqttAuth: true,
     requireExactClientCert: true,
+    ...extra.mock,
   })
   t.after(() => printer.close())
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'native-kx-signed-')))
@@ -571,6 +582,7 @@ async function nativeSignedFixture(t: test.TestContext) {
     clock,
     allowedOrigins: config.collection.allowedOrigins,
     limits: config.collection.limits,
+    ...(extra.evidence ? { kobraXControlEvidence: extra.evidence } : {}),
     connectKobraX: (options) =>
       connectKobraX({
         ...options,
@@ -597,17 +609,22 @@ async function nativeSignedFixture(t: test.TestContext) {
     dispatcher.close()
     await driver.closeAttempt(printerBinding)
   })
-  assert.deepEqual(await driver.detect(printerBinding), [
-    'pause',
-    'resume',
-    'cancel',
-    'set_temperature',
-    'set_fan',
-    'set_light',
-    'start_print',
-    'load_filament',
-    'unload_filament',
-  ])
+  assert.deepEqual(
+    await driver.detect(printerBinding),
+    extra.evidence
+      ? kobraXControls(extra.evidence())
+      : [
+          'pause',
+          'resume',
+          'cancel',
+          'set_temperature',
+          'set_fan',
+          'set_light',
+          'start_print',
+          'load_filament',
+          'unload_filament',
+        ],
+  )
   const capability = await admitFixture(dispatcher, f, printerBinding)
   async function signed(
     action: ExtendedControlAction,
@@ -649,6 +666,7 @@ async function nativeSignedFixture(t: test.TestContext) {
       .map(({ type, action, data }) => ({ type, action, data }))
   return {
     printer,
+    driver,
     dispatcher,
     capability,
     printerBinding,
@@ -801,5 +819,66 @@ test(
         data: { type: 3, status: 1, brightness: 100 },
       },
     ])
+  },
+)
+
+test(
+  'native Kobra X keeps a sequence longer than five seconds until it settles',
+  { timeout: 30000 },
+  async (t) => {
+    const { printer, dispatch, commands, journal } = await nativeSignedFixture(
+      t,
+      { mock: { reportIntervalMs: 0 } },
+    )
+    // Connecting waits 1.5 s for the printer's first state answers, and the
+    // light result then arrives 4.5 s after the write: 6 s in all, past the
+    // dispatcher's default five, with the state refresh still fresh.
+    printer.control.faults.addFault({
+      fault: { type: 'delay', delayMs: 1500 },
+      topic: /\/info\/report$/,
+      method: 'REPORT',
+      count: 2,
+    })
+    printer.control.faults.addFault({
+      fault: { type: 'delay', delayMs: 4500 },
+      topic: /\/light\/report$/,
+      method: 'REPORT',
+      count: 1,
+    })
+    const started = Date.now()
+    const result = await dispatch('set_light', { on: true })
+    assert.ok(Date.now() - started > 5000, 'the sequence outlasted 5 s')
+    assert.equal(result.kind, 'applied', JSON.stringify(result))
+    assert.equal(readCommandOutcome(journal, result.cmdId)?.status, 'applied')
+    assert.equal(commands().length, 1, 'written exactly once')
+  },
+)
+
+test(
+  'native Kobra X refuses a control its printer has not reported before any write',
+  { timeout: 20000 },
+  async (t) => {
+    let evidence: KobraXControlEvidence | undefined = {
+      ace: false,
+      light: true,
+      fan: true,
+    }
+    const { driver, printerBinding, dispatch, commands } =
+      await nativeSignedFixture(t, { evidence: () => evidence })
+    assert.ok(!driver.controls(printerBinding).includes('load_filament'))
+    assert.ok(driver.controls(printerBinding).includes('set_light'))
+    assert.deepEqual(await dispatch('load_filament', { tray: 4 }), {
+      kind: 'rejected',
+      reason: 'unsupported-action',
+    })
+    assert.deepEqual(await dispatch('unload_filament'), {
+      kind: 'rejected',
+      reason: 'unsupported-action',
+    })
+    assert.deepEqual(commands(), [])
+    // The ACE is reported later: the same control is offered and runs.
+    evidence = { ace: true, light: true, fan: true }
+    assert.ok(driver.controls(printerBinding).includes('load_filament'))
+    assert.equal((await dispatch('load_filament', { tray: 4 })).kind, 'applied')
   },
 )

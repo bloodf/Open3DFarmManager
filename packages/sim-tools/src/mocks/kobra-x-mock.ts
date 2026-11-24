@@ -155,6 +155,12 @@ export interface KobraXInfoPayload {
   zone: string
 }
 
+export interface KobraXAccessories {
+  ace: boolean
+  light: boolean
+  fan: boolean
+}
+
 export interface KobraXMockState {
   state: KobraXPrintState
   infoState: 'free' | 'busy'
@@ -177,6 +183,11 @@ export interface KobraXMockOptions {
   credentials?: { username: string; password: string } | undefined
   initialState?: KobraXPrintState | undefined
   spoolHolder?: boolean | undefined
+  /**
+   * Accessories this synthetic printer reports. Each defaults to present. An
+   * absent one is left out of every report, as hardware without it would.
+   */
+  accessories?: Partial<KobraXAccessories> | undefined
   printDurationMs?: number | undefined
   preparationPhases?: readonly KobraXJobPhase[] | undefined
   preparationStepMs?: number | undefined
@@ -261,6 +272,8 @@ export interface KobraXMockInstance {
         clientKind?: KobraXClientKind
       },
     ) => void
+    /** Change which accessories the printer reports and publish a fresh info report. */
+    setAccessories: (next: Partial<KobraXAccessories>) => void
     setState: (state: KobraXPrintState) => void
     setPrintProgress: (progress: number) => void
     setJobPhase: (
@@ -455,8 +468,16 @@ export async function startKobraXMock(
     ? { ...defaultAceBox(), id: -1, model_id: 'SPOOL_HOLDER_SYNTHETIC' }
     : undefined
   if (spoolHolder) spoolHolder.slots[3]!.consumables_percent = 0
+  const accessories: KobraXAccessories = {
+    ace: true,
+    light: true,
+    fan: true,
+    ...options.accessories,
+  }
   const colorBoxes = () =>
-    structuredClone(spoolHolder ? [spoolHolder, aceBox] : [aceBox])
+    accessories.ace
+      ? structuredClone(spoolHolder ? [spoolHolder, aceBox] : [aceBox])
+      : structuredClone(spoolHolder ? [spoolHolder] : [])
   const assistantSettings = [
     { option: 0, value: 1 },
     { option: 1, value: 1 },
@@ -826,9 +847,9 @@ export async function startKobraXMock(
         ...(announcedFlvUrl() ? { rtspUrl: announcedFlvUrl() } : {}),
       },
       temp: { ...tempState },
-      fan_speed_pct: fanSpeedPct,
+      ...(accessories.fan ? { fan_speed_pct: fanSpeedPct } : {}),
       print_speed_mode: printSpeedMode,
-      lights: [{ ...lightState }],
+      lights: accessories.light ? [{ ...lightState }] : [],
       multi_color_box: colorBoxes(),
       ...extended,
     }
@@ -840,7 +861,7 @@ export async function startKobraXMock(
     return {
       ...project,
       settings: {
-        fan_speed_pct: fanSpeedPct,
+        ...(accessories.fan ? { fan_speed_pct: fanSpeedPct } : {}),
         print_speed_mode: printSpeedMode,
       },
     }
@@ -1800,6 +1821,18 @@ export async function startKobraXMock(
       publishReport: (data) => publishTypedReport('info', 'report', data),
       publishAck,
       publishTypedReport,
+      setAccessories: (next) => {
+        Object.assign(accessories, next)
+        publishTypedReport('info', 'report', buildInfoData(), {
+          state: 'done',
+        })
+        publishTypedReport(
+          'multiColorBox',
+          'getInfo',
+          { multi_color_box: colorBoxes() },
+          { state: 'done' },
+        )
+      },
       setState: (newState) => {
         state = newState
         infoState =

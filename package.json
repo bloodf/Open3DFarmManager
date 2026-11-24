@@ -2,7 +2,7 @@
   "name": "open3dfarmmanager",
   "private": true,
   "version": "0.1.0",
-  "license": "MIT",
+  "license": "AGPL-3.0-or-later",
   "type": "module",
   "engines": {
     "node": "^22.22.3 || >=24.22.2 <25"

@@ -1,10 +1,19 @@
 import { randomUUID } from 'node:crypto'
-import { connect, createSecureContext } from 'node:tls'
+import { createSecureContext } from 'node:tls'
 import { MqttClient } from 'mqtt'
+import {
+  anycubicTlsTrustError,
+  connectAnycubicTls,
+  normalizeAnycubicPin,
+} from '../anycubic/tls-trust.ts'
 import { readKobraXInfo, recoverKobraXCredentials } from './discovery.ts'
 import { createKobraXControl } from './control.ts'
-import { createKobraXFacts } from './facts.ts'
-import { createKobraXRequests, parseKobraXReport } from './requests.ts'
+import { createKobraXFacts, type KobraXFacts } from './facts.ts'
+import {
+  createKobraXRequests,
+  parseKobraXReport,
+  type KobraXReport,
+} from './requests.ts'
 import { createKobraXStatus } from './status.ts'
 import { createKobraXUsage, type KobraXJobUsage } from './usage.ts'
 
@@ -21,7 +30,15 @@ export async function connectKobraX(options: {
   httpPort?: number
   mqttPort?: number
   reconnectMs?: number
+  signal?: AbortSignal
+  expectedIdentity?: { deviceId: string; modelId: string }
   onError?: (error: Error) => void
+  onDisconnect?: () => void
+  onReport?: (
+    report: KobraXReport,
+    snapshot: ReturnType<ReturnType<typeof createKobraXStatus>['snapshot']>,
+    facts: KobraXFacts,
+  ) => void
   /** Called once per finished job with the filament used per ACE slot. */
   onJobUsage?: (usage: KobraXJobUsage) => void
   /** How long a result is awaited after a command. */
@@ -41,12 +58,17 @@ export async function connectKobraX(options: {
   } catch {
     throw new Error('Kobra X client certificate or key is invalid')
   }
-  let pin = options.pinSha256?.toLowerCase()
-  if (pin !== undefined && !/^[a-f0-9]{64}$/.test(pin))
-    throw new Error('Invalid Kobra X certificate fingerprint')
-  const info = await readKobraXInfo(address, options.httpPort)
+  const pin = normalizeAnycubicPin(options.pinSha256)
+  const info = await readKobraXInfo(address, options.httpPort, options.signal)
   const { modeId, deviceId, username, password } =
-    await recoverKobraXCredentials(info, options.httpPort)
+    await recoverKobraXCredentials(info, options.httpPort, options.signal)
+  if (
+    options.expectedIdentity &&
+    (deviceId !== options.expectedIdentity.deviceId ||
+      modeId !== options.expectedIdentity.modelId)
+  )
+    throw new Error('Kobra X printer identity changed')
+  options.signal?.throwIfAborted()
   const state = createKobraXStatus(options.printerKey, address)
   const facts = createKobraXFacts()
   const usage = createKobraXUsage({
@@ -67,32 +89,16 @@ export async function connectKobraX(options: {
     tempature: 'query',
     multiColorBox: 'getInfo',
   }
-  let fingerprint: string | undefined
-  let connectionError: Error | undefined
+  let tlsEstablished = false
   const client = new MqttClient(
     () => {
-      connectionError = undefined
-      fingerprint = undefined
-      const socket = connect({
-        host: address,
-        port: options.mqttPort ?? 9883,
-        secureContext,
-        rejectUnauthorized: false,
-      })
-      socket.cork()
+      tlsEstablished = false
+      const socket = connectAnycubicTls(
+        { host: address, port: options.mqttPort ?? 9883, secureContext },
+        pin,
+      )
       socket.once('secureConnect', () => {
-        fingerprint = socket
-          .getPeerCertificate()
-          .fingerprint256?.replaceAll(':', '')
-          .toLowerCase()
-        if (!fingerprint || (pin && fingerprint !== pin)) {
-          connectionError = new Error(
-            'Kobra X printer certificate fingerprint mismatch',
-          )
-          socket.destroy(connectionError)
-          return
-        }
-        socket.uncork()
+        tlsEstablished = !socket.destroyed
       })
       return socket
     },
@@ -151,6 +157,19 @@ export async function connectKobraX(options: {
       state.disconnect()
     })
   }
+  function query(type: keyof typeof queries) {
+    if (!client.connected) return
+    client.publish(
+      `${path}/${modeId}/${deviceId}/${type}`,
+      JSON.stringify({
+        type,
+        action: queries[type],
+        msgid: randomUUID(),
+        data: {},
+      }),
+    )
+  }
+  let abort = () => {}
   const started = new Promise<void>((resolve, reject) => {
     const timer = setTimeout(
       () => reject(new Error('Kobra X MQTT connection timed out')),
@@ -161,9 +180,15 @@ export async function connectKobraX(options: {
       if (ready) options.onError?.(error)
       else reject(error)
     }
+    abort = () => failed(new Error('Kobra X connection aborted'))
+    options.signal?.addEventListener('abort', abort, { once: true })
     client.on('error', (error: Error & { code?: string | number }) => {
-      if (connectionError) return
-      else if (typeof error.code === 'number')
+      const trustError = anycubicTlsTrustError(error)
+      if (trustError) {
+        tlsEstablished = false
+        failed(trustError)
+        if (ready) void close()
+      } else if (typeof error.code === 'number')
         failed(new Error('Kobra X MQTT credentials were refused'))
       else if (/alert.*(?:certificate|unknown ca)/i.test(error.message))
         failed(new Error('Kobra X printer rejected the client certificate'))
@@ -172,10 +197,8 @@ export async function connectKobraX(options: {
     client.on('close', () => {
       state.disconnect()
       facts.reset()
-      if (connectionError) {
-        failed(connectionError)
-        if (ready) void close()
-      } else if (!ready && !accepted && fingerprint) {
+      options.onDisconnect?.()
+      if (!ready && !accepted && tlsEstablished) {
         failed(
           new Error(
             'Kobra X printer closed TLS before MQTT login. Check the client certificate.',
@@ -186,7 +209,6 @@ export async function connectKobraX(options: {
     })
     client.on('connect', () => {
       accepted = true
-      pin ??= fingerprint
       // The public tree carries `<type>/report` and the per-request
       // `response` acknowledgements ("received" only).
       client.subscribe(`${reports}#`, (error, grants) => {
@@ -194,25 +216,24 @@ export async function connectKobraX(options: {
           failed(new Error('Kobra X status subscription failed'))
           return
         }
-        for (const [type, action] of Object.entries(queries)) {
-          client.publish(
-            `${path}/${modeId}/${deviceId}/${type}`,
-            JSON.stringify({
-              type,
-              action,
-              msgid: randomUUID(),
-              data: {},
-            }),
-          )
-        }
+        for (const type of [
+          'info',
+          'status',
+          'print',
+          'tempature',
+          'multiColorBox',
+        ] as const)
+          query(type)
         clearTimeout(timer)
         ready = true
         resolve()
       })
     })
   })
-  client.on('message', (topic, payload) => {
-    if (!topic.startsWith(reports) || payload.length > 65536) return
+  client.on('message', (topic, payload, packet) => {
+    // A broker replay at subscribe time does not establish current state.
+    if (packet.retain || !topic.startsWith(reports) || payload.length > 65536)
+      return
     const [type, suffix, extra] = topic.slice(reports.length).split('/')
     if (type === 'response' && suffix === undefined) {
       try {
@@ -231,22 +252,30 @@ export async function connectKobraX(options: {
       if (!report) return
       facts.report(report)
       usage.report(report)
+      options.onReport?.(report, state.snapshot(), facts.get())
       requests.handleReport(report)
     } catch {
       // Invalid telemetry is ignored.
     }
   })
   try {
+    options.signal?.throwIfAborted()
     client.connect()
     await started
   } catch (error) {
     await close()
     throw error
+  } finally {
+    options.signal?.removeEventListener('abort', abort)
   }
   return {
     snapshot: state.snapshot,
     control,
     facts: facts.get,
+    refreshControlState() {
+      query('info')
+      query('print')
+    },
     /** Unscoped telemetry hint. It confers no capture ownership and is never
      * used by the Connector's passive camera source. */
     cameraUrl: state.cameraUrl,

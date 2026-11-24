@@ -17,9 +17,11 @@ import {
   isSnapmakerU1StatusObject,
   mapSnapmakerU1Tools,
 } from './u1-tools.ts'
+import { snapmakerU1ToolHeaters } from './u1-marker.ts'
 import {
   MoonrakerClientError,
   openMoonrakerClient,
+  readMoonrakerObjects,
   readMoonrakerReady,
   validateMoonrakerInput,
   type MoonrakerFailureReason,
@@ -66,6 +68,9 @@ export type MoonrakerEvent =
     }
 
 const webhookState = z.enum(['ready', 'startup', 'shutdown', 'error'])
+// Two slow polls fit inside the farm status provider's five-second freshness
+// window, even though each observation is dated at request start.
+const U1_COMPLETE_QUERY_TIMEOUT_MS = 2000
 /**
  * A chamber reading this far from the last recorded one is a meaningful
  * change and earns its own durable telemetry record.
@@ -327,6 +332,9 @@ export function createMoonrakerSubscription(input: {
           },
         )
         const materials = u1Materials()
+        const toolHeaters = snapmakerU1
+          ? snapmakerU1ToolHeaters(Object.keys(toolStatus))
+          : []
         // The raw chamber reading is live evidence: it is always published,
         // whatever the durable record rate allows.
         const chamberReading = chamberTemperatureReading(value.status)
@@ -340,6 +348,7 @@ export function createMoonrakerSubscription(input: {
                 printer: Object.freeze({
                   ...parsed.printer,
                   ...(materials ? { materials } : {}),
+                  ...(toolHeaters.length ? { toolHeaters } : {}),
                   ...(chamberReading === undefined
                     ? {}
                     : { chamberTemperatureCelsius: chamberReading }),
@@ -483,18 +492,35 @@ export function createMoonrakerSubscription(input: {
         })
       }
       try {
-        await readMoonrakerReady({ origin, limits, signal })
+        const clientInput = { origin, limits, signal }
+        await readMoonrakerReady(clientInput)
+        if (signal.aborted) break
+        // U1 discovery follows the Moonraker agent's HTTP inventory and WS
+        // subscription. Explicit field lists keep both transports bounded.
+        const httpStatus = snapmakerU1
+          ? {
+              objects: await readMoonrakerObjects(clientInput),
+              queryTimeoutMs: U1_COMPLETE_QUERY_TIMEOUT_MS,
+            }
+          : undefined
         if (signal.aborted) break
         client = openMoonrakerClient({
-          origin,
-          limits,
+          ...clientInput,
           ...(input.linkHealth
             ? { onRequestSuccess: input.linkHealth.success }
             : {}),
-          signal,
-          ...(input.discoverObjects ? { discoverObjects: true } : {}),
           ...(input.jobFields ? { jobFields: true } : {}),
-          ...(snapmakerU1 ? { extraObjects: SNAPMAKER_U1_STATUS_OBJECTS } : {}),
+          ...(httpStatus
+            ? {
+                httpStatus,
+                extraObjects: {
+                  ...SNAPMAKER_U1_STATUS_OBJECTS,
+                  heater_bed: ['temperature', 'target'],
+                },
+              }
+            : input.discoverObjects
+              ? { discoverObjects: true }
+              : {}),
           ...(input.onRawObservation
             ? {
                 onInvalidated: invalidate,

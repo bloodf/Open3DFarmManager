@@ -49,6 +49,7 @@ export interface KobraXGateInput {
   facts: KobraXFacts
   /** The ACE slot the action targets, when it has one. */
   slot?: number | undefined
+  boxId?: number | undefined
   /** The file the action targets, when it has one. */
   filename?: string | undefined
 }
@@ -66,7 +67,10 @@ export function kobraXGate(input: KobraXGateInput): string | null {
   const job = state === 'printing' || state === 'paused'
   const quiet =
     state === 'idle' && !facts.jobActive && facts.infoState === 'free'
-  const box = facts.boxes[0]
+  const box =
+    input.boxId === undefined
+      ? facts.boxes[0]
+      : facts.boxes.find((entry) => entry.id === input.boxId)
   switch (action) {
     case 'pause':
       if (state !== 'printing') return 'not-printing'

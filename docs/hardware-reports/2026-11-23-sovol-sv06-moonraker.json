@@ -1,0 +1,77 @@
+{
+  "vendor": "moonraker",
+  "host": "<printer-host>",
+  "port": 7125,
+  "timestamp": "2026-11-23T21:26:48.018Z",
+  "identity": {
+    "vendor": "Klipper",
+    "model": "Moonraker Generic",
+    "firmware": "Klipper v0.13.0-820-g0cee841e3-dirty; Moonraker v0.11.0-4-gb559b9a",
+    "hostname": "<printer-hostname>"
+  },
+  "telemetry": {
+    "observed": true,
+    "fields": [
+      "klippyConnected",
+      "klippyState",
+      "activeTool",
+      "toolTemperatures"
+    ],
+    "sample": {
+      "klippyConnected": true,
+      "klippyState": "ready",
+      "moonrakerVersion": "v0.11.0-4-gb559b9a",
+      "activeTool": "extruder",
+      "tools": [
+        {
+          "index": 0,
+          "object": "extruder",
+          "active": true,
+          "celsius": 240.05,
+          "targetCelsius": 240
+        }
+      ]
+    }
+  },
+  "camera": {
+    "reachable": false,
+    "kind": null,
+    "url": null,
+    "webcams": []
+  },
+  "files": {
+    "listable": false,
+    "count": 0,
+    "files": []
+  },
+  "catalog": {
+    "matchedCatalogId": "klipper-generic-moonraker",
+    "matchedCatalogBrand": "Klipper",
+    "matchedCatalogModel": "Klipper + Moonraker gen\u00e9rico",
+    "currentCapabilities": {
+      "telemetry": "hardware",
+      "files": "unknown",
+      "camera": "simulated",
+      "materials": "simulated",
+      "pause": "simulated",
+      "resume": "simulated",
+      "cancel": "simulated"
+    },
+    "provenCapabilities": {
+      "telemetry": true,
+      "camera": false,
+      "files": false
+    },
+    "canPromoteToHardwareProven": true,
+    "promotionNotes": [
+      "Identified catalog entry: klipper-generic-moonraker (Klipper Klipper + Moonraker gen\u00e9rico)",
+      "Telemetry observed with 4 active field(s) [klippyConnected, klippyState, activeTool, toolTemperatures]",
+      "Camera was unreachable or not detected",
+      "File listing was not supported or returned no listable files"
+    ]
+  },
+  "qualification": {
+    "status": "partially_qualified",
+    "summary": "Telemetry observed with 4 field(s), but camera and files could not be verified."
+  }
+}

@@ -120,10 +120,14 @@ export function consoleAllowedWhilePrinting(line: string): boolean {
 }
 
 /** Any line the console may send while the printer is stopped. */
-export function consoleAllowedWhenStopped(line: string): boolean {
+export function consoleAllowedWhenStopped(
+  line: string,
+  additionalRefused?: readonly string[],
+): boolean {
   const parts = tokens(line)
   if (!parts) return false
-  return !ALWAYS_REFUSED.has(parts[0]!.toUpperCase())
+  const command = parts[0]!.toUpperCase()
+  return !ALWAYS_REFUSED.has(command) && !additionalRefused?.includes(command)
 }
 
 const PrintState = z.enum([
@@ -177,6 +181,7 @@ export function parseConsoleState(result: unknown): ConsoleState {
 export function refuseConsole(
   args: Record<string, unknown>,
   state: ConsoleState | undefined,
+  additionalRefused?: readonly string[],
 ): string {
   const parsed = z.strictObject({ line: GcodeLine }).safeParse(args)
   if (!parsed.success) throw new ConsoleRefusal('invalid')
@@ -185,7 +190,11 @@ export function refuseConsole(
     throw new ConsoleRefusal('unknown-state')
   const active =
     state.printState === 'printing' || state.printState === 'paused'
-  if (!(active ? consoleAllowedWhilePrinting : consoleAllowedWhenStopped)(line))
+  if (
+    !(active
+      ? consoleAllowedWhilePrinting(line)
+      : consoleAllowedWhenStopped(line, additionalRefused))
+  )
     throw new ConsoleRefusal('not-allowed')
   return line
 }

@@ -1,6 +1,10 @@
-import { connect as tlsConnect } from 'node:tls'
-import { createHash } from 'node:crypto'
 import { MqttClient } from 'mqtt'
+import {
+  anycubicTlsTrustError,
+  connectAnycubicTls,
+  type AnycubicPairingRequired,
+  type PinMismatch,
+} from './tls-trust.ts'
 
 export interface AnycubicLanClientOptions {
   host: string
@@ -21,6 +25,7 @@ export interface AnycubicLanClientOptions {
   signal: AbortSignal
   onReport: (payload: Buffer) => void
   onConnection: (state: 'connected' | 'disconnected' | 'closed') => void
+  onTrustError?: (error: PinMismatch | AnycubicPairingRequired) => void
 }
 
 export function createAnycubicLanClient(options: AnycubicLanClientOptions) {
@@ -81,17 +86,18 @@ export function createAnycubicLanClient(options: AnycubicLanClientOptions) {
       let body = 0
       let header = true
       inflight = 0
-      const socket = tlsConnect({
-        host,
-        port,
-        ca: options.caPem,
-        ...(options.certPem && options.keyPem
-          ? { cert: options.certPem, key: options.keyPem }
-          : {}),
-        minVersion: 'TLSv1.2',
-        // A configured exact certificate pin is an alternative trust anchor.
-        rejectUnauthorized: !options.pinSha256,
-      })
+      const socket = connectAnycubicTls(
+        {
+          host,
+          port,
+          ...(options.caPem !== undefined ? { ca: options.caPem } : {}),
+          ...(options.certPem && options.keyPem
+            ? { cert: options.certPem, key: options.keyPem }
+            : {}),
+          minVersion: 'TLSv1.2',
+        },
+        options.pinSha256?.toLowerCase(),
+      )
       socket.prependListener('data', (chunk: Buffer) => {
         for (const byte of chunk) {
           if (body > 0) {
@@ -115,15 +121,6 @@ export function createAnycubicLanClient(options: AnycubicLanClientOptions) {
             header = true
           }
         }
-      })
-      socket.once('secureConnect', () => {
-        if (
-          options.pinSha256 &&
-          createHash('sha256')
-            .update(socket.getPeerCertificate().raw)
-            .digest('hex') !== options.pinSha256.toLowerCase()
-        )
-          socket.destroy(new Error('TLS pin mismatch'))
       })
       return socket
     },
@@ -153,8 +150,11 @@ export function createAnycubicLanClient(options: AnycubicLanClientOptions) {
     })
     return done
   }
-  client.on('error', () => {
-    /* Connection errors are handled by close/retry without exposing credentials. */
+  client.on('error', (error: Error & { code?: string | number }) => {
+    const trustError = anycubicTlsTrustError(error)
+    if (!trustError) return
+    void close()
+    options.onTrustError?.(trustError)
   })
   client.on('connect', () => {
     client.subscribe(topic, { qos: 0 }, (error, grants) => {

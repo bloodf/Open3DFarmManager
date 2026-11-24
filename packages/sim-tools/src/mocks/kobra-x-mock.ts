@@ -176,6 +176,7 @@ export interface KobraXMockOptions {
   token?: string | undefined
   credentials?: { username: string; password: string } | undefined
   initialState?: KobraXPrintState | undefined
+  spoolHolder?: boolean | undefined
   printDurationMs?: number | undefined
   preparationPhases?: readonly KobraXJobPhase[] | undefined
   preparationStepMs?: number | undefined
@@ -447,6 +448,12 @@ export async function startKobraXMock(
   let videoCapturing = false
   let printSpeedMode = 2
   const aceBox: KobraXAceBox = defaultAceBox()
+  const spoolHolder = options.spoolHolder
+    ? { ...defaultAceBox(), id: -1, model_id: 'SPOOL_HOLDER_SYNTHETIC' }
+    : undefined
+  if (spoolHolder) spoolHolder.slots[3]!.consumables_percent = 0
+  const colorBoxes = () =>
+    structuredClone(spoolHolder ? [spoolHolder, aceBox] : [aceBox])
   const assistantSettings = [
     { option: 0, value: 1 },
     { option: 1, value: 1 },
@@ -819,7 +826,7 @@ export async function startKobraXMock(
       fan_speed_pct: fanSpeedPct,
       print_speed_mode: printSpeedMode,
       lights: [{ ...lightState }],
-      multi_color_box: [structuredClone(aceBox)],
+      multi_color_box: colorBoxes(),
       ...extended,
     }
   }
@@ -1293,6 +1300,7 @@ export async function startKobraXMock(
         }
 
         case 'multiColorBox': {
+          const targetBox = data.id === -1 ? spoolHolder : aceBox
           if (action === 'feed') {
             const slotIdx =
               typeof data.slot === 'number'
@@ -1300,15 +1308,15 @@ export async function startKobraXMock(
                 : typeof data.index === 'number'
                   ? data.index
                   : 0
-            applyAceFeed(slotIdx)
+            if (targetBox) applyAceFeed(slotIdx, targetBox)
           } else if (action === 'retract' || action === 'unfeed') {
             const slotIdx =
               typeof data.slot === 'number'
                 ? data.slot
                 : typeof data.index === 'number'
                   ? data.index
-                  : aceBox.loaded_slot
-            applyAceRetract(slotIdx)
+                  : targetBox?.loaded_slot
+            if (targetBox) applyAceRetract(slotIdx, targetBox)
           } else if (action === 'startDrying' || action === 'drying') {
             const targetTemp =
               typeof data.target_temp === 'number' ? data.target_temp : 55
@@ -1350,7 +1358,7 @@ export async function startKobraXMock(
           publishTypedReport(
             'multiColorBox',
             action || 'getInfo',
-            { multi_color_box: [structuredClone(aceBox)] },
+            { multi_color_box: colorBoxes() },
             { clientKind },
           )
           break
@@ -1582,21 +1590,21 @@ export async function startKobraXMock(
   })
   brokerRef = broker
 
-  function applyAceFeed(slotIndex: number) {
-    for (const slot of aceBox.slots) {
+  function applyAceFeed(slotIndex: number, box = aceBox) {
+    for (const slot of box.slots) {
       slot.status = slot.index === slotIndex ? 5 : 0
     }
-    aceBox.loaded_slot = slotIndex
+    box.loaded_slot = slotIndex
   }
 
-  function applyAceRetract(slotIndex?: number) {
-    for (const slot of aceBox.slots) {
+  function applyAceRetract(slotIndex?: number, box = aceBox) {
+    for (const slot of box.slots) {
       if (slotIndex === undefined || slot.index === slotIndex) {
         slot.status = 0
       }
     }
-    if (slotIndex === undefined || aceBox.loaded_slot === slotIndex) {
-      aceBox.loaded_slot = -1
+    if (slotIndex === undefined || box.loaded_slot === slotIndex) {
+      box.loaded_slot = -1
     }
   }
 

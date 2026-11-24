@@ -239,6 +239,7 @@ test('another MQTT client retains its capture through Connector camera failure a
     printerKey: 'kobra-x-competing-client',
     httpPort: mock.httpPort,
     mqttPort: mock.mqttPort,
+    pinSha256: mock.tls.serverFingerprintSha256!,
     clientIdentity: { cert: mock.tls.clientCert, key: mock.tls.clientKey },
   })
   t.after(() => adapter.close())

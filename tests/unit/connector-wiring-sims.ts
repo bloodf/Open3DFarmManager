@@ -22,6 +22,16 @@ export async function moonrakerSimulator(input: {
   const subscribed: Record<string, unknown>[] = []
   const sockets = new Set<WsTestSocket>()
   let eventtime = 1
+  const status: Record<string, unknown> = {
+    webhooks: { state: 'ready' },
+    print_stats: {
+      state: 'printing',
+      filename: 'part.gcode',
+      filament_used: 10,
+    },
+    virtual_sdcard: { progress: 0.5 },
+    ...input.status,
+  }
   const server = await serveWsTestServer({
     async http(request) {
       const path = new URL(request.url).pathname
@@ -33,6 +43,10 @@ export async function moonrakerSimulator(input: {
         return Response.json({
           result: { klippy_connected: true, klippy_state: 'ready' },
         })
+      if (path === '/printer/objects/list')
+        return Response.json({ result: { objects: input.objects ?? [] } })
+      if (path === '/printer/objects/query')
+        return Response.json({ result: { eventtime: ++eventtime, status } })
       return new Response('', { status: 404 })
     },
     upgrade: () => true,
@@ -55,16 +69,7 @@ export async function moonrakerSimulator(input: {
           subscribed.push(call.params.objects)
         return reply({
           eventtime: ++eventtime,
-          status: {
-            webhooks: { state: 'ready' },
-            print_stats: {
-              state: 'printing',
-              filename: 'part.gcode',
-              filament_used: 10,
-            },
-            virtual_sdcard: { progress: 0.5 },
-            ...input.status,
-          },
+          status,
         })
       }
       socket.send(
@@ -83,18 +88,22 @@ export async function moonrakerSimulator(input: {
     connected: () => sockets.size > 0 && subscribed.length > 0,
     /** Reports the watched job complete with this measured length. */
     finish(millimetres: number) {
+      const delta = {
+        print_stats: { state: 'complete', filament_used: millimetres },
+        virtual_sdcard: { progress: 1 },
+      }
+      const stats = status.print_stats
+      status.print_stats = {
+        ...(stats && typeof stats === 'object' ? stats : {}),
+        ...delta.print_stats,
+      }
+      status.virtual_sdcard = delta.virtual_sdcard
       for (const socket of sockets)
         socket.send(
           JSON.stringify({
             jsonrpc: '2.0',
             method: 'notify_status_update',
-            params: [
-              {
-                print_stats: { state: 'complete', filament_used: millimetres },
-                virtual_sdcard: { progress: 1 },
-              },
-              ++eventtime,
-            ],
+            params: [delta, ++eventtime],
           }),
         )
     },

@@ -16,6 +16,7 @@ test('Kobra X detail reflects native reports from the E16 loopback mock', async 
         clientIdentity: { cert: mock.tls.clientCert, key: mock.tls.clientKey },
         httpPort: mock.httpPort,
         mqttPort: mock.mqttPort,
+        pinSha256: mock.tls.serverFingerprintSha256!,
       })
       try {
         await expect.poll(() => adapter.snapshot().state).toBe('idle')

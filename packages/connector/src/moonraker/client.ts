@@ -3,7 +3,7 @@ import { moonrakerSession, moonrakerAuthHeaders } from '../config/moonraker.ts'
 import { z } from 'zod'
 import { createMoonrakerSocket } from './socket.ts'
 import { Reply, decodeMoonrakerFrame } from './frame.ts'
-import { parseMoonrakerServerInfo } from './parse.ts'
+import { parseMoonrakerHttpResult, parseMoonrakerServerInfo } from './parse.ts'
 import {
   extruderIndex,
   parseIdentifyResult,
@@ -27,30 +27,50 @@ export class MoonrakerClientError extends Error {
   }
 }
 
-export async function readMoonrakerReady(input: {
+type MoonrakerHttpInput = {
   origin: string
   limits: MoonrakerLimits
   signal: AbortSignal
-}): Promise<void> {
+}
+
+async function readMoonrakerHttp<T>(
+  input: MoonrakerHttpInput,
+  path: string,
+  parse: (wire: string) => T,
+  pollTimeoutMs?: number,
+): Promise<T> {
   const controller = new AbortController()
   const signal = AbortSignal.any([input.signal, controller.signal])
   const timer = setTimeout(
     () => controller.abort(),
-    input.limits.requestTimeoutMs,
+    pollTimeoutMs ?? input.limits.requestTimeoutMs,
   )
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
   try {
-    const response = await fetch(`${input.origin}/server/info`, {
+    signal.throwIfAborted()
+    const session = moonrakerSession(input.origin, input.limits)
+    // A credential refresh is shared with other Moonraker clients. Bound this
+    // request's wait without cancelling the refresh for other callers.
+    const headers = session
+      ? await Promise.race([
+          session.getAuthHeaders(),
+          new Promise<never>((_, reject) => {
+            signal.addEventListener('abort', () => reject(signal.reason), {
+              once: true,
+            })
+          }),
+        ])
+      : moonrakerAuthHeaders(input.origin, input.limits)
+    const response = await fetch(new URL(path, input.origin), {
       signal,
       redirect: 'error',
       credentials: 'omit',
-      headers: await (moonrakerSession(
-        input.origin,
-        input.limits,
-      )?.getAuthHeaders() ?? moonrakerAuthHeaders(input.origin, input.limits)),
+      headers,
     })
-    if (!response.ok || !response.body)
+    if (!response.ok || !response.body) {
+      void response.body?.cancel().catch(() => {})
       throw new MoonrakerClientError('offline')
+    }
     reader = response.body.getReader()
     const chunks: Uint8Array[] = []
     let bytes = 0
@@ -62,18 +82,20 @@ export async function readMoonrakerReady(input: {
         throw new MoonrakerClientError('invalid-response')
       chunks.push(item.value)
     }
-    let ready: boolean
     try {
-      ready = parseMoonrakerServerInfo(
+      return parse(
         new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)),
-      ).ready
+      )
     } catch {
       throw new MoonrakerClientError('invalid-response')
     }
-    if (!ready) throw new MoonrakerClientError('not-ready')
   } catch (error) {
     if (error instanceof MoonrakerClientError) throw error
-    throw new MoonrakerClientError('offline')
+    throw new MoonrakerClientError(
+      pollTimeoutMs !== undefined && controller.signal.aborted
+        ? 'stale'
+        : 'offline',
+    )
   } finally {
     clearTimeout(timer)
     controller.abort()
@@ -82,6 +104,31 @@ export async function readMoonrakerReady(input: {
       reader.releaseLock()
     }
   }
+}
+
+const ObjectList = z.object({
+  objects: z.array(z.string().min(1).max(128)).max(512),
+})
+
+export async function readMoonrakerReady(
+  input: MoonrakerHttpInput,
+): Promise<void> {
+  const state = await readMoonrakerHttp(
+    input,
+    '/server/info',
+    parseMoonrakerServerInfo,
+  )
+  if (!state.ready) throw new MoonrakerClientError('not-ready')
+}
+
+export function readMoonrakerObjects(
+  input: MoonrakerHttpInput,
+): Promise<string[]> {
+  return readMoonrakerHttp(
+    input,
+    '/printer/objects/list',
+    (wire) => ObjectList.parse(parseMoonrakerHttpResult(wire)).objects,
+  )
 }
 
 // Status objects have open fields, including explicitly nullable values.
@@ -105,6 +152,7 @@ export type MoonrakerCompleteObservation = Readonly<{
   requestStartedAtMonoMs: number
   receivedAtMonoMs: number
 }>
+type StatusMethod = 'printer.objects.subscribe' | 'printer.objects.query'
 /** Reserved request id for the identify call that precedes every subscription. */
 const IDENTIFY_ID = Number.MAX_SAFE_INTEGER - 1
 const DEFAULT_CLIENT = {
@@ -158,6 +206,8 @@ export function openMoonrakerClient(input: {
   onStatus: (params: unknown) => void
   /** Opt-in display evidence; default telemetry transport remains unchanged. */
   onComplete?: (observation: MoonrakerCompleteObservation) => void
+  /** A model may discover by HTTP and use HTTP for subsequent complete reads. */
+  httpStatus?: { objects: readonly string[]; queryTimeoutMs: number }
   onRequestSuccess?: (startedAtMonoMs: number, receivedAtMonoMs: number) => void
   onInvalidated?: () => void
 }): {
@@ -170,13 +220,26 @@ export function openMoonrakerClient(input: {
   let discoveryTimer: ReturnType<typeof setTimeout> | undefined
   let queryTimer: ReturnType<typeof setTimeout> | undefined
   let queryTimeout: ReturnType<typeof setTimeout> | undefined
+  let httpPoll: Promise<void> | undefined
+  const statusController = new AbortController()
   let nextId = 1
   let pending:
-    { id: number; started: number; activeToolQuery: boolean } | undefined
+    | {
+        id: number
+        started: number
+        activeToolQuery: boolean
+      }
+    | undefined
   let finished = false
   let subscribed = false
   let identified = false
-  let discovering = input.discoverObjects === true
+  const discoverOnWebSocket =
+    !input.httpStatus && input.discoverObjects === true
+  let discovering = discoverOnWebSocket
+  const completeWebSocketTimeoutMs = Math.min(
+    1000,
+    input.limits.requestTimeoutMs,
+  )
   const extraObjects = Object.fromEntries(
     Object.entries(input.extraObjects ?? {}).map(([name, fields]) => [
       name,
@@ -213,6 +276,7 @@ export function openMoonrakerClient(input: {
     clearTimeout(discoveryTimer)
     clearTimeout(queryTimer)
     clearTimeout(queryTimeout)
+    statusController.abort()
     try {
       input.onInvalidated?.()
     } catch {
@@ -243,7 +307,8 @@ export function openMoonrakerClient(input: {
     finish('offline')
     socket?.off('error', error)
     socket?.off('close', close)
-    resolveClosed(closedReason)
+    if (httpPoll) void httpPoll.then(() => resolveClosed(closedReason))
+    else resolveClosed(closedReason)
   }
   function open() {
     if (finished) return
@@ -251,7 +316,7 @@ export function openMoonrakerClient(input: {
     timer = setTimeout(
       () => finish(earlyUpdates.length ? 'invalid-response' : 'offline'),
       input.onComplete
-        ? Math.min(1000, input.limits.requestTimeoutMs)
+        ? completeWebSocketTimeoutMs
         : input.limits.requestTimeoutMs,
     )
     // Moonraker must attribute this connection before any subscription.
@@ -271,18 +336,13 @@ export function openMoonrakerClient(input: {
     )
   }
   function sendStatusRequest(
-    method: 'printer.objects.subscribe' | 'printer.objects.query',
+    method: StatusMethod,
     requestObjects: Record<string, string[]>,
   ) {
     pending = {
       id: nextId,
       started: performance.now(),
-      activeToolQuery:
-        requestObjects.toolhead?.includes('extruder') === true &&
-        Object.entries(requestObjects).some(
-          ([name, fields]) =>
-            extruderIndex(name) !== undefined && fields.includes('temperature'),
-        ),
+      activeToolQuery: requestsActiveTool(requestObjects),
     }
     socket!.send(
       JSON.stringify({
@@ -293,8 +353,18 @@ export function openMoonrakerClient(input: {
       }),
     )
   }
+  function requestsActiveTool(requestObjects: Record<string, string[]>) {
+    return (
+      requestObjects.toolhead?.includes('extruder') === true &&
+      Object.entries(requestObjects).some(
+        ([name, fields]) =>
+          extruderIndex(name) !== undefined && fields.includes('temperature'),
+      )
+    )
+  }
   function begin() {
     if (!discovering) {
+      if (input.httpStatus) selectObjects(input.httpStatus.objects)
       sendStatusRequest('printer.objects.subscribe', objects)
       return
     }
@@ -319,6 +389,11 @@ export function openMoonrakerClient(input: {
     if (!input.onComplete || finished) return
     queryTimer = setTimeout(
       () => {
+        if (input.httpStatus) {
+          if (!finished)
+            httpPoll = pollHttpStatus(input.httpStatus.queryTimeoutMs)
+          return
+        }
         if (finished || pending || nextId >= Number.MAX_SAFE_INTEGER) {
           finish('invalid-response')
           return
@@ -326,7 +401,7 @@ export function openMoonrakerClient(input: {
         nextId++
         queryTimeout = setTimeout(
           () => finish('stale'),
-          Math.min(1000, input.limits.requestTimeoutMs),
+          completeWebSocketTimeoutMs,
         )
         try {
           if (socket!.bufferedAmount !== 0) throw Error('Outbound queue')
@@ -337,6 +412,92 @@ export function openMoonrakerClient(input: {
       },
       Math.max(0, 1000 - (performance.now() - lastRequestStarted)),
     )
+  }
+  async function pollHttpStatus(queryTimeoutMs: number) {
+    const timeoutMs = Math.min(queryTimeoutMs, input.limits.requestTimeoutMs)
+    const started = performance.now()
+    const query = new URLSearchParams()
+    for (const [name, fields] of Object.entries(queryObjects))
+      query.set(name, fields.join(','))
+    try {
+      const result = await readMoonrakerHttp(
+        { ...input, signal: statusController.signal },
+        `/printer/objects/query?${query}`,
+        parseMoonrakerHttpResult,
+        timeoutMs,
+      )
+      if (finished) return
+      const received = performance.now()
+      if (received < started || received - started >= timeoutMs) {
+        finish('stale')
+        return
+      }
+      observeComplete(
+        result,
+        started,
+        received,
+        requestsActiveTool(queryObjects),
+      )
+      scheduleQuery()
+    } catch (error) {
+      finish(
+        error instanceof MoonrakerClientError
+          ? error.reason
+          : 'invalid-response',
+      )
+    } finally {
+      httpPoll = undefined
+    }
+  }
+  function observeComplete(
+    result: unknown,
+    started: number,
+    received: number,
+    activeToolQuery: boolean,
+  ) {
+    lastRequestStarted = started
+    input.onRequestSuccess?.(started, received)
+    input.onComplete?.(
+      Object.freeze({
+        result,
+        activeToolQuery,
+        requestStartedAtMonoMs: started,
+        receivedAtMonoMs: received,
+      }),
+    )
+  }
+  function selectObjects(listed: readonly string[]) {
+    const optional = Object.fromEntries(
+      listed
+        .filter(
+          (name) =>
+            name === 'fan' ||
+            name.startsWith('fan_generic ') ||
+            name === 'output_pin caselight' ||
+            (input.jobFields &&
+              (/^extruder(?:[1-9][0-9]{0,2})?$/.test(name) ||
+                isChamberTemperatureObject(name))),
+        )
+        .map((name) => [
+          name,
+          /^extruder/.test(name) || name === 'heater_generic chamber'
+            ? ['temperature', 'target']
+            : isChamberTemperatureObject(name)
+              ? ['temperature']
+              : [name === 'output_pin caselight' ? 'value' : 'speed'],
+        ]),
+    )
+    objects = { ...baseObjects, ...optional }
+    queryObjects = { ...baseQueryObjects, ...optional }
+    if (!input.onComplete || !listed.includes('toolhead')) return
+    const tools = selectToolObjects({ objects: listed })
+    if (tools.some((name) => name !== 'extruder')) {
+      delete queryObjects.extruder
+      // Keep caller-specific fields, including the active tool and targets.
+      for (const name of tools)
+        queryObjects[name] = extraObjects[name] ?? ['temperature']
+      queryObjects.toolhead = extraObjects.toolhead ?? ['extruder']
+    }
   }
   let extensionId: number | undefined
   let extendSubscription = false
@@ -379,48 +540,10 @@ export function openMoonrakerClient(input: {
       if (reply.success) {
         // Only the discovery request is outstanding until the base subscription.
         if (discovering && reply.data.id !== Number.MAX_SAFE_INTEGER) return
-        if (
-          input.discoverObjects &&
-          reply.data.id === Number.MAX_SAFE_INTEGER
-        ) {
+        if (discoverOnWebSocket && reply.data.id === Number.MAX_SAFE_INTEGER) {
           const wasDiscovering = discovering
           clearTimeout(discoveryTimer)
-          const listed = z
-            .object({ objects: z.array(z.string().min(1).max(128)).max(512) })
-            .parse(reply.data.result)
-          const optional = Object.fromEntries(
-            listed.objects
-              .filter(
-                (name) =>
-                  name === 'fan' ||
-                  name.startsWith('fan_generic ') ||
-                  name === 'output_pin caselight' ||
-                  (input.jobFields &&
-                    (/^extruder(?:[1-9][0-9]{0,2})?$/.test(name) ||
-                      isChamberTemperatureObject(name))),
-              )
-              .map((name) => [
-                name,
-                /^extruder/.test(name) || name === 'heater_generic chamber'
-                  ? ['temperature', 'target']
-                  : isChamberTemperatureObject(name)
-                    ? ['temperature']
-                    : [name === 'output_pin caselight' ? 'value' : 'speed'],
-              ]),
-          )
-          objects = { ...baseObjects, ...optional }
-          queryObjects = { ...baseQueryObjects, ...optional }
-          if (input.onComplete && listed.objects.includes('toolhead')) {
-            const tools = selectToolObjects(listed)
-            if (tools.some((name) => name !== 'extruder')) {
-              delete queryObjects.extruder
-              // Fields a caller already selected for the tool projection,
-              // including `target` and the active tool, must survive.
-              for (const name of tools)
-                queryObjects[name] = extraObjects[name] ?? ['temperature']
-              queryObjects.toolhead = extraObjects.toolhead ?? ['extruder']
-            }
-          }
+          selectObjects(ObjectList.parse(reply.data.result).objects)
           discovering = false
           if (!wasDiscovering) {
             extendSubscription = true
@@ -441,8 +564,7 @@ export function openMoonrakerClient(input: {
         const { started, activeToolQuery } = pending
         if (
           received < started ||
-          (input.onComplete &&
-            received - started >= Math.min(1000, input.limits.requestTimeoutMs))
+          (input.onComplete && received - started >= completeWebSocketTimeoutMs)
         )
           throw Error('Late observation')
         const replayAfter = earlyUpdates.length
@@ -454,17 +576,8 @@ export function openMoonrakerClient(input: {
           extensionId = undefined
         }
         pending = undefined
-        lastRequestStarted = started
         clearTimeout(queryTimeout)
-        input.onRequestSuccess?.(started, received)
-        input.onComplete?.(
-          Object.freeze({
-            result: reply.data.result,
-            activeToolQuery,
-            requestStartedAtMonoMs: started,
-            receivedAtMonoMs: received,
-          }),
-        )
+        observeComplete(reply.data.result, started, received, activeToolQuery)
         if (!subscribed) {
           subscribed = true
           clearTimeout(timer)

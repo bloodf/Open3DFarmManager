@@ -6,9 +6,8 @@ import { readPrivateJsonFile } from './local.ts'
 
 /**
  * Private native Kobra X bindings written by signed onboarding. They live
- * beside the accepted runtime file, like the Bambu bindings, because the strict
- * runtime reader has no native Kobra X assignment mapping; the runtime file and
- * every KobraLink assignment in it are never touched.
+ * beside the accepted runtime file. The runtime scopes these bindings to the
+ * enrolled farm and agent and resolves their assignments by printer key.
  *
  * A row holds only what is needed to reconnect: the printer address, the
  * identity it proved at onboarding, the private client certificate path and the

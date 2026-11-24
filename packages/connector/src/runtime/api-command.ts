@@ -27,6 +27,7 @@ import {
   controlPrinterBusy,
   controlSourceState,
   LibraryPrintArgs,
+  U1_CONTROL_RESULT_TIMEOUT_MS,
   type ControlArguments,
 } from '../../../farm-protocol/src/control-actions.ts'
 import { macroParamsAllowed } from '../moonraker/control-macros.ts'
@@ -73,7 +74,12 @@ export type ApiPrinterObservation = Readonly<{
 }>
 export type ApiCommandDriver = Pick<
   PreparedPauseDriver,
-  'execute' | 'controls' | 'macros' | 'macroParams' | 'speedModes'
+  | 'execute'
+  | 'controls'
+  | 'macros'
+  | 'macroParams'
+  | 'speedModes'
+  | 'allowsExtendedResult'
 > &
   Partial<Pick<PreparedPauseDriver, 'closeAttempt'>> & {
     prepare?(
@@ -612,15 +618,27 @@ export function createApiCommandRunner(config: {
     let threw = false
     let prepared = false
     let jobWatch: ReturnType<ApiJobLifecycle['watch']> | undefined
-    const deadline = AbortSignal.timeout(
-      Math.max(
-        1,
-        Math.min(
-          envelope.kind === 'job' ? 60_000 : MAX_EXECUTE_MS,
-          envelope.expires_at - config.clock.wallNow(),
-        ),
+    const postWrite =
+      envelope.kind === 'action' &&
+      action === 'home' &&
+      config.driver.allowsExtendedResult?.(binding) === true
+        ? new AbortController()
+        : undefined
+    const executeMs = Math.max(
+      1,
+      Math.min(
+        envelope.kind === 'job' ? 60_000 : MAX_EXECUTE_MS,
+        envelope.expires_at - config.clock.wallNow(),
       ),
     )
+    const deadline = postWrite?.signal ?? AbortSignal.timeout(executeMs)
+    const writeDeadline = postWrite
+      ? config.clock.monotonicNow() + executeMs
+      : Infinity
+    let resultDeadline = Infinity
+    let postWriteTimer = postWrite
+      ? setTimeout(() => postWrite.abort(), executeMs)
+      : undefined
     const signal = config.signal
       ? AbortSignal.any([config.signal, deadline])
       : deadline
@@ -635,15 +653,25 @@ export function createApiCommandRunner(config: {
       if (!markWriteStarted(config.journal, receipt)) return false
       const now = sample()
       lastRefusal =
-        config.keys.issuer(API_ENVELOPE_ISSUER, envelope.kid) !== issuerKey
-          ? ['grant-revoked', 'issuer no longer trusted']
-          : (authorityRefusal(envelope, now) ??
-            safetyRefusal(envelope, binding) ??
-            commandStateRefusal())
+        postWrite && now.mono >= writeDeadline
+          ? ['expired', 'write deadline elapsed']
+          : config.keys.issuer(API_ENVELOPE_ISSUER, envelope.kid) !== issuerKey
+            ? ['grant-revoked', 'issuer no longer trusted']
+            : (authorityRefusal(envelope, now) ??
+              safetyRefusal(envelope, binding) ??
+              commandStateRefusal())
       if (lastRefusal || signal.aborted || !readPrinterBinding(binding))
         return false
       sentMono = now.mono
       sentAt = now.wall
+      if (postWrite) {
+        clearTimeout(postWriteTimer)
+        resultDeadline = now.mono + U1_CONTROL_RESULT_TIMEOUT_MS
+        postWriteTimer = setTimeout(
+          () => postWrite.abort(),
+          U1_CONTROL_RESULT_TIMEOUT_MS,
+        )
+      }
       permitted = true
       return true
     }
@@ -892,10 +920,13 @@ export function createApiCommandRunner(config: {
       } catch {
         threw = true
       }
+      clearTimeout(postWriteTimer)
     }
     // Losing the inbox after positive local confirmation only affects reporting.
     const interrupted =
-      signal.aborted && !(jobWatch && acknowledged && confirmed)
+      (signal.aborted ||
+        (postWrite && config.clock.monotonicNow() >= resultDeadline)) &&
+      !(jobWatch && acknowledged && confirmed)
     if (threw || interrupted || !acknowledged || !confirmed) jobWatch?.dispose()
     if (attempted && !guardCalled) {
       finishCommand(

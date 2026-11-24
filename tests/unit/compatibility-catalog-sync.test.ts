@@ -112,9 +112,9 @@ describe('sincronização do catálogo de compatibilidade', () => {
     expect(anycubicCatalog.length).toBe(5)
     expect(bambuCatalog.length).toBe(5)
     expect(crealityCatalog.length).toBe(5)
-    expect(klipperCatalog.length).toBe(5)
+    expect(klipperCatalog.length).toBe(6)
     expect(lanCatalog.length).toBe(2)
-    expect(catalogById.size).toBe(22)
+    expect(catalogById.size).toBe(23)
   })
 
   it('mantém todo status simulado acompanhado de limitação em pt-BR', () => {
@@ -175,8 +175,8 @@ describe('sincronização do catálogo de compatibilidade', () => {
       expect(kobra.capabilities[capability]).toBe('simulated')
     // A câmera nativa não está ligada à sessão de mídia do produto.
     expect(kobra.capabilities.camera).toBe('unknown')
-    // AMS/ACE aparecem na telemetria, mas fora do vocabulário de comandos assinados.
-    expect(kobra.capabilities.materials).toBe('unknown')
+    // Seleção e carga de materiais foram exercitadas com comandos assinados no simulador.
+    expect(kobra.capabilities.materials).toBe('simulated')
   })
 
   it('liga a LAN Anycubic ao identificador aceito pelo driver', () => {

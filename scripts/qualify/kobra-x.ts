@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: MIT
-import { connect as mqttConnect, type IClientOptions } from 'mqtt'
+import { MqttClient } from 'mqtt'
 import { readFileSync } from 'node:fs'
+import {
+  anycubicTlsTrustError,
+  connectAnycubicTls,
+  normalizeAnycubicPin,
+} from '../../packages/connector/src/anycubic/tls-trust.ts'
 import {
   readKobraXInfo,
   recoverKobraXCredentials,
 } from '../../packages/connector/src/kobra-x/discovery.ts'
 import { decodeAnycubicReport } from '../../packages/connector/src/anycubic/report.ts'
 import { resolveKobraClientIdentity } from '../../packages/connector/src/config/kobra-x-cert.ts'
-import { createKobraXMqttTlsOptions } from './kobra-x-tls.ts'
 import type {
   QualifyCliOptions,
   ObservedIdentity,
@@ -47,6 +51,7 @@ export async function qualifyKobraX(
   const mqttPort = options.port ?? 9883
   const timeoutMs = options.timeoutMs ?? 10_000
   const observeMs = Math.max(2000, Math.min(timeoutMs, 9000))
+  const pin = normalizeAnycubicPin(options.pinSha256 ?? credentials.pinSha256)
 
   const identity: ObservedIdentity = {
     vendor: 'Anycubic',
@@ -79,28 +84,34 @@ export async function qualifyKobraX(
   const ca = options.caFile
     ? readFileSync(options.caFile, 'utf8')
     : credentials.caPem
-  const pinSha256 = options.pinSha256 ?? credentials.pinSha256
-
   const reportBase = `anycubic/anycubicCloud/v1/printer/public/${modeId}/${deviceId}/`
   const requestBase = `anycubic/anycubicCloud/v1/slicer/printer/${modeId}/${deviceId}/`
 
-  const mqttTls = createKobraXMqttTlsOptions(ca, pinSha256)
-  const client = mqttConnect({
-    host,
-    port: mqttPort,
-    protocol: 'mqtts',
-    cert: clientIdentity.certPem,
-    key: clientIdentity.keyPem,
-    ...mqttTls,
-    username,
-    password,
-    protocolVersion: 4,
-    clean: true,
-    keepalive: 60,
-    resubscribe: false,
-    reconnectPeriod: 0,
-    connectTimeout: Math.min(timeoutMs, 5000),
-  } as IClientOptions)
+  const client = new MqttClient(
+    () =>
+      connectAnycubicTls(
+        {
+          host,
+          port: mqttPort,
+          ...(ca !== undefined ? { ca } : {}),
+          cert: clientIdentity.certPem,
+          key: clientIdentity.keyPem,
+          minVersion: 'TLSv1.2',
+        },
+        pin,
+      ),
+    {
+      manualConnect: true,
+      username,
+      password,
+      protocolVersion: 4,
+      clean: true,
+      keepalive: 60,
+      resubscribe: false,
+      reconnectPeriod: 0,
+      connectTimeout: Math.min(timeoutMs, 5000),
+    },
+  )
 
   const observedFields = new Set<string>()
   const sample: Record<string, unknown> = {}
@@ -197,9 +208,9 @@ export async function qualifyKobraX(
         Math.min(timeoutMs, 5000),
       )
       client.on('message', onMessage)
-      client.once('error', (error) => {
+      client.once('error', (error: Error & { code?: string | number }) => {
         clearTimeout(timer)
-        reject(error instanceof Error ? error : new Error(String(error)))
+        reject(anycubicTlsTrustError(error) ?? error)
       })
       client.once('connect', () => {
         clearTimeout(timer)
@@ -227,6 +238,7 @@ export async function qualifyKobraX(
           resolve()
         })
       })
+      client.connect()
     })
 
     await new Promise<void>((resolve) => setTimeout(resolve, observeMs))

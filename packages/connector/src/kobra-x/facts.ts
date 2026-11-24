@@ -49,6 +49,20 @@ export interface KobraXFacts {
   skippedObjects: readonly number[]
 }
 
+/** LAN print indices are distinct across the holder and ACE in a mixed report. */
+export function kobraXPrintSlots(boxes: KobraXFacts['boxes']) {
+  const hasHolder = boxes.some((box) => box.id === -1)
+  const hasAce = boxes.some((box) => box.id >= 0)
+  return boxes.flatMap((box) => {
+    if (box.id < -1 || box.id > 3) return []
+    const count = box.id === -1 && hasAce ? 3 : 4
+    const offset = box.id < 0 ? 0 : box.id * 4 + (hasHolder ? 4 : 0)
+    return box.slots
+      .filter((slot) => slot.index >= 0 && slot.index < count)
+      .map((slot) => ({ boxId: box.id, slot, amsIndex: offset + slot.index }))
+  })
+}
+
 function nonnegative(value: unknown) {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0
     ? value

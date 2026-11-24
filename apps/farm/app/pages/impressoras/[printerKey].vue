@@ -36,6 +36,7 @@ import {
   liveControlActionAvailability,
 } from '../../utils/farm-control.ts'
 import { printableFile } from '../../utils/files-view.ts'
+import { kobraXInputs, kobraXMapping } from '../../utils/kobra-x-inputs.ts'
 import { extendedLabel } from '../../utils/farm-control-extended.ts'
 import {
   formatPrinterStateLabel,
@@ -75,12 +76,40 @@ const vendorCatalog = computed(() => {
   return vendor ? vendorDetailCatalog[vendor] : undefined
 })
 const printFile = ref('')
-const canStartStoredFile = computed(() =>
-  printableFile(printFile.value, vendorFrame.value?.vendor),
+const kobraInputCount = ref(1)
+const kobraInputs = ref(['', '', '', '', '', '', ''])
+const availableKobraInputs = computed(() =>
+  kobraXInputs(state.value?.materials),
+)
+const selectedKobraInput = computed(() =>
+  availableKobraInputs.value.find(
+    (input) => String(input.id) === kobraInputs.value[0],
+  ),
+)
+const selectedKobraMapping = computed(() =>
+  kobraXMapping(
+    kobraInputs.value,
+    kobraInputCount.value,
+    availableKobraInputs.value,
+  ),
+)
+const canStartStoredFile = computed(
+  () =>
+    printableFile(printFile.value, vendorFrame.value?.vendor) &&
+    (vendorFrame.value?.vendor !== 'kobra-x' ||
+      /\.(3mf|gcode)$/i.test(printFile.value)),
 )
 function startStoredFile(event: Event) {
-  if (canStartStoredFile.value)
-    control('start_print', event, { file: printFile.value })
+  if (!canStartStoredFile.value) return
+  if (vendorFrame.value?.vendor === 'kobra-x') {
+    if (!selectedKobraMapping.value) return
+    control('start_print', event, {
+      file: printFile.value,
+      ams_mapping: selectedKobraMapping.value,
+    })
+    return
+  }
+  control('start_print', event, { file: printFile.value })
 }
 const systemFrame = computed(() =>
   detailFrame.value?.capabilities.includes('system')
@@ -1039,9 +1068,62 @@ watch(
         >
           Informe o nome de um arquivo .gcode já armazenado na impressora.
         </span>
+        <template v-if="vendorFrame.vendor === 'kobra-x'">
+          <label for="detail-kobra-count"
+            >Quantidade de filamentos do arquivo</label
+          >
+          <select id="detail-kobra-count" v-model.number="kobraInputCount">
+            <option v-for="count in 7" :key="count" :value="count">
+              {{ count }}
+            </option>
+          </select>
+          <template v-for="index in kobraInputCount" :key="index">
+            <label :for="`detail-kobra-input-${index}`"
+              >Entrada do filamento {{ index }}</label
+            >
+            <select
+              :id="`detail-kobra-input-${index}`"
+              v-model="kobraInputs[index - 1]"
+              required
+            >
+              <option value="">Selecione uma entrada</option>
+              <option
+                v-for="input in availableKobraInputs"
+                :key="input.id"
+                :value="String(input.id)"
+              >
+                {{ input.label }}
+              </option>
+            </select>
+          </template>
+          <Button
+            v-if="state?.controls?.includes('load_filament')"
+            type="button"
+            :disabled="
+              !selectedKobraInput ||
+              !availability('load_filament').available ||
+              commandInFlight
+            "
+            @click="
+              (event: Event) =>
+                selectedKobraInput &&
+                control('load_filament', event, { tray: selectedKobraInput.id })
+            "
+          >
+            Carregar filamento da entrada 1
+          </Button>
+          <span
+            >Selecione um arquivo .3mf ou .gcode já armazenado na
+            impressora.</span
+          >
+          <span v-if="!availableKobraInputs.length"
+            >Nenhuma entrada de filamento disponível na observação atual.</span
+          >
+        </template>
         <Button
           type="submit"
           :disabled="
+            (vendorFrame.vendor === 'kobra-x' && !selectedKobraMapping) ||
             !availability('start_print').available ||
             commandInFlight ||
             !canStartStoredFile

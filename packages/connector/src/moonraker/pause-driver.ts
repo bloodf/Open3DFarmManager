@@ -1,4 +1,5 @@
 import { moonrakerAuthHeaders } from '../config/moonraker.ts'
+import { fetchMoonrakerConfigfile } from '../machine-profile/moonraker-fetch.ts'
 import {
   ConfigWriteRefused,
   createMoonrakerConfigEditor,
@@ -16,6 +17,7 @@ import {
   controlTargetState,
   ExcludeObjectArguments,
   controlSourceState,
+  U1_CONTROL_RESULT_TIMEOUT_MS,
   type ControlAction,
   type ExtendedControlAction,
 } from '../../../farm-protocol/src/control-actions.ts'
@@ -32,7 +34,24 @@ import {
   excludeObjectWire,
 } from './control-print-status.ts'
 import { buildMoonrakerCommand } from './commands.ts'
-import { SnapmakerU1CommandRefused, isDeclaredSnapmakerU1 } from './u1-tools.ts'
+import { isDeclaredSnapmakerU1 } from './u1-tools.ts'
+import {
+  SNAPMAKER_U1_MARKER,
+  SnapmakerU1CommandRefused,
+  snapmakerU1Controls,
+  snapmakerU1ToolHeaters,
+} from './u1-marker.ts'
+import {
+  requireU1HeaterLimit,
+  U1ConfigRefusal,
+  u1ConfigSettings,
+  u1ConsoleAudit,
+  u1ConsoleTool,
+  u1HomeAudit,
+  u1JogAudit,
+  u1TemperatureAudit,
+  type U1Audit,
+} from './u1-audit.ts'
 import {
   parseQueueOp,
   parseQueueStatus,
@@ -141,6 +160,9 @@ const Snapshot = z.strictObject({
     }),
   }),
 })
+const U1AuditSnapshot = Snapshot.extend({
+  status: Snapshot.shape.status.loose(),
+})
 const commandWire = (action: ControlAction) =>
   JSON.stringify({
     jsonrpc: '2.0',
@@ -198,6 +220,14 @@ export function openFixedMoonrakerPause(input: {
   )
     throw new Error('Invalid local pause binding')
   const mapping = candidateMapping
+  const u1 = isDeclaredSnapmakerU1(mapping.printer_key)
+  const u1Controls = u1 ? snapmakerU1Controls(input.objects) : undefined
+  const toolHeaters = u1 ? snapmakerU1ToolHeaters(input.objects) : []
+  const commandObjects =
+    u1 && input.objects && !input.objects.includes(SNAPMAKER_U1_MARKER)
+      ? [...input.objects, SNAPMAKER_U1_MARKER]
+      : input.objects
+  let u1Audit: U1Audit | undefined
   const selected = validateMoonrakerInput({
     assignment: {
       printerKey: mapping.printer_key,
@@ -429,10 +459,11 @@ export function openFixedMoonrakerPause(input: {
       const started = now()
       const id = index === 0 ? 1 : index + 2
       const readRun = index === 0 && input.observeRun !== undefined
+      const audit = index > 0 ? u1Audit : undefined
       const wire =
         excludedName !== undefined
           ? excludeObjectProbe(id)
-          : withFilename || readRun
+          : withFilename || readRun || audit
             ? JSON.stringify({
                 jsonrpc: '2.0',
                 id,
@@ -442,19 +473,25 @@ export function openFixedMoonrakerPause(input: {
                     webhooks: ['state'],
                     print_stats: readRun
                       ? ['state', 'filename', 'total_duration', 'info']
-                      : ['state', 'filename'],
+                      : withFilename
+                        ? ['state', 'filename']
+                        : ['state'],
+                    ...audit?.objects,
                   },
                 },
               })
             : QUERIES[index]
       if (!wire) throw failure()
-      const snapshot = Snapshot.parse(await request(id, wire, deadline))
+      const result = await request(id, wire, deadline)
+      const snapshot = (audit ? U1AuditSnapshot : Snapshot).parse(result)
       const received = now()
       current()
       if (received >= deadline || snapshot.eventtime <= sourceTime)
         throw failure()
       sourceTime = snapshot.eventtime
       const state = snapshot.status.print_stats.state
+      const auditEffect =
+        state !== 'error' && audit?.effect(snapshot.status, started)
       const observation: ControlObservation = Object.freeze({
         assignmentId: mapping.assignment_id,
         printerKey: mapping.printer_key,
@@ -471,6 +508,8 @@ export function openFixedMoonrakerPause(input: {
         readyObservedMono: started,
         printStateObservedMono: started,
         receivedMono: received,
+        ...(toolHeaters.length ? { toolHeaters } : {}),
+        ...(auditEffect ? { effect: auditEffect } : {}),
         ...(withFilename && snapshot.status.print_stats.filename !== undefined
           ? {
               effect: {
@@ -552,7 +591,10 @@ export function openFixedMoonrakerPause(input: {
     if (signal.aborted) stop()
     try {
       const started = now()
-      operationDeadline = Math.min(lifetimeDeadline, started + 5000)
+      operationDeadline = Math.min(
+        lifetimeDeadline,
+        started + Math.max(5000, cap ?? 0),
+      )
       operationTimer = setTimeout(stop, operationDeadline - started)
     } catch {
       stop()
@@ -584,9 +626,9 @@ export function openFixedMoonrakerPause(input: {
     action: ExtendedControlAction,
     args: Record<string, unknown>,
   ): string | undefined {
-    if (!input.objects) return undefined
+    if (!commandObjects) return undefined
     try {
-      const call = buildMoonrakerCommand(action, args, input.objects)
+      const call = buildMoonrakerCommand(action, args, commandObjects)
       return JSON.stringify({
         jsonrpc: '2.0',
         id: 2,
@@ -596,6 +638,15 @@ export function openFixedMoonrakerPause(input: {
     } catch {
       return undefined
     }
+  }
+  async function readU1Settings(signal: AbortSignal) {
+    // Installed config can exceed the fixed command socket's reply ceiling.
+    const result = await fetchMoonrakerConfigfile({
+      origin: selected.origin,
+      limits: selected.limits,
+      signal: AbortSignal.any([ownerSignal, signal]),
+    }).catch(() => undefined)
+    return u1ConfigSettings(result)
   }
   /**
    * Motion: refusals are decided from one toolhead read before the single
@@ -617,18 +668,32 @@ export function openFixedMoonrakerPause(input: {
       // Same builder as the send; it also rejects malformed arguments.
       const wire = extendedWire(action, args)
       if (wire === undefined) throw new MotionRefusal('invalid')
-      if (motionNeedsState(action))
-        refuseMotion(
-          action,
-          args,
-          parseMotionState(
-            await request(11, motionQueryWire(11), lifetimeDeadline),
-          ),
+      if (motionNeedsState(action)) {
+        const state = parseMotionState(
+          await request(11, motionQueryWire(11), lifetimeDeadline),
         )
+        refuseMotion(action, args, state)
+        if (u1 && action === 'jog')
+          u1Audit = u1JogAudit(
+            args,
+            state,
+            await readU1Settings(requested.signal),
+          )
+      }
       return await send(wire, requested, 5000)
     } catch (error) {
       stop()
       await closed
+      if (u1 && error instanceof U1ConfigRefusal) throw error
+      if (u1 && error instanceof MotionRefusal)
+        throw Object.assign(error, {
+          refusal:
+            error.code === 'invalid'
+              ? 'invalid-command'
+              : error.code === 'unsupported'
+                ? 'unsupported-action'
+                : 'state',
+        })
       throw error instanceof MotionRefusal ? error : failure()
     }
   }
@@ -839,25 +904,98 @@ export function openFixedMoonrakerPause(input: {
         !consoleSupported(input.objects)
       )
         throw new ConsoleRefusal('unsupported')
-      refuseConsole(
+      const line = refuseConsole(
         args,
         parseConsoleState(
           await request(11, consoleQueryWire(11), lifetimeDeadline),
         ),
+        u1
+          ? ['SDCARD_PRINT_FILE_WITH_PARAMETERS', 'SDCARD_PRINT_PL_RESTORE']
+          : undefined,
       )
-      const wire = extendedWire('gcode', args)
+      let wireArgs = args
+      let cap = 5000
+      if (u1) {
+        const consoleLine = line.trim()
+        const tool = u1ConsoleTool(consoleLine, input.objects)
+        if (tool) {
+          const state = parseMotionState(
+            await request(12, motionQueryWire(12), lifetimeDeadline),
+          )
+          if (!state.ready || state.printState === 'error')
+            throw new ConsoleRefusal('unknown-state')
+          if (state.printState === 'printing' || state.printState === 'paused')
+            throw new ConsoleRefusal('not-allowed')
+          if (!['x', 'y', 'z'].every((axis) => state.homedAxes.includes(axis)))
+            throw new ConsoleRefusal('unknown-state')
+          // A0 selects the named physical tool without the current job's remap.
+          wireArgs = { line: `${consoleLine.toUpperCase()} A0` }
+          cap = U1_CONTROL_RESULT_TIMEOUT_MS
+        }
+        u1Audit = u1ConsoleAudit(consoleLine, tool)
+      }
+      const wire = extendedWire('gcode', wireArgs)
       if (wire === undefined) throw new ConsoleRefusal('invalid')
       takeConsoleRate(binding, input.clock.monotonicNow())
       extended = 'gcode'
-      return await send(wire, requested, 5000)
+      return await send(wire, requested, cap)
     } catch (error) {
       stop()
       await closed
+      if (u1 && error instanceof MotionRefusal)
+        throw new ConsoleRefusal('unknown-state')
       throw error instanceof ConsoleRefusal ? error : failure()
     }
   }
   const requestRead = (id: number, wire: string) =>
     request(id, wire, lifetimeDeadline)
+  async function executeU1Heater(
+    action: 'set_temperature' | 'set_tool_temperature',
+    args: Record<string, unknown>,
+    requested: Parameters<PauseDriver['pauseOnce']>[0],
+  ) {
+    const wire = extendedWire(action, args)
+    if (wire === undefined)
+      throw Object.assign(Error('Invalid U1 heater arguments'), {
+        refusal: 'invalid-command',
+      })
+    const audit = u1TemperatureAudit(action, args)
+    if (audit.target !== 0)
+      requireU1HeaterLimit(
+        await readU1Settings(requested.signal),
+        audit.heater,
+        audit.target,
+      )
+    extended = action
+    u1Audit = audit
+    return send(wire, requested, 5000)
+  }
+  async function executeU1Home(
+    args: Record<string, unknown>,
+    requested: Parameters<PauseDriver['pauseOnce']>[0],
+  ) {
+    const wire = extendedWire('home', args)
+    if (wire === undefined)
+      throw Object.assign(Error('Invalid U1 home arguments'), {
+        refusal: 'invalid-command',
+      })
+    const audit = u1HomeAudit(args)
+    if (audit.zOnly) {
+      const state = await request(11, motionQueryWire(11), lifetimeDeadline)
+        .then(parseMotionState)
+        .catch(() => undefined)
+      if (
+        !state?.ready ||
+        !['standby', 'complete', 'cancelled'].includes(state.printState) ||
+        !state.homedAxes.includes('x') ||
+        !state.homedAxes.includes('y')
+      )
+        throw new U1ConfigRefusal('U1 Z homing requires homed X and Y axes')
+    }
+    extended = 'home'
+    u1Audit = audit
+    return send(wire, requested, U1_CONTROL_RESULT_TIMEOUT_MS)
+  }
   async function configWrite(
     args: Record<string, unknown>,
     request: Parameters<NonNullable<PauseDriver['execute']>>[2],
@@ -927,9 +1065,7 @@ export function openFixedMoonrakerPause(input: {
       args: Record<string, unknown>,
       request: Parameters<NonNullable<PauseDriver['execute']>>[2],
     ) {
-      // A declared Snapmaker U1 has no qualified command; refuse before any
-      // write, also before its object list has been detected.
-      if (isDeclaredSnapmakerU1(mapping.printer_key))
+      if (u1 && !u1Controls?.includes(action))
         return Promise.reject(new SnapmakerU1CommandRefused(action))
       if (action === 'pause' || action === 'resume' || action === 'cancel')
         return send(commandWire(action), request)
@@ -963,6 +1099,12 @@ export function openFixedMoonrakerPause(input: {
       if (action === 'exclude_object') return excludeObject(args, request)
       if (action === 'bed_mesh') return bedMesh(args, request)
       if (action === 'gcode') return executeConsole(args, request)
+      if (
+        u1 &&
+        (action === 'set_temperature' || action === 'set_tool_temperature')
+      )
+        return executeU1Heater(action, args, request)
+      if (u1 && action === 'home') return executeU1Home(args, request)
       if (action === 'extrude') return extrude(args, request)
       if (action === 'power') {
         extended = 'power'
@@ -986,7 +1128,7 @@ export function openFixedMoonrakerPause(input: {
       return send(extendedWire(action, args), request, 5000)
     },
     pauseOnce(request: Parameters<PauseDriver['pauseOnce']>[0]) {
-      if (isDeclaredSnapmakerU1(mapping.printer_key))
+      if (u1 && !u1Controls?.includes(request.action ?? 'pause'))
         return Promise.reject(
           new SnapmakerU1CommandRefused(request.action ?? 'pause'),
         )

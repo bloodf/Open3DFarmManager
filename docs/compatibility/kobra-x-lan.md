@@ -5,9 +5,10 @@ License of this document: MIT, same as OpenFarm.
 
 ## Purpose and clean-room rules
 
-OpenFarm reaches the Kobra X today only through the KobraLink container, which is GPL-3.0. This
-document describes the Kobra X's LAN protocol in facts and message shapes so that an MIT-licensed
-native adapter can be implemented without copying GPL or AGPL code.
+OpenFarm connects directly to the Kobra X over its native LAN endpoints.
+This document records the protocol facts and message shapes used by the
+MIT-licensed adapter. KobraLink and other third-party sources contribute only
+reported protocol observations.
 
 Rules for anyone editing this document or implementing from it:
 
@@ -144,6 +145,14 @@ The focused loopback test checks the supplied signature and ciphertext vectors.
 They are synthetic and establish agreement with S6. Hardware TLS interoperability,
 firmware compatibility, and browser acceptance require separate evidence.
 
+### Hardware qualification route
+
+Use the printer's direct native LAN endpoints for every Kobra X test and
+qualification. Read identity from `/info` on port 18910 and use the printer's
+MQTT broker on port 9883. Never use the cortex-kobralink Moonraker bridge for
+Kobra X tests, qualification, or catalog evidence. Verify the direct printer
+address from private configuration.
+
 ### Activation: native setup, persistence and confirmation (E16.22)
 
 New Kobra X setup in the web UI uses the native `kobra-x` configuration backend
@@ -154,32 +163,30 @@ assignments and pending bridge operations are untouched.
 1. The browser sends an IPv4 (private, port 18910) and the operator's own client
    certificate. The discovery panel can prefill the address from SSDP; discovery
    proves neither identity nor connection.
-2. The Connector refuses endpoints outside its configured printer networks and
-   any port other than 18910, stages the certificate in private custody (0600),
-   reads `/info`, recovers the MQTT credentials in memory, and logs in over
-   mutual TLS. That login is the connection confirmation: without it nothing is
-   offered for commit. A refused certificate, LAN mode off, refused credentials
-   and an unreachable printer each fail with their own code and leave no staged
-   file behind.
-3. The server certificate leaf is pinned on first use (SHA-256). The
-   recovered credentials, the `/info` token and the private key are never
-   journaled, returned, or written outside the certificate files.
-4. A signed review shows the observed identity (device id derived from the model
-   and device id, firmware when reported) as unqualified. Commit writes a
-   binding (address, model id, device id, certificate path, pin) to
-   `kobra-x-bindings.json` beside the runtime file, plus the assignment. The
-   runtime file and every KobraLink row are not modified. A printer already
-   claimed by a native binding or a KobraLink row is an identity conflict.
-5. Collection reconnects with the pinned fingerprint and re-proves the device
-   identity on every connection. A changed fingerprint, a different device or a
-   missing certificate yields an offline printer, never a healthy one.
+2. The Connector checks the configured printer networks and the identity port,
+   then stages the client certificate in private custody (0600). During signed
+   onboarding it captures the broker's public-key fingerprint on a TLS
+   connection that sends no MQTT data. The subsequent broker login must match
+   that fingerprint before MQTT credentials can be sent.
+3. The Connector reads `/info`, recovers MQTT credentials in memory, and
+   confirms login over the pinned mutual TLS connection. The credentials,
+   `/info` token, and private key stay out of journal entries and receipts.
+4. The existing signed review and commit persist the address, model ID, device
+   ID, client certificate path, and SPKI SHA-256 pin in
+   `kobra-x-bindings.json` next to the runtime file. Existing assignments and
+   duplicate-identity checks still apply. Discovery alone writes no trust.
+5. Collection uses the stored pin on every connection and rechecks the device
+   identity. A certificate renewal that keeps the pinned public key works
+   automatically. A different key takes the printer offline and leaves the
+   stored pin intact. An HTTP `/info` response can identify a model and serial
+   but cannot prove that a replacement public key belongs to that printer.
 
-Limits of this activation: the binding store follows the Bambu pattern, so the
-agent runtime does not yet load it into its assignment mapping; control commands
-for a native assignment are not routed (read-only); camera exposure is not
-enabled; certificate-refusal and LAN-off causes are inferred from adapter errors,
-not from hardware. All of it is proven only against the loopback mock and the
-synthetic vectors above.
+The Connector loads the binding into its local assignment mapping. Adding that
+assignment to `pause.control.assignmentIds` enables the existing signed command
+path for the native actions listed in [Kobra X detail capabilities](../protocols/kobra-x-detail.md).
+The signed path has loopback evidence. The [hardware reports](../hardware-reports/)
+record pinned LAN telemetry separately. Native camera media is unavailable.
+Certificate-refusal and LAN-off diagnostics come from adapter errors.
 
 ### `POST /gcode_upload`
 
@@ -198,9 +205,14 @@ synthetic vectors above.
 - The client certificate and its key are not in this repository. OpenFarm must not bundle them. The
   adapter must obtain them from the user's own installation, through an explicit user action, and
   never from the repository. (policy; see [Security notes](#security-notes))
-- The printer's server certificate is self-signed. S1 does not verify it. OpenFarm's adapter must
-  pin or verify it under its own policy before use, and this document does not decide that policy.
-  (observed fact: self-signed, S1)
+- The printer's server certificate is self-signed (observed, S1). The November
+  23 owner report described one Kobra X certificate valid from 1970 to 1979.
+  The driver uses an exact SPKI SHA-256 pin for new bindings and also accepts
+  matching legacy leaf-certificate SHA-256 pins. It checks the pin before
+  MQTT traffic. Pinned connections rely on the exact key or leaf match, so
+  certificate dates do not block them. Unpinned connections use normal TLS
+  verification. A generated 1970–1979 certificate exercises expiry handling
+  in loopback tests.
 - S1 reports that a working connection from OrcaSlicer's runtime (OpenSSL 1.1.1) used the cipher
   string `DEFAULT:@SECLEVEL=0`. (reported, S1; the adapter's TLS stack may need a different setting)
 
@@ -236,6 +248,8 @@ anycubic/anycubicCloud/v1/{slicer|web}/printer/public/<modeId>/<deviceId>/#
 Types in S1 (`<type>` in the topic): `info`, `status`, `print`, `tempature` (the printer's own
 spelling), `multiColorBox`, `light`, `fan`, `file`, `axis`, `skip`, `video`.
 
+- S1 reports no raw G-code console channel. Its console is a log of the
+  client's own requests, responses and printer state changes.
 - These types are named in S1. Per-message status is given in each section below.
 - `properties` is named only in S1's Workbench table. (reported, `not verified`)
 
@@ -273,6 +287,9 @@ Multiple clients: observed on firmware 2.0.2.8 (S1). Two MQTT sessions coexisted
 (Kobralink) stayed connected the whole time, and each client sees reports caused by the other. The
 adapter must therefore not assume it is the only reader of the report topics. S1 keeps one
 connection per printer on its side.
+
+The Connector ignores MQTT reports carrying the retained flag and requests
+fresh state before permitting a signed command.
 
 ## Status and reports
 
@@ -339,6 +356,15 @@ Observed on firmware 2.0.2.8 (S1):
 | `ams_settings.ams_box_mapping` | filament-to-slot mapping | Chosen in the slicer's print dialog. |
 | `task_settings` | object of print options | See the table below. |
 <!-- prettier-ignore-end -->
+
+Each mapping entry contains the slicer's `paint_index` and the printer's
+`ams_index`. The reported holder uses box id `-1`, with indices 0–2 when an
+ACE is attached. The first ACE uses box id 0 and indices 4–7. The reported
+formula for multiple ACE units is `4 + unit * 4 + slot` when the holder is
+present. S1 independently read back index 4 for the first ACE's first slot.
+An ACE-only report is ambiguous: the references give indices 0–3 for a
+single unit, while S1 saw the same readback of 4 on a printer that reported
+only box 0. Signed explicit print mapping requires a reported holder.
 
 Important: `filepath` set to `/<name>` makes the printer end the task with code 10111
 ("abnormal end of task") about one second after the start. (observed, S1) A start report alone is

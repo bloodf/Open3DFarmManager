@@ -299,9 +299,11 @@ export async function collectIntoQueue(input: {
           throw error
         }
         const snapshotDropped = queue.storageLost !== lostBeforeSnapshot
-        if (confirmsRelease && snapshotDropped)
+        // The Farm ignores out-of-order rows, so a machine block carried by one
+        // was never recorded there; the next in-order snapshot must resend it.
+        if (outOfOrder || (confirmsRelease && snapshotDropped))
           machineGate.forget(printer.printerKey)
-        else if (!outOfOrder) {
+        if (!outOfOrder && !(confirmsRelease && snapshotDropped)) {
           latestStates.set(printer.printerKey, current)
           lastControls.set(printer.printerKey, JSON.stringify(controls ?? null))
           if (confirmsRelease && refresh?.releasedAtMonoMs === pendingRelease)

@@ -6,7 +6,7 @@
 
 Um projeto open source para reunir impressoras Klipper/Moonraker, materiais do Spoolman e acesso pelo navegador, com um Connector na sua rede local.
 
-**MIT · Interface em português · Nuxt 4 + TypeScript · Em desenvolvimento**
+**AGPL-3.0-or-later · Interface em português · Nuxt 4 + TypeScript · Em desenvolvimento**
 
 [Conheça a interface](#conheça-a-interface) · [Execute localmente](#execute-localmente) · [Acompanhe o progresso](docs/PHASE-0.md) · [Contribua](#contribua)
 

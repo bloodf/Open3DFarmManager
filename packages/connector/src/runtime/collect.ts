@@ -209,7 +209,11 @@ export async function collectIntoQueue(input: {
         diagnostic({ kind: 'unavailable', reason: event.reason })
         const previous = latestStates.get(event.printerKey)
         if (previous && previous.state !== 'offline') {
-          const { controls: _controls, ...rest } = previous
+          const {
+            controls: _controls,
+            materials: _materials,
+            ...rest
+          } = previous
           onEvent({
             kind: 'snapshot',
             printer: {
@@ -338,14 +342,34 @@ export async function collectIntoQueue(input: {
       let nextMachineRead = -Infinity
       let machinePending = false
       let latest: RawPrinterObservation | undefined
+      // Keep the driver-owned snapshot separate from the optional Spoolman
+      // enrichment so expired evidence cannot be copied into later records.
+      let moonrakerState: PrinterState | undefined
+      let publishedMaterials: string | undefined
       function freshMaterials() {
         if (
-          cachedInventory === inventory &&
-          inventory?.kind === 'observed' &&
-          cached &&
-          cached.observedAtMonoMs + 5000 > performance.now()
+          cachedInventory !== inventory ||
+          inventory?.kind !== 'observed' ||
+          (cached && cached.observedAtMonoMs + 5000 <= performance.now())
         )
-          return cached
+          cached = undefined
+        return cached?.materials
+      }
+      function publishMaterialChange() {
+        if (!moonrakerState || signal.aborted) return
+        const materials = moonrakerState.materials ?? freshMaterials()
+        const fingerprint = JSON.stringify(materials ?? null)
+        if (fingerprint === publishedMaterials) return
+        publishedMaterials = fingerprint
+        const previous = latestStates.get(assignment.printerKey)
+        onEvent({
+          kind: 'snapshot',
+          printer: {
+            ...moonrakerState,
+            ...(materials ? { materials } : {}),
+            observedAt: Math.max(Date.now(), (previous?.observedAt ?? 0) + 1),
+          },
+        })
       }
       const history = input.importMoonrakerHistory
         ? createMoonrakerHistoryImport({
@@ -472,17 +496,18 @@ export async function collectIntoQueue(input: {
               })
             materialReads.add(machineRead)
           }
-          const material = freshMaterials()
+          freshMaterials()
+          publishMaterialChange()
           input.onRawObservation?.({
             ...value,
             ...(firmwareObservation ? { firmwareObservation } : {}),
-            ...(material ? { materialsObservation: material } : {}),
+            ...(cached ? { materialsObservation: cached } : {}),
           })
-          if (inventory?.kind !== 'observed' || pending) return
+          if (!selected || !inventory || pending || !input.onRawObservation)
+            return
           pending = true
           const snapshot = inventory
           const started = performance.now()
-          let noActiveSpool = false
           const read = getSpoolmanMaterials(async () => {
             const session = moonrakerSession(selected.origin, selected.limits)
             const headers = session
@@ -502,10 +527,7 @@ export async function collectIntoQueue(input: {
                 ]),
               },
             )
-            if (!response.ok || !response.body) {
-              await response.body?.cancel().catch(() => {})
-              throw new Error('Moonraker active spool unavailable')
-            }
+            if (!response.ok || !response.body) return null
             const reader = response.body.getReader()
             const chunks: Uint8Array[] = []
             let size = 0
@@ -514,31 +536,27 @@ export async function collectIntoQueue(input: {
                 const chunk = await reader.read()
                 if (chunk.done) break
                 size += chunk.value.length
-                if (size > 4096)
-                  throw new Error('Moonraker active spool response bound')
+                if (size > 4096) return null
                 chunks.push(chunk.value)
               }
             } finally {
               await reader.cancel()
             }
             const body = JSON.parse(Buffer.concat(chunks).toString())
-            noActiveSpool = body?.result?.spool_id === null
             return parseMoonrakerActiveSpoolId(body)
           }, snapshot)
             .then((materials) => {
               if (
-                (!materials && !noActiveSpool) ||
+                !materials ||
                 signal.aborted ||
                 latest?.epoch !== value.epoch ||
                 inventory !== snapshot ||
                 performance.now() - started >= 5000
               )
                 return
-              cached = {
-                materials: materials ?? latest.printer.materials ?? [],
-                observedAtMonoMs: started,
-              }
+              cached = { materials, observedAtMonoMs: started }
               cachedInventory = snapshot
+              publishMaterialChange()
               const current = latest
               input.onRawObservation?.({
                 ...current,
@@ -546,24 +564,6 @@ export async function collectIntoQueue(input: {
                 receivedAtMonoMs: performance.now(),
                 materialsObservation: cached,
               })
-              // The durable Moonraker fingerprint can stay unchanged while
-              // an idle printer's active spool changes.
-              const queued = latestStates.get(current.printerKey)
-              if (
-                queued &&
-                queued.state !== 'offline' &&
-                JSON.stringify(queued.materials ?? []) !==
-                  JSON.stringify(cached.materials)
-              ) {
-                onEvent({
-                  kind: 'snapshot',
-                  printer: {
-                    ...queued,
-                    materials: cached.materials,
-                    observedAt: Math.max(Date.now(), queued.observedAt + 1),
-                  },
-                })
-              }
             })
             .catch(() => {})
             .finally(() => {
@@ -576,26 +576,23 @@ export async function collectIntoQueue(input: {
           firmwareObservation = undefined
           latest = undefined
           cached = undefined
+          cachedInventory = undefined
+          moonrakerState = undefined
+          publishedMaterials = undefined
           input.onRawUnavailable?.(event)
         },
         onEvent: (event) => {
           if (event.kind === 'snapshot') {
-            const previous = latestStates.get(event.printer.printerKey)
-            const material = freshMaterials()
+            moonrakerState = machine
+              ? { ...event.printer, machine }
+              : event.printer
+            const materials = moonrakerState.materials ?? freshMaterials()
+            publishedMaterials = JSON.stringify(materials ?? null)
             onEvent({
               ...event,
               printer: {
-                ...event.printer,
-                ...(machine ? { machine } : {}),
-                ...(material ? { materials: material.materials } : {}),
-                ...(config.spoolman && previous
-                  ? {
-                      observedAt: Math.max(
-                        event.printer.observedAt,
-                        previous.observedAt + 1,
-                      ),
-                    }
-                  : {}),
+                ...moonrakerState,
+                ...(materials ? { materials } : {}),
               },
             })
           } else onEvent(event)

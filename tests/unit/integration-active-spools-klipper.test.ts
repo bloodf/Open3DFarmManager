@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, expect, test } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
 import { startMoonrakerMock } from '../../packages/sim-tools/src/mocks/moonraker-mock.ts'
 import { startSpoolmanMock } from '../../packages/sim-tools/src/mocks/spoolman-mock.ts'
 import { collectIntoQueue } from '../../packages/connector/src/runtime/collect.ts'
@@ -20,6 +20,7 @@ const closers: Array<() => Promise<void>> = []
 const directories: string[] = []
 
 afterEach(async () => {
+  vi.restoreAllMocks()
   for (const close of closers.splice(0)) await close()
   for (const directory of directories.splice(0))
     rmSync(directory, { recursive: true, force: true })
@@ -96,6 +97,10 @@ test('Klipper active spool reaches stored printer state and activeSpools', async
   directories.push(directory)
   const queue = new TelemetryQueue(join(directory, 'queue'), Date.now())
   const controller = new AbortController()
+  const now = performance.now.bind(performance)
+  let offset = 0
+  let inventoryObserved = false
+  vi.spyOn(performance, 'now').mockImplementation(() => now() + offset)
   const done = collectIntoQueue({
     config: parseLocalCollectorConfig({
       version: 1,
@@ -111,6 +116,10 @@ test('Klipper active spool reaches stored printer state and activeSpools', async
     queue,
     signal: controller.signal,
     onDiagnostic() {},
+    onRawObservation() {},
+    onInventory(snapshot) {
+      inventoryObserved = snapshot.kind === 'observed'
+    },
   })
 
   function states() {
@@ -157,6 +166,8 @@ test('Klipper active spool reaches stored printer state and activeSpools', async
   }
 
   try {
+    await settle(() => inventoryObserved && latest() !== undefined)
+    bump()
     await settle(() => latest()?.materials?.[0]?.materialType === 'PLA')
     const plaState = latest()!
     const plaStatus = await statusFor(plaState)
@@ -172,11 +183,12 @@ test('Klipper active spool reaches stored printer state and activeSpools', async
 
     const plaAt = plaState.observedAt
     moonrakerOptions.spoolId = null
+    offset += 5001
     bump()
     await settle(
       () =>
         (latest()?.observedAt ?? 0) > plaAt &&
-        latest()?.materials?.length === 0,
+        latest()?.materials === undefined,
     )
     const cleared = await statusFor(latest()!)
     expect(cleared.activeSpools).toBeUndefined()

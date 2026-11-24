@@ -1,3 +1,4 @@
+import { vitestPostgresOptions } from '../helpers/vitest-postgres.ts'
 import { appendFileSync } from 'node:fs'
 import postgres from 'postgres'
 import { describe, expect, it } from 'vitest'
@@ -35,7 +36,7 @@ it.runIf(process.env.OPENFARM_TEST_PHYSICAL_PG === '1')(
   async () => {
     const ledgerPath = process.env.OPENFARM_PHYSICAL_RESOURCE_LEDGER
     const fixture = disposablePostgres({
-      name: 'physical-spool',
+      ...vitestPostgresOptions('physical-spool'),
       isolated: true,
       ledger: (entry) => {
         if (ledgerPath) appendFileSync(ledgerPath, JSON.stringify(entry) + '\n')

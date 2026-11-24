@@ -30,12 +30,13 @@ function observation(
   connectorId: string,
   index = 0,
   observedAt = 1000,
+  spoolIds = [1, 5],
 ) {
   const inventory = parseSpoolmanSpoolInventory(
     [
       {
         wire: JSON.stringify(
-          [1, 5].map((id) => ({
+          spoolIds.map((id) => ({
             id,
             filament: { id: 1, name: 'PLA' },
             archived: false,
@@ -123,7 +124,7 @@ test('search and usage expose only explicitly bound provenance even when spool I
 
 test('registration rejects untrusted snapshot data before allocating or writing a receipt', async () => {
   const observedAt = Date.now()
-  const { snapshot } = observation(serviceA, connectorA, 0, observedAt)
+  const { snapshot } = observation(serviceA, connectorA, 0, observedAt, [1, 99])
   const access = {
     appId: connectorA,
     farmId,
@@ -133,10 +134,22 @@ test('registration rejects untrusted snapshot data before allocating or writing 
   const input = {
     filamentId: 1,
     location: 'A',
-    spoolman: { serviceId: serviceA, spoolId: 1 },
+    spoolman: { serviceId: serviceA, spoolId: 99 },
   }
+  const { snapshot: capped } = observation(
+    serviceA,
+    connectorA,
+    0,
+    observedAt,
+    [1, 2, 3, 4, 5, 6, 7, 8, 99],
+  )
+  expect(capped.total).toBe(9)
+  expect(capped.spools.map(({ spoolId }) => spoolId)).toEqual([
+    1, 2, 3, 4, 5, 6, 7, 8,
+  ])
   for (const rows of [
     [],
+    [{ observedAt, snapshot: capped }],
     [{ observedAt, snapshot: { ...snapshot, stale: true } }],
     [
       {
@@ -157,7 +170,7 @@ test('registration rejects untrusted snapshot data before allocating or writing 
     [
       {
         observedAt,
-        snapshot: { ...snapshot, spools: snapshot.spools.slice(1) },
+        snapshot: { ...snapshot, spools: snapshot.spools.slice(0, 1) },
       },
     ],
   ]) {
@@ -188,24 +201,39 @@ test('registration rejects untrusted snapshot data before allocating or writing 
   }
 })
 
+const runnerFixture =
+  process.env.SPOOL_BINDING_FIXTURE_ADMITTED === 'yes'
+    ? process.env.SPOOL_BINDING_FIXTURE_URL
+    : undefined
+
 test.runIf(
-  process.env.OPENFARM_TEST_SPOOL_IDENTITY_PG === '1' ||
+  runnerFixture !== undefined ||
+    process.env.OPENFARM_TEST_SPOOL_IDENTITY_PG === '1' ||
     process.env.OPENFARM_PG === 'docker',
 )(
   'sandbox ledger joins only explicit bindings across a service replacement',
   async () => {
-    const fixture = disposablePostgres({
-      ...vitestPostgresOptions('spool-identity'),
-      isolated: true,
-      ledger: (entry) => {
-        const path = process.env.OPENFARM_SPOOL_IDENTITY_RESOURCE_LEDGER
-        if (path) appendFileSync(path, JSON.stringify(entry) + '\n')
-      },
-    })
+    const fixture = runnerFixture
+      ? undefined
+      : disposablePostgres({
+          ...vitestPostgresOptions('spool-identity'),
+          isolated: true,
+          ledger: (entry) => {
+            const path = process.env.OPENFARM_SPOOL_IDENTITY_RESOURCE_LEDGER
+            if (path) appendFileSync(path, JSON.stringify(entry) + '\n')
+          },
+        })
+    const runnerDb = runnerFixture ? postgres(runnerFixture) : undefined
     let reader: Sql | undefined
     let writer: Sql | undefined
     try {
-      const root = await fixture.start()
+      const root = runnerDb ?? (await fixture!.start())
+      if (runnerDb) {
+        const [identity] =
+          await root`SELECT system_identifier::text AS id FROM pg_control_system()`
+        expect(identity?.id).toBe(process.env.SPOOL_BINDING_FIXTURE_SYSTEM_ID)
+      }
+      const connectionString = runnerFixture ?? fixture!.connectionString
       const appId = crypto.randomUUID()
       const grantId = crypto.randomUUID()
       const access = {
@@ -224,13 +252,13 @@ test.runIf(
         VALUES (${farmId}, 1, 'PLA', 1.24, 1.75, 0)`
       await root`CREATE ROLE spool_identity_writer NOLOGIN`
       await root`GRANT farm_spool_features, farm_spool_library, farm_integration_apps TO spool_identity_writer`
-      writer = postgres(fixture.connectionString, {
+      writer = postgres(connectionString, {
         connection: {
           role: 'spool_identity_writer',
           application_name: 'spool_identity_writer',
         },
       })
-      reader = postgres(fixture.connectionString, {
+      reader = postgres(connectionString, {
         connection: { role: 'farm_integration_apps' },
       })
 
@@ -485,9 +513,11 @@ test.runIf(
         serviceB + ':1',
       ])
     } finally {
-      await Promise.all([reader?.end(), writer?.end()]).finally(() =>
-        fixture.stop(),
-      )
+      await Promise.all([
+        reader?.end(),
+        writer?.end(),
+        runnerDb?.end(),
+      ]).finally(() => fixture?.stop())
     }
   },
   45000,

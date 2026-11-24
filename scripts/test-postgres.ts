@@ -298,6 +298,14 @@ export const PG_SUITE_CONTRACTS: Record<string, PgSuiteContract> = {
       admitted: 'LATEST_STATE_TEST_DISPOSABLE',
     },
   },
+  'test-postgres-spool-binding.ts': {
+    migrations: 'full',
+    fixture: { admitted: 'SPOOL_BINDING_FIXTURE_ADMITTED' },
+    extra: ({ url, systemId }) => ({
+      SPOOL_BINDING_FIXTURE_URL: url,
+      SPOOL_BINDING_FIXTURE_SYSTEM_ID: systemId,
+    }),
+  },
   'test-postgres-startup-gating.ts': {
     migrations: 'none',
     fixture: { admitted: 'STARTUP_GATING_DISPOSABLE' },

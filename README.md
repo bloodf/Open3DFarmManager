@@ -129,4 +129,6 @@ Quer ajudar a construir a próxima etapa? Consulte as [issues](https://github.co
 
 ## Licença
 
-O código original do projeto usa a [licença MIT](LICENSE). Dependências e fontes de terceiros mantêm suas próprias licenças e avisos; consulte [THIRD_PARTY.md](THIRD_PARTY.md).
+O OpenFarm usa a [GNU Affero General Public License, versão 3 ou posterior](LICENSE) (`AGPL-3.0-or-later`). A seção 13 exige que, ao oferecer uma versão modificada pela rede, você disponibilize o código-fonte correspondente gratuitamente a todos os usuários que interagem com essa versão pela rede.
+
+Dependências e fontes de terceiros mantêm suas próprias licenças e avisos. Consulte os [avisos de terceiros](THIRD_PARTY_NOTICES.md).

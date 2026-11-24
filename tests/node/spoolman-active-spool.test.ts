@@ -8,6 +8,96 @@ import { TelemetryQueue } from '../../packages/connector/src/cloud/queue.ts'
 import { moonrakerSpoolmanFixture } from '../../packages/connector/test/moonraker-spoolman-fixture.ts'
 import type { RawPrinterObservation } from '../../packages/connector/src/runtime/farm-snapshot-provider.ts'
 
+test(
+  'disconnect clears offline materials without publishing a fresh online row',
+  { timeout: 10000 },
+  async () => {
+    const fixture = await moonrakerSpoolmanFixture()
+    const dir = mkdtempSync(join(tmpdir(), 'active-spool-disconnect-'))
+    const queue = new TelemetryQueue(join(dir, 'queue'), Date.now())
+    const controller = new AbortController()
+    let invalidationRowCount: number | undefined
+    let inventoryReady = false
+    const states = () =>
+      queue
+        .batch(Date.now())
+        .records.filter((record) => record.kind === 'printer-state')
+        .map((record) => record.state)
+    const done = collectIntoQueue({
+      config: {
+        version: 1,
+        allowedOrigins: [fixture.origin],
+        printers: [{ printerKey: 'printer', origin: fixture.origin }],
+        limits: {
+          maxMessageBytes: 4096,
+          connectTimeoutMs: 1000,
+          requestTimeoutMs: 1000,
+          staleAfterMs: 30000,
+          reconnectMinMs: 5000,
+          reconnectMaxMs: 5000,
+        },
+        spoolman: {
+          origin: fixture.origin,
+          farmId: '00000000-0000-4000-8000-000000000001',
+          serviceId: '00000000-0000-4000-8000-000000000002',
+          limit: 200,
+        },
+      },
+      queue,
+      signal: controller.signal,
+      onDiagnostic() {},
+      onInventory(value) {
+        inventoryReady = value.kind === 'observed'
+      },
+      onRawObservation() {},
+      onRawUnavailable() {
+        invalidationRowCount = states().length
+      },
+    })
+    async function waitFor(predicate: () => boolean) {
+      const deadline = Date.now() + 4000
+      while (!predicate()) {
+        if (Date.now() > deadline)
+          throw Error('Timed out waiting for collection')
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+    }
+    try {
+      await waitFor(() => inventoryReady && states().length > 0)
+      fixture.update()
+      await waitFor(
+        () => states().at(-1)?.materials?.[0]?.materialType === 'PLA',
+      )
+      const before = states().length
+      const readsBefore = fixture.requests.filter(
+        (request) => request.path === '/server/spoolman/spool_id',
+      ).length
+      fixture.disconnect()
+      await waitFor(() => states().at(-1)?.state === 'offline')
+      assert.equal(invalidationRowCount, before)
+      assert.deepEqual(
+        states()
+          .slice(before)
+          .map((state) => state.state),
+        ['offline'],
+      )
+      assert.equal(states().at(-1)?.materials, undefined)
+      assert.equal(
+        fixture.requests.filter(
+          (request) => request.path === '/server/spoolman/spool_id',
+        ).length,
+        readsBefore,
+      )
+    } finally {
+      controller.abort()
+      await done
+      queue.close()
+      await fixture.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  },
+)
+
 for (const auth of ['key', 'jwt'] as const) {
   test(
     `active Spoolman spool through collection with ${auth}`,
@@ -159,3 +249,142 @@ for (const auth of ['key', 'jwt'] as const) {
     },
   )
 }
+
+test(
+  'fresh active spool evidence reaches durable state and superseded evidence does not',
+  { timeout: 10000 },
+  async (t) => {
+    const fixture = await moonrakerSpoolmanFixture()
+    const dir = mkdtempSync(join(tmpdir(), 'active-spool-telemetry-'))
+    const queue = new TelemetryQueue(join(dir, 'queue'), Date.now())
+    const controller = new AbortController()
+    const observations: RawPrinterObservation[] = []
+    let inventoryKind: string | undefined
+    let offset = 0
+    const realNow = performance.now.bind(performance)
+    t.mock.method(performance, 'now', () => realNow() + offset)
+    fixture.reply({ result: { spool_id: null } })
+    const done = collectIntoQueue({
+      config: {
+        version: 1,
+        allowedOrigins: [fixture.origin],
+        printers: [{ printerKey: 'printer', origin: fixture.origin }],
+        limits: {
+          maxMessageBytes: 4096,
+          connectTimeoutMs: 1000,
+          requestTimeoutMs: 1000,
+          staleAfterMs: 30000,
+          reconnectMinMs: 100,
+          reconnectMaxMs: 1000,
+        },
+        spoolman: {
+          origin: fixture.origin,
+          farmId: '00000000-0000-4000-8000-000000000001',
+          serviceId: '00000000-0000-4000-8000-000000000002',
+          limit: 200,
+        },
+      },
+      queue,
+      signal: controller.signal,
+      onDiagnostic() {},
+      onInventory(value) {
+        inventoryKind = value.kind
+      },
+      onRawObservation(value) {
+        observations.push(value)
+      },
+    })
+    const states = () =>
+      queue
+        .batch(Date.now())
+        .records.filter((record) => record.kind === 'printer-state')
+        .map((record) => record.state)
+    const reads = () =>
+      fixture.requests.filter(
+        (request) => request.path === '/server/spoolman/spool_id',
+      ).length
+    async function waitFor(predicate: () => boolean) {
+      const deadline = Date.now() + 4000
+      while (!predicate()) {
+        if (Date.now() > deadline)
+          throw Error('Timed out waiting for collection')
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+    }
+    try {
+      await waitFor(() => states().length > 0 && reads() > 0)
+      assert.equal(states().at(-1)?.materials, undefined)
+      fixture.reply({ result: { spool_id: 42 } })
+      let before = reads()
+      fixture.update()
+      await waitFor(
+        () =>
+          reads() > before &&
+          states().at(-1)?.materials?.[0]?.materialType === 'PLA',
+      )
+      assert.deepEqual(
+        states().at(-1)?.materials,
+        observations.at(-1)?.materialsObservation?.materials,
+      )
+      fixture.reply({ result: { spool_id: 43 } })
+      before = reads()
+      fixture.update()
+      await waitFor(
+        () =>
+          reads() > before &&
+          states().at(-1)?.materials?.[0]?.materialType === 'PETG',
+      )
+      assert.deepEqual(
+        states().at(-1)?.materials,
+        observations.at(-1)?.materialsObservation?.materials,
+      )
+
+      // A response which took longer than the freshness window must not replace
+      // the current material, even if a later status update arrives meanwhile.
+      fixture.reply({ result: { spool_id: 42 } })
+      fixture.holdNext()
+      before = reads()
+      fixture.update()
+      await waitFor(() => reads() > before)
+      offset += 5001
+      fixture.update()
+      await waitFor(() => states().at(-1)?.materials === undefined)
+      fixture.release()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      assert.equal(states().at(-1)?.materials, undefined)
+      assert.equal(observations.at(-1)?.materialsObservation, undefined)
+
+      // A pending response belongs to the inventory snapshot that started it.
+      // Invalidating that snapshot supersedes the response even when it is fast.
+      fixture.reply({ result: { spool_id: 43 } })
+      before = reads()
+      fixture.update()
+      await waitFor(
+        () =>
+          reads() > before &&
+          states().at(-1)?.materials?.[0]?.materialType === 'PETG',
+      )
+      fixture.reply({ result: { spool_id: 42 } })
+      fixture.holdNext()
+      before = reads()
+      fixture.update()
+      await waitFor(() => reads() > before)
+      fixture.invalidateInventory()
+      await waitFor(() => inventoryKind === 'stale')
+      fixture.release()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      assert.equal(states().at(-1)?.materials?.[0]?.materialType, 'PETG')
+      assert.notEqual(
+        observations.at(-1)?.materialsObservation?.materials[0]?.materialType,
+        'PLA',
+      )
+    } finally {
+      fixture.release()
+      controller.abort()
+      await done
+      queue.close()
+      await fixture.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  },
+)

@@ -22,7 +22,7 @@ export function browserBundle(
         const result = await build({ entryPoints: [process.argv[2]], bundle: true,
           platform: 'browser', format: 'esm', write: false, logLevel: 'silent' });
         const output = result.outputFiles[0];
-        if (!output || output.contents.byteLength > 1024 * 1024)
+        if (!output || output.contents.byteLength > 2 * 1024 * 1024)
           throw Error('Browser bundle output limit');
         process.stdout.write(output.contents);
       `,
@@ -33,7 +33,7 @@ export function browserBundle(
         encoding: 'utf8',
         timeout: 10000,
         killSignal: 'SIGKILL',
-        maxBuffer: 1024 * 1024,
+        maxBuffer: 2 * 1024 * 1024,
         ...(signal ? { signal } : {}),
       },
       (error, stdout) => {

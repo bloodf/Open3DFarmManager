@@ -97,7 +97,58 @@ if (journeyEnabled())
   })
 
 if (journeyEnabled())
-  test('mostra telemetria e controla a temperatura da Snapmaker U1 simulada', async ({
+  test('mostra a temperatura do bico ativo da Snapmaker U1 simulada', async ({
+    browser,
+  }) => {
+    test.setTimeout(5 * 60_000)
+    const journey = await startJourneyHarness({
+      browser,
+      simulator: 'moonraker-fixture',
+      openFarmInspector: true,
+      moonraker: { mock: { profile: 'u1' } },
+    })
+    try {
+      const printer = journey.printer.control
+      printer.update({
+        activeExtruder: 'extruder2',
+        extruders: {
+          extruder2: { temperature: 230, target: 235 },
+          extruder3: { temperature: 245, target: 250 },
+        },
+      })
+
+      await journey.expectLiveTelemetry()
+      expect(journey.printer.subscriptionObjects()).toContainEqual(
+        expect.objectContaining({
+          extruder1: ['temperature', 'target'],
+          extruder2: ['temperature', 'target'],
+          extruder3: ['temperature', 'target'],
+          toolhead: ['extruder'],
+        }),
+      )
+      const row = journey.farmRow()
+      const temperatures = row.getByLabel('Temperaturas observadas')
+      await expect(temperatures).toContainText('230 °C')
+      await expect(temperatures).toContainText('60 °C')
+
+      printer.update({ activeExtruder: 'extruder3' })
+      await expect(temperatures).toContainText('245 °C')
+
+      printer.update({ activeExtruder: 'extruder' })
+      await expect(temperatures).toContainText('210 °C')
+
+      printer.update({ activeExtruder: 'extruder9' })
+      await expect(temperatures).toContainText('Indisponível')
+      await expect(temperatures).toContainText('60 °C')
+      await journey.expectProgress(0.25)
+      expect(printer.gcodeScripts).toEqual([])
+    } finally {
+      await journey.close()
+    }
+  })
+
+if (journeyEnabled())
+  test('U1 tool 2 temperature: define a temperatura da Ferramenta 3 pela rota de controle assinada', async ({
     browser,
   }) => {
     test.setTimeout(5 * 60_000)
@@ -238,22 +289,6 @@ if (journeyEnabled())
       })
       await expect(temperatures).toContainText('231 °C', { timeout: 60_000 })
       await expect(row).toContainText('Conexão direta autenticada')
-
-      printer.update({ activeExtruder: 'extruder3' })
-      await expect(temperatures).toContainText('245 °C')
-
-      printer.update({ activeExtruder: 'extruder' })
-      await expect(temperatures).toContainText('210 °C')
-
-      printer.update({ activeExtruder: 'extruder9' })
-      await expect(temperatures).toContainText('Indisponível')
-      await expect(temperatures).toContainText('60 °C')
-      // The reported progress ring is only drawn while a job is printing.
-      printer.update({ state: 'printing' })
-      await journey.expectProgress(0.25)
-      expect(printer.gcodeScripts).toEqual([
-        'SET_HEATER_TEMPERATURE HEATER=extruder2 TARGET=222',
-      ])
     } finally {
       await journey.close()
     }

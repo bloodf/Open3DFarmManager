@@ -1,5 +1,7 @@
 # FullFarmManager review
 
+Catalog-to-code evidence by printer model: [DRIVER-EVIDENCE.md](DRIVER-EVIDENCE.md).
+
 ## Mac driver review matrix
 
 Historical review update — 2026-11-22. The matrix records protocol documentation, adapter coverage and synthetic evidence. End-to-end and owner hardware qualification remain pending for every row. Listed firmware identifies the source or fixture reviewed. Model support requires evidence for the matching identity and protocol.

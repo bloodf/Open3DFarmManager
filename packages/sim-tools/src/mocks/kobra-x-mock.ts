@@ -273,6 +273,8 @@ export interface KobraXMockInstance {
         preparationPhases?: readonly KobraXJobPhase[]
         preparationStepMs?: number
         printDurationMs?: number
+        taskid?: string
+        msgid?: string
       },
     ) => Promise<void>
     finishPrint: () => void

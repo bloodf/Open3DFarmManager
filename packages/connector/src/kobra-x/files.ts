@@ -6,7 +6,7 @@ import {
   type KobraXControlContext,
 } from './context.ts'
 import { kobraXGate } from './gate.ts'
-import { kobraXPrintSlots } from './facts.ts'
+import { isKobraXActivePhase, kobraXPrintSlots } from './facts.ts'
 import {
   refusedLocally,
   reportRefusal,
@@ -280,9 +280,24 @@ export function createKobraXFiles(context: KobraXControlContext) {
       return refuse('file-not-on-printer')
     if (!slotsAvailable(context.facts.get())) return refuse('unknown-slot')
     const watchMs = options.watchMs ?? 5000
+    let startedReport: KobraXReport | undefined
     let ended: KobraXReport | undefined
     const stop = context.requests.onReport((report) => {
-      if (report.type === 'print' && report.state === 'stoped') ended = report
+      if (
+        report.type !== 'print' ||
+        (report.state !== 'stoped' && report.state !== 'finished') ||
+        !startedReport
+      )
+        return
+      const taskId = startedReport.data.taskid
+      if (
+        (report.msgid === startedReport.msgid &&
+          report.action === startedReport.action) ||
+        (typeof taskId === 'string' &&
+          taskId !== '-1' &&
+          report.data.taskid === taskId)
+      )
+        ended = report
     })
     try {
       const started = await runGated(
@@ -308,16 +323,20 @@ export function createKobraXFiles(context: KobraXControlContext) {
               : {}),
             task_settings: taskSettings,
           },
-          // A job that already ended cannot confirm a start.
           effect: (report) =>
-            report.state !== 'stoped' && report.state !== 'finished',
-          result: () => ({ filename: options.filename }),
+            isKobraXActivePhase(report.state) &&
+            report.data.filename === options.filename,
+          result(report) {
+            startedReport = report
+            return { filename: options.filename }
+          },
         },
       )
       if (started.kind !== 'confirmed') return started
       const outcome = await watchForEnd(() => ended, watchMs, call.signal)
       if (call.signal?.aborted) return { kind: 'received' }
       if (outcome) {
+        if (outcome.state === 'finished') return { kind: 'received' }
         const refusal = reportRefusal(outcome)
         return {
           kind: 'refused',

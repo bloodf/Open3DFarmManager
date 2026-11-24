@@ -18,10 +18,18 @@ async function frames(video: Locator) {
 }
 
 /** The decoder must keep producing frames: time and decoded count advance. */
-async function assertAdvancing(video: Locator, page: Page) {
+async function assertAdvancing(video: Locator) {
   const first = await frames(video)
   assert.equal(first.attached, true)
-  await page.waitForTimeout(1500)
+  await expect
+    .poll(
+      async () => {
+        const current = await frames(video)
+        return current.time > first.time && current.decoded > first.decoded
+      },
+      { timeout: 8000, intervals: [250, 500, 1000] },
+    )
+    .toBe(true)
   const second = await frames(video)
   assert.ok(second.time > first.time, 'Video time must advance')
   assert.ok(second.decoded > first.decoded, 'Decoded frames must increase')
@@ -43,7 +51,7 @@ export async function assertCameraPlaying(input: {
   await expect(
     region.getByText('Câmera ao vivo.', { exact: true }),
   ).toBeVisible({ timeout: 15000 })
-  const decoded = await assertAdvancing(video, input.page)
+  const decoded = await assertAdvancing(video)
   // Positive control for the later absence check: the helper is running now.
   assert.ok(helperProcesses(input.helperPath) >= 1, 'Ingest helper running')
   await input.note(`farm-page-camera-playing-frames:${decoded}`)
@@ -56,9 +64,25 @@ export async function assertCameraPlaying(input: {
   await expect(
     region.getByText('Câmera ao vivo.', { exact: true }),
   ).toBeVisible({ timeout: 10000 })
-  await assertAdvancing(video, input.page)
+  await assertAdvancing(video)
   await input.note('farm-page-camera-toggle-stop-show')
   return { region, video }
+}
+
+/** Decoded playback assertion for sources that own their own teardown probe. */
+export async function assertCameraFramesDecoded(input: {
+  page: Page
+  printerKey: string
+}) {
+  const region = input.page.getByRole('region', {
+    name: `Câmera da impressora ${input.printerKey}`,
+    exact: true,
+  })
+  const video = region.locator('video')
+  await expect(
+    region.getByText('Câmera ao vivo.', { exact: true }),
+  ).toBeVisible({ timeout: 15000 })
+  await assertAdvancing(video)
 }
 
 /**

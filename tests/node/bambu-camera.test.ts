@@ -7,6 +7,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { connect as netConnect } from 'node:net'
 import { startBambuCameraFixture } from '../journey/bambu-camera-fixture.ts'
 import {
   bambuCameraAuth,
@@ -15,6 +16,7 @@ import {
   selectBambuCamera,
   streamBambuJpegs,
 } from '../../packages/connector/src/bambu/camera.ts'
+import { startBambuRtspsBridge } from '../../packages/connector/src/bambu/rtsps-bridge.ts'
 import {
   readBambuH264,
   openBambuCameraSource,
@@ -327,43 +329,181 @@ test('a trusted certificate for a different numeric IP cannot receive JPEG authe
   }
 })
 
-test('staged RTSPS refuses trusted wrong identity and redirect fixtures before dialing', async (t) => {
-  const start = async (
-    options: Partial<Parameters<typeof startBambuCameraFixture>[0]> = {},
-  ) => {
-    const directory = mkdtempSync(join(tmpdir(), 'bambu-rtsps-refusal-'))
+test(
+  'staged RTSPS refuses trusted wrong identity and redirect fixtures safely',
+  { skip: ffmpegQualificationSkip },
+  async (t) => {
+    const start = async (
+      options: Partial<Parameters<typeof startBambuCameraFixture>[0]> = {},
+    ) => {
+      const directory = mkdtempSync(join(tmpdir(), 'bambu-rtsps-refusal-'))
+      t.after(() => rmSync(directory, { recursive: true, force: true }))
+      const fixture = await startBambuCameraFixture({
+        directory,
+        accessCode: 'synthetic',
+        rtsps: true,
+        ...options,
+      })
+      t.after(() => fixture.close())
+      return fixture
+    }
+    const wrongIdentity = await start({ certificateIp: '127.0.0.2' })
+    const redirectTarget = await start()
+    const redirect = await start({
+      redirectTo: `rtsps://${redirectTarget.host}:${redirectTarget.port}/streaming/live/1`,
+    })
+    for (const fixture of [wrongIdentity, redirect]) {
+      await assert.rejects(
+        (async () => {
+          const stream = await openBambuCameraSource({
+            source: {
+              model: 'X1C',
+              host: fixture.host,
+              port: fixture.port,
+              caFile: fixture.caFile,
+              accessCode: 'synthetic',
+            },
+            ffmpeg: qualificationEncoder(),
+            signal: AbortSignal.timeout(5000),
+          })
+          await stream[Symbol.asyncIterator]().next()
+        })(),
+        /Bambu camera media unavailable/,
+      )
+    }
+    assert.equal(wrongIdentity.connections(), 1)
+    assert.equal(wrongIdentity.requests(), 0)
+    // Not even the unauthenticated OPTIONS or the credential header was sent.
+    assert.equal(wrongIdentity.received(), 0)
+    assert.equal(wrongIdentity.credentials(), 0)
+    assert.equal(redirect.connections(), 1)
+    assert.ok(redirect.requests() > 0)
+    for (const fixture of [redirectTarget]) {
+      assert.equal(fixture.connections(), 0)
+      assert.equal(fixture.requests(), 0)
+    }
+  },
+)
+
+test(
+  'RTSPS authenticates to the maintained H264 source and yields frames',
+  {
+    skip: ffmpegQualificationSkip,
+  },
+  async (t) => {
+    const directory = mkdtempSync(join(tmpdir(), 'bambu-rtsps-playback-'))
     t.after(() => rmSync(directory, { recursive: true, force: true }))
     const fixture = await startBambuCameraFixture({
       directory,
       accessCode: 'synthetic',
-      ...options,
+      rtsps: true,
     })
     t.after(() => fixture.close())
-    return fixture
-  }
-  const wrongIdentity = await start({ certificateIp: '127.0.0.2' })
-  const redirectTarget = await start()
-  const redirect = await start({
-    redirectTo: `rtsps://${redirectTarget.host}:${redirectTarget.port}/streaming/live/1`,
-  })
-  for (const fixture of [wrongIdentity, redirect]) {
-    await assert.rejects(
-      openBambuCameraSource({
-        source: {
-          model: 'X1C',
-          host: fixture.host,
-          port: fixture.port,
-          caFile: fixture.caFile,
-          accessCode: 'synthetic',
-        },
-        ffmpeg: encoder.ffmpeg,
-        signal: AbortSignal.timeout(5000),
-      }),
-      /RTSPS ingest unavailable/,
+    const stream = await openBambuCameraSource({
+      source: {
+        model: 'X1C',
+        host: fixture.host,
+        port: fixture.port,
+        caFile: fixture.caFile,
+        accessCode: 'synthetic',
+      },
+      ffmpeg: qualificationEncoder(),
+      signal: AbortSignal.timeout(30_000),
+    })
+    const iterator = stream[Symbol.asyncIterator]()
+    const first = await iterator.next()
+    const second = await iterator.next()
+    await new Promise((resolve) => setTimeout(resolve, 6000))
+    const third = await iterator.next()
+    assert.equal(first.done, false)
+    assert.equal(first.value?.keyframe, true)
+    assert.equal(second.done, false)
+    assert.equal(
+      third.done,
+      false,
+      `RTSPS ended early (requests=${fixture.requests()}, active=${fixture.activeConnections()})`,
     )
+    assert.ok(
+      (third.value?.timestampUs ?? 0) > (second.value?.timestampUs ?? 0),
+    )
+    assert.ok(fixture.requests() > 0)
+    assert.equal(fixture.activeConnections(), 1)
+    await iterator.return?.()
+    assert.equal(fixture.activeConnections(), 0)
+    assert.ok(fixture.requests() > 0)
+  },
+)
+
+test('RTSPS bridge forwards only verified, token-scoped read requests', async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'bambu-rtsps-bridge-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const fixture = await startBambuCameraFixture({
+    directory,
+    accessCode: 'synthetic',
+    rtsps: true,
+  })
+  t.after(() => fixture.close())
+  const abort = new AbortController()
+  const bridge = await startBambuRtspsBridge({
+    host: fixture.host,
+    port: fixture.port,
+    accessCode: 'synthetic',
+    caPem: readFileSync(fixture.caFile),
+    signal: abort.signal,
+  })
+  t.after(() => bridge.close())
+  const url = new URL(bridge.url)
+  const connectBridge = () =>
+    new Promise<import('node:net').Socket>((resolve, reject) => {
+      const socket = netConnect(Number(url.port), url.hostname, () =>
+        resolve(socket),
+      )
+      socket.once('error', reject)
+    })
+  const closes = (socket: import('node:net').Socket) =>
+    new Promise<void>((resolve) => socket.once('close', () => resolve()))
+  const refused = async (request: string) => {
+    const socket = await connectBridge()
+    const closed = closes(socket)
+    let received = ''
+    socket.on('data', (chunk) => (received += chunk.toString('latin1')))
+    socket.write(request)
+    await closed
+    assert.equal(received, '')
   }
-  for (const fixture of [wrongIdentity, redirect, redirectTarget]) {
-    assert.equal(fixture.connections(), 0)
-    assert.equal(fixture.requests(), 0)
-  }
+  const wrongPath = `rtsp://127.0.0.1:${url.port}/streaming/live/1`
+  await refused(`OPTIONS ${wrongPath} RTSP/1.0\r\nCSeq: 1\r\n\r\n`)
+  await refused(`ANNOUNCE ${bridge.url} RTSP/1.0\r\nCSeq: 1\r\n\r\n`)
+  await refused(
+    `SETUP ${bridge.url}/trackID=0 RTSP/1.0\r\nCSeq: 1\r\nTransport: RTP/AVP;unicast;client_port=5000-5001\r\n\r\n`,
+  )
+  await refused(
+    `DESCRIBE rtsp://127.0.0.1:1${url.pathname} RTSP/1.0\r\nCSeq: 1\r\n\r\n`,
+  )
+  await refused(
+    `DESCRIBE ${bridge.url} RTSP/1.0\r\nCSeq: 1\r\nContent-Length: 999999\r\n\r\n`,
+  )
+  assert.equal(fixture.received(), 0)
+  assert.equal(fixture.credentials(), 0)
+
+  const socket = await connectBridge()
+  let response = ''
+  socket.on('data', (chunk) => (response += chunk.toString('latin1')))
+  socket.write(
+    `OPTIONS ${bridge.url} RTSP/1.0\r\nCSeq: 7\r\nAuthorization: Basic Zm9yZ2Vk\r\n\r\n`,
+  )
+  await new Promise((resolve) => setTimeout(resolve, 500))
+  assert.match(response, /^RTSP\/1\.0 200 /)
+  assert.equal(fixture.received(), 1)
+  // The client's own Authorization was dropped; the bridge's credential was sent.
+  assert.equal(fixture.credentials(), 1)
+  // Only one client may hold the bridge.
+  const second = await connectBridge()
+  await closes(second)
+  const closed = closes(socket)
+  abort.abort()
+  await closed
+  await bridge.close()
+  await new Promise((resolve) => setTimeout(resolve, 200))
+  assert.equal(fixture.activeConnections(), 0)
 })

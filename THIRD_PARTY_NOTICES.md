@@ -54,3 +54,11 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## Orca UI foundation spool illustration
+
+The spool illustration and layered reel images are adapted from
+[bloodf/orca-ui-foundation](https://github.com/bloodf/orca-ui-foundation/tree/e4d93af0cf576660ad4b80ac5d5a1cdef4a5c795)
+(commit `e4d93af0cf576660ad4b80ac5d5a1cdef4a5c795`), copyright 2026 bloodf.
+The source is MIT licensed; its notice is retained in
+[`notices/orca-ui-foundation-MIT.txt`](notices/orca-ui-foundation-MIT.txt).

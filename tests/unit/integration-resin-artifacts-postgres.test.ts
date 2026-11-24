@@ -1,3 +1,4 @@
+import { vitestPostgresOptions } from '../helpers/vitest-postgres.ts'
 import { randomUUID } from 'node:crypto'
 import { appendFileSync } from 'node:fs'
 import { expect, it } from 'vitest'
@@ -26,7 +27,7 @@ import { acceptedArtifact } from '../fixtures/resin-artifacts/contracts.ts'
 
 let postgresReady = false
 try {
-  findPostgresBin()
+  if (process.env.OPENFARM_PG !== 'docker') findPostgresBin()
   postgresReady = true
 } catch {
   // The unit suite also runs on hosts with no PostgreSQL executable.
@@ -37,7 +38,7 @@ it.skipIf(!postgresReady)(
   async () => {
     const ledgerPath = process.env.OPENFARM_RESIN_ARTIFACT_TEST_LEDGER
     const database = disposablePostgres({
-      name: 'openfarm-resin-artifact-storage',
+      ...vitestPostgresOptions('openfarm-resin-artifact-storage'),
       isolated: true,
       ledger(event) {
         if (ledgerPath) appendFileSync(ledgerPath, JSON.stringify(event) + '\n')

@@ -52,6 +52,14 @@ describe('firmware shutdown reader contract', () => {
     expect(
       PrinterState.safeParse({ ...state, statusMessage: '\ud800' }).success,
     ).toBe(false)
+    expect(
+      PrinterState.safeParse({ ...state, statusMessage: 'fault\0detail' })
+        .success,
+    ).toBe(false)
+    const message = 'Falha 🌡️\n' + 'x'.repeat(200)
+    expect(
+      PrinterState.parse({ ...state, statusMessage: message }).statusMessage,
+    ).toBe(message)
   })
   it.each([{}, { progress: 0.5 }])(
     'accepts an error with firmware shutdown and progress fields %j',

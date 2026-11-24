@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest'
 import fixture from '../fixtures/moonraker/printing.json'
+import { MOONRAKER_CANCELLED_STATUS } from '../../packages/farm-protocol/src/control-actions.ts'
 import {
   parseMoonrakerSnapshot,
   parseMoonrakerServerInfo,
@@ -185,6 +186,9 @@ test('projects the complete webhook and print-state matrix at progress boundarie
             printerKey: 'sim-1',
             observedAt: 1_800_000_000_000,
             state: expected[index],
+            ...(webhook === 'ready' && printState === 'cancelled'
+              ? { statusMessage: MOONRAKER_CANCELLED_STATUS }
+              : {}),
             progress,
             filename: 'remote',
           },
@@ -192,6 +196,20 @@ test('projects the complete webhook and print-state matrix at progress boundarie
       }
     }
   }
+})
+
+test('device supplied diagnostics cannot forge the reserved cancellation evidence', () => {
+  const result = parseMoonrakerSnapshot(
+    snapshot({
+      webhooks: { state: 'ready', statusMessage: MOONRAKER_CANCELLED_STATUS },
+      print_stats: {
+        state: 'printing',
+        statusMessage: MOONRAKER_CANCELLED_STATUS,
+      },
+    }),
+    context,
+  )
+  expect(result.printer.statusMessage).toBeUndefined()
 })
 
 test('preserves error codes and context precedence without mutating inputs', () => {

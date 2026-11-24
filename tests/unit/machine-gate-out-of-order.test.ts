@@ -34,6 +34,14 @@ test('an out-of-order profile change is sent again on the next newer snapshot', 
       version: 1,
       allowedOrigins: ['http://127.0.0.1:7125'],
       printers: [{ printerKey: 'p', origin: 'http://127.0.0.1:7125' }],
+      limits: {
+        maxMessageBytes: 8192,
+        connectTimeoutMs: 1000,
+        requestTimeoutMs: 1000,
+        staleAfterMs: 5000,
+        reconnectMinMs: 100,
+        reconnectMaxMs: 100,
+      },
     },
     queue,
     signal: controller.signal,
@@ -45,6 +53,7 @@ test('an out-of-order profile change is sent again on the next newer snapshot', 
     const emit = (observedAt: number, model: string) =>
       subscription.emit!({
         kind: 'snapshot',
+        sourceEventtime: observedAt,
         printer: {
           printerKey: 'p',
           state: 'idle',

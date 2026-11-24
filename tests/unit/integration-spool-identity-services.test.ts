@@ -1,4 +1,8 @@
 import {
+  hasCurrentSpoolObservation,
+  recordInventorySnapshot,
+} from '../../apps/farm/server/storage/postgres-inventory-snapshot.ts'
+import {
   answerApiQuery,
   createSpoolMembershipReader,
 } from '../../packages/connector/src/runtime/api-query.ts'
@@ -160,29 +164,21 @@ test('registration rejects untrusted snapshot data before allocating or writing 
   expect(capped.spools.map(({ spoolId }) => spoolId)).toEqual([
     1, 2, 3, 4, 5, 6, 7, 8,
   ])
+  const receivedAt = Date.now()
+  const row = { observedAt, receivedAt, snapshot }
   for (const rows of [
     [],
-    [{ observedAt, snapshot: capped }],
-    [{ observedAt, snapshot: { ...snapshot, stale: true } }],
+    [{ ...row, snapshot: capped }],
+    [{ ...row, snapshot: { ...snapshot, stale: true } }],
+    [{ ...row, receivedAt: receivedAt - 30_000 }],
+    [{ ...row, receivedAt: null }],
+    [{ ...row, observedAt: observedAt - 1 }],
+    [{ ...row, snapshot: { ...snapshot, serviceId: undefined } }],
+    [{ ...row, snapshot: { ...snapshot, spools: [{ spoolId: 1 }] } }],
+    [{ ...row, snapshot: { ...snapshot, serviceId: serviceB } }],
     [
       {
-        observedAt: observedAt - 30_000,
-        snapshot: { ...snapshot, observedAt: observedAt - 30_000 },
-      },
-    ],
-    [
-      {
-        observedAt: observedAt + 60_000,
-        snapshot: { ...snapshot, observedAt: observedAt + 60_000 },
-      },
-    ],
-    [{ observedAt: observedAt - 1, snapshot }],
-    [{ observedAt, snapshot: { ...snapshot, serviceId: undefined } }],
-    [{ observedAt, snapshot: { ...snapshot, spools: [{ spoolId: 1 }] } }],
-    [{ observedAt, snapshot: { ...snapshot, serviceId: serviceB } }],
-    [
-      {
-        observedAt,
+        ...row,
         snapshot: { ...snapshot, spools: snapshot.spools.slice(0, 1) },
       },
     ],
@@ -213,6 +209,25 @@ test('registration rejects untrusted snapshot data before allocating or writing 
     )
   }
 })
+
+test.each([-20_000, 20_000])(
+  'binds a newly received snapshot with Connector clock skew of %i ms',
+  async (skew) => {
+    const receivedAt = Date.now()
+    const row = observation(serviceA, connectorA, 0, receivedAt + skew)
+    const tx = vi.fn(async () => [{ ...row, receivedAt }])
+    expect(
+      await hasCurrentSpoolObservation(
+        tx as unknown as TransactionSql,
+        farmId,
+        {
+          serviceId: serviceA,
+          spoolId: 1,
+        },
+      ),
+    ).toBe(true)
+  },
+)
 
 const cappedIds = [1, 2, 3, 4, 5, 6, 7, 8, 99]
 
@@ -257,7 +272,8 @@ function membershipLookup(observedAt: number) {
 }
 
 test('binds an omitted ninth spool only with current targeted membership', async () => {
-  const observedAt = Date.now()
+  const receivedAt = Date.now()
+  const observedAt = receivedAt + 20_000
   const { snapshot } = observation(
     serviceA,
     connectorA,
@@ -280,7 +296,7 @@ test('binds an omitted ninth spool only with current targeted membership', async
     vi.fn((parts: TemplateStringsArray) => {
       const query = parts.join('')
       if (query.includes('lock_physical_spool_observations'))
-        return [{ agentId: connectorA, snapshot, observedAt }]
+        return [{ agentId: connectorA, snapshot, observedAt, receivedAt }]
       if (query.includes('SELECT g.id')) return grant ? [{ id: 1 }] : []
       if (query.includes('SELECT id FROM farm.spool_filaments'))
         return [{ id: 1 }]
@@ -325,15 +341,6 @@ test('binds an omitted ninth spool only with current targeted membership', async
         spoolId: 100,
         present: true,
         observedAt,
-      })),
-    ),
-    await register(
-      binding,
-      vi.fn(async () => ({
-        kind: 'spool-membership',
-        ...binding,
-        present: true,
-        observedAt: observedAt - 30_000,
       })),
     ),
   ])
@@ -431,20 +438,22 @@ test.runIf(
           db = root,
           targetFarm = farmId,
           observedAt = Date.now(),
+          receivedAt = Date.now(),
           stale = false,
           spoolIds = [1, 5],
         }: {
           db?: Sql | TransactionSql
           targetFarm?: string
           observedAt?: number
+          receivedAt?: number
           stale?: boolean
           spoolIds?: number[]
         } = {},
       ) {
         const row = observation(serviceId, connectorId, 0, observedAt, spoolIds)
-        await db`INSERT INTO farm.connector_inventory_snapshots (farm_id, agent_id, observed_at, snapshot)
-          VALUES (${targetFarm}, ${connectorId}, ${row.observedAt}, ${db.json({ ...row.snapshot, stale })})
-          ON CONFLICT (farm_id, agent_id) DO UPDATE SET observed_at = EXCLUDED.observed_at, snapshot = EXCLUDED.snapshot`
+        await db`INSERT INTO farm.connector_inventory_snapshots (farm_id, agent_id, observed_at, snapshot, received_at)
+          VALUES (${targetFarm}, ${connectorId}, ${row.observedAt}, ${db.json({ ...row.snapshot, stale })}, ${receivedAt})
+          ON CONFLICT (farm_id, agent_id) DO UPDATE SET observed_at = EXCLUDED.observed_at, snapshot = EXCLUDED.snapshot, received_at = EXCLUDED.received_at`
       }
 
       const input = { filamentId: 1, location: 'A' }
@@ -463,13 +472,35 @@ test.runIf(
       await publish(serviceA)
       expect(await registerA()).toEqual(rejected)
       await enroll(farmId, connectorA, serviceA)
-      await publish(serviceA, connectorA, { observedAt: Date.now() - 30_000 })
+      await publish(serviceA, connectorA, { receivedAt: Date.now() - 30_000 })
       expect(await registerA()).toEqual(rejected)
       await publish(serviceA, connectorA, { stale: true })
       expect(await registerA()).toEqual(rejected)
       await publish(serviceB)
       expect(await registerA()).toEqual(rejected)
-      await publish(serviceA)
+
+      const receivedAt = Date.now()
+      const reported = observation(serviceA, connectorA, 0, receivedAt + 60_000)
+      const valid = observation(serviceA, connectorA, 0, receivedAt + 20_000)
+      const source = { farmId, agentId: connectorA }
+      await root.begin(async (tx) => {
+        await tx`SET LOCAL ROLE farm_connector_telemetry_writer`
+        await recordInventorySnapshot(tx, source, reported.snapshot, receivedAt)
+        await recordInventorySnapshot(tx, source, valid.snapshot, receivedAt)
+        await recordInventorySnapshot(
+          tx,
+          source,
+          valid.snapshot,
+          receivedAt + 1,
+        )
+      })
+      const [stored] =
+        await root`SELECT observed_at::float8, received_at::float8
+        FROM farm.connector_inventory_snapshots WHERE farm_id = ${farmId} AND agent_id = ${connectorA}`
+      expect(stored).toEqual({
+        observed_at: valid.observedAt,
+        received_at: receivedAt,
+      })
       expect(
         await registerPhysicalSpool(
           writeDb,

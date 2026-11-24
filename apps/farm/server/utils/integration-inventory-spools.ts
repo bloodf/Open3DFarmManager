@@ -1,5 +1,5 @@
 import type { Sql } from 'postgres'
-import { SpoolInventory } from '@open3dfarmmanager/farm-protocol'
+import { parseInventorySnapshot } from '../storage/postgres-inventory-snapshot.ts'
 import { uuidPattern } from './integration-auth.ts'
 import { spoolIdentity } from './integration-spool-identity.ts'
 
@@ -59,21 +59,16 @@ export async function listObservedSpools(
       AND (${p?.farmId ?? null}::uuid IS NULL OR (s.farm_id, s.agent_id, item.ordinality - 1) > (${p?.farmId ?? null}::uuid, ${p?.connectorId ?? null}::uuid, ${p?.index ?? null}::bigint))
     ORDER BY s.farm_id, s.agent_id, item.ordinality LIMIT ${input.limit + 1}`
   const data = rows.slice(0, input.limit).map((row) => {
-    const parsed = SpoolInventory.safeParse(row.snapshot)
-    if (
-      !parsed.success ||
-      parsed.data.observedAt !== row.observedAt ||
-      !parsed.data.spools[row.index]
-    )
-      throw new Error('Invalid inventory snapshot')
-    const spool = parsed.data.spools[row.index]!
+    const snapshot = parseInventorySnapshot(row)
+    const spool = snapshot?.spools[row.index]
+    if (!snapshot || !spool) throw new Error('Invalid inventory snapshot')
     return {
-      ...spoolIdentity(parsed.data.serviceId, spool.spoolId),
+      ...spoolIdentity(snapshot.serviceId, spool.spoolId),
       farmId: row.farmId,
       connectorId: row.connectorId,
       observedAt: row.observedAt,
-      stale: parsed.data.stale,
-      partial: parsed.data.spools.length < parsed.data.total,
+      stale: snapshot.stale,
+      partial: snapshot.spools.length < snapshot.total,
       spool,
     }
   })

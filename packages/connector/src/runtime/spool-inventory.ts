@@ -1,12 +1,10 @@
 import {
   MAX_INVENTORY_SPOOLS,
+  SPOOL_INVENTORY_STALE_MS,
   SpoolInventory,
   SpoolSummary,
 } from '../../../farm-protocol/src/inventory.ts'
 import type { SpoolmanSnapshot } from './spoolman-provider.ts'
-
-/** Spoolman observations older than this are shown as stale. */
-const STALE_MS = 30_000
 
 function clip(value: string | null, max: number): string | null {
   if (value === null) return null
@@ -62,7 +60,7 @@ export function inventoryAt(
   const ageMs = state.ageMs + Math.max(0, elapsedMs)
   return SpoolInventory.parse({
     observedAt: Math.max(0, Math.floor(wallNow - ageMs)),
-    stale: state.kind !== 'observed' || ageMs >= STALE_MS,
+    stale: state.kind !== 'observed' || ageMs >= SPOOL_INVENTORY_STALE_MS,
     total: state.total,
     serviceId: state.serviceId,
     spools: state.spools.slice(0, count),

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { Sql, TransactionSql } from 'postgres'
 import { z } from 'zod'
+import { hasCurrentSpoolObservation } from '../storage/postgres-inventory-snapshot.ts'
 
 const recordId = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER)
 const location = z
@@ -147,6 +148,10 @@ export function registerPhysicalSpool(
         WHERE response @> ${tx.json(binding)}::jsonb
         LIMIT 1`
       if (duplicate) return { outcome: 'already-bound' as const }
+      if (
+        !(await hasCurrentSpoolObservation(tx, access.farmId, input.spoolman))
+      )
+        return { outcome: 'spool-not-observed' as const }
     }
     // Use the Spoolman-compatible library allocator, including its per-farm lock.
     const [row] = await tx<SpoolRow[]>`

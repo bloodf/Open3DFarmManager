@@ -8,7 +8,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { setupFormsBundle } from './mount-setup-forms.ts'
 
 let certDir = ''
@@ -162,15 +162,54 @@ test.afterAll(() => {
   if (certDir) rmSync(certDir, { recursive: true, force: true })
 })
 
-test.beforeEach(async ({ page }) => {
-  await page.goto('/healthz')
+// Nuxt normally supplies these routing auto-imports. Keep them tied to the
+// browser URL when mounting the page outside Nuxt, including after reloads.
+async function mountForms(page: Page, revision: number | null = 1) {
   await page.evaluate(() => {
     document.body.innerHTML = '<div id="fixture"></div>'
+    const route = {
+      get path() {
+        return location.pathname
+      },
+      get query() {
+        return Object.fromEntries(new URLSearchParams(location.search))
+      },
+      get hash() {
+        return location.hash
+      },
+    }
+    Object.assign(window, {
+      useRoute: () => route,
+      useRouter: () => ({
+        replace: ({
+          path,
+          query,
+          hash,
+        }: {
+          path: string
+          query: Record<string, string | null>
+          hash: string
+        }) => {
+          const url = new URL(path, location.origin)
+          for (const [key, value] of Object.entries(query)) {
+            if (value != null) url.searchParams.set(key, value)
+          }
+          url.hash = hash
+          history.replaceState(null, '', url)
+          return Promise.resolve()
+        },
+      }),
+    })
   })
-  await page.addScriptTag({ content: await setupFormsBundle() })
+  await page.addScriptTag({ content: await setupFormsBundle(revision) })
   await page.evaluate(() =>
     (window as any).mountSetupForms(document.querySelector('#fixture')),
   )
+}
+
+test.beforeEach(async ({ page }) => {
+  await page.goto('/healthz')
+  await mountForms(page)
 })
 
 test('forms expose unique labelled controls and validate each family', async ({
@@ -327,13 +366,7 @@ test('Kobra X setup form validates PEM and PKCS#12 client certificate import, sh
 
   // 8. Full submit path passes validation without storing private key or passphrase in sessionStorage
   await page.reload()
-  await page.evaluate(() => {
-    document.body.innerHTML = '<div id="fixture"></div>'
-  })
-  await page.addScriptTag({ content: await setupFormsBundle(null) })
-  await page.evaluate(() =>
-    (window as any).mountSetupForms(document.querySelector('#fixture')),
-  )
+  await mountForms(page, null)
   await page
     .getByLabel('Família da impressora')
     .selectOption('anycubic-kobra-x')
@@ -382,13 +415,7 @@ test('Moonraker rejects mixed credentials and secrets stay out of rendered text'
     'password',
   )
   await page.reload()
-  await page.evaluate(() => {
-    document.body.innerHTML = '<div id="fixture"></div>'
-  })
-  await page.addScriptTag({ content: await setupFormsBundle(null) })
-  await page.evaluate(() =>
-    (window as any).mountSetupForms(document.querySelector('#fixture')),
-  )
+  await mountForms(page, null)
   await page
     .getByLabel('Família da impressora')
     .selectOption('klipper-moonraker')

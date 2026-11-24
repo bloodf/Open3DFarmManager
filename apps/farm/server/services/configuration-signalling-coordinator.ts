@@ -590,9 +590,18 @@ export class ConfigurationSignallingCoordinator implements ConfigurationLiveRegi
   bound(bindingSha256: string) {
     for (const c of this.contexts)
       if (c.bindingSha256 === bindingSha256 && this.live(c))
-        return Object.freeze({ transportId: c.id, expiresAt: c.deadline })
+        // Pinned to the inbox credential this context was admitted under. The
+        // admission floor does not apply: a bound context lives to its deadline.
+        return Object.freeze({
+          transportId: c.id,
+          farmId: c.authority.farm_id,
+          agentId: c.authority.agent_id,
+          credentialJti: c.inbox.jti,
+          expiresAt: c.deadline,
+        })
     return null
   }
+  /** New-admission view: needs at least MIN_CONTEXT_MS of inbox lease left. */
   advertised(farmId: string, agentId: string) {
     const inbox = this.currentInbox(farmId, agentId)
     if (!inbox || inbox.revision === null) return null

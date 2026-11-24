@@ -240,6 +240,7 @@ if (journeyEnabled())
       harness = await startJourneyHarness({
         browser,
         simulator: 'bambu',
+        openFarmInspector: true,
         control: true,
         signedControl: true,
         history: true,
@@ -338,36 +339,51 @@ if (journeyEnabled())
     })
 
     test('AMS telemetry across reconnect', async () => {
-      test.setTimeout(90_000)
+      test.setTimeout(4 * 60_000)
       const journey = started()
       journey.setTelemetryUpload(false)
       const page = journey.ownerPage
-      const printer = await journey.openFarm(page)
       await journey.expectLiveTelemetry(page)
+      const printer = journey.farmRow(page)
 
       const materials = printer.getByRole('region', { name: 'Materiais' })
       await expect(materials).toContainText('AMS 1, bandeja 1')
       await expect(materials).toContainText('PLA')
       await expect(materials).toContainText('#FFFFFFFF')
       const commandCount = simulator().requests.length
-
-      await simulator().control.disconnectClients()
-      await expect(materials).toHaveCount(0, { timeout: 15_000 })
-
-      // Change the simulator's retained report while disconnected. Its next
-      // subscription report after reconnect must replace the previous tray.
-      const ams = simulator().extendedState.ams as {
+      const sim = simulator()
+      const ams = sim.extendedState.ams as {
         ams: { tray: { tray_type: string; tray_color: string }[] }[]
       }
-      ams.ams[0]!.tray[0]!.tray_type = 'PETG'
-      ams.ams[0]!.tray[0]!.tray_color = 'FF0080FF'
 
-      await expect(materials).toBeVisible({ timeout: 30_000 })
-      await expect(materials).toContainText('PETG')
-      await expect(materials).toContainText('#FF0080FF')
-      await expect(materials).not.toContainText('PLA')
-      ams.ams[0]!.tray[0]!.tray_type = 'PLA'
-      ams.ams[0]!.tray[0]!.tray_color = 'FFFFFFFF'
+      // Refuse a few MQTT reconnects so the browser can observe the outage;
+      // the bounded fault then permits the Connector's automatic retry.
+      sim.control.faults.addFault({
+        method: 'CONNECT',
+        filter: (context) => context.packetType === 1,
+        fault: { type: 'refuse' },
+        count: 3,
+      })
+      try {
+        await sim.control.disconnectClients()
+        await expect(materials).toHaveCount(0, { timeout: 15_000 })
+        expect(sim.control.faults.hasFault('refuse')).toBe(true)
+
+        // Change the retained report while reconnects are refused, then let
+        // the next subscription receive a fresh material and color.
+        ams.ams[0]!.tray[0]!.tray_type = 'PETG'
+        ams.ams[0]!.tray[0]!.tray_color = 'FF0080FF'
+        sim.control.faults.clearFaults()
+
+        await expect(materials).toBeVisible({ timeout: 30_000 })
+        await expect(materials).toContainText('PETG')
+        await expect(materials).toContainText('#FF0080FF')
+        await expect(materials).not.toContainText('PLA')
+      } finally {
+        sim.control.faults.clearFaults()
+        ams.ams[0]!.tray[0]!.tray_type = 'PLA'
+        ams.ams[0]!.tray[0]!.tray_color = 'FFFFFFFF'
+      }
       expect(simulator().requests).toHaveLength(commandCount)
     })
 

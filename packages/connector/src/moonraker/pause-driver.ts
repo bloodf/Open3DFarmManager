@@ -46,6 +46,7 @@ import {
   U1ConfigRefusal,
   u1ConfigSettings,
   u1ConsoleAudit,
+  u1ConsoleTool,
   u1HomeAudit,
   u1JogAudit,
   u1TemperatureAudit,
@@ -910,8 +911,35 @@ export function openFixedMoonrakerPause(input: {
           () => undefined,
         ),
       )
-      const line = refuseConsole(args, state)
-      if (state.printState !== 'printing' && state.printState !== 'paused') {
+      const line = refuseConsole(
+        args,
+        state,
+        u1
+          ? ['SDCARD_PRINT_FILE_WITH_PARAMETERS', 'SDCARD_PRINT_PL_RESTORE']
+          : undefined,
+        // U1 `T0`..`T3` is a classified action with its own guard below.
+        u1 ? (candidate) => /^T[0-3]$/i.test(candidate.trim()) : undefined,
+      )
+      const tool = u1 ? u1ConsoleTool(line.trim(), input.objects) : undefined
+      let wireArgs = args
+      let cap = 5000
+      if (tool) {
+        const motion = parseMotionState(
+          await request(12, motionQueryWire(12), lifetimeDeadline),
+        )
+        if (!motion.ready || motion.printState === 'error')
+          throw new ConsoleRefusal('unknown-state')
+        if (motion.printState === 'printing' || motion.printState === 'paused')
+          throw new ConsoleRefusal('not-allowed')
+        if (!['x', 'y', 'z'].every((axis) => motion.homedAxes.includes(axis)))
+          throw new ConsoleRefusal('unknown-state')
+        // A0 selects the named physical tool without the current job's remap.
+        wireArgs = { line: `${line.trim().toUpperCase()} A0` }
+        cap = U1_CONTROL_RESULT_TIMEOUT_MS
+      } else if (
+        state.printState !== 'printing' &&
+        state.printState !== 'paused'
+      ) {
         const command = line.trim().split(/\s+/, 1)[0]!.toUpperCase()
         if (
           input.objects?.some(
@@ -933,15 +961,17 @@ export function openFixedMoonrakerPause(input: {
           guardIdleConsole(line, live, config)
         }
       }
-      if (u1) u1Audit = u1ConsoleAudit(line.trim())
-      const wire = extendedWire('gcode', args)
+      if (u1) u1Audit = u1ConsoleAudit(line.trim(), tool)
+      const wire = extendedWire('gcode', wireArgs)
       if (wire === undefined) throw new ConsoleRefusal('invalid')
       takeConsoleRate(binding, input.clock.monotonicNow())
       extended = 'gcode'
-      return await send(wire, requested, 5000)
+      return await send(wire, requested, cap)
     } catch (error) {
       stop()
       await closed
+      if (u1 && error instanceof MotionRefusal)
+        throw new ConsoleRefusal('unknown-state')
       throw error instanceof ConsoleRefusal ? error : failure()
     }
   }

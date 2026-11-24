@@ -158,10 +158,14 @@ export function idleConsoleClass(line: string): 'safe' | 'guarded' | 'refused' {
   return 'refused'
 }
 
-/** Any line the console may send while the printer is stopped. */
+/**
+ * Any line the console may send while the printer is stopped. `classified`
+ * admits a line the caller has its own guard for (the U1 tool selection).
+ */
 export function consoleAllowedWhenStopped(
   line: string,
   additionalRefused?: readonly string[],
+  classified?: (line: string) => boolean,
 ): boolean {
   const parts = tokens(line)
   if (!parts) return false
@@ -169,7 +173,7 @@ export function consoleAllowedWhenStopped(
   return (
     !ALWAYS_REFUSED.has(command) &&
     !additionalRefused?.includes(command) &&
-    idleConsoleClass(line) !== 'refused'
+    (idleConsoleClass(line) !== 'refused' || classified?.(line) === true)
   )
 }
 
@@ -225,6 +229,7 @@ export function refuseConsole(
   args: Record<string, unknown>,
   state: ConsoleState | undefined,
   additionalRefused?: readonly string[],
+  classified?: (line: string) => boolean,
 ): string {
   const parsed = z.strictObject({ line: GcodeLine }).safeParse(args)
   if (!parsed.success) throw new ConsoleRefusal('invalid')
@@ -236,7 +241,7 @@ export function refuseConsole(
   if (
     !(active
       ? consoleAllowedWhilePrinting(line)
-      : consoleAllowedWhenStopped(line, additionalRefused))
+      : consoleAllowedWhenStopped(line, additionalRefused, classified))
   )
     throw new ConsoleRefusal('not-allowed')
   return line

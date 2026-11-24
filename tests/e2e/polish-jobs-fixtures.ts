@@ -190,7 +190,11 @@ export async function settle(page: Page, scenario: Scenario) {
       await page.getByRole('heading', { name: 'Selecione uma farm' }).waitFor()
       break
     case 'loading':
-      await page.getByText('Consultando histórico…').waitFor()
+      await page
+        .locator('div[aria-busy="true"]')
+        .getByRole('status')
+        .filter({ hasText: /^Consultando histórico…$/ })
+        .waitFor()
       break
     case 'sign-in':
       await page.getByText('Sua sessão não está disponível').waitFor()

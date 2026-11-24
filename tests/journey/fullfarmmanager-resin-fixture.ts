@@ -3,6 +3,7 @@ import { once } from 'node:events'
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
 import { connect, createServer, type Socket } from 'node:net'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import postgres from 'postgres'
 
 const ROLE = 'journey_resin_ledger'
@@ -12,7 +13,7 @@ const ROLE = 'journey_resin_ledger'
 // this journey's cluster and provision the restricted login before navigation.
 export async function startResinFixture() {
   // Keep the nested PostgreSQL socket path below the Unix path limit.
-  const directory = await mkdtemp('/tmp/ofr-')
+  const directory = await mkdtemp(join(tmpdir(), 'ofr-'))
   const saved = {
     TMPDIR: process.env.TMPDIR,
     NUXT_RESIN_LEDGER_ENABLED: process.env.NUXT_RESIN_LEDGER_ENABLED,

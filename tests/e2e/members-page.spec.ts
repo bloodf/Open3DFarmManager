@@ -90,6 +90,7 @@ test('members page role change and removal require confirmation and post', async
 
 test('members page is keyboard operable and axe-clean', async ({ page }) => {
   await mount(page)
+  await expect(page.getByLabel('Novo papel para Admin')).toBeVisible()
   await page.keyboard.press('Tab')
   await expect(
     page.getByRole('link', { name: 'Criar novo convite' }),

@@ -11,6 +11,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { request as httpsRequest } from 'node:https'
 import { expect, type Browser, type Locator, type Page } from '@playwright/test'
+import postgres from 'postgres'
 import { browserBundle } from '../helpers/browser-bundle.ts'
 import { browserLogin, pagePost } from '../helpers/kobralink-rtc/acceptance.ts'
 import { createRuntimeMoonrakerFixture } from '../helpers/signalling-runtime-moonraker.ts'
@@ -234,6 +235,8 @@ export type JourneyHarness = Readonly<{
    * connection is needed (for example to read the job history).
    */
   setTelemetryUpload(open: boolean): void
+  /** Reads the actions persisted for the signed capability issuer. */
+  advertisedControls(): Promise<string[]>
   /** Directory of the server-mode library blobs (`<sha256>` files). */
   libraryDirectory: string
   /** Bounded Nitro output tail for failure diagnostics. */
@@ -941,6 +944,18 @@ export async function startJourneyHarness(
         )
       },
       setTelemetryUpload: (open: boolean) => app.setTelemetryUpload(open),
+      async advertisedControls() {
+        const sql = postgres(database.url('farm_pause_authority'), { max: 1 })
+        try {
+          const rows = await sql<{ controls: string[] | null }[]>`
+            SELECT controls FROM farm.pause_authority_advertised_controls
+            WHERE farm_id=${database.farmId}::uuid
+              AND agent_id=${claim.agent_id}::uuid AND printer_key=${printerKey}`
+          return rows[0]?.controls ?? []
+        } finally {
+          await sql.end({ timeout: 3 })
+        }
+      },
       libraryDirectory: join(app.directory, 'library'),
       appLog: () => app.log(),
       close,

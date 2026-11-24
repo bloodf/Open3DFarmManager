@@ -8,7 +8,7 @@ import {
   watch,
 } from 'vue'
 import { type useFarmView } from '../../composables/useFarmView.ts'
-import { type FarmRow } from '../../utils/farm-view.ts'
+import { observationAge, type FarmRow } from '../../utils/farm-view.ts'
 import { macroArgs } from '../../utils/farm-macros.ts'
 import {
   controlStatusText,
@@ -301,6 +301,24 @@ export function useFarmControls(
       pauseLost.value = true
       pauseControl.close()
     }
+  })
+  // A capability issued during a collection hold lacks the start actions.
+  // When fresh telemetry advertises them, the session is admitted again.
+  watch([() => ready.value?.rows, now], () => {
+    const target = pauseTarget.value
+    if (!target || !pauseControl || pauseState.value.kind !== 'ready') return
+    const row = ready.value?.rows.find(
+      (item) => item.assignment.assignmentId === target.assignmentId,
+    )
+    const observation = row?.observation
+    pauseControl.controlsChanged(
+      observation?.state.controls,
+      !!row &&
+        !!observation &&
+        row.connection === 'authenticated' &&
+        !observation.historical &&
+        !observationAge(observation, now.value).stale,
+    )
   })
   onBeforeUnmount(() => {
     const control = pauseControl

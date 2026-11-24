@@ -337,6 +337,40 @@ if (journeyEnabled())
       expect(simulator().requests).toHaveLength(commandCount)
     })
 
+    test('AMS telemetry across reconnect', async () => {
+      test.setTimeout(90_000)
+      const journey = started()
+      journey.setTelemetryUpload(false)
+      const page = journey.ownerPage
+      const printer = await journey.openFarm(page)
+      await journey.expectLiveTelemetry(page)
+
+      const materials = printer.getByRole('region', { name: 'Materiais' })
+      await expect(materials).toContainText('AMS 1, bandeja 1')
+      await expect(materials).toContainText('PLA')
+      await expect(materials).toContainText('#FFFFFFFF')
+      const commandCount = simulator().requests.length
+
+      await simulator().control.disconnectClients()
+      await expect(materials).toHaveCount(0, { timeout: 15_000 })
+
+      // Change the simulator's retained report while disconnected. Its next
+      // subscription report after reconnect must replace the previous tray.
+      const ams = simulator().extendedState.ams as {
+        ams: { tray: { tray_type: string; tray_color: string }[] }[]
+      }
+      ams.ams[0]!.tray[0]!.tray_type = 'PETG'
+      ams.ams[0]!.tray[0]!.tray_color = 'FF0080FF'
+
+      await expect(materials).toBeVisible({ timeout: 30_000 })
+      await expect(materials).toContainText('PETG')
+      await expect(materials).toContainText('#FF0080FF')
+      await expect(materials).not.toContainText('PLA')
+      ams.ams[0]!.tray[0]!.tray_type = 'PLA'
+      ams.ams[0]!.tray[0]!.tray_color = 'FFFFFFFF'
+      expect(simulator().requests).toHaveLength(commandCount)
+    })
+
     test('completa a jornada Bambu no navegador com resultados confirmados ou desconhecidos', async () => {
       // Thirteen Connector sessions, each opened only after the previous one
       // closed (about 30 s apart), plus a timed print and its history entry.

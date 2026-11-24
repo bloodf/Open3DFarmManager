@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { formatWeight } from '../utils/ui-format.ts'
+import FarmSpool from './spool-art/FarmSpool.vue'
+import { resolveSpoolLevel } from '../utils/spool-level.ts'
 import { computed } from 'vue'
 import {
   spoolInventoryStale,
@@ -37,6 +39,10 @@ const sections = computed(() =>
 )
 // Spoolman can report a negative remaining weight after over-consumption;
 // show it as reported instead of hiding it behind "Indisponível".
+function spoolFraction(remainingGrams: number | null) {
+  const level = resolveSpoolLevel({ spoolmanRemainingWeight: remainingGrams })
+  return level.kind === 'known' ? level.fraction : null
+}
 function grams(value: number | null) {
   const magnitude = formatWeight(value === null ? null : Math.abs(value))
   if (!magnitude) return 'Indisponível'
@@ -95,6 +101,7 @@ function grams(value: number | null) {
             </caption>
             <thead>
               <tr>
+                <th scope="col">Bobina</th>
                 <th scope="col">Filamento</th>
                 <th scope="col">Material</th>
                 <th scope="col">Cor</th>
@@ -108,6 +115,13 @@ function grams(value: number | null) {
                 v-for="(spool, index) in section.item.inventory.spools"
                 :key="index"
               >
+                <td>
+                  <FarmSpool
+                    :color="spool.colorHex ? `#${spool.colorHex}` : null"
+                    :fraction="spoolFraction(spool.remainingGrams)"
+                    :size="36"
+                  />
+                </td>
                 <th scope="row">{{ spool.name ?? 'Sem nome' }}</th>
                 <td>{{ spool.material ?? 'Indisponível' }}</td>
                 <td>

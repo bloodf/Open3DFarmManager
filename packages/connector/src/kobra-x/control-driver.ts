@@ -235,6 +235,8 @@ export function openFixedKobraXControl(input: {
       if (!latest || !job || effectChanged || stopped || request.signal.aborted)
         return
       if (action === 'start_print') {
+        // The command report only narrows the match (it can block a start, never
+        // prove one): the evidence is the post-send idle-to-printing transition.
         const taskId = commandReport.data.taskid
         const wasIdle =
           baseline?.printState === 'idle' ||

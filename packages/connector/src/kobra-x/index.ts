@@ -278,7 +278,9 @@ export async function connectKobraX(options: {
         usage.report(report)
         options.onReport?.(report, state.snapshot(), facts.get(), source)
       }
-      requests.handleReport(report)
+      // A reply carrying the ID of one of our own state queries belongs to
+      // that query and never settles a command.
+      if (queryMatch === 'other') requests.handleReport(report)
     } catch {
       // Invalid telemetry is ignored.
     }

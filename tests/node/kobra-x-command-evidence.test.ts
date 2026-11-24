@@ -43,10 +43,9 @@ function frame(
   return parseKobraXReport(topicType, JSON.parse(reader.rest().toString()))!
 }
 
-for (const [label, type, action, foreign] of [
-  ['foreign ID', 'print', 'start', true],
-  ['wrong type', 'info', 'start', false],
-  ['wrong action', 'print', 'stop', false],
+for (const [label, type, action] of [
+  ['wrong type', 'info', 'start'],
+  ['wrong action', 'print', 'stop'],
 ] as const) {
   test(`${label} cannot settle a command`, async () => {
     let id = ''
@@ -65,11 +64,74 @@ for (const [label, type, action, foreign] of [
       beforeSend: () => true,
     })
     requests.handleAck({ msgid: id, code: 0 })
-    requests.handleReport(frame(type, action, foreign ? 'another-client' : id))
+    requests.handleReport(frame(type, action, id))
     assert.equal((await result).kind, 'received')
     assert.equal(sends, 1)
   })
 }
+
+test('a report owned by another pending request cannot settle a command', async () => {
+  const ids: string[] = []
+  const requests = createKobraXRequests({
+    topic: (type) => type,
+    publish(_topic, payload) {
+      ids.push(JSON.parse(payload).msgid)
+    },
+    resultTimeoutMs: 40,
+  })
+  const spec = {
+    type: 'print',
+    action: 'start',
+    beforeSend: () => true,
+  }
+  const first = requests.send(spec)
+  const second = requests.send(spec)
+  requests.handleReport(frame('print', 'start', ids[1]!))
+  const confirmed = await second
+  assert.equal(confirmed.kind, 'confirmed')
+  assert.equal(confirmed.kind === 'confirmed' && confirmed.correlated, true)
+  assert.equal((await first).kind, 'unanswered')
+})
+
+test('a report with a printer-chosen or missing ID still settles by type and action, uncorrelated', async () => {
+  for (const msgid of ['printer-chosen', '']) {
+    const requests = createKobraXRequests({
+      topic: (type) => type,
+      publish() {},
+      resultTimeoutMs: 40,
+    })
+    const result = requests.send({
+      type: 'print',
+      action: 'stop',
+      beforeSend: () => true,
+    })
+    requests.handleReport(frame('print', 'stop', msgid))
+    const outcome = await result
+    assert.equal(outcome.kind, 'confirmed')
+    assert.equal(outcome.kind === 'confirmed' && outcome.correlated, false)
+  }
+})
+
+test('a failed report without an ID still refuses and a wrong action never does', async () => {
+  const requests = createKobraXRequests({
+    topic: (type) => type,
+    publish() {},
+    resultTimeoutMs: 40,
+  })
+  const result = requests.send({
+    type: 'print',
+    action: 'stop',
+    beforeSend: () => true,
+  })
+  requests.handleReport(frame('print', 'pause', '', {}, 'failed', 500))
+  requests.handleReport(frame('print', 'stop', '', {}, 'failed', 500))
+  assert.deepEqual(await result, {
+    kind: 'refused',
+    stage: 'printer',
+    reason: 'printer-refused',
+    code: 500,
+  })
+})
 
 test('a failed free report invalidates readiness and cannot update facts', () => {
   const evidence = createKobraXStateEvidence()
@@ -116,6 +178,7 @@ function driverFixture(
   t: TestContext,
   initiallyPrinting = false,
   refreshedTask = 'existing',
+  settledBy: 'exact' | 'type-action' = 'exact',
 ) {
   const directory = mkdtempSync(join(tmpdir(), 'kobra-x-command-evidence-'))
   t.after(() => rmSync(directory, { recursive: true, force: true }))
@@ -236,23 +299,29 @@ function driverFixture(
               }
             sends++
             start = action === 'start_print'
-            const result = start
-              ? frame(
-                  'print',
-                  'start',
-                  'command',
-                  { filename: 'part.gcode', taskid: 'new-job' },
-                  'checking',
-                )
-              : frame('tempature', 'set', 'command', {
-                  target_nozzle_temp: 190,
-                })
-            report(result, 'request')
+            const light = action === 'set_light'
+            const result = light
+              ? frame('light', 'control', 'command', { status: 1 })
+              : start
+                ? frame(
+                    'print',
+                    'start',
+                    'command',
+                    { filename: 'part.gcode', taskid: 'new-job' },
+                    'checking',
+                  )
+                : frame('tempature', 'set', 'command', {
+                    target_nozzle_temp: 190,
+                  })
+            report(result, settledBy === 'exact' ? 'request' : 'other')
             return {
               kind: 'confirmed',
               report: result,
+              correlated: settledBy === 'exact',
               data: undefined,
-              effectMatches: (next) => next.data.target_nozzle_temp === 190,
+              effectMatches: light
+                ? (next) => next.data.status === 1
+                : (next) => next.data.target_nozzle_temp === 190,
             }
           },
         },
@@ -362,4 +431,34 @@ test('a contradictory current reply invalidates readiness', () => {
     true,
   )
   assert.equal(evidence.get(), undefined)
+})
+
+test('a control settled only by type and action is not effect evidence', async (t) => {
+  const exact = driverFixture(t, false, 'existing', 'exact')
+  await exact.prepare()
+  assert.deepEqual(
+    await exact.driver.execute!('set_light', { on: true }, exact.request),
+    { acknowledged: true },
+  )
+  const fallback = driverFixture(t, false, 'existing', 'type-action')
+  await fallback.prepare()
+  assert.deepEqual(
+    await fallback.driver.execute!('set_light', { on: true }, fallback.request),
+    { acknowledged: false },
+  )
+  assert.equal(fallback.sends(), 1)
+})
+
+test('a fresh correlated state read-back confirms a control the fallback settled', async (t) => {
+  const fixture = driverFixture(t, false, 'existing', 'type-action')
+  await fixture.prepare()
+  assert.deepEqual(
+    await fixture.driver.execute!(
+      'set_temperature',
+      { heater: 'extruder', target_c: 190 },
+      fixture.request,
+    ),
+    { acknowledged: true },
+  )
+  assert.equal(fixture.sends(), 1)
 })

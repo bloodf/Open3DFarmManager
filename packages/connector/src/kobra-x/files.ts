@@ -191,6 +191,7 @@ export function createKobraXFiles(context: KobraXControlContext) {
       if (response.status === 200 && code === 200 && typeof stored === 'string')
         return {
           kind: 'confirmed',
+          correlated: true,
           report: {
             type: 'http',
             action: 'gcode_upload',

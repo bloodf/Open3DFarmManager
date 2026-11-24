@@ -20,6 +20,8 @@ export type KobraXOutcome<T = undefined> =
       kind: 'confirmed'
       report: KobraXReport
       data: T
+      /** True only when the report carries this request's own msgid. */
+      correlated: boolean
       effectMatches?: (report: KobraXReport) => boolean
     }
   | {
@@ -137,12 +139,23 @@ export function createKobraXRequests(input: {
       function onAbort() {
         finish(acked ? { kind: 'received' } : { kind: 'unanswered' })
       }
+      // Exact: our own msgid with the right type and action.
       const ownsReport = (report: KobraXReport) =>
         report.msgid === msgid &&
         report.type === spec.type &&
         report.action === spec.action
+      // S1 printers acknowledge with our msgid, then report with a printer
+      // chosen msgid or none. Type and action still apply on this path, and an
+      // ID that belongs to another pending request never settles this one
+      // (#616). Such a report can settle the request but is never evidence of
+      // an effect: `confirmed.correlated` stays false.
+      const settlesReport = (report: KobraXReport) =>
+        ownsReport(report) ||
+        (report.type === spec.type &&
+          report.action === spec.action &&
+          !inflight.has(report.msgid))
       stop = onReport((report) => {
-        if (!ownsReport(report) || Number.isNaN(report.code)) return
+        if (!settlesReport(report) || Number.isNaN(report.code)) return
         const refusal = reportRefusal(report)
         // A failure report may carry no payload to match; it still refuses.
         const matches =
@@ -163,6 +176,7 @@ export function createKobraXRequests(input: {
         finish({
           kind: 'confirmed',
           report,
+          correlated: ownsReport(report),
           ...(spec.effect ? { effectMatches: spec.effect } : {}),
           data: (spec.result ? spec.result(report) : undefined) as T,
         })

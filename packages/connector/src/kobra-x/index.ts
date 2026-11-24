@@ -38,6 +38,7 @@ export async function connectKobraX(options: {
     report: KobraXReport,
     snapshot: ReturnType<ReturnType<typeof createKobraXStatus>['snapshot']>,
     facts: KobraXFacts,
+    currentStateQuery: boolean,
   ) => void
   /** Called once per finished job with the filament used per ACE slot. */
   onJobUsage?: (usage: KobraXJobUsage) => void
@@ -157,6 +158,8 @@ export async function connectKobraX(options: {
       state.disconnect()
     })
   }
+  let currentInfoQuery: string | undefined
+  let currentPrintQuery: string | undefined
   function query(type: keyof typeof queries) {
     if (!client.connected) return
     // The Orca LAN client sends timestamped, null-data requests for info,
@@ -165,12 +168,15 @@ export async function connectKobraX(options: {
       type === 'status' || type === 'tempature'
         ? { data: {} }
         : { timestamp: Date.now(), data: null }
+    const msgid = randomUUID()
+    if (type === 'info') currentInfoQuery = msgid
+    if (type === 'print') currentPrintQuery = msgid
     client.publish(
       `${path}/${modeId}/${deviceId}/${type}`,
       JSON.stringify({
         type,
         action: queries[type],
-        msgid: randomUUID(),
+        msgid,
         ...envelope,
       }),
     )
@@ -203,6 +209,8 @@ export async function connectKobraX(options: {
     client.on('close', () => {
       state.disconnect()
       facts.reset()
+      currentInfoQuery = undefined
+      currentPrintQuery = undefined
       options.onDisconnect?.()
       if (!ready && !accepted && tlsEstablished) {
         failed(
@@ -256,10 +264,28 @@ export async function connectKobraX(options: {
         state.report(type, message)
       const report = parseKobraXReport(type, message)
       if (!report) return
+      const currentStateQuery =
+        report.type === 'info' &&
+        report.action === 'report' &&
+        report.msgid === currentInfoQuery
+      if (currentStateQuery) currentInfoQuery = undefined
       facts.report(report)
       usage.report(report)
-      options.onReport?.(report, state.snapshot(), facts.get())
+      options.onReport?.(
+        report,
+        state.snapshot(),
+        facts.get(),
+        currentStateQuery,
+      )
       requests.handleReport(report)
+      if (
+        report.type === 'print' &&
+        report.action === 'query' &&
+        report.msgid === currentPrintQuery
+      ) {
+        currentPrintQuery = undefined
+        query('info')
+      }
     } catch {
       // Invalid telemetry is ignored.
     }

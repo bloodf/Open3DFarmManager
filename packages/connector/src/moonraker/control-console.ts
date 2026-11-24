@@ -153,7 +153,18 @@ export function idleConsoleClass(line: string): 'safe' | 'guarded' | 'refused' {
   )
     return 'safe'
   if (command === 'M118' && parts.length > 1) return 'safe'
-  if (['G0', 'G1', 'M104', 'M109', 'M140', 'M190'].includes(command))
+  if (
+    [
+      'G0',
+      'G1',
+      'G28',
+      'BED_MESH_CALIBRATE',
+      'M104',
+      'M109',
+      'M140',
+      'M190',
+    ].includes(command)
+  )
     return 'guarded'
   return 'refused'
 }

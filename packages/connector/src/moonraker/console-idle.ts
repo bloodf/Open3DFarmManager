@@ -60,6 +60,15 @@ const gcodeMove = z.object({
   extrude_factor: finite.positive(),
 })
 const section = z.object({ position_min: finite, position_max: finite })
+// Klipper reports a float pair as a list or as the raw "x, y" string.
+const pair = z.preprocess(
+  (value) =>
+    typeof value === 'string'
+      ? value.split(',').map((part) => Number(part.trim()))
+      : value,
+  z.tuple([finite, finite]),
+)
+const meshSection = z.object({ mesh_min: pair, mesh_max: pair })
 const heater = z.object({ max_temp: finite.positive() })
 const configfile = z.object({
   status: z.object({
@@ -73,12 +82,49 @@ export function guardIdleConsole(
   config: unknown,
 ): void {
   const parsed = snapshot.safeParse(live)
-  const configured = configfile.safeParse(config)
-  if (!parsed.success || !configured.success)
-    throw new ConsoleRefusal('unknown-state')
-  const { settings } = configured.data.status.configfile
+  if (!parsed.success) throw new ConsoleRefusal('unknown-state')
   const state = parsed.data.status
   const [raw, ...parts] = line.trim().toUpperCase().split(/\s+/)
+  if (raw === 'G28') {
+    // Homing is the structured `home` action: bare axes, no bounds needed.
+    if (
+      parts.some((part) => !/^[XYZ]$/.test(part)) ||
+      new Set(parts).size !== parts.length
+    )
+      throw new ConsoleRefusal('invalid')
+    return
+  }
+  const configured = configfile.safeParse(config)
+  if (!configured.success) throw new ConsoleRefusal('unknown-state')
+  const { settings } = configured.data.status.configfile
+  const stepper = (axis: string) => {
+    const bounds = section.safeParse(settings[`stepper_${axis.toLowerCase()}`])
+    if (!bounds.success || bounds.data.position_min >= bounds.data.position_max)
+      throw new ConsoleRefusal('limit')
+    return bounds.data
+  }
+  if (raw === 'BED_MESH_CALIBRATE') {
+    // Probe travel is limited by the configured mesh area inside the axes.
+    if (parts.length) throw new ConsoleRefusal('invalid')
+    if (
+      !['x', 'y', 'z'].every((axis) => state.toolhead.homed_axes.includes(axis))
+    )
+      throw new ConsoleRefusal('unhomed')
+    const mesh = meshSection.safeParse(settings.bed_mesh)
+    if (!mesh.success) throw new ConsoleRefusal('limit')
+    for (const [index, axis] of ['X', 'Y'].entries()) {
+      const bounds = stepper(axis)
+      const low = mesh.data.mesh_min[index]!
+      const high = mesh.data.mesh_max[index]!
+      if (
+        low >= high ||
+        low < bounds.position_min ||
+        high > bounds.position_max
+      )
+        throw new ConsoleRefusal('limit')
+    }
+    return
+  }
   const values: Record<string, number> = {}
   for (const part of parts) {
     const match = /^([XYZEFS])(-?\d+(?:\.\d+)?)$/.exec(part)

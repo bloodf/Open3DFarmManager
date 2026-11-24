@@ -77,12 +77,40 @@ describe('idle console guards', () => {
     for (const line of [
       'MY_MACRO',
       'QUERY_MY_MACRO',
-      'G28',
       'G92 X0',
       'G2 X10',
       'M112',
     ])
       expect(idleConsoleClass(line)).toBe('refused')
+  })
+  it('guards homing and mesh calibration', () => {
+    expect(idleConsoleClass('G28')).toBe('guarded')
+    expect(idleConsoleClass('BED_MESH_CALIBRATE')).toBe('guarded')
+    expect(() => guard('G28')).not.toThrow()
+    expect(() => guard('G28 X Y')).not.toThrow()
+    for (const line of ['G28 X0', 'G28 X X', 'G28 A', 'BED_MESH_CALIBRATE X=1'])
+      expect(() => guard(line)).toThrow(ConsoleRefusal)
+    expect(() => guard('G28', {}, {})).toThrow(ConsoleRefusal)
+    expect(() => guard('BED_MESH_CALIBRATE')).toThrow(ConsoleRefusal)
+    const meshed: {
+      status: { configfile: { settings: Record<string, unknown> } }
+    } = structuredClone(config)
+    Object.assign(meshed.status.configfile.settings, {
+      bed_mesh: { mesh_min: '20, 20', mesh_max: [180, 180] },
+    })
+    expect(() => guard('BED_MESH_CALIBRATE', snapshot(), meshed)).not.toThrow()
+    const unhomed = snapshot()
+    unhomed.status.toolhead.homed_axes = 'xy'
+    expect(() => guard('BED_MESH_CALIBRATE', unhomed, meshed)).toThrow(
+      'Eixo não referenciado',
+    )
+    meshed.status.configfile.settings.bed_mesh = {
+      mesh_min: '20, 20',
+      mesh_max: [250, 180],
+    }
+    expect(() => guard('BED_MESH_CALIBRATE', snapshot(), meshed)).toThrow(
+      ConsoleRefusal,
+    )
   })
   it('keeps queries and the printing allow-list', () => {
     expect(idleConsoleClass('M105')).toBe('safe')

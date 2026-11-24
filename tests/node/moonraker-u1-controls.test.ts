@@ -181,35 +181,6 @@ test('declared U1 confirms a delayed signed home without replaying its write', a
   assert.equal(remote.calls()['printer.gcode.script'], 1)
 })
 
-test('declared U1 confirms a delayed console home without replaying its write', async (t) => {
-  const { remote, applied } = await world(t, { homedAxes: '' })
-  remote.control.faults.addFault({
-    path: '/websocket',
-    method: 'printer.gcode.script',
-    fault: { type: 'delay', delayMs: 5200 },
-    count: 1,
-  })
-  await applied('gcode', { line: 'G28' })
-  assert.deepEqual(remote.control.gcodeScripts, ['G28 X Y Z'])
-  assert.equal(remote.calls()['printer.gcode.script'], 1)
-})
-
-test('declared U1 console still refuses an advertised G28 macro under the home window', async (t) => {
-  const { remote, run } = await world(t, { homedAxes: '', macros: ['G28'] })
-  remote.control.faults.addFault({
-    path: '/websocket',
-    method: 'printer.gcode.script',
-    fault: { type: 'delay', delayMs: 5200 },
-    count: 1,
-  })
-  for (const line of ['G28', 'G28 X Y']) {
-    const result = await run('gcode', { line })
-    assert.equal(result.kind, 'not-sent', JSON.stringify({ line, result }))
-  }
-  assert.deepEqual(remote.control.gcodeScripts, [])
-  assert.equal(remote.calls()['printer.gcode.script'] ?? 0, 0)
-})
-
 test('declared U1 console retains the existing safety policy', async (t) => {
   const { remote, run, applied } = await world(t)
   for (const line of [

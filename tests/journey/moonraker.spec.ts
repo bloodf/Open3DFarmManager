@@ -97,7 +97,7 @@ if (journeyEnabled())
   })
 
 if (journeyEnabled())
-  test('mostra a temperatura do bico ativo da Snapmaker U1 simulada', async ({
+  test('mostra telemetria e controla a temperatura da Snapmaker U1 simulada', async ({
     browser,
   }) => {
     test.setTimeout(5 * 60_000)
@@ -105,19 +105,47 @@ if (journeyEnabled())
       browser,
       simulator: 'moonraker-fixture',
       openFarmInspector: true,
-      moonraker: { mock: { profile: 'u1' } },
+      signedControl: true,
+      history: true,
+      moonraker: {
+        mock: {
+          profile: 'u1',
+          // The Connector reads each heater's configured ceiling before it
+          // writes a tool temperature.
+          configfileSettings: {
+            extruder: { max_temp: 300 },
+            extruder1: { max_temp: 300 },
+            extruder2: { max_temp: 300 },
+            extruder3: { max_temp: 300 },
+          },
+        },
+        declaredModel: 'Snapmaker U1',
+      },
     })
     try {
       const printer = journey.printer.control
+      const page = journey.ownerPage
       printer.update({
         activeExtruder: 'extruder2',
         extruders: {
-          extruder2: { temperature: 230, target: 235 },
-          extruder3: { temperature: 245, target: 250 },
+          extruder: { temperature: 210, target: 40 },
+          extruder1: { temperature: 220, target: 41 },
+          extruder2: { temperature: 230, target: 42 },
+          extruder3: { temperature: 245, target: 43 },
         },
+        bedTarget: 55,
       })
 
+      // The issuer grants only persisted advertised controls: wait for the
+      // Connector's telemetry before opening the single-use control peer.
+      await expect
+        .poll(() => journey.advertisedControls(), { timeout: 90_000 })
+        .toContain('set_tool_temperature')
+      journey.setTelemetryUpload(false)
       await journey.expectLiveTelemetry()
+      const row = journey.farmRow()
+      printer.update({ state: 'standby' })
+      await expect(row).toContainText('Ociosa', { timeout: 60_000 })
       expect(journey.printer.subscriptionObjects()).toContainEqual(
         expect.objectContaining({
           extruder1: ['temperature', 'target'],
@@ -126,10 +154,90 @@ if (journeyEnabled())
           toolhead: ['extruder'],
         }),
       )
-      const row = journey.farmRow()
       const temperatures = row.getByLabel('Temperaturas observadas')
       await expect(temperatures).toContainText('230 °C')
       await expect(temperatures).toContainText('60 °C')
+
+      await expect
+        .poll(
+          () => {
+            const { pauseInboxReady, pauseInboxes } =
+              journey.simulatorObservation()
+            return pauseInboxReady && pauseInboxes > 0
+          },
+          { timeout: 90_000 },
+        )
+        .toBe(true)
+      const extended = row.getByRole('region', {
+        name: 'Controles adicionais de ' + journey.printerKey,
+      })
+      const toolTwoInput = extended.getByLabel(
+        'Ferramenta 3 — Temperatura em °C',
+      )
+      await expect(toolTwoInput).toBeVisible({ timeout: 10_000 })
+      const setToolTwo = extended.getByRole('button', {
+        name: 'Definir temperatura da Ferramenta 3',
+        exact: true,
+      })
+      await toolTwoInput.fill('222')
+      await expect(setToolTwo).toBeEnabled()
+      await setToolTwo.click()
+
+      const dialog = page.getByRole('dialog', {
+        name: new RegExp(journey.printerKey),
+      })
+      await expect(dialog).toBeVisible()
+      await expect(
+        dialog.getByText(
+          'Confirme a temperatura de 222 °C para a Ferramenta 3.',
+        ),
+      ).toBeVisible()
+      const confirm = dialog.getByRole('button', {
+        name: 'Confirmar comando',
+        exact: true,
+      })
+      await expect(confirm).toBeEnabled({ timeout: 45_000 })
+      await confirm.click()
+      await expect(dialog.getByRole('status')).toHaveText(
+        'Comando confirmado pelo Connector.',
+        { timeout: 60_000 },
+      )
+      await dialog.getByRole('button', { name: 'Fechar', exact: true }).click()
+      await expect(dialog).toBeHidden()
+
+      await expect
+        .poll(() => printer.model().extruders.extruder2?.target)
+        .toBe(222)
+      expect(printer.model().extruders).toMatchObject({
+        extruder: { target: 40 },
+        extruder1: { target: 41 },
+        extruder3: { target: 43 },
+      })
+      expect(printer.model().bedTarget).toBe(55)
+      expect(printer.gcodeScripts).toEqual([
+        'SET_HEATER_TEMPERATURE HEATER=extruder2 TARGET=222',
+      ])
+      // Exactly one write reached the fixture: the signed tool temperature.
+      const calls = journey.printer.calls()
+      expect(calls['printer.gcode.script']).toBe(1)
+      expect(
+        Object.fromEntries(
+          PRINT_CALLS.map((method) => [method, calls[method] ?? 0]),
+        ),
+      ).toEqual({
+        'printer.print.start': 0,
+        'printer.print.pause': 0,
+        'printer.print.resume': 0,
+        'printer.print.cancel': 0,
+        'printer.emergency_stop': 0,
+        'printer.gcode.script': 1,
+      })
+
+      printer.update({
+        extruders: { extruder2: { temperature: 231, target: 222 } },
+      })
+      await expect(temperatures).toContainText('231 °C', { timeout: 60_000 })
+      await expect(row).toContainText('Conexão direta autenticada')
 
       printer.update({ activeExtruder: 'extruder3' })
       await expect(temperatures).toContainText('245 °C')
@@ -140,8 +248,12 @@ if (journeyEnabled())
       printer.update({ activeExtruder: 'extruder9' })
       await expect(temperatures).toContainText('Indisponível')
       await expect(temperatures).toContainText('60 °C')
+      // The reported progress ring is only drawn while a job is printing.
+      printer.update({ state: 'printing' })
       await journey.expectProgress(0.25)
-      expect(printer.gcodeScripts).toEqual([])
+      expect(printer.gcodeScripts).toEqual([
+        'SET_HEATER_TEMPERATURE HEATER=extruder2 TARGET=222',
+      ])
     } finally {
       await journey.close()
     }

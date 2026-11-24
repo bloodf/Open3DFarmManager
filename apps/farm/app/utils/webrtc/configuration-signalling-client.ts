@@ -148,7 +148,9 @@ export class ConfigurationBrowserSignallingClient {
   #clock: () => number
   #socket: ConfigurationBrowserSocketPort | undefined
   #unbindSocket = () => {}
-  #phase: 'open' | 'ready' | 'offer' | 'binding' | 'active' | 'closed' = 'open'
+  #phase:
+    'open' | 'ready' | 'retry' | 'offer' | 'binding' | 'active' | 'closed' =
+    'open'
   #transportId: string | undefined
   #browserNonce: string | undefined
   #thumbprint: string | undefined
@@ -170,6 +172,8 @@ export class ConfigurationBrowserSignallingClient {
   #terminal: string | undefined
   #removeAbort = () => {}
   #openTimer: ReturnType<typeof setTimeout> | undefined
+  #retryTimer: ReturnType<typeof setTimeout> | undefined
+  #admissionRetries = 0
   #leaseTimer: ReturnType<typeof setTimeout> | undefined
   #queue: Promise<void> = Promise.resolve()
 
@@ -224,14 +228,7 @@ export class ConfigurationBrowserSignallingClient {
                 this.close('unexpected-open')
                 return
               }
-              this.#phase = 'ready'
-              this.sendSignalling({
-                v: 1,
-                t: 'config.begin',
-                farm_id: this.#scope.farmId,
-                agent_id: this.#scope.agentId,
-                key_id: this.#scope.keyId,
-              })
+              this.beginAdmission()
             },
             message: (raw) => {
               this.#queue = this.#queue
@@ -245,6 +242,21 @@ export class ConfigurationBrowserSignallingClient {
         .catch(() => this.close('connect-failed'))
     }
     return this.#start
+  }
+
+  private beginAdmission(): void {
+    this.#phase = 'ready'
+    try {
+      this.sendSignalling({
+        v: 1,
+        t: 'config.begin',
+        farm_id: this.#scope.farmId,
+        agent_id: this.#scope.agentId,
+        key_id: this.#scope.keyId,
+      })
+    } catch {
+      this.close('frame-failed')
+    }
   }
 
   private sendSignalling(frame: unknown): void {
@@ -270,6 +282,17 @@ export class ConfigurationBrowserSignallingClient {
   ): Promise<void> {
     if (this.#terminal) return
     const scope = this.#scope
+    if (frame.t === 'config.retry' && this.#phase === 'ready') {
+      if (this.#admissionRetries >= 2)
+        throw new Error('Configuration admission retry limit')
+      this.#admissionRetries++
+      this.#phase = 'retry'
+      this.#retryTimer = setTimeout(
+        () => this.beginAdmission(),
+        frame.retry_after_ms,
+      )
+      return
+    }
     if (frame.t === 'config.ready' && this.#phase === 'ready') {
       if (
         frame.farm_id !== scope.farmId ||
@@ -399,6 +422,7 @@ export class ConfigurationBrowserSignallingClient {
     this.#phase = 'closed'
     this.#removeAbort()
     clearTimeout(this.#openTimer)
+    clearTimeout(this.#retryTimer)
     clearTimeout(this.#leaseTimer)
     this.#unbindSocket()
     this.#rejectStart(new Error(this.#terminal))

@@ -340,6 +340,7 @@ for (const width of [320, 1280]) {
     await expect(table.getByRole('columnheader')).toHaveCount(6)
     const firstSpool = table.getByRole('rowheader', { name: /PLA Branco/ })
     await expect(firstSpool).toBeVisible()
+    await expect(firstSpool).toHaveText('? PLA Branco')
     await expect(
       firstSpool.getByRole('img', { name: 'Nível restante desconhecido' }),
     ).toHaveAttribute('data-level', '1')

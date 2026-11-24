@@ -213,6 +213,7 @@ it('hides last-known materials in the table when the observation is historical',
 
 it('keeps live materials in the table', async () => {
   const cells = await tableCells(false)
-  expect(cells['Materiais']).toContain('PETG-HF')
-  expect(cells['Materiais']).toContain('PLA-SEDA')
+  expect(
+    cells['Materiais']?.replaceAll('?', '').replace(/\s+/g, ' ').trim(),
+  ).toBe('PETG-HF PLA-SEDA')
 })

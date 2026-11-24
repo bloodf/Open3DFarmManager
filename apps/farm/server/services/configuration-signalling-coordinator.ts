@@ -444,7 +444,10 @@ export class ConfigurationSignallingCoordinator implements ConfigurationLiveRegi
         read.observedAt + CONFIGURATION_HARD_MAXIMUMS.bindingMs,
         inbox.expiresAt,
       )
-      const remaining = deadline - Math.max(read.observedAt, now.wall)
+      const remaining = Math.min(
+        deadline - Math.max(read.observedAt, now.wall),
+        inbox.deadlineMono - now.monotonic,
+      )
       if (remaining < MIN_CONTEXT_MS) return null
       const handle = new Handle(this)
       Object.freeze(handle)
@@ -573,9 +576,14 @@ export class ConfigurationSignallingCoordinator implements ConfigurationLiveRegi
   }
   advertised(farmId: string, agentId: string) {
     const inbox = this.currentInbox(farmId, agentId)
-    return inbox && inbox.revision !== null
-      ? Object.freeze({ jti: inbox.jti, revision: inbox.revision })
-      : null
+    if (!inbox || inbox.revision === null) return null
+    const now = signallingClockSample(this.clock)
+    if (
+      Math.min(inbox.expiresAt - now.wall, inbox.deadlineMono - now.monotonic) <
+      MIN_CONTEXT_MS
+    )
+      return null
+    return Object.freeze({ jti: inbox.jti, revision: inbox.revision })
   }
   activeContext(scope: {
     sessionRecordId: string

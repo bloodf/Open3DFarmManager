@@ -48,6 +48,7 @@ import { createConfigurationAuthorityService } from '../../apps/farm/server/serv
 import { createConfigurationRegistrationService } from '../../apps/farm/server/services/configuration-receipt-registration.ts'
 import { ConfigurationSignallingCoordinator } from '../../apps/farm/server/services/configuration-signalling-coordinator.ts'
 import { createConfigurationSocketSession } from '../../apps/farm/server/services/configuration-signalling-session.ts'
+import type { SignallingClock } from '../../apps/farm/server/services/signalling-clock.ts'
 import {
   ConfigurationSignallingRuntime,
   configurationSocketHooks,
@@ -162,7 +163,7 @@ beforeAll(async () => {
 })
 
 /** Synthetic store. One transaction at a time; a rejection restores every map. */
-function memoryStore() {
+function memoryStore(now = Date.now) {
   const state = {
     authority: null as unknown,
     operations: new Map<string, ConfigurationOperationRecord>(),
@@ -184,7 +185,7 @@ function memoryStore() {
             scope.keyId === a.key_id
               ? structuredClone(a)
               : null,
-          observedAt: Date.now(),
+          observedAt: now(),
           operation: async (id) => state.operations.get(id) ?? null,
           createOperation: async (record) =>
             !state.operations.has(record.operation_id) &&
@@ -229,7 +230,12 @@ function memoryStore() {
   return { state, store }
 }
 
-async function fixture() {
+async function fixture(
+  clock: SignallingClock = {
+    wall: Date.now,
+    monotonic: () => performance.now(),
+  },
+) {
   const ed = () =>
     crypto.subtle.generateKey('Ed25519', false, ['sign', 'verify'])
   const [issuer, connector] = await Promise.all([ed(), ed()])
@@ -260,16 +266,16 @@ async function fixture() {
     credential_jti: ids.jti,
     origin,
     audience,
-    validUntil: Date.now() + 3_600_000,
+    validUntil: clock.wall() + 3_600_000,
   }
-  const { state, store } = memoryStore()
+  const { state, store } = memoryStore(clock.wall)
   state.authority = authority
   const thumbprint = (await connectorKeyBinding(spki)).thumbprint
   const credentials = {
     async issue(input: unknown): Promise<CredentialAcceptanceDecision> {
       const request = CredentialProofRequest.parse(input)
       if (request.token !== token) return { ok: false, reason: 'denied' }
-      const now = Date.now()
+      const now = clock.wall()
       return {
         ok: true,
         kind: 'challenge',
@@ -310,8 +316,8 @@ async function fixture() {
         jti: done.challenge.jti,
         connectionId: done.connectionId,
         purpose: 'signalling',
-        acceptedAt: Date.now(),
-        expiresAt: Date.now() + 600_000,
+        acceptedAt: clock.wall(),
+        expiresAt: clock.wall() + 600_000,
       }
     },
   }
@@ -327,7 +333,7 @@ async function fixture() {
     },
     credentials,
     credentialAudience,
-    clock: { wall: Date.now, monotonic: () => performance.now() },
+    clock,
     timers,
   })
   const a = authFixture()
@@ -694,6 +700,49 @@ test('socket sessions enforce order, authentication and a session-bound browser'
   live.c.session.close()
   expect(f.coordinator.advertised(ids.farm, ids.agent)).toBeNull()
   expect(f.coordinator.snapshot()).toMatchObject({ inboxes: 0, contexts: 0 })
+})
+
+test('bootstrap stops advertising before the Connector can no longer admit configuration', async () => {
+  const started = Date.now()
+  let elapsed = 0
+  const f = await fixture({
+    wall: () => started + elapsed,
+    monotonic: () => elapsed,
+  })
+  const live = await f.handshake()
+  live.b.session.close()
+  const bootstrapPath = `/api/farms/${ids.farm}/connectors/${ids.agent}/configuration?keyId=${ids.key}`
+  const scope = { farmId: ids.farm, agentId: ids.agent }
+  const bootstrap = () =>
+    configurationBootstrapRequest(f.event(bootstrapPath), f.runtime, scope)
+  const openBrowser = async () => {
+    const browser = f.socket('browser', sessionRecordId)
+    await browser.send({
+      v: 1,
+      t: 'config.begin',
+      farm_id: ids.farm,
+      agent_id: ids.agent,
+      key_id: ids.key,
+    })
+    return browser
+  }
+
+  elapsed = 55_000
+  expect(await bootstrap()).toMatchObject({ available: true, revision: 0 })
+  const lastChance = await openBrowser()
+  expect(lastChance.last().t).toBe('config.ready')
+  lastChance.session.close()
+
+  elapsed++
+  const browser = await openBrowser()
+  expect(browser.closed).toBe(true)
+  expect(await bootstrap()).toMatchObject({ available: false, revision: null })
+  expect(live.c.closed).toBe(false)
+
+  const fresh = await f.handshake()
+  expect(await bootstrap()).toMatchObject({ available: true, revision: 0 })
+  fresh.b.session.close()
+  fresh.c.session.close()
 })
 
 test('HTTP handlers issue a capability and register the committed receipt end to end', async () => {

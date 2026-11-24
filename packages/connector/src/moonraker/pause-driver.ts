@@ -161,6 +161,19 @@ const Snapshot = z.strictObject({
     }),
   }),
 })
+/**
+ * A builder's typed refusal says why nothing was written. Anything else the
+ * builder throws is a malformed request and stays `invalid-command`.
+ */
+function isTypedRefusal(error: unknown): error is Error {
+  const refusal = (error as { refusal?: unknown } | null)?.refusal
+  return (
+    error instanceof Error &&
+    (refusal === 'state' ||
+      refusal === 'unsupported-action' ||
+      refusal === 'invalid-command')
+  )
+}
 const U1AuditSnapshot = Snapshot.extend({
   status: Snapshot.shape.status.loose(),
 })
@@ -636,7 +649,9 @@ export function openFixedMoonrakerPause(input: {
         method: call.method,
         ...(call.params ? { params: call.params } : {}),
       })
-    } catch {
+    } catch (error) {
+      // Keep the builder's own reason; the caller closes the attempt.
+      if (isTypedRefusal(error)) throw error
       return undefined
     }
   }
@@ -695,6 +710,7 @@ export function openFixedMoonrakerPause(input: {
                 ? 'unsupported-action'
                 : 'state',
         })
+      if (isTypedRefusal(error)) throw error
       throw error instanceof MotionRefusal ? error : failure()
     }
   }
@@ -757,7 +773,9 @@ export function openFixedMoonrakerPause(input: {
     } catch (error) {
       stop()
       await closed
-      throw error instanceof QueueRefused ? error : failure()
+      throw error instanceof QueueRefused || isTypedRefusal(error)
+        ? error
+        : failure()
     }
   }
   /**
@@ -793,7 +811,9 @@ export function openFixedMoonrakerPause(input: {
     } catch (error) {
       stop()
       await closed
-      throw error instanceof TimelapseRefused ? error : failure()
+      throw error instanceof TimelapseRefused || isTypedRefusal(error)
+        ? error
+        : failure()
     }
   }
   /**
@@ -885,7 +905,9 @@ export function openFixedMoonrakerPause(input: {
     } catch (error) {
       stop()
       await closed
-      throw error instanceof BedMeshRefused ? error : failure()
+      throw error instanceof BedMeshRefused || isTypedRefusal(error)
+        ? error
+        : failure()
     }
   }
   /**
@@ -980,7 +1002,9 @@ export function openFixedMoonrakerPause(input: {
       await closed
       if (error instanceof MotionRefusal || error instanceof U1ConfigRefusal)
         throw new ConsoleRefusal('unknown-state')
-      throw error instanceof ConsoleRefusal ? error : failure()
+      throw error instanceof ConsoleRefusal || isTypedRefusal(error)
+        ? error
+        : failure()
     }
   }
   const requestRead = (id: number, wire: string) =>
@@ -1031,7 +1055,9 @@ export function openFixedMoonrakerPause(input: {
     }
     // A console line is confirmed as the signed `gcode` action, not as `home`.
     extended = consoleLine ? 'gcode' : 'home'
-    u1Audit = consoleLine ? u1ConsoleAudit(consoleLine) : audit
+    u1Audit = consoleLine
+      ? u1ConsoleAudit(consoleLine, undefined, audit)
+      : audit
     return send(wire, requested, U1_CONTROL_RESULT_TIMEOUT_MS)
   }
   async function configWrite(

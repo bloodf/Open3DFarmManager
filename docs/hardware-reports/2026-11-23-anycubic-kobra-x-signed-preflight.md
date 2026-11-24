@@ -14,3 +14,21 @@ paired with an isolated local farm, and the browser key was approved.
 
 The run adds no hardware-proven control capabilities. [Issue #259](https://github.com/bloodf/Open3DFarmManager/issues/259)
 tracks hardware qualification.
+
+## Follow-up diagnosis
+
+A simulator trace reproduced the browser failure before provisioning reached
+the printer. The browser loaded an available Connector, then sent `config.begin`
+after the Connector's remaining signalling lease had dropped to 2,073 ms.
+The server requires at least 5,000 ms to admit a configuration session, so it
+closed the socket before emitting `config.ready`.
+
+A separate native LAN probe validated the model, LAN token, and client
+certificate and key. The Connector's existing bundled identity negotiated pinned
+TLS 1.3. The broker accepted MQTT 3.1.1 connection and subscription without any
+MQTT publishes. The explicit installed-slicer path returned
+`client-cert-missing`; the local installation did not expose certificate files
+that the importer could read.
+
+The owner cancelled physical acceptance. Print, pause, and heater results
+remain unverified on hardware.

@@ -21,6 +21,7 @@ export type SpoolmanStatus = 'reachable' | 'unreachable' | 'unauthorized'
 export interface SpoolmanConnectorSetting {
   agentId: string
   origin: string
+  serviceId?: string | null
   status: SpoolmanStatus
   configured: boolean
   checkedAt: number
@@ -41,6 +42,7 @@ export interface SpoolmanSettingsStore {
     input: Authority & {
       agentId: string
       origin: string
+      serviceId?: string | undefined
       status: SpoolmanStatus
       configured: boolean
     },
@@ -137,7 +139,7 @@ export class PostgresSpoolmanSettings implements SpoolmanSettingsStore {
     }>(input, async (tx, member) => {
       const rows = await tx<
         SpoolmanConnectorSetting[]
-      >`SELECT agent_id AS "agentId", origin, status, configured, checked_at::float8 AS "checkedAt" FROM farm.spoolman_connector_settings WHERE farm_id=${input.farmId}::uuid ORDER BY agent_id LIMIT 50`
+      >`SELECT agent_id AS "agentId", origin, service_id AS "serviceId", status, configured, checked_at::float8 AS "checkedAt" FROM farm.spoolman_connector_settings WHERE farm_id=${input.farmId}::uuid ORDER BY agent_id LIMIT 50`
       return {
         ok: true as const,
         settings: rows.map((row) => ({ ...row })),
@@ -150,6 +152,7 @@ export class PostgresSpoolmanSettings implements SpoolmanSettingsStore {
     input: Authority & {
       agentId: string
       origin: string
+      serviceId?: string | undefined
       status: SpoolmanStatus
       configured: boolean
     },
@@ -167,13 +170,13 @@ export class PostgresSpoolmanSettings implements SpoolmanSettingsStore {
         if (!enrolled[0])
           return { ok: false as const, reason: 'forbidden' as const }
         // A failed test never replaces a Spoolman that is already applied.
-        await tx`INSERT INTO farm.spoolman_connector_settings (farm_id, agent_id, origin, status, configured, checked_at, updated_by)
-          VALUES (${input.farmId}::uuid, ${input.agentId}::uuid, ${input.origin}, ${input.status}, ${input.configured}, ${now}, ${accountId})
-          ON CONFLICT (farm_id, agent_id) DO UPDATE SET origin=EXCLUDED.origin, status=EXCLUDED.status, configured=EXCLUDED.configured, checked_at=EXCLUDED.checked_at, updated_by=EXCLUDED.updated_by
+        await tx`INSERT INTO farm.spoolman_connector_settings (farm_id, agent_id, origin, service_id, status, configured, checked_at, updated_by)
+          VALUES (${input.farmId}::uuid, ${input.agentId}::uuid, ${input.origin}, ${input.serviceId ?? null}::uuid, ${input.status}, ${input.configured}, ${now}, ${accountId})
+          ON CONFLICT (farm_id, agent_id) DO UPDATE SET origin=EXCLUDED.origin, service_id=CASE WHEN EXCLUDED.service_id IS NOT NULL THEN EXCLUDED.service_id WHEN farm.spoolman_connector_settings.origin=EXCLUDED.origin THEN farm.spoolman_connector_settings.service_id ELSE NULL END, status=EXCLUDED.status, configured=EXCLUDED.configured, checked_at=EXCLUDED.checked_at, updated_by=EXCLUDED.updated_by
           WHERE EXCLUDED.configured OR NOT farm.spoolman_connector_settings.configured`
         const stored = await tx<
           SpoolmanConnectorSetting[]
-        >`SELECT agent_id AS "agentId", origin, status, configured, checked_at::float8 AS "checkedAt" FROM farm.spoolman_connector_settings WHERE farm_id=${input.farmId}::uuid AND agent_id=${input.agentId}::uuid`
+        >`SELECT agent_id AS "agentId", origin, service_id AS "serviceId", status, configured, checked_at::float8 AS "checkedAt" FROM farm.spoolman_connector_settings WHERE farm_id=${input.farmId}::uuid AND agent_id=${input.agentId}::uuid`
         if (!stored[0])
           return { ok: false as const, reason: 'storage-unavailable' as const }
         return { ok: true as const, setting: { ...stored[0] } }

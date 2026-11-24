@@ -346,7 +346,7 @@ test('cancel discards staged credentials; nothing is written to runtime', async 
   )
 })
 
-test('replacing the farm Spoolman rotates credentials and keeps serviceId', async () => {
+test('credential rotation preserves the service id, while a changed origin rotates it', async () => {
   const w = world()
   async function apply(t: ReturnType<typeof target>, revision: number) {
     const prepare = {
@@ -383,6 +383,22 @@ test('replacing the farm Spoolman rotates credentials and keeps serviceId', asyn
     ),
     spoolmanAuthorization({ username: 'ana', password: 'novo' }),
   )
+  await apply(target({ origin: 'http://192.168.1.61:7912' }), 2)
+  const third = JSON.parse(readFileSync(w.runtimeConfigPath, 'utf8'))
+  assert.notEqual(
+    third.collection.spoolman.serviceId,
+    second.collection.spoolman.serviceId,
+  )
+  const replacement = randomUUID()
+  await apply(
+    target({ origin: 'http://192.168.1.61:7912', service_id: replacement }),
+    3,
+  )
+  const fourth = JSON.parse(readFileSync(w.runtimeConfigPath, 'utf8'))
+  assert.equal(fourth.collection.spoolman.serviceId, replacement)
+  await apply(target({ service_id: replacement }), 4)
+  const fifth = JSON.parse(readFileSync(w.runtimeConfigPath, 'utf8'))
+  assert.equal(fifth.collection.spoolman.serviceId, replacement)
   readAgentRuntimeConfig(w.runtimeConfigPath, w.scope)
 })
 
@@ -633,4 +649,47 @@ test('server schema has no credential column and the migration is paired', () =>
   assert.match(up, /CREATE TABLE farm\.spoolman_connector_settings/)
   assert.match(down, /DROP TABLE farm\.spoolman_connector_settings/)
   assert.match(down, /DROP ROLE farm_spoolman_settings/)
+})
+
+test('explicit service identity reaches the Connector and only confirmed identity is reported', async () => {
+  const id = randomUUID()
+  const validated = validateSpoolmanTargetInput({
+    origin: ORIGIN,
+    serviceId: id.toUpperCase(),
+    token: SECRET,
+  })
+  assert.equal(validated.ok, true)
+  if (!validated.ok) return
+  const accepted = fakeSession({
+    prepare: { kind: 'prepared', targetSha256: 'h', receiptSha256: 'r' },
+  })
+  const rejected = fakeSession({
+    prepare: { kind: 'error', code: 'invalid-target' },
+  })
+  const reports: Record<string, unknown>[] = []
+  await configureSpoolmanOnConnectors({
+    target: validated.target,
+    agentIds: ['accepted', 'old'],
+    signal: new AbortController().signal,
+    openSession: async (id) =>
+      id === 'accepted' ? accepted.session : rejected.session,
+    report: async (report) => {
+      reports.push({ ...report })
+    },
+  })
+  assert.equal((accepted.sent[0] as { service_id: string }).service_id, id)
+  assert.deepEqual(reports, [
+    {
+      agentId: 'accepted',
+      origin: ORIGIN,
+      status: 'reachable',
+      configured: true,
+      serviceId: id,
+    },
+  ])
+  assert.equal(JSON.stringify(reports).includes(SECRET), false)
+  assert.equal(
+    validateSpoolmanTargetInput({ origin: ORIGIN, serviceId: 'invalid' }).ok,
+    false,
+  )
 })

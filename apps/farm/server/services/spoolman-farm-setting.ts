@@ -25,6 +25,11 @@ export const spoolmanSettingBody = z.strictObject({
   origin: ConfigurationMoonrakerOrigin.transform(
     (value) => new URL(value).origin,
   ),
+  serviceId: z
+    .string()
+    .uuid()
+    .transform((value) => value.toLowerCase())
+    .optional(),
   status: z.enum(['reachable', 'unreachable', 'unauthorized']),
   configured: z.boolean(),
 })

@@ -10,6 +10,7 @@ import {
 export type SpoolmanSavedSetting = {
   agentId: string
   origin: string
+  serviceId?: string | null
   status: 'reachable' | 'unreachable' | 'unauthorized'
   configured: boolean
   checkedAt: number
@@ -57,6 +58,7 @@ const when = (value: number) => formatDateTime(value, 'short') ?? 'Indisponível
         <tr>
           <th scope="col">Connector</th>
           <th scope="col">Endereço</th>
+          <th scope="col">ID do serviço</th>
           <th scope="col">Situação</th>
           <th scope="col">Última verificação</th>
         </tr>
@@ -65,6 +67,7 @@ const when = (value: number) => formatDateTime(value, 'short') ?? 'Indisponível
         <tr v-for="setting in settings" :key="setting.agentId">
           <td>{{ setting.agentId.slice(0, 8) }}</td>
           <td>{{ setting.origin }}</td>
+          <td>{{ setting.serviceId ?? 'Não informado' }}</td>
           <td>
             {{ describeSpoolmanStatus(setting.status)
             }}{{ setting.configured ? '' : ' (não aplicado)' }}

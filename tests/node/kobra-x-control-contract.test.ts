@@ -290,6 +290,8 @@ test('the Kobra X result window covers the sequence after the write', () => {
 function tlsFixture(
   t: test.TestContext,
   version: 'TLSv1.2' | 'TLSv1.3' = 'TLSv1.3',
+  /** Restricting the server's groups makes TLS 1.3 answer with a HelloRetryRequest. */
+  ecdhCurve?: string,
 ) {
   const material = generateKobraXThrowawayTls({ dirPrefix: 'kx-contract-tls-' })
   t.after(material.cleanup)
@@ -301,6 +303,7 @@ function tlsFixture(
     rejectUnauthorized: false,
     minVersion: version,
     maxVersion: version,
+    ...(ecdhCurve ? { ecdhCurve } : {}),
   })
   // Whether each accepted connection presented a client certificate.
   const peers: boolean[] = []
@@ -358,6 +361,22 @@ function tlsFixture(
       }),
     )
     .digest('hex')
+  /** The client's plaintext TLS records, by content type and first handshake byte. */
+  function clientRecords() {
+    const all = Buffer.concat(wire)
+    const records: { type: number; handshake?: number; end: number }[] = []
+    for (let at = 0; at + 5 <= all.length;) {
+      const end = at + 5 + all.readUInt16BE(at + 3)
+      const type = all[at]!
+      records.push({
+        type,
+        ...(type === 22 ? { handshake: all[at + 5] } : {}),
+        end: Math.min(end, all.length),
+      })
+      at = end
+    }
+    return { all, records }
+  }
   async function attempt(
     pin: string | undefined,
     extra: {
@@ -396,11 +415,17 @@ function tlsFixture(
       error,
       clientCertificateReached,
       applicationData: Buffer.concat(received).toString(),
-      /** Bytes sent after the first TLS record, the ClientHello. */
+      /** Bytes sent after the last ClientHello (a HelloRetryRequest asks for two). */
       bytesAfterClientHello: (() => {
-        const all = Buffer.concat(wire)
-        return all.length < 5 ? 0 : all.length - (5 + all.readUInt16BE(3))
+        const { all, records } = clientRecords()
+        const last = records.findLast(
+          (record) => record.type === 22 && record.handshake === 1,
+        )
+        return last ? all.length - last.end : all.length
       })(),
+      clientHellos: clientRecords().records.filter(
+        (record) => record.type === 22 && record.handshake === 1,
+      ).length,
     }
   }
   function reset() {
@@ -428,6 +453,38 @@ test('a pin mismatch stops the Kobra X client identity and all data before they 
   assert.equal(match.clientCertificateReached, true)
   assert.equal(match.applicationData, 'application-data')
   assert.ok(match.bytesAfterClientHello > 0)
+})
+
+test('a P-256-only peer that asks for a HelloRetryRequest completes the pinned handshake', async (t) => {
+  // OpenSSL 3.5 offers X25519MLKEM768 and X25519 key shares first. A printer
+  // that accepts only P-256 answers with a HelloRetryRequest, and the client's
+  // second ClientHello must reach it or the handshake stalls.
+  const f = tlsFixture(t, 'TLSv1.3', 'P-256')
+  const match = await f.attempt(f.spki)
+  assert.equal(match.error, undefined)
+  assert.equal(match.clientHellos, 2, 'the server sent a HelloRetryRequest')
+  assert.equal(match.clientCertificateReached, true)
+  assert.equal(match.applicationData, 'application-data')
+  f.reset()
+  const mismatch = await f.attempt(f.wrong)
+  assert.ok(mismatch.error instanceof PinMismatch)
+  assert.equal(mismatch.clientHellos, 2)
+  assert.equal(mismatch.clientCertificateReached, false)
+  assert.equal(mismatch.applicationData, '')
+  assert.equal(
+    mismatch.bytesAfterClientHello,
+    0,
+    'nothing but the two ClientHellos (and compatibility CCS) left the client',
+  )
+})
+
+test('the default pinned handshake needs no HelloRetryRequest', async (t) => {
+  const f = tlsFixture(t)
+  const match = await f.attempt(f.spki)
+  assert.equal(match.error, undefined)
+  assert.equal(match.clientHellos, 1)
+  assert.equal(match.clientCertificateReached, true)
+  assert.equal(match.applicationData, 'application-data')
 })
 
 test('a CA together with a pin means both must hold', async (t) => {

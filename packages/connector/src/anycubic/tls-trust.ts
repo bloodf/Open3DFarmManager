@@ -67,15 +67,65 @@ function pinMatches(socket: ReturnType<typeof connect>, pin: string) {
   }
 }
 
+/** RFC 8446 4.1.3: the ServerHello random that marks a HelloRetryRequest. */
+const HELLO_RETRY_RANDOM = Buffer.from(
+  'cf21ad74e59a6111be1d8c021e65b891c2a211167abb8c5e079e09e2c8a8339c',
+  'hex',
+)
+const TLS_CHANGE_CIPHER_SPEC = 20
+const TLS_HANDSHAKE = 22
+const SERVER_HELLO = 2
+
+/**
+ * Reads the server's plaintext records until a real ServerHello (not a
+ * HelloRetryRequest or a compatibility ChangeCipherSpec) is seen. Answers
+ * `true` from then on.
+ */
+class ServerHelloWatch {
+  #pending = Buffer.alloc(0)
+  #seen = false
+
+  /** Feeds inbound bytes; returns whether a real ServerHello has arrived. */
+  observe(chunk: Buffer): boolean {
+    if (this.#seen) return true
+    this.#pending = Buffer.concat([this.#pending, chunk])
+    while (this.#pending.length >= 5) {
+      const end = 5 + this.#pending.readUInt16BE(3)
+      // Type, handshake type, 3-byte length, legacy_version, then the random.
+      if (this.#pending.length < Math.min(end, 5 + 4 + 2 + 32)) return false
+      const retryOrCompat =
+        this.#pending[0] === TLS_CHANGE_CIPHER_SPEC ||
+        (this.#pending[0] === TLS_HANDSHAKE &&
+          this.#pending[5] === SERVER_HELLO &&
+          this.#pending.subarray(11, 43).equals(HELLO_RETRY_RANDOM))
+      if (!retryOrCompat) {
+        // A real ServerHello, or anything unexpected: hold from here on.
+        this.#seen = true
+        this.#pending = Buffer.alloc(0)
+        return true
+      }
+      if (this.#pending.length < end) return false
+      this.#pending = this.#pending.subarray(end)
+    }
+    return false
+  }
+}
+
 /**
  * Carries a TLS client's bytes to the network, but holds the client's second
  * flight (its certificate and Finished) until `release()`. Node reports the
  * server certificate to JavaScript only after the handshake, by which time
  * OpenSSL has already written the client certificate. With the flight held
  * here, a peer that fails verification never receives the client identity.
+ *
+ * Client writes pass until the server's real ServerHello arrives, so a
+ * HelloRetryRequest's second ClientHello (and its compatibility
+ * ChangeCipherSpec) still reach the peer. Inbound bytes are inspected before
+ * OpenSSL sees them, so nothing the client writes in reply can slip past.
  */
 class ClientFlightHold extends Duplex {
   readonly #raw: ReturnType<typeof netConnect>
+  readonly #serverHello = new ServerHelloWatch()
   #inbound = false
   #held: { chunk: Buffer; done: (error?: Error | null) => void }[] = []
   #open = false
@@ -83,9 +133,8 @@ class ClientFlightHold extends Duplex {
   constructor(options: { host: string; port: number }) {
     super()
     this.#raw = netConnect(options)
-    this.#raw.on('data', (chunk) => {
-      // The ClientHello is the only write before the server speaks.
-      this.#inbound = true
+    this.#raw.on('data', (chunk: Buffer) => {
+      if (this.#serverHello.observe(chunk)) this.#inbound = true
       if (!this.push(chunk)) this.#raw.pause()
     })
     this.#raw.on('end', () => this.push(null))

@@ -82,6 +82,7 @@ import { z } from 'zod'
 import { decodeMoonrakerFrame } from './frame.ts'
 import {
   ConsoleRefusal,
+  classifyIdleConsole,
   consoleQueryWire,
   consoleSupported,
   parseConsoleState,
@@ -904,20 +905,52 @@ export function openFixedMoonrakerPause(input: {
         !consoleSupported(input.objects)
       )
         throw new ConsoleRefusal('unsupported')
+      const consoleState = parseConsoleState(
+        await request(11, consoleQueryWire(11), lifetimeDeadline),
+      )
       const line = refuseConsole(
         args,
-        parseConsoleState(
-          await request(11, consoleQueryWire(11), lifetimeDeadline),
-        ),
+        consoleState,
         u1
           ? ['SDCARD_PRINT_FILE_WITH_PARAMETERS', 'SDCARD_PRINT_PL_RESTORE']
           : undefined,
       )
+      const active =
+        consoleState.printState === 'printing' ||
+        consoleState.printState === 'paused'
       let wireArgs = args
       let cap = 5000
-      if (u1) {
-        const consoleLine = line.trim()
-        const tool = u1ConsoleTool(consoleLine, input.objects)
+      let tool: string | undefined
+      if (!active) {
+        const classification = classifyIdleConsole(line)
+        if (classification.kind === 'home') {
+          // Canonical homing runs through the structured `home` action, with
+          // the U1's own X/Y pairing and Z-only checks.
+          const { axes } = classification
+          if (u1 && axes.includes('x') !== axes.includes('y'))
+            throw new ConsoleRefusal('not-allowed')
+          takeConsoleRate(binding, input.clock.monotonicNow())
+          if (u1) return await executeU1Home({ axes }, requested, line.trim())
+          extended = 'gcode'
+          return await send(extendedWire('home', { axes }), requested, 5000)
+        }
+        const command = line.trim().split(/\s+/)[0]!.toUpperCase()
+        // Only the U1's recognised tool selection has a guarded path; every
+        // other macro or unclassified line, and any raw motion, is refused.
+        tool =
+          u1 && classification.kind === 'tool'
+            ? u1ConsoleTool(line.trim(), input.objects)
+            : undefined
+        if (
+          !tool &&
+          (classification.kind === 'unknown' ||
+            classification.kind === 'tool' ||
+            classification.kind === 'move' ||
+            input.objects?.some(
+              (object) => object.toUpperCase() === `GCODE_MACRO ${command}`,
+            ))
+        )
+          throw new ConsoleRefusal('not-allowed')
         if (tool) {
           const state = parseMotionState(
             await request(12, motionQueryWire(12), lifetimeDeadline),
@@ -929,11 +962,11 @@ export function openFixedMoonrakerPause(input: {
           if (!['x', 'y', 'z'].every((axis) => state.homedAxes.includes(axis)))
             throw new ConsoleRefusal('unknown-state')
           // A0 selects the named physical tool without the current job's remap.
-          wireArgs = { line: `${consoleLine.toUpperCase()} A0` }
+          wireArgs = { line: `${line.trim().toUpperCase()} A0` }
           cap = U1_CONTROL_RESULT_TIMEOUT_MS
         }
-        u1Audit = u1ConsoleAudit(consoleLine, tool)
       }
+      if (u1) u1Audit = u1ConsoleAudit(line.trim(), tool)
       const wire = extendedWire('gcode', wireArgs)
       if (wire === undefined) throw new ConsoleRefusal('invalid')
       takeConsoleRate(binding, input.clock.monotonicNow())
@@ -942,7 +975,7 @@ export function openFixedMoonrakerPause(input: {
     } catch (error) {
       stop()
       await closed
-      if (u1 && error instanceof MotionRefusal)
+      if (error instanceof MotionRefusal || error instanceof U1ConfigRefusal)
         throw new ConsoleRefusal('unknown-state')
       throw error instanceof ConsoleRefusal ? error : failure()
     }
@@ -973,6 +1006,7 @@ export function openFixedMoonrakerPause(input: {
   async function executeU1Home(
     args: Record<string, unknown>,
     requested: Parameters<PauseDriver['pauseOnce']>[0],
+    consoleLine?: string,
   ) {
     const wire = extendedWire('home', args)
     if (wire === undefined)
@@ -992,8 +1026,9 @@ export function openFixedMoonrakerPause(input: {
       )
         throw new U1ConfigRefusal('U1 Z homing requires homed X and Y axes')
     }
-    extended = 'home'
-    u1Audit = audit
+    // A console line is confirmed as the signed `gcode` action, not as `home`.
+    extended = consoleLine ? 'gcode' : 'home'
+    u1Audit = consoleLine ? u1ConsoleAudit(consoleLine) : audit
     return send(wire, requested, U1_CONTROL_RESULT_TIMEOUT_MS)
   }
   async function configWrite(

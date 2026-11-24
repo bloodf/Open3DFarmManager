@@ -923,7 +923,13 @@ export function openFixedMoonrakerPause(input: {
       let tool: string | undefined
       if (!active) {
         const classification = classifyIdleConsole(line)
+        const command = line.trim().split(/\s+/)[0]!.toUpperCase()
+        const macroOverride = !!input.objects?.some(
+          (object) => object.toUpperCase() === `GCODE_MACRO ${command}`,
+        )
         if (classification.kind === 'home') {
+          // An advertised `G28` macro replaces canonical homing: refuse it.
+          if (macroOverride) throw new ConsoleRefusal('not-allowed')
           // Canonical homing runs through the structured `home` action, with
           // the U1's own X/Y pairing and Z-only checks.
           const { axes } = classification
@@ -934,7 +940,6 @@ export function openFixedMoonrakerPause(input: {
           extended = 'gcode'
           return await send(extendedWire('home', { axes }), requested, 5000)
         }
-        const command = line.trim().split(/\s+/)[0]!.toUpperCase()
         // Only the U1's recognised tool selection has a guarded path; every
         // other macro or unclassified line, and any raw motion, is refused.
         tool =
@@ -946,9 +951,7 @@ export function openFixedMoonrakerPause(input: {
           (classification.kind === 'unknown' ||
             classification.kind === 'tool' ||
             classification.kind === 'move' ||
-            input.objects?.some(
-              (object) => object.toUpperCase() === `GCODE_MACRO ${command}`,
-            ))
+            macroOverride)
         )
           throw new ConsoleRefusal('not-allowed')
         if (tool) {

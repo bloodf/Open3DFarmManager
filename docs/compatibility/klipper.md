@@ -4,19 +4,25 @@ Catalog entries for the Klipper/Moonraker family. Source of truth:
 `apps/farm/app/utils/compatibility/klipper.ts`. Shown on `/compatibilidade`.
 Labels never grant authority; they do not enable commands.
 
-| Entry                                 | Telemetry | Files   | Camera    | Materials | Pause/Resume/Cancel |
-| ------------------------------------- | --------- | ------- | --------- | --------- | ------------------- |
-| Generic Klipper + Moonraker           | hardware  | unknown | hardware  | unknown   | simulated           |
-| Snapmaker U1 (paxx12 profile)         | simulated | unknown | simulated | simulated | simulated           |
-| Creality K1 series (rooted Moonraker) | simulated | unknown | simulated | unknown   | simulated           |
-| Voron 2.4 (self-built kit)            | simulated | unknown | simulated | unknown   | simulated           |
-| Sovol SV08                            | simulated | unknown | simulated | unknown   | simulated           |
+| Entry                                 | Telemetry         | Files   | Camera    | Materials | Pause/Resume/Cancel |
+| ------------------------------------- | ----------------- | ------- | --------- | --------- | ------------------- |
+| Generic Klipper + Moonraker           | hardware          | unknown | hardware  | unknown   | simulated           |
+| Snapmaker U1 (paxx12 profile)         | reference-matched | unknown | simulated | simulated | simulated           |
+| Creality K1 series (rooted Moonraker) | simulated         | unknown | simulated | unknown   | simulated           |
+| Voron 2.4 (self-built kit)            | simulated         | unknown | simulated | unknown   | simulated           |
+| Sovol SV08                            | simulated         | unknown | simulated | unknown   | simulated           |
 
 `simulated` means exercised against the loopback Klipper/Moonraker simulators in
 `infra/sim` and the unit tests. The generic entry's `hardware` grades come
 from read-only reports documenting telemetry on a Sovol SV06 and a Snapmaker
 U1, plus one JPEG snapshot validated by the Connector on the U1. The snapshot
 uses a separately configured camera source. [Hardware reports](../hardware-reports/README.md).
+
+The U1 telemetry grade `reference-matched` records software coverage of the
+Moonraker status subscription and update protocol used by OrcaSlicer v2.5.2.
+Signed controls retain their `simulated` grades.
+[Pinned protocol references](../protocols/snapmaker-u1-moonraker.md),
+[loopback telemetry tests](../../tests/node/moonraker-client-active-tool.test.ts).
 
 ## Snapmaker U1 signed control
 

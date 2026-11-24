@@ -175,6 +175,8 @@ const u1ControlAreaEvidence = {
 
 const u1FirmwareSource =
   'https://github.com/paxx12/SnapmakerU1-Extended-Firmware'
+const u1MoonrakerReference =
+  'https://github.com/OrcaSlicer/OrcaSlicer/blob/f92a7c065c5718b8ef1baac1cd704df2911238f4/src/slic3r/Utils/MoonrakerPrinterAgent.cpp#L1840-L2025'
 
 export const klipperCatalog: readonly KlipperCatalogProduct[] = [
   {
@@ -248,16 +250,18 @@ export const klipperCatalog: readonly KlipperCatalogProduct[] = [
       },
     ],
     connection: 'Moonraker via HTTP e WebSocket na rede local',
-    capabilities: simulatedControl,
+    capabilities: { ...simulatedControl, telemetry: 'reference-matched' },
     sources: [
       'https://www.snapmaker.com/snapmaker-u1/specs',
       u1FirmwareSource,
+      u1MoonrakerReference,
       reportUrl(u1ReadOnlyReport),
     ],
     limitations: [
       'Pausar, retomar, cancelar, iniciar um arquivo já enviado à impressora, aquecer ou zerar cada bico e a mesa, referenciar e mover eixos foram exercitados em simuladores, nunca em hardware.',
       'O console exige autorização do proprietário. A seleção T0–T3 exige eixos referenciados e a impressora fora de um trabalho ativo.',
       controlAuthorizationLimitation,
+      'Um teste local valida a assinatura de estado e as atualizações enviadas pelo Moonraker, seguindo o agente Moonraker do OrcaSlicer v2.5.2.',
       'A telemetria de leitura da U1 consta no relatório de hardware da entrada genérica Klipper + Moonraker. Materiais dependem do espelho Spoolman configurado.',
       'Iniciar um arquivo existente é um comando assinado. A capacidade de gerenciar arquivos da U1 ainda é desconhecida.',
     ],

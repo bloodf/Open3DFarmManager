@@ -263,10 +263,12 @@ describe('compatibility-match', () => {
         identified: true,
         product: { id: 'snapmaker-u1' },
         capabilityStatuses: {
+          telemetry: 'reference-matched',
           pause: 'simulated',
           resume: 'simulated',
           cancel: 'simulated',
         },
+        statusLabels: { telemetry: 'Validado com a referência' },
       })
     })
 

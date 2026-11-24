@@ -16,7 +16,14 @@ export interface KobraXReport {
  * get the transport acknowledgement. An acknowledgement alone is never success.
  */
 export type KobraXOutcome<T = undefined> =
-  | { kind: 'confirmed'; report: KobraXReport; data: T }
+  | {
+      kind: 'confirmed'
+      report: KobraXReport
+      data: T
+      /** True only when the report carries this request's own msgid. */
+      correlated: boolean
+      effectMatches?: (report: KobraXReport) => boolean
+    }
   | {
       kind: 'refused'
       /** `local`: refused before publishing. `printer`: refused by the printer. */
@@ -37,13 +44,15 @@ export function parseKobraXReport(
 ): KobraXReport | undefined {
   const message = record(payload)
   if (typeof message.action !== 'string') return undefined
+  if (message.type !== undefined && message.type !== type) return undefined
   const code = message.code
   return {
     type,
     action: message.action,
     msgid: typeof message.msgid === 'string' ? message.msgid : '',
     state: typeof message.state === 'string' ? message.state : undefined,
-    code: typeof code === 'number' && Number.isFinite(code) ? code : undefined,
+    code:
+      code === undefined ? undefined : typeof code === 'number' ? code : NaN,
     data: record(message.data),
   }
 }
@@ -81,8 +90,7 @@ export function createKobraXRequests(input: {
   const defaultTimeout = input.resultTimeoutMs ?? 5000
   const acks = new Map<string, (code: number | undefined) => void>()
   const listeners = new Set<(report: KobraXReport) => void>()
-  /** In-flight request msgids so a reply named for another request cannot settle this one. */
-  const inflight = new Set<string>()
+  const inflight = new Map<string, (report: KobraXReport) => boolean>()
 
   /** Acknowledgement on `<deviceId>/response`: "received" only. */
   function handleAck(payload: unknown) {
@@ -90,6 +98,10 @@ export function createKobraXRequests(input: {
     if (typeof message.msgid !== 'string') return
     const code = message.code
     acks.get(message.msgid)?.(typeof code === 'number' ? code : undefined)
+  }
+
+  function isPending(report: KobraXReport) {
+    return inflight.get(report.msgid)?.(report) === true
   }
 
   function handleReport(report: KobraXReport) {
@@ -127,16 +139,23 @@ export function createKobraXRequests(input: {
       function onAbort() {
         finish(acked ? { kind: 'received' } : { kind: 'unanswered' })
       }
-      // Own msgid always matches. A report msgid that names another in-flight
-      // request must not settle this one (#616). Otherwise S1 printers choose
-      // their own report msgid (or omit it), so type+action still applies.
-      const ownsReport = (report: KobraXReport) => {
-        if (report.msgid === msgid) return true
-        if (report.msgid && inflight.has(report.msgid)) return false
-        return report.type === spec.type && report.action === spec.action
-      }
+      // Exact: our own msgid with the right type and action.
+      const ownsReport = (report: KobraXReport) =>
+        report.msgid === msgid &&
+        report.type === spec.type &&
+        report.action === spec.action
+      // S1 printers acknowledge with our msgid, then report with a printer
+      // chosen msgid or none. Type and action still apply on this path, and an
+      // ID that belongs to another pending request never settles this one
+      // (#616). Such a report can settle the request but is never evidence of
+      // an effect: `confirmed.correlated` stays false.
+      const settlesReport = (report: KobraXReport) =>
+        ownsReport(report) ||
+        (report.type === spec.type &&
+          report.action === spec.action &&
+          !inflight.has(report.msgid))
       stop = onReport((report) => {
-        if (!ownsReport(report)) return
+        if (!settlesReport(report) || Number.isNaN(report.code)) return
         const refusal = reportRefusal(report)
         // A failure report may carry no payload to match; it still refuses.
         const matches =
@@ -157,10 +176,12 @@ export function createKobraXRequests(input: {
         finish({
           kind: 'confirmed',
           report,
+          correlated: ownsReport(report),
+          ...(spec.effect ? { effectMatches: spec.effect } : {}),
           data: (spec.result ? spec.result(report) : undefined) as T,
         })
       })
-      inflight.add(msgid)
+      inflight.set(msgid, ownsReport)
       acks.set(msgid, (code) => {
         if (code !== undefined && code !== 0 && code !== 200) {
           finish({
@@ -207,6 +228,6 @@ export function createKobraXRequests(input: {
     })
   }
 
-  return { send, handleAck, handleReport, onReport }
+  return { send, handleAck, handleReport, isPending, onReport }
 }
 export type KobraXRequests = ReturnType<typeof createKobraXRequests>

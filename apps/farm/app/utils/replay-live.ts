@@ -36,6 +36,9 @@ export function liveReplayInfo(
       slot: m.slot,
       ...(m.materialType ? { materialType: m.materialType } : {}),
       ...(m.colorHex ? { colorHex: m.colorHex } : {}),
+      ...(m.remainingPercent !== undefined
+        ? { remainingPercent: m.remainingPercent }
+        : {}),
     })),
   }
 }

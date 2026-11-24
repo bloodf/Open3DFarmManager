@@ -3,7 +3,9 @@ import type { ReplaySend } from '../../utils/replay-live.ts'
 import { computed, ref, watch } from 'vue'
 import Dialog from '../ui/Dialog.vue'
 import Button from '../ui/Button.vue'
-import { locationLabel, safeColour } from '../../utils/library-view.ts'
+import { locationLabel } from '../../utils/library-view.ts'
+import type { MatchedSlot } from '../../utils/filament-match.ts'
+import FilamentMatch from './FilamentMatch.vue'
 import { replayOutcomeLocks } from '../../utils/replay-outcome.ts'
 import {
   GROUP_LABELS,
@@ -99,14 +101,21 @@ const slotLabel = (m: ReplayPrinter['materials'][number], index: number) =>
   `Slot ${m.slot || index + 1}: ${m.materialType ?? 'material desconhecido'}`
 const slotValue = (m: ReplayPrinter['materials'][number], index: number) =>
   /^\d{1,3}$/.test(m.slot) ? Number(m.slot) : index
-/** Colour of the slot chosen for a filament, painted only when it is a safe hex. */
-function paint(index: number) {
-  const hex = selected.value?.materials.find(
+/** The slot chosen for a filament, as the match view shows it; null until one is chosen. */
+function chosen(index: number): MatchedSlot | null {
+  const printer = selected.value
+  if (!printer) return null
+  const at = printer.materials.findIndex(
     (m, slot) => slotValue(m, slot) === mapping.value[index],
-  )?.colorHex
-  return safeColour(
-    hex && /^[0-9A-F]{8}$/i.test(hex) ? `#${hex.slice(0, 6)}` : '',
   )
+  const m = printer.materials[at]
+  if (!m) return null
+  return {
+    label: `Slot ${m.slot || at + 1}`,
+    materialType: m.materialType,
+    colorHex: m.colorHex,
+    remainingPercent: m.remainingPercent,
+  }
 }
 
 async function confirm() {
@@ -239,12 +248,14 @@ function confirmPrinterChecked() {
               {{ m.colorHex ? `· #${m.colorHex.slice(0, 6)}` : '' }}
             </option>
           </select>
-          <span
-            v-if="paint(index)"
-            class="swatch"
-            aria-hidden="true"
-            :style="{ background: paint(index) }"
-          ></span>
+          <FilamentMatch
+            :index="index + 1"
+            :required="{
+              type: tool.filamentType,
+              colour: tool.filamentColour,
+            }"
+            :matched="chosen(index)"
+          />
         </div>
       </section>
 
@@ -292,11 +303,5 @@ fieldset {
 ul {
   margin-block: 0 var(--space-2);
   color: var(--text-muted);
-}
-.swatch {
-  display: inline-block;
-  inline-size: 1rem;
-  block-size: 1rem;
-  border: 1px solid var(--text-muted);
 }
 </style>

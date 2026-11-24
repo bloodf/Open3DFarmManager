@@ -3,7 +3,6 @@ import { createHash, randomUUID } from 'node:crypto'
 import { registerHooks } from 'node:module'
 import test from 'node:test'
 import type { Sql } from 'postgres'
-import { z } from 'zod'
 import { PostgresPauseAuthority } from '../../apps/farm/server/storage/postgres-pause-authority.ts'
 import {
   encodePauseAdmissionProof,
@@ -49,10 +48,6 @@ const previousActions = [
   'gcode',
   'confirm_collection',
 ] as const
-const previousActionList = z
-  .array(z.enum(previousActions))
-  .min(1)
-  .max(previousActions.length)
 const protocolUrl = new URL(
   '../../packages/farm-protocol/src/pause-capability.ts',
   import.meta.url,
@@ -131,7 +126,11 @@ async function issue(
     if (statement.startsWith('SET LOCAL') || statement.startsWith('UPDATE'))
       return []
     if (statement.includes('AS now')) return [{ now, watermark: now }]
-    if (statement.includes('AS observed_at')) return [{ observed_at: now }]
+    if (
+      statement.includes('AS observed_at') &&
+      !statement.includes('FROM farm.pause_authority_advertised_controls')
+    )
+      return [{ observed_at: now }]
     if (statement.includes('FROM farm.pause_authority_challenges')) return [row]
     if (statement.includes('FROM farm.session_accounts'))
       return [{ id: binding.account_id, disabled: false, sessionVersion: 0 }]
@@ -200,7 +199,9 @@ async function issue(
         binding.agent_id,
         fixture.printerKey,
       ])
-      return advertised === undefined ? [] : [{ controls: advertised }]
+      return advertised === undefined
+        ? []
+        : [{ controls: advertised, observed_at: now }]
     }
     assert.fail(`Unexpected fixture query: ${statement}`)
   }
@@ -268,7 +269,7 @@ test('the new issuer capability is admitted by the previous action enum and disp
   assert.equal(dispatcher.writes(), 1)
 })
 
-test('only advertised role-allowed actions are signed, with stable fallback for absent advertisements', async () => {
+test('only fresh advertised role-allowed actions are signed', async () => {
   const fixture = await createV2Authority(await nodeSigner())
   const dispatcher = await openV2Dispatch(fixture, {
     now: 2000,
@@ -283,14 +284,10 @@ test('only advertised role-allowed actions are signed, with stable fallback for 
       const empty = await issue(fixture, claims, ['power', 'future_action'])
       assert.deepEqual(empty, { ok: false, reason: 'denied' })
       const missing = await issue(fixture, claims, undefined)
-      assert.ok(missing.ok)
-      assert.deepEqual(previousActionList.parse(missing.capability.actions), [
-        'pause',
-        'resume',
-        'cancel',
-        'emergency_stop',
-      ])
-      return encodePauseCapability(missing.capability)
+      assert.deepEqual(missing, { ok: false, reason: 'denied' })
+      const compatible = await issue(fixture, claims, ['pause'])
+      assert.ok(compatible.ok)
+      return encodePauseCapability(compatible.capability)
     },
   })
   dispatcher.close()

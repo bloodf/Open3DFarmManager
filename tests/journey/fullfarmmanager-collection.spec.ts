@@ -66,7 +66,7 @@ if (journeyEnabled())
         await files.getByRole('radio', { name: /collection\.gcode/ }).check()
         await inboxReady(listens)
       }
-      const confirmStart = async (held = false) => {
+      const confirmStart = async () => {
         const listens = journey.simulatorObservation().pauseInboxes
         await start.click()
         const dialog = page.getByRole('dialog', {
@@ -74,7 +74,7 @@ if (journeyEnabled())
         })
         await dialog.getByRole('button', { name: 'Confirmar comando' }).click()
         await expect(dialog.getByRole('status')).toHaveText(
-          held ? 'Comando não enviado.' : 'Comando confirmado pelo Connector.',
+          'Comando confirmado pelo Connector.',
           { timeout: 60_000 },
         )
         await dialog.getByRole('button', { name: 'Fechar' }).click()
@@ -114,7 +114,8 @@ if (journeyEnabled())
 
       await page.goto(detailUrl)
       await selectFile()
-      await confirmStart(true)
+      // The Connector does not advertise start while the plate is held.
+      await expect(start).toBeDisabled()
       expect(journey.printer.calls()['printer.print.start']).toBe(1)
 
       await journey.openFarm()
@@ -137,6 +138,13 @@ if (journeyEnabled())
       await inboxReady(collectionListen)
       await expect(hold).toBeHidden()
       expect(journey.printer.calls()['printer.print.start']).toBe(1)
+      journey.setTelemetryUpload(true)
+      // Model the printer returning to standby after the plate is cleared.
+      journey.printer.update({ state: 'standby', progress: 0 })
+      await expect
+        .poll(() => journey.advertisedControls(), { timeout: 90_000 })
+        .toContain('start_print')
+      journey.setTelemetryUpload(false)
 
       await page.goto(detailUrl)
       await selectFile()

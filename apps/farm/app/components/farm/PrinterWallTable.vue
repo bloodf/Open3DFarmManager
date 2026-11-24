@@ -9,12 +9,15 @@ import {
 } from '../../utils/farm-view.ts'
 import { formatJobTime } from '../../utils/farm-job-view.ts'
 import { printerDetailHref } from '../../utils/farm-wall-card.ts'
-import { farmSlotViews } from '../../utils/farm-slot-view.ts'
+import { farmSlotViews, type SlotBinding } from '../../utils/farm-slot-view.ts'
 import FarmSpool from '../spool-art/FarmSpool.vue'
 
 const props = defineProps<{
   farmId?: string
   rows: readonly Row[]
+  bindingsFor?: (
+    row: Row,
+  ) => Readonly<Record<string, SlotBinding | undefined>> | undefined
   liveNow: () => { wall: number; mono: number }
 }>()
 
@@ -76,7 +79,7 @@ const sortedRows = computed(() => {
       // pass for the filament that is loaded now.
       const spools = row.observation?.historical
         ? undefined
-        : farmSlotViews(state?.materials)
+        : farmSlotViews(state?.materials, props.bindingsFor?.(row))
       const age = row.observation && observationAge(row.observation, now)
       const printerAlarms = formatPrinterAlarmLabel(state?.alarms)
       const alerts = [

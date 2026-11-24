@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import type { PrinterState } from '../../../../packages/farm-protocol/src/state.ts'
 import { resolveSpoolLevel, type SpoolLevel } from './spool-level.ts'
+import type { SlotAssignment, SlotKind } from './spool-features-types.ts'
+import type { SpoolItem } from './spool-library-types.ts'
 
 /**
  * Weights of the Spoolman spool verified as bound to a slot, in grams. A
@@ -69,4 +71,47 @@ export function farmSlotViews(
       level,
     }
   })
+}
+
+type SlotBindingKey = `${SlotKind}:${number}`
+export type SlotBindingIndex = ReadonlyMap<
+  string,
+  Map<SlotBindingKey, SlotBinding>
+>
+
+export function slotBindingKey(slot: string): SlotBindingKey {
+  const ams = /^ams:([0-3]):([0-3])$/.exec(slot)
+  if (ams) return `ams:${Number(ams[1]) * 4 + Number(ams[2])}`
+  const ace = /^(\d+):([0-3])$/.exec(slot)
+  if (ace) return `ams:${Number(ace[1]) * 4 + Number(ace[2])}`
+  const tool = /^(?:t|tool|extruder|toolhead)[-_:]?(\d{1,4})$/i.exec(slot)
+  if (tool) return `toolhead:${Number(tool[1])}`
+  const holder = /^-1:([0-3])$/.exec(slot)
+  if (holder) return `printer:${Number(holder[1])}`
+  return slot === 'external' ? 'printer:0' : 'printer:-1'
+}
+
+export function verifiedSlotBindings(
+  assignments: readonly SlotAssignment[],
+  spools: readonly SpoolItem[],
+): SlotBindingIndex {
+  const byId = new Map(
+    spools
+      .filter((spool) => !spool.archived)
+      .map((spool) => [Number(spool.id), spool]),
+  )
+  const index = new Map<string, Map<SlotBindingKey, SlotBinding>>()
+  for (const assignment of assignments) {
+    if (assignment.unassignedAt !== null) continue
+    const spool = byId.get(Number(assignment.spoolId))
+    if (!spool) continue
+    const slots =
+      index.get(assignment.printerId) ?? new Map<SlotBindingKey, SlotBinding>()
+    slots.set(`${assignment.slotKind}:${assignment.slotIndex}`, {
+      remainingGrams: spool.remaining_weight,
+      initialGrams: spool.initial_weight ?? spool.filament.weight,
+    })
+    index.set(assignment.printerId, slots)
+  }
+  return index
 }

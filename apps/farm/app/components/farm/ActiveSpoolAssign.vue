@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import type { PrinterState } from '../../../../../packages/farm-protocol/src/state.ts'
-import { farmSlotLabel, farmSlotViews } from '../../utils/farm-slot-view.ts'
+import {
+  farmSlotLabel,
+  farmSlotViews,
+  type SlotBinding,
+} from '../../utils/farm-slot-view.ts'
 import FarmSpool from '../spool-art/FarmSpool.vue'
 import {
   safeReadStored,
@@ -11,6 +15,7 @@ import {
 
 const props = defineProps<{
   farmId: string
+  bindings?: Readonly<Record<string, SlotBinding | undefined>>
   printerKey: string
   slots: readonly string[]
   busy?: boolean
@@ -102,7 +107,13 @@ watch(
 )
 
 const spools = computed(
-  () => new Map((farmSlotViews(props.materials) ?? []).map((v) => [v.key, v])),
+  () =>
+    new Map(
+      (farmSlotViews(props.materials, props.bindings) ?? []).map((v) => [
+        v.key,
+        v,
+      ]),
+    ),
 )
 
 function fractionOf(slot: string): number | null {

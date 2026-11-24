@@ -18,6 +18,7 @@ import PowerPanel from '../../components/printer-detail/PowerPanel.vue'
 import SystemServicesPanel from '../../components/printer-detail/SystemServicesPanel.vue'
 import WebcamsPanel from '../../components/printer-detail/WebcamsPanel.vue'
 import type { WebcamDetailOptions } from '../../utils/webrtc/readonly-peer.ts'
+import { useFarmSlotBindings } from '../../composables/useFarmSlotBindings.ts'
 import PrinterDetailMaterials from '../../components/printer-detail/PrinterDetailMaterials.vue'
 import PrinterDetailDashboard from '../../components/printer-detail/PrinterDetailDashboard.vue'
 import Button from '../../components/ui/Button.vue'
@@ -260,6 +261,21 @@ const detailMaterials = computed(() =>
 )
 const vendorHasMaterials = computed(
   () => !!vendorFrame.value && !!detailMaterials.value?.length,
+)
+const displayedMaterials = computed(() =>
+  detailMaterials.value?.length
+    ? detailMaterials.value
+    : state.value?.materials,
+)
+const slotBindings = useFarmSlotBindings(
+  () => ready.value?.scope?.farmId,
+  () =>
+    !row.value?.observation?.historical && !!displayedMaterials.value?.length,
+)
+const bindings = computed(() =>
+  row.value && !row.value.observation?.historical
+    ? slotBindings(row.value.assignment.assignmentId, displayedMaterials.value)
+    : undefined,
 )
 const heaters = computed(() => {
   const observed = state.value ? heatersFromObservation(state.value) : []
@@ -1248,6 +1264,7 @@ watch(
       <PrinterDetailMaterials
         v-if="vendorHasMaterials"
         :materials="detailMaterials"
+        :bindings="bindings"
         :heading="
           vendorFrame.vendor === 'kobra-x'
             ? 'Slots ACE'
@@ -1258,11 +1275,8 @@ watch(
 
     <PrinterDetailMaterials
       v-if="!vendorHasMaterials"
-      :materials="
-        detailMaterials?.length
-          ? detailMaterials
-          : row?.observation?.state.materials
-      "
+      :materials="displayedMaterials"
+      :bindings="bindings"
       :historical="row?.observation?.historical"
       class="panel"
     />

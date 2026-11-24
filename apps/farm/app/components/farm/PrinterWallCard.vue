@@ -8,7 +8,7 @@ import { computed } from 'vue'
 import type { ActiveSpool } from '../../../../../packages/farm-protocol/src/status.ts'
 import type { FarmAlert } from '../../utils/farm-alerts.ts'
 import { farmJobView } from '../../utils/farm-job-view.ts'
-import { farmSlotViews } from '../../utils/farm-slot-view.ts'
+import { farmSlotViews, type SlotBinding } from '../../utils/farm-slot-view.ts'
 import { resolveSpoolLevel } from '../../utils/spool-level.ts'
 import FarmSlot from '../spool-art/FarmSlot.vue'
 import FarmSpool from '../spool-art/FarmSpool.vue'
@@ -29,6 +29,7 @@ const props = withDefaults(
     nozzleTarget?: number
     bedTarget?: number
     thumbnailUrl?: string
+    bindings?: Readonly<Record<string, SlotBinding | undefined>>
     activeSpools?: readonly ActiveSpool[]
     /** Plain labels, or the farm alerts so each chip keeps its kind. */
     alerts?: readonly (string | FarmAlert)[]
@@ -85,7 +86,7 @@ const finish = computed(() => {
 const slots = computed(() =>
   props.observation?.historical
     ? undefined
-    : farmSlotViews(state.value?.materials),
+    : farmSlotViews(state.value?.materials, props.bindings),
 )
 const staleMaterials = computed(
   () => !!props.observation?.historical && !!state.value?.materials?.length,

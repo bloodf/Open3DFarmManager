@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import type { PrinterState } from '../../../../../packages/farm-protocol/src/state.ts'
+import type { SlotBinding } from '../../utils/farm-slot-view.ts'
 import FarmMaterials from '../FarmMaterials.vue'
 
 withDefaults(
   defineProps<{
     materials: PrinterState['materials']
     historical?: boolean
+    bindings?: Readonly<Record<string, SlotBinding | undefined>>
     heading?: string
   }>(),
   { heading: 'Bandejas de filamento' },
@@ -21,6 +23,7 @@ withDefaults(
     <FarmMaterials
       v-else
       :materials="materials"
+      :bindings="bindings"
       :heading="heading"
       :heading-level="2"
     />

@@ -1,4 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import {
+  slotBindingKey,
+  verifiedSlotBindings,
+} from '../../apps/farm/app/utils/farm-slot-view.ts'
+import type { SpoolItem } from '../../apps/farm/app/utils/spool-library-types.ts'
 import { renderFarmComponent } from '../../apps/farm/app/components/farm/render-farm-component.ts'
 import type {
   FarmObservation,
@@ -89,9 +94,54 @@ describe('drawn spool on printer slots', () => {
   })
 
   it('draws a Spoolman-bound slot from the bound weights, not the printer percent', async () => {
-    const html = await renderFarmComponent('../FarmMaterials.vue', {
-      materials: [live],
-      bindings: { 'ams:0:0': { remainingGrams: 250, initialGrams: 1000 } },
+    const current = row([live])
+    const printerId = current.assignment.assignmentId
+    const bindings = verifiedSlotBindings(
+      [
+        {
+          id: 'retired',
+          printerId,
+          slotKind: 'ams',
+          slotIndex: 0,
+          spoolId: 1,
+          assignedAt: 0,
+          unassignedAt: 1,
+        },
+        {
+          id: 'current',
+          printerId,
+          slotKind: 'ams',
+          slotIndex: 0,
+          spoolId: 2,
+          assignedAt: 1,
+          unassignedAt: null,
+        },
+      ],
+      [
+        {
+          id: 1,
+          remaining_weight: 99,
+          initial_weight: 100,
+          filament: {},
+          archived: false,
+        } as SpoolItem,
+        {
+          id: 2,
+          remaining_weight: 250,
+          initial_weight: 1000,
+          filament: {},
+          archived: false,
+        } as SpoolItem,
+      ],
+    )
+    const html = await renderFarmComponent('FarmPrinterCard.vue', {
+      row: current,
+      farmId: 'farm-1',
+      cameraFor: () => null,
+      liveNow: () => now,
+      bindings: {
+        [live.slot]: bindings.get(printerId)?.get(slotBindingKey(live.slot)),
+      },
     })
     expect(html).toContain('data-level-source="spoolman"')
     expect(html).toContain('aria-valuenow="25"')

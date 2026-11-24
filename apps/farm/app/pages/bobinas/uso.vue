@@ -6,6 +6,7 @@ import EmptyState from '../../components/ui/EmptyState.vue'
 import ErrorState from '../../components/ui/ErrorState.vue'
 import Skeleton from '../../components/ui/Skeleton.vue'
 import FeaturePanel from '../../components/spool-library/FeaturePanel.vue'
+import SpoolArt from '../../components/spool-library/SpoolArt.vue'
 import FeatureTable from '../../components/spool-library/FeatureTable.vue'
 import SpoolLibraryShell from '../../components/spool-library/SpoolLibraryShell.vue'
 import {
@@ -361,7 +362,14 @@ async function submitManual() {
         >
           <tr v-for="record in records" :key="record.id">
             <td>{{ formatStamp(record.createdAt) }}</td>
-            <td>{{ spoolText(record.spoolId) }}</td>
+            <td class="spool-record-cell">
+              <SpoolArt
+                v-if="spoolById.get(record.spoolId)"
+                :spool="spoolById.get(record.spoolId)!"
+                :size="40"
+              />
+              {{ spoolText(record.spoolId) }}
+            </td>
             <td>
               {{
                 record.printerId

@@ -5,6 +5,7 @@ import EmptyState from '../../components/ui/EmptyState.vue'
 import ErrorState from '../../components/ui/ErrorState.vue'
 import Skeleton from '../../components/ui/Skeleton.vue'
 import FeaturePanel from '../../components/spool-library/FeaturePanel.vue'
+import SpoolArt from '../../components/spool-library/SpoolArt.vue'
 import SpoolLibraryShell from '../../components/spool-library/SpoolLibraryShell.vue'
 import {
   featureFetch,
@@ -193,6 +194,11 @@ async function unassign(item: SlotAssignment, printer: PrinterRef) {
             :key="item.id"
           >
             <div>
+              <SpoolArt
+                v-if="spoolById.get(Number(item.spoolId))"
+                :spool="spoolById.get(Number(item.spoolId))!"
+                :size="40"
+              />
               <strong>{{ slotLabel(item.slotKind, item.slotIndex) }}</strong>
               <span class="muted"> · {{ spoolText(item.spoolId) }}</span>
               <span class="muted">

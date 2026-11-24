@@ -87,6 +87,7 @@ export function openFixedKobraXControl(input: {
   let closing: Promise<void> | undefined
   let stopped = false
   let attempted = false
+  let commandSent = false
   let latest: ControlObservation | undefined
   let readConfirmation: (() => ControlObservation | undefined) | undefined
   const stateEvidence = createKobraXStateEvidence()
@@ -166,6 +167,7 @@ export function openFixedKobraXControl(input: {
           return false
         baseline = stateEvidence.get()
         sent = request.beforeSend()
+        commandSent = sent
         return sent
       },
     })
@@ -187,12 +189,10 @@ export function openFixedKobraXControl(input: {
         })
       return { acknowledged: false }
     }
-    if (
-      stopped ||
-      request.signal.aborted ||
-      !baseline ||
-      stateEvidence.invalidated()
-    )
+    // Telemetry that changed because the command worked is expected here and
+    // may have invalidated the pre-send evidence. Confirmation below never
+    // reuses it: it waits for fresh correlated replies to new state queries.
+    if (stopped || request.signal.aborted || !baseline)
       return { acknowledged: false }
 
     const commandReport = outcome.report
@@ -387,7 +387,11 @@ export function openFixedKobraXControl(input: {
               printStateObservedMono: now,
               receivedMono: now,
             }
-            if (latest || stateEvidence.invalidated())
+            // After the send, the printer changing state is the command's own
+            // effect. Confirmation never reuses the pre-send evidence, so a
+            // contradiction only keeps it from confirming. Withdrawing the
+            // observation would void a command that was already sent.
+            if (latest || (stateEvidence.invalidated() && !commandSent))
               input.publish(latest ?? null)
           }
           notify?.()

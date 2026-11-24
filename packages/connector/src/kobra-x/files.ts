@@ -290,12 +290,19 @@ export function createKobraXFiles(context: KobraXControlContext) {
       )
         return
       const taskId = startedReport.data.taskid
+      const reportedTask = report.data.taskid
       if (
         (report.msgid === startedReport.msgid &&
           report.action === startedReport.action) ||
         (typeof taskId === 'string' &&
           taskId !== '-1' &&
-          report.data.taskid === taskId)
+          reportedTask === taskId) ||
+        // The printer's own end report names the job it started from this
+        // request: same file and no different task ID.
+        (report.data.filename === options.filename &&
+          (reportedTask === undefined ||
+            reportedTask === '-1' ||
+            reportedTask === taskId))
       )
         ended = report
     })

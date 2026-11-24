@@ -11,7 +11,10 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { readPackagedConnectorManifest } from '../helpers/packaged-connector-bounds.ts'
+import {
+  PACKAGED_CONNECTOR_LIMITS,
+  readPackagedConnectorManifest,
+} from '../helpers/packaged-connector-bounds.ts'
 
 const noticeDirectory = 'notices/node-datachannel'
 const noticeSource = new URL(
@@ -59,10 +62,14 @@ describe('packaged Connector bounds', () => {
     })
   })
 
-  it('counts notices toward the 96-file limit', async () => {
-    for (let i = 0; i < 82; i++)
+  it('counts notices toward the configured file limit', async () => {
+    const baseline = await readPackagedConnectorManifest(dist)
+    const remaining = PACKAGED_CONNECTOR_LIMITS.files - baseline.length
+    for (let i = 0; i < remaining; i++)
       await writeFile(join(dist, `chunk-${i}.js`), '')
-    await expect(readPackagedConnectorManifest(dist)).resolves.toHaveLength(96)
+    await expect(readPackagedConnectorManifest(dist)).resolves.toHaveLength(
+      PACKAGED_CONNECTOR_LIMITS.files,
+    )
     await writeFile(join(dist, noticeDirectory, 'extra-LICENSE'), '')
     await expect(readPackagedConnectorManifest(dist)).rejects.toThrow(
       'Packaged file bound',

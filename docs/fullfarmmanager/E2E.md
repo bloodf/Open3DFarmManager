@@ -32,6 +32,30 @@ not `test:journey`.
 
 ## Earlier run and remaining acceptance
 
+The resin-only regate passed on `06c3def2`, the cherry-pick of `afcea4d6`
+onto integrated head `0a617cdf`, which includes `ea86fb60`. The command
+`npm run test:journey -- tests/journey/fullfarmmanager-printer.spec.ts`
+exited 0 with one passing test using disposable local PostgreSQL and a
+loopback Moonraker simulator. The journey checked the four initial unknown
+values and verified the manual entries for vat (Cuba A), volume (250 mL),
+film (125 layers), and LCD (12 hours), including after reload. Only the resin
+journey ran in this regate. Collection acceptance remains pending.
+
+On 2026-11-24, an independent local run of the unchanged `3d1a3f22`
+baseline timed out waiting for the seeded file radio in the collection
+journey. That baseline result is separate from the later acceptance changes.
+On integrated head `0d83b5b7` (which includes `ea86fb60`), a local run with
+the journey fixture corrections passed the printer and resin journey: all four
+initial unknown values, the four manual entries and their values after reload
+were exercised. The collection journey still failed: its file-list operation
+reported a direct-connection error before the seeded radio appeared. The test
+retains the radio selection and the collection-hold, refusal and release
+assertions; those later assertions were not reached. This result does not
+establish the cause of the file-list failure or a passing collection journey.
+The integrated-head runs used disposable local PostgreSQL and a loopback
+simulator, not a physical printer. The other three journeys were not rerun in
+this correction.
+
 On 2026-11-23, the command above exited 0 in 2.2 minutes. The shell,
 printer and resin, and spool finder journeys passed as they existed then.
 Playwright skipped the collection and Integration API journeys, which were

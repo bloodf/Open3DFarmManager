@@ -28,6 +28,11 @@ if (journeyEnabled())
         page.getByText('Connector: conexão direta ativa', { exact: true }),
       ).toBeVisible()
       const resin = page.getByRole('region', { name: 'Resina' })
+      const summaryValue = (label: string) =>
+        resin
+          .locator('dl.resin-summary > div')
+          .filter({ has: page.getByText(label, { exact: true }) })
+          .locator('dd')
       await expect(
         resin.getByText('Filme (camadas)', { exact: true }),
       ).toBeVisible()
@@ -41,12 +46,7 @@ if (journeyEnabled())
         'Filme (camadas)',
         'LCD (horas)',
       ]) {
-        await expect(
-          resin
-            .locator('dl.resin-summary > div')
-            .filter({ has: resin.getByText(label, { exact: true }) })
-            .locator('dd'),
-        ).toHaveText('Não informado')
+        await expect(summaryValue(label)).toHaveText('Não informado')
       }
       await kind.selectOption('vat')
       await resin
@@ -64,7 +64,9 @@ if (journeyEnabled())
         .getByRole('textbox', { name: 'Volume (mL)', exact: true })
         .fill('250')
       await resin.getByRole('button', { name: 'Salvar registro' }).click()
-      await expect(resin.getByText(/^250 mL · Manual/)).toBeVisible()
+      await expect(summaryValue('Volume da cuba')).toContainText(
+        '250 mL · Manual',
+      )
       await resin
         .getByRole('combobox', { name: 'Tipo de registro', exact: true })
         .selectOption('film')
@@ -86,7 +88,9 @@ if (journeyEnabled())
       await expect(
         resin.getByText('Cuba A · Manual', { exact: true }),
       ).toBeVisible()
-      await expect(resin.getByText(/^250 mL · Manual/)).toBeVisible()
+      await expect(summaryValue('Volume da cuba')).toContainText(
+        '250 mL · Manual',
+      )
     } finally {
       try {
         await journey?.close()

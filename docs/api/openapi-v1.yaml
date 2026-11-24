@@ -1337,8 +1337,13 @@ paths:
       summary: Register a physical spool
       description: |
         Creates a spool using an existing filament in the farm-wide grant. A
-        caller with a farm-wide inventory write grant may attest an explicit
-        Spoolman binding at creation. The binding is immutable. A second local
+        caller with a farm-wide inventory write grant may request a Spoolman
+        binding at creation. An approved Connector in the same farm must have
+        the exact service ID configured and include the exact spool ID in its
+        current, non-stale inventory snapshot less than 30 seconds old.
+        Without that observation the API returns 409 (`spool-not-observed`)
+        before creating a spool or recording a receipt.
+        The binding is immutable. A second local
         spool cannot claim the same external identity in the same farm.
         A retry with the same key, farm and body returns the original response.
         Reusing the key with different input returns 409 (`idempotency-key-reused`).
@@ -3190,8 +3195,8 @@ components:
     Conflict:
       description: |
         `idempotency-key-reused`, `intent-conflict`, `request-conflict`,
-        `webhook-limit-reached`, `spool-already-bound`, `device-stale` or
-        `device-not-ready`.
+        `webhook-limit-reached`, `spool-already-bound`, `spool-not-observed`,
+        `device-stale` or `device-not-ready`.
       headers:
         RateLimit-Limit:
           $ref: '#/components/headers/RateLimit-Limit'
@@ -3410,6 +3415,7 @@ components:
         - request-conflict
         - webhook-limit-reached
         - spool-already-bound
+        - spool-not-observed
         - spool-location-changed
         - payload-too-large
         - unsupported-media-type

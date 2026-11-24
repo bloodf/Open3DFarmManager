@@ -460,6 +460,7 @@ function physicalSpoolScenarios(): Scenario[] {
     },
   ] as const
 
+  const serviceId = '12345678-1234-4234-8234-123456789abc'
   return routes.flatMap(({ method, path, scope, suffix, success }) => {
     const scenario = (
       status: string,
@@ -474,6 +475,7 @@ function physicalSpoolScenarios(): Scenario[] {
         requiresApproval?: boolean
         keyConflict?: boolean
         bindingConflict?: boolean
+        missingObservation?: boolean
         replay?: boolean
       } = {},
     ): Scenario => ({
@@ -529,11 +531,38 @@ function physicalSpoolScenarios(): Scenario[] {
                 expect(values[0]).toEqual({
                   farmId: ids.farmA,
                   spoolman: {
-                    serviceId: '12345678-1234-4234-8234-123456789abc',
+                    serviceId,
                     spoolId: 1,
                   },
                 })
                 return options.bindingConflict ? [{ exists: true }] : []
+              }
+              if (text.includes('farm.lock_physical_spool_observations')) {
+                expect(values).toEqual([ids.farmA, serviceId])
+                if (options.missingObservation || stored) return []
+                const observedAt = Date.now()
+                return [
+                  {
+                    observedAt,
+                    snapshot: {
+                      observedAt,
+                      serviceId,
+                      stale: false,
+                      total: 1,
+                      spools: [
+                        {
+                          spoolId: 1,
+                          name: 'PLA',
+                          material: null,
+                          colorHex: null,
+                          remainingGrams: null,
+                          location: null,
+                          archived: false,
+                        },
+                      ],
+                    },
+                  },
+                ]
               }
               if (text.includes('INSERT INTO farm.spools'))
                 return [{ ...spool, id: 8, location: values[3] }]
@@ -592,7 +621,12 @@ function physicalSpoolScenarios(): Scenario[] {
           world.config.integrationAuth.writeLimit = 1
           await call(input)
         }
-        return { input, result: await call(input) }
+        const result = await call(input)
+        if (options.missingObservation) {
+          expect(result.json).toMatchObject({ code: 'spool-not-observed' })
+          expect(stored).toBeUndefined()
+        }
+        return { input, result }
       },
     })
 
@@ -643,7 +677,7 @@ function physicalSpoolScenarios(): Scenario[] {
           filamentId: 1,
           location: 'Gaveta A',
           spoolman: {
-            serviceId: '12345678-1234-4234-8234-123456789abc',
+            serviceId,
             spoolId: 1,
           },
         },
@@ -652,6 +686,10 @@ function physicalSpoolScenarios(): Scenario[] {
         scenario('201', 'registers an explicitly bound spool', {
           input: bindingInput,
           replay: true,
+        }),
+        scenario('409', 'external spool has no current trusted observation', {
+          input: bindingInput,
+          missingObservation: true,
         }),
         scenario('409', 'external spool already bound', {
           input: bindingInput,

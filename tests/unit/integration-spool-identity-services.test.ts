@@ -1,9 +1,10 @@
 import { vitestPostgresOptions } from '../helpers/vitest-postgres.ts'
 import { appendFileSync } from 'node:fs'
+import { setTimeout as delay } from 'node:timers/promises'
 import postgres from 'postgres'
 import { disposablePostgres } from '../helpers/disposable-postgres.ts'
 import { registerPhysicalSpool } from '../../apps/farm/server/utils/integration-spool-physical.ts'
-import type { Sql } from 'postgres'
+import type { Sql, TransactionSql } from 'postgres'
 import { expect, test, vi } from 'vitest'
 import { parseSpoolmanSpoolInventory } from '../../packages/connector/src/spoolman/read.ts'
 import {
@@ -24,7 +25,12 @@ const connectorB = '00000000-0000-4000-8000-000000000003'
 const serviceA = '00000000-0000-4000-8000-000000000004'
 const serviceB = '00000000-0000-4000-8000-000000000005'
 
-function observation(serviceId: string, connectorId: string, index = 0) {
+function observation(
+  serviceId: string,
+  connectorId: string,
+  index = 0,
+  observedAt = 1000,
+) {
   const inventory = parseSpoolmanSpoolInventory(
     [
       {
@@ -36,7 +42,7 @@ function observation(serviceId: string, connectorId: string, index = 0) {
           })),
         ),
         offset: 0,
-        observedAt: 1000,
+        observedAt,
       },
     ],
     { farmId, serviceId, limit: 100 },
@@ -45,9 +51,9 @@ function observation(serviceId: string, connectorId: string, index = 0) {
   return {
     farmId,
     connectorId,
-    observedAt: 1000,
+    observedAt,
     index,
-    snapshot: inventoryAt(summary, 0, 1000),
+    snapshot: inventoryAt(summary, 0, observedAt),
   }
 }
 
@@ -115,6 +121,73 @@ test('search and usage expose only explicitly bound provenance even when spool I
   }
 })
 
+test('registration rejects untrusted snapshot data before allocating or writing a receipt', async () => {
+  const observedAt = Date.now()
+  const { snapshot } = observation(serviceA, connectorA, 0, observedAt)
+  const access = {
+    appId: connectorA,
+    farmId,
+    grantIds: [connectorB],
+    scope: 'inventory:write' as const,
+  }
+  const input = {
+    filamentId: 1,
+    location: 'A',
+    spoolman: { serviceId: serviceA, spoolId: 1 },
+  }
+  for (const rows of [
+    [],
+    [{ observedAt, snapshot: { ...snapshot, stale: true } }],
+    [
+      {
+        observedAt: observedAt - 30_000,
+        snapshot: { ...snapshot, observedAt: observedAt - 30_000 },
+      },
+    ],
+    [
+      {
+        observedAt: observedAt + 60_000,
+        snapshot: { ...snapshot, observedAt: observedAt + 60_000 },
+      },
+    ],
+    [{ observedAt: observedAt - 1, snapshot }],
+    [{ observedAt, snapshot: { ...snapshot, serviceId: undefined } }],
+    [{ observedAt, snapshot: { ...snapshot, spools: [{ spoolId: 1 }] } }],
+    [{ observedAt, snapshot: { ...snapshot, serviceId: serviceB } }],
+    [
+      {
+        observedAt,
+        snapshot: { ...snapshot, spools: snapshot.spools.slice(1) },
+      },
+    ],
+  ]) {
+    const tx = Object.assign(
+      vi.fn((parts: TemplateStringsArray) => {
+        const query = parts.join('')
+        if (query.includes('lock_physical_spool_observations')) return rows
+        if (
+          query.includes('SELECT g.id') ||
+          query.includes('SELECT id FROM farm.spool_filaments')
+        )
+          return [{ id: 1 }]
+        if (query.includes('SELECT')) return []
+        throw new Error('Unexpected statement: ' + query)
+      }),
+      { json: (value: unknown) => value },
+    )
+    const sql = {
+      begin: (work: (tx: TransactionSql) => Promise<unknown>) =>
+        work(tx as unknown as TransactionSql),
+    } as unknown as Sql
+    expect(await registerPhysicalSpool(sql, access, input, 'binding')).toEqual({
+      outcome: 'spool-not-observed',
+    })
+    expect(tx.mock.calls.map(([parts]) => parts.join('')).join('')).not.toMatch(
+      /INSERT|UPDATE/,
+    )
+  }
+})
+
 test.runIf(
   process.env.OPENFARM_TEST_SPOOL_IDENTITY_PG === '1' ||
     process.env.OPENFARM_PG === 'docker',
@@ -152,33 +225,104 @@ test.runIf(
       await root`CREATE ROLE spool_identity_writer NOLOGIN`
       await root`GRANT farm_spool_features, farm_spool_library, farm_integration_apps TO spool_identity_writer`
       writer = postgres(fixture.connectionString, {
-        connection: { role: 'spool_identity_writer' },
+        connection: {
+          role: 'spool_identity_writer',
+          application_name: 'spool_identity_writer',
+        },
       })
       reader = postgres(fixture.connectionString, {
         connection: { role: 'farm_integration_apps' },
       })
 
+      const writeDb = writer
+      const otherFarm = crypto.randomUUID()
+      const otherConnector = crypto.randomUUID()
+      async function enroll(
+        targetFarm: string,
+        connectorId: string,
+        serviceId: string,
+      ) {
+        await root`INSERT INTO farm.connector_enrollments (farm_id, agent_id, public_key_spki, fingerprint)
+          VALUES (${targetFarm}, ${connectorId}, repeat('A', 59), 'SHA256:' || repeat('A', 43))`
+        await root`UPDATE farm.connector_enrollments SET status = 'approved' WHERE agent_id = ${connectorId}`
+        await root`INSERT INTO farm.spoolman_connector_settings (farm_id, agent_id, origin, service_id, status, configured, checked_at, updated_by)
+          VALUES (${targetFarm}, ${connectorId}, 'http://spoolman.invalid', ${serviceId}, 'reachable', true, 0, 'spool-identity-owner')`
+      }
+      async function publish(
+        serviceId: string,
+        connectorId = connectorA,
+        {
+          db = root,
+          targetFarm = farmId,
+          observedAt = Date.now(),
+          stale = false,
+        }: {
+          db?: Sql | TransactionSql
+          targetFarm?: string
+          observedAt?: number
+          stale?: boolean
+        } = {},
+      ) {
+        const row = observation(serviceId, connectorId, 0, observedAt)
+        await db`INSERT INTO farm.connector_inventory_snapshots (farm_id, agent_id, observed_at, snapshot)
+          VALUES (${targetFarm}, ${connectorId}, ${row.observedAt}, ${db.json({ ...row.snapshot, stale })})
+          ON CONFLICT (farm_id, agent_id) DO UPDATE SET observed_at = EXCLUDED.observed_at, snapshot = EXCLUDED.snapshot`
+      }
+
       const input = { filamentId: 1, location: 'A' }
+      const boundAInput = {
+        ...input,
+        spoolman: { serviceId: serviceA, spoolId: 1 },
+      }
+      const rejected = { outcome: 'spool-not-observed' }
+      const registerA = () =>
+        registerPhysicalSpool(writeDb, access, boundAInput, 'service-a')
+      expect(await registerA()).toEqual(rejected)
+      await root`INSERT INTO farm.farms (id, sandbox) VALUES (${otherFarm}, true)`
+      await enroll(otherFarm, otherConnector, serviceA)
+      await publish(serviceA, otherConnector, { targetFarm: otherFarm })
+      expect(await registerA()).toEqual(rejected)
+      await publish(serviceA)
+      expect(await registerA()).toEqual(rejected)
+      await enroll(farmId, connectorA, serviceA)
+      await publish(serviceA, connectorA, { observedAt: Date.now() - 30_000 })
+      expect(await registerA()).toEqual(rejected)
+      await publish(serviceA, connectorA, { stale: true })
+      expect(await registerA()).toEqual(rejected)
+      await publish(serviceB)
+      expect(await registerA()).toEqual(rejected)
+      await publish(serviceA)
+      expect(
+        await registerPhysicalSpool(
+          writeDb,
+          access,
+          { ...boundAInput, spoolman: { serviceId: serviceA, spoolId: 99 } },
+          'service-a',
+        ),
+      ).toEqual(rejected)
+      expect(
+        await root`SELECT id FROM farm.spools WHERE farm_id = ${farmId}`,
+      ).toHaveLength(0)
+      expect(
+        await root`SELECT last_id FROM farm.spool_library_counters WHERE farm_id = ${farmId}`,
+      ).toHaveLength(0)
+      expect(
+        await root`SELECT response FROM farm.integration_physical_spool_registrations WHERE app_id = ${appId}`,
+      ).toHaveLength(0)
+
       const legacy = await registerPhysicalSpool(
         writer,
         access,
         input,
         'legacy',
       )
-      const boundAInput = {
-        ...input,
-        spoolman: { serviceId: serviceA, spoolId: 1 },
-      }
-      const boundA = await registerPhysicalSpool(
-        writer,
-        access,
-        boundAInput,
-        'service-a',
-      )
+      const boundA = await registerA()
       const boundBInput = {
         ...input,
         spoolman: { serviceId: serviceB, spoolId: 1 },
       }
+      await enroll(farmId, connectorB, serviceB)
+      await publish(serviceB, connectorB)
       const concurrent = await Promise.all([
         registerPhysicalSpool(writer, access, boundBInput, 'service-b'),
         registerPhysicalSpool(writer, access, boundBInput, 'service-b-race'),
@@ -221,12 +365,6 @@ test.runIf(
           VALUES (${crypto.randomUUID()}, ${farmId}, ${spool.spoolId}, ${job!.id}, 8, 'manual', 1000)`
       }
 
-      async function publish(serviceId: string, connectorId = connectorA) {
-        const row = observation(serviceId, connectorId)
-        await root`INSERT INTO farm.connector_inventory_snapshots (farm_id, agent_id, observed_at, snapshot)
-          VALUES (${farmId}, ${connectorId}, ${row.observedAt}, ${root.json(row.snapshot)})
-          ON CONFLICT (farm_id, agent_id) DO UPDATE SET snapshot = EXCLUDED.snapshot`
-      }
       const farms = [farmId]
       const observed = { farmIds: farms, cursor: null, limit: 8 }
       const usageQuery = spoolUsageQuery(
@@ -235,11 +373,9 @@ test.runIf(
       const readDb = reader
       const readUsage = () =>
         listIntegrationSpoolUsage(readDb, farms, usageQuery)
-      await publish(serviceA)
       const before = await readUsage()
       const firstObservation = await listObservedSpools(readDb, observed)
       expect(firstObservation.data[0]?.spoolKey).toBe(serviceA + ':1')
-      await publish(serviceB, connectorB)
       const both = await listObservedSpools(readDb, observed)
       expect(both.data.map(({ spoolKey }) => spoolKey)).toEqual([
         serviceA + ':1',
@@ -247,7 +383,78 @@ test.runIf(
         serviceB + ':1',
         serviceB + ':5',
       ])
-      await publish(serviceB)
+      async function registerDuringUpdate(
+        update: (tx: TransactionSql) => Promise<void>,
+        spoolman: { serviceId: string; spoolId: number },
+        key: string,
+      ) {
+        let registration: ReturnType<typeof registerPhysicalSpool> | undefined
+        await root.begin(async (tx) => {
+          await update(tx)
+          registration = registerPhysicalSpool(
+            writeDb,
+            access,
+            { ...input, spoolman },
+            key,
+          )
+          // The writer must reach the observation query while the change is uncommitted.
+          for (let attempt = 0; attempt < 200; attempt++) {
+            await tx`SELECT pg_stat_clear_snapshot()`
+            const pending = await tx`
+              SELECT 1 FROM pg_stat_activity
+              WHERE application_name = 'spool_identity_writer'
+                AND wait_event_type = 'Lock'
+                AND pg_backend_pid() = ANY(pg_blocking_pids(pid))`
+            if (pending.length) return
+            await delay(10)
+          }
+          throw new Error('Registration did not wait for the provenance update')
+        })
+        expect(await registration).toEqual(rejected)
+      }
+
+      await registerDuringUpdate(
+        async (tx) => {
+          await tx`UPDATE farm.connector_enrollments SET status = 'revoked' WHERE agent_id = ${connectorB}`
+          await tx`INSERT INTO farm.connector_revocations (agent_id, farm_id, fingerprint, revoked_at, revoked_by)
+            SELECT agent_id, farm_id, fingerprint, ${Date.now()}, 'spool-identity-owner'
+            FROM farm.connector_enrollments WHERE agent_id = ${connectorB}`
+        },
+        { serviceId: serviceB, spoolId: 5 },
+        'revoked',
+      )
+      await registerDuringUpdate(
+        async (tx) => {
+          await tx`UPDATE farm.spoolman_connector_settings SET service_id = ${serviceB}
+          WHERE farm_id = ${farmId} AND agent_id = ${connectorA}`
+        },
+        { serviceId: serviceA, spoolId: 5 },
+        'reconfigured',
+      )
+      expect(
+        await registerPhysicalSpool(
+          writeDb,
+          access,
+          { ...input, spoolman: { serviceId: serviceB, spoolId: 5 } },
+          'replacement',
+        ),
+      ).toEqual(rejected)
+      await root`UPDATE farm.spoolman_connector_settings SET service_id = ${serviceA}
+        WHERE farm_id = ${farmId} AND agent_id = ${connectorA}`
+      await registerDuringUpdate(
+        async (tx) => {
+          await publish(serviceB, connectorA, { db: tx })
+        },
+        { serviceId: serviceA, spoolId: 5 },
+        'replaced-snapshot',
+      )
+      expect(await registerA()).toEqual(boundA)
+      expect(
+        await root`SELECT id FROM farm.spools WHERE farm_id = ${farmId}`,
+      ).toHaveLength(3)
+      expect(
+        await root`SELECT response FROM farm.integration_physical_spool_registrations WHERE app_id = ${appId}`,
+      ).toHaveLength(3)
       const replacement = await listObservedSpools(readDb, observed)
       expect(replacement.data[0]?.spoolKey).toBe(serviceB + ':1')
       await root`UPDATE farm.integration_apps SET revoked_at = 1001 WHERE id = ${appId}`

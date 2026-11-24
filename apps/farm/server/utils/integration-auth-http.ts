@@ -173,6 +173,10 @@ const problems = {
     409,
     'A bobina do Spoolman já foi vinculada nesta farm.',
   ],
+  'spool-not-observed': [
+    409,
+    'Nenhum Connector autorizado desta farm observou recentemente esta bobina no serviço Spoolman configurado.',
+  ],
   'spool-location-changed': [
     409,
     'O registro da bobina mudou. Consulte o local atual.',

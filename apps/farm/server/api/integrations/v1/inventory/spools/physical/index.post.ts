@@ -44,6 +44,8 @@ export default defineEventHandler(async (event) => {
       return integrationProblem('idempotency-key-reused', headers)
     if (spool.outcome === 'already-bound')
       return integrationProblem('spool-already-bound', headers)
+    if (spool.outcome === 'spool-not-observed')
+      return integrationProblem('spool-not-observed', headers)
     const responseHeaders = new Headers(headers)
     responseHeaders.set(
       'location',

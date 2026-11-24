@@ -109,16 +109,16 @@ function grams(value: number | null) {
                 v-for="(spool, index) in section.item.inventory.spools"
                 :key="index"
               >
-                <th scope="row">
+                <th scope="row">{{ spool.name ?? 'Sem nome' }}</th>
+                <td>{{ spool.material ?? 'Indisponível' }}</td>
+                <td>
+                  <!-- Kept out of the row header so its name stays the filament name. -->
                   <SpoolIllustration
                     :filament="{ color_hex: spool.colorHex ?? undefined }"
                     :spoolman-percent="spool.remainingPercent"
+                    class="cell-spool"
                     compact
                   />
-                  {{ spool.name ?? 'Sem nome' }}
-                </th>
-                <td>{{ spool.material ?? 'Indisponível' }}</td>
-                <td>
                   <template v-if="spool.colorHex">
                     #{{ spool.colorHex }}
                   </template>
@@ -166,6 +166,9 @@ td {
   padding: 0.4rem 0.6rem;
   text-align: left;
   overflow-wrap: anywhere;
+}
+.cell-spool {
+  margin-inline-end: 0.4rem;
 }
 .opaque {
   overflow-wrap: anywhere;

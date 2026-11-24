@@ -196,3 +196,24 @@ test('idle generic console refuses a tool macro it cannot classify', async (t) =
   assert.equal(result.kind, 'not-sent', JSON.stringify(result))
   assert.deepEqual(remote.control.gcodeScripts, [])
 })
+
+for (const u1 of [true, false])
+  test(`idle console refuses homing when G28 is an advertised macro (${u1 ? 'U1' : 'generic'})`, async (t) => {
+    const { remote, run } = await world(t, { macros: ['G28'] }, true, u1)
+    for (const line of ['G28', 'G28 X Y', 'G28 Z']) {
+      const result = await run('gcode', { line })
+      assert.equal(result.kind, 'not-sent', JSON.stringify({ line, result }))
+    }
+    assert.deepEqual(remote.control.gcodeScripts, [])
+  })
+
+test('idle console still homes canonically when no G28 macro is advertised', async (t) => {
+  const { remote, run } = await world(
+    t,
+    { macros: ['LOAD_FILAMENT'], homedAxes: '' },
+    true,
+    false,
+  )
+  assert.notEqual((await run('gcode', { line: 'G28' })).kind, 'not-sent')
+  assert.deepEqual(remote.control.gcodeScripts, ['G28 X Y Z'])
+})

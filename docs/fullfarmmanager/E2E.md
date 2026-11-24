@@ -32,6 +32,15 @@ not `test:journey`.
 
 ## Earlier run and remaining acceptance
 
+The resin-only regate passed on `06c3def2`, the cherry-pick of `afcea4d6`
+onto integrated head `0a617cdf`, which includes `ea86fb60`. The command
+`npm run test:journey -- tests/journey/fullfarmmanager-printer.spec.ts`
+exited 0 with one passing test using disposable local PostgreSQL and a
+loopback Moonraker simulator. The journey checked the four initial unknown
+values and verified the manual entries for vat (Cuba A), volume (250 mL),
+film (125 layers), and LCD (12 hours), including after reload. Only the resin
+journey ran in this regate. Collection acceptance remains pending.
+
 On 2026-11-24, an independent local run of the unchanged `3d1a3f22`
 baseline timed out waiting for the seeded file radio in the collection
 journey. That baseline result is separate from the later acceptance changes.

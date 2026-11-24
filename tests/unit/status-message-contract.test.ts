@@ -46,16 +46,32 @@ describe('firmware shutdown reader contract', () => {
     expect(
       PrinterState.safeParse({ ...state, statusReason: undefined }).success,
     ).toBe(false)
-    for (const otherState of ['idle', 'printing', 'paused', 'unknown'] as const)
-      expect(
-        PrinterState.safeParse({ ...state, state: otherState }).success,
-      ).toBe(false)
+    for (const otherState of [
+      'idle',
+      'printing',
+      'paused',
+      'unknown',
+      'offline',
+    ] as const)
+      for (const progress of [undefined, 0.5])
+        expect(
+          PrinterState.safeParse({ ...state, state: otherState, progress })
+            .success,
+        ).toBe(false)
     expect(
       PrinterState.safeParse({ ...state, statusMessage: undefined }).success,
     ).toBe(true)
     expect(
       PrinterState.safeParse({ ...state, statusMessage: '\ud800' }).success,
     ).toBe(false)
+    expect(
+      PrinterState.safeParse({ ...state, statusMessage: 'fault\0detail' })
+        .success,
+    ).toBe(false)
+    const message = 'Falha 🌡️\n' + 'x'.repeat(200)
+    expect(
+      PrinterState.parse({ ...state, statusMessage: message }).statusMessage,
+    ).toBe(message)
   })
   it('exposes the reason and leaves unknown progress absent', async () => {
     expect(parseStoredPrinterState(JSON.parse(JSON.stringify(state)))).toEqual(

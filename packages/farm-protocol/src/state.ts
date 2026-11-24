@@ -162,7 +162,9 @@ function printerStateSchema(legacy: boolean) {
         'unknown',
       ]),
       preformStatus: text(256, 1).optional(),
-      statusMessage: text(256, 1, 256).optional(),
+      statusMessage: text(256, 1, 256)
+        .refine((value) => !value.includes('\0'), 'Invalid diagnostic text')
+        .optional(),
       statusReason: z
         .enum([
           'client-certificate-missing',
@@ -267,6 +269,14 @@ function printerStateSchema(legacy: boolean) {
       runEnergyWh: z.number().finite().nonnegative().optional(),
       observedAt: z.number().int().nonnegative(),
     })
+    .refine(
+      (value) =>
+        value.statusReason !== 'firmware-shutdown' || value.state === 'error',
+      {
+        path: ['statusReason'],
+        message: 'Firmware shutdown requires error state',
+      },
+    )
     .refine(
       (value) =>
         value.state === 'offline' ||

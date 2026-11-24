@@ -363,11 +363,11 @@ describe('Moonraker console on the E16 mock', () => {
 
   it('sends one line when enabled and stopped', async () => {
     await withMock({}, true, async (mock, attempt) => {
-      expect(await attempt('gcode', { line: ' G28 ' })).toMatchObject({
+      expect(await attempt('gcode', { line: ' M105 ' })).toMatchObject({
         ok: true,
         guard: 1,
       })
-      expect(mock.control.gcodeScripts).toEqual(['G28'])
+      expect(mock.control.gcodeScripts).toEqual(['M105'])
     })
   })
 

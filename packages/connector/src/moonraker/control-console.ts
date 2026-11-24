@@ -130,6 +130,50 @@ export function consoleAllowedWhenStopped(
   return !ALWAYS_REFUSED.has(command) && !additionalRefused?.includes(command)
 }
 
+/** Only a single, explicit axis and feed can be checked without interpreting a program. */
+export function classifyIdleConsole(
+  line: string,
+):
+  | { kind: 'safe' }
+  | { kind: 'move'; axis: 'x' | 'y' | 'z' | 'e'; value: number; feed: number }
+  | { kind: 'tool' }
+  | { kind: 'unknown' } {
+  const parts = tokens(line)
+  if (!parts) return { kind: 'unknown' }
+  const [word, ...params] = parts
+  const command = word!.toUpperCase()
+  if (/^T[0-3]$/.test(command) && params.length === 0) return { kind: 'tool' }
+  if (command === 'G0' || command === 'G1') {
+    if (params.length !== 2) return { kind: 'unknown' }
+    const axis = /^([XYZE])(-?\d+(?:\.\d+)?)$/i.exec(params[0]!)
+    const feed = /^F(\d+(?:\.\d+)?)$/i.exec(params[1]!)
+    if (!axis || !feed) return { kind: 'unknown' }
+    const value = Number(axis[2])
+    const speed = Number(feed[1])
+    if (
+      !Number.isFinite(value) ||
+      !Number.isFinite(speed) ||
+      speed <= 0 ||
+      speed > 9000
+    )
+      return { kind: 'unknown' }
+    const letter = axis[1]!.toLowerCase()
+    if (letter !== 'x' && letter !== 'y' && letter !== 'z' && letter !== 'e')
+      return { kind: 'unknown' }
+    return { kind: 'move', axis: letter, value, feed: speed }
+  }
+  if (command === 'M118') return { kind: 'safe' }
+  if (
+    (command === 'M104' || command === 'M140') &&
+    params.length === 1 &&
+    /^S0(?:\.0+)?$/i.test(params[0]!)
+  )
+    return { kind: 'safe' }
+  return consoleAllowedWhilePrinting(line)
+    ? { kind: 'safe' }
+    : { kind: 'unknown' }
+}
+
 const PrintState = z.enum([
   'standby',
   'printing',

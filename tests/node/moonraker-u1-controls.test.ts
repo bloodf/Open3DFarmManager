@@ -133,7 +133,7 @@ test('declared U1 sets and clears each tool and the bed', async (t) => {
   assert.equal(remote.control.gcodeScripts.length, 10)
 })
 
-test('declared U1 homes, jogs and selects tools', async (t) => {
+test('declared U1 homes and jogs but refuses unclassified tool macros', async (t) => {
   const { remote, applied, run } = await world(t, { homedAxes: '' })
   const early = await run('gcode', { line: 'T2' })
   assert.equal(early.kind, 'not-sent', JSON.stringify(early))
@@ -143,16 +143,12 @@ test('declared U1 homes, jogs and selects tools', async (t) => {
   await applied('home', { axes: ['x', 'y', 'z'] })
   await applied('jog', { axis: 'x', distance_mm: 1, feed: 300 })
   for (const tool of [0, 1, 2, 3]) {
-    await applied('gcode', { line: `T${tool}` })
-    assert.equal(remote.control.model().activeTool, tool)
+    const result = await run('gcode', { line: `T${tool}` })
+    assert.equal(result.kind, 'not-sent', JSON.stringify(result))
   }
   assert.deepEqual(remote.control.gcodeScripts, [
     'G28 X Y Z',
     'G91\nG1 X1 F300\nG90',
-    'T0 A0',
-    'T1 A0',
-    'T2 A0',
-    'T3 A0',
   ])
 })
 

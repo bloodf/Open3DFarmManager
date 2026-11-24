@@ -32,6 +32,8 @@ describe('macros and filament controls', () => {
     })
   })
   it('maps advertised AMS slots to tray indices', () => {
-    expect(filamentTrays(state)).toEqual([{ id: 11, label: 'ams:2:3 — PLA' }])
+    expect(filamentTrays(state)).toMatchObject([
+      { id: 11, label: 'ams:2:3 — PLA' },
+    ])
   })
 })

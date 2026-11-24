@@ -8,6 +8,7 @@ import {
   type ReplaySend,
 } from '../utils/replay-live.ts'
 import type { LibraryVersion } from '../utils/library-view.ts'
+import { activeSlotSpools } from '../utils/slot-spools.ts'
 
 /**
  * The live, signed session replay needs: which printers can be picked right
@@ -33,6 +34,13 @@ export function useReplayLive(farmId: Ref<string>) {
           current.keys,
           controls.pauseEnabled.value,
           view.now.value,
+          (row) =>
+            activeSlotSpools({
+              farmId: farmId.value,
+              row,
+              inventory: current.spools,
+              now: view.now.value,
+            }),
         )
       : new Map()
   })

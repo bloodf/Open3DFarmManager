@@ -15,7 +15,8 @@ test('duplicate names retain distinct IDs in the existing snapshot contract', as
   const wire = JSON.stringify(
     Array.from({ length: 9 }, (_, i) => ({
       id: i + 1,
-      filament: { id: 1, name: 'PLA', material: 'PLA' },
+      filament: { id: 1, name: 'PLA', material: 'PLA', weight: 1000 },
+      remaining_weight: i === 0 ? 250 : null,
       archived: false,
     })),
   )
@@ -28,6 +29,8 @@ test('duplicate names retain distinct IDs in the existing snapshot contract', as
   expect(snapshot.spools.map((spool) => spool.spoolId)).toEqual([
     1, 2, 3, 4, 5, 6, 7, 8,
   ])
+  expect(snapshot.spools[0]?.remainingPercent).toBe(25)
+  expect(snapshot.spools[1]?.remainingPercent).toBeUndefined()
   const sql = (() =>
     Promise.resolve([
       { farmId, connectorId, observedAt: 1000, snapshot },

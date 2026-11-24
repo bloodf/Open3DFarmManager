@@ -13,6 +13,8 @@ import { useRoute } from 'vue-router'
 import ConfigEditorPanel from '../../components/printer-detail/ConfigEditorPanel.vue'
 import { vendorDetailCatalog } from '../../utils/compatibility/detail-panels.ts'
 import FileManagerPanel from '../../components/printer-detail/FileManagerPanel.vue'
+import FarmMaterials from '../../components/FarmMaterials.vue'
+import SpoolIllustration from '../../components/spool-library/SpoolIllustration.vue'
 import ResinLedgerPanel from '../../components/resin/ResinLedgerPanel.vue'
 import PowerPanel from '../../components/printer-detail/PowerPanel.vue'
 import SystemServicesPanel from '../../components/printer-detail/SystemServicesPanel.vue'
@@ -37,6 +39,7 @@ import {
 } from '../../utils/farm-control.ts'
 import { printableFile } from '../../utils/files-view.ts'
 import { kobraXInputs, kobraXMapping } from '../../utils/kobra-x-inputs.ts'
+import { activeSlotSpools } from '../../utils/slot-spools.ts'
 import { extendedLabel } from '../../utils/farm-control-extended.ts'
 import {
   formatPrinterStateLabel,
@@ -81,11 +84,12 @@ const kobraInputs = ref(['', '', '', '', '', '', ''])
 const availableKobraInputs = computed(() =>
   kobraXInputs(state.value?.materials),
 )
-const selectedKobraInput = computed(() =>
-  availableKobraInputs.value.find(
-    (input) => String(input.id) === kobraInputs.value[0],
+const selectedKobraInputs = computed(() =>
+  kobraInputs.value.map((selection) =>
+    availableKobraInputs.value.find((input) => String(input.id) === selection),
   ),
 )
+const selectedKobraInput = computed(() => selectedKobraInputs.value[0])
 const selectedKobraMapping = computed(() =>
   kobraXMapping(
     kobraInputs.value,
@@ -198,6 +202,20 @@ const row = computed(
     ) ?? null,
 )
 const state = computed(() => row.value?.observation?.state)
+const activeSpools = computed(() => {
+  const current = ready.value
+  return current?.scope && row.value
+    ? activeSlotSpools({
+        farmId: current.scope.farmId,
+        row: row.value,
+        inventory: current.spools,
+        now: now.value,
+      })
+    : []
+})
+const spoolBySlot = computed(
+  () => new Map(activeSpools.value.map((spool) => [spool.slot, spool])),
+)
 const age = computed(() => {
   void now.value
   const observation = row.value?.observation
@@ -949,6 +967,12 @@ watch(
           "
           :message="detailFrame.detail.print?.message ?? ''"
         />
+        <FarmMaterials
+          v-if="live && !vendorFrame?.detail.materials?.length"
+          :materials="detailFrame?.detail.materials ?? state?.materials"
+          :active-spools="activeSpools"
+          :heading-level="2"
+        />
       </template>
       <template #configuracao>
         <ConfigEditorPanel
@@ -1095,6 +1119,26 @@ watch(
                 {{ input.label }}
               </option>
             </select>
+            <SpoolIllustration
+              v-if="selectedKobraInputs[index - 1]"
+              :filament="{
+                color_hex:
+                  spoolBySlot.get(selectedKobraInputs[index - 1]!.material.slot)
+                    ?.colorHex ??
+                  selectedKobraInputs[index - 1]?.material.colorHex?.slice(
+                    0,
+                    6,
+                  ),
+              }"
+              :spoolman-percent="
+                spoolBySlot.get(selectedKobraInputs[index - 1]!.material.slot)
+                  ?.remainingPercent
+              "
+              :printer-percent="
+                selectedKobraInputs[index - 1]?.material.remainingPercent
+              "
+              compact
+            />
           </template>
           <Button
             v-if="state?.controls?.includes('load_filament')"
@@ -1177,18 +1221,13 @@ watch(
           }}
         </Button>
       </template>
-      <template v-if="vendorFrame.detail.materials?.length">
-        <h2>Slots ACE</h2>
-        <ul>
-          <li v-for="slot in vendorFrame.detail.materials" :key="slot.slot">
-            {{ slot.slot
-            }}<template v-if="slot.materialType">
-              · {{ slot.materialType }}</template
-            >
-            <template v-if="slot.active"> · Em uso</template>
-          </li>
-        </ul>
-      </template>
+      <FarmMaterials
+        v-if="vendorFrame.detail.materials?.length"
+        :materials="vendorFrame.detail.materials"
+        :active-spools="activeSpools"
+        :title="vendorFrame.vendor === 'creality' ? 'Slots CFS' : 'Slots ACE'"
+        :heading-level="2"
+      />
     </section>
 
     <ResinLedgerPanel

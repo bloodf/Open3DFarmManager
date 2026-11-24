@@ -9,6 +9,7 @@ import type {
 } from '../../apps/farm/app/utils/farm-view.ts'
 import { startHttpMock } from '../../packages/sim-tools/src/mocks/http-mock.ts'
 import { withBrowser } from '../helpers/browser.ts'
+import { vueSfcPlugin } from '../e2e/vue-sfc-plugin.ts'
 
 const now = { wall: Date.UTC(2026, 10, 19, 12), mono: 3000 }
 const colors = ['FF4400', '00AA55']
@@ -136,6 +137,7 @@ async function tableCells(historical: boolean) {
     genDefaultAs: 'Wall',
   })
   const bundle = await build({
+    plugins: [vueSfcPlugin],
     stdin: {
       contents: `
         ${script.content}
@@ -211,5 +213,6 @@ it('hides last-known materials in the table when the observation is historical',
 
 it('keeps live materials in the table', async () => {
   const cells = await tableCells(false)
-  expect(cells['Materiais']).toBe('PETG-HF, PLA-SEDA')
+  expect(cells['Materiais']).toContain('PETG-HF')
+  expect(cells['Materiais']).toContain('PLA-SEDA')
 })

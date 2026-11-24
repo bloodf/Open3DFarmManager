@@ -129,7 +129,9 @@ export function spoolDisplayTitle(spool: SpoolItem): string {
   return filamentDisplayTitle(spool.filament)
 }
 
-export function spoolBaseWeight(spool: SpoolItem): number | null {
+export function spoolBaseWeight(
+  spool: Pick<SpoolItem, 'initial_weight' | 'filament'>,
+): number | null {
   if (spool.initial_weight !== undefined && spool.initial_weight !== null)
     return spool.initial_weight
   if (spool.filament.weight !== undefined && spool.filament.weight !== null)
@@ -153,18 +155,26 @@ export function spoolTareWeight(spool: SpoolItem): number | null {
   return null
 }
 
-export function spoolRemainingPercent(spool: SpoolItem): number | null {
+export function spoolRemainingFraction(
+  spool: Pick<SpoolItem, 'initial_weight' | 'filament' | 'remaining_weight'>,
+): number | null {
   const base = spoolBaseWeight(spool)
   const remaining = spool.remaining_weight
   if (
     base === null ||
+    !Number.isFinite(base) ||
     base <= 0 ||
     remaining === undefined ||
-    remaining === null
+    remaining === null ||
+    !Number.isFinite(remaining)
   )
     return null
-  const pct = (remaining / base) * 100
-  return Math.max(0, Math.min(100, Math.round(pct)))
+  return Math.max(0, Math.min(1, remaining / base))
+}
+
+export function spoolRemainingPercent(spool: SpoolItem): number | null {
+  const fraction = spoolRemainingFraction(spool)
+  return fraction === null ? null : Math.round(fraction * 100)
 }
 
 export function formatSpoolWeight(grams: number | null | undefined): string {

@@ -22,6 +22,9 @@ export type ReplayMaterial = {
   materialType?: string
   /** `RRGGBBAA`, as the Connector reports it. */
   colorHex?: string
+  remainingPercent?: number
+  spoolmanRemainingPercent?: number
+  spoolmanColorHex?: string
 }
 export type ReplayPrinter = {
   key: string

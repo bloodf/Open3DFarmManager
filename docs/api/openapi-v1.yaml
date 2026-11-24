@@ -4045,6 +4045,11 @@ components:
         remainingGrams:
           type: [integer, 'null']
           description: Negative values are reported as stored, never clamped.
+        remainingPercent:
+          type: number
+          minimum: 0
+          maximum: 100
+          description: Derived from remaining and initial filament weight when both are available.
         location:
           type: [string, 'null']
           maxLength: 32

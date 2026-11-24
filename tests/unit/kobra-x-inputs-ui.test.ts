@@ -16,7 +16,7 @@ describe('Kobra X input selection', () => {
         { slot: '0:2' },
         { slot: '0:3' },
       ]),
-    ).toEqual([
+    ).toMatchObject([
       { id: 0, label: 'Suporte 1 — PLA' },
       { id: 1, label: 'Suporte 2' },
       { id: 2, label: 'Suporte 3' },

@@ -7,6 +7,7 @@ import ErrorState from '../../components/ui/ErrorState.vue'
 import Skeleton from '../../components/ui/Skeleton.vue'
 import FeaturePanel from '../../components/spool-library/FeaturePanel.vue'
 import FeatureTable from '../../components/spool-library/FeatureTable.vue'
+import SpoolIllustration from '../../components/spool-library/SpoolIllustration.vue'
 import SpoolLibraryShell from '../../components/spool-library/SpoolLibraryShell.vue'
 import {
   featureFetch,
@@ -361,7 +362,13 @@ async function submitManual() {
         >
           <tr v-for="record in records" :key="record.id">
             <td>{{ formatStamp(record.createdAt) }}</td>
-            <td>{{ spoolText(record.spoolId) }}</td>
+            <td>
+              <SpoolIllustration
+                :spool="spoolById.get(record.spoolId)"
+                compact
+              />
+              {{ spoolText(record.spoolId) }}
+            </td>
             <td>
               {{
                 record.printerId
@@ -423,6 +430,11 @@ async function submitManual() {
             </option>
           </select>
         </label>
+        <SpoolIllustration
+          v-if="spoolById.has(Number(manual.spoolId))"
+          :spool="spoolById.get(Number(manual.spoolId))"
+          compact
+        />
         <label class="feature-field">
           Gramas usadas
           <input v-model="manual.grams" type="text" inputmode="decimal" />

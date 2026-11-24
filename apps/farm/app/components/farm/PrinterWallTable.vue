@@ -1,6 +1,7 @@
 <script setup lang="ts" generic="Row extends FarmRow">
 import { formatTemperature } from '../../utils/ui-format.ts'
 import { computed, onMounted, ref } from 'vue'
+import type { ActiveSpool } from '../../../../../packages/farm-protocol/src/status.ts'
 import {
   formatPrinterAlarmLabel,
   formatPrinterOperationalStateLabel,
@@ -9,11 +10,13 @@ import {
 } from '../../utils/farm-view.ts'
 import { formatJobTime } from '../../utils/farm-job-view.ts'
 import { printerDetailHref } from '../../utils/farm-wall-card.ts'
+import SpoolIllustration from '../spool-library/SpoolIllustration.vue'
 
 const props = defineProps<{
   farmId?: string
   rows: readonly Row[]
   liveNow: () => { wall: number; mono: number }
+  activeSpoolsFor?: (row: Row) => readonly ActiveSpool[]
 }>()
 
 const storageKey = 'openfarm:printer-wall-view'
@@ -67,6 +70,12 @@ const sortedRows = computed(() => {
   return props.rows
     .map((row) => {
       const state = row.observation?.state
+      const materials = row.observation?.historical
+        ? undefined
+        : state?.materials
+      const spools = new Map(
+        props.activeSpoolsFor?.(row).map((spool) => [spool.slot, spool]),
+      )
       const age = row.observation && observationAge(row.observation, now)
       const printerAlarms = formatPrinterAlarmLabel(state?.alarms)
       const alerts = [
@@ -84,17 +93,17 @@ const sortedRows = computed(() => {
         state?.toolTemperatureCelsius,
         state?.bedTemperatureCelsius,
         state?.filename,
-        row.observation?.historical
-          ? undefined
-          : state?.materials
-              ?.map((material) => material.materialType || material.slot)
-              .join(', '),
+        materials
+          ?.map((material) => material.materialType || material.slot)
+          .join(', '),
         alerts.length ? alerts.join(', ') : 'Nenhum',
         age?.seconds,
       ]
       return {
         id: row.assignment.assignmentId,
         printerKey: row.assignment.printerKey,
+        materials,
+        spools,
         cells,
       }
     })
@@ -191,7 +200,29 @@ function display(value: string | number | null | undefined, index: number) {
             :key="index"
             :class="{ numeric: [4, 5, 6, 7, 11].includes(index) }"
           >
-            {{ display(row.cells[index], index) }}
+            <ul
+              v-if="
+                columns[index]?.label === 'Materiais' && row.materials?.length
+              "
+              class="wall-materials"
+            >
+              <li v-for="material in row.materials" :key="material.slot">
+                <SpoolIllustration
+                  :filament="{
+                    color_hex:
+                      row.spools.get(material.slot)?.colorHex ??
+                      material.colorHex?.slice(0, 6),
+                  }"
+                  :spoolman-percent="
+                    row.spools.get(material.slot)?.remainingPercent
+                  "
+                  :printer-percent="material.remainingPercent"
+                  compact
+                />
+                {{ material.materialType || material.slot }}
+              </li>
+            </ul>
+            <template v-else>{{ display(row.cells[index], index) }}</template>
           </td>
         </tr>
       </tbody>
@@ -200,6 +231,11 @@ function display(value: string | number | null | undefined, index: number) {
 </template>
 
 <style scoped>
+.wall-materials {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
 .wall-scroll {
   max-height: 65vh;
   overflow: auto;

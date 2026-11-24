@@ -1,3 +1,4 @@
+import { vitestPostgresOptions } from '../helpers/vitest-postgres.ts'
 import { appendFileSync } from 'node:fs'
 import postgres from 'postgres'
 import { disposablePostgres } from '../helpers/disposable-postgres.ts'
@@ -118,7 +119,7 @@ test.runIf(process.env.OPENFARM_TEST_SPOOL_IDENTITY_PG === '1')(
   'sandbox ledger joins only explicit bindings across a service replacement',
   async () => {
     const fixture = disposablePostgres({
-      name: 'spool-identity',
+      ...vitestPostgresOptions('spool-identity'),
       isolated: true,
       ledger: (entry) => {
         const path = process.env.OPENFARM_SPOOL_IDENTITY_RESOURCE_LEDGER

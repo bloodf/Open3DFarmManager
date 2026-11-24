@@ -1,3 +1,4 @@
+import { vitestPostgresOptions } from '../helpers/vitest-postgres.ts'
 import {
   appendFileSync,
   mkdtempSync,
@@ -161,11 +162,11 @@ async function withCluster(
   through: string | false,
   body: (sql: Sql) => Promise<void>,
 ) {
-  delete process.env.OPENFARM_PG
+  const options = vitestPostgresOptions(name)
   const ledgerDir = mkdtempSync(join(tmpdir(), 'o3dfm-migration-ledger-'))
   const ledgerPath = join(ledgerDir, 'resources.log')
   const database = disposablePostgres({
-    name,
+    ...options,
     isolated: true,
     through,
     ledger: (value) => {
@@ -183,7 +184,7 @@ async function withCluster(
 
 const postgresReady = (() => {
   try {
-    findPostgresBin()
+    if (process.env.OPENFARM_PG !== 'docker') findPostgresBin()
     return true
   } catch (error) {
     if (process.env.CI) throw error

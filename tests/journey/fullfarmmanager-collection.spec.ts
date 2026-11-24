@@ -15,9 +15,16 @@ if (journeyEnabled())
     const journey = await startJourneyHarness({
       browser,
       signedControl: true,
+      history: true,
       moonraker: { mock: { files: [{ path: FILE, content: 'G28\n' }] } },
     })
     try {
+      // The issuer grants only persisted advertised controls. Wait for the
+      // synthetic Connector's telemetry before opening a single-use peer.
+      await expect
+        .poll(() => journey.advertisedControls(), { timeout: 90_000 })
+        .toEqual(expect.arrayContaining(['file_op', 'start_print']))
+      journey.setTelemetryUpload(false)
       const page = journey.ownerPage
       const row = await openLiveInspector(journey)
       const tile = floorTile(journey)
@@ -52,6 +59,10 @@ if (journeyEnabled())
         await inboxReady()
         const listens = journey.simulatorObservation().pauseInboxes
         await files.getByRole('button', { name: 'Atualizar arquivos' }).click()
+        await expect(files.getByRole('status')).toHaveText(
+          'Arquivos atualizados.',
+          { timeout: 60_000 },
+        )
         await files.getByRole('radio', { name: /collection\.gcode/ }).check()
         await inboxReady(listens)
       }
@@ -94,6 +105,12 @@ if (journeyEnabled())
         .getByRole('status')
         .filter({ hasText: 'Aguardando retirada.' })
       await expect(hold).toBeVisible({ timeout: 60_000 })
+      // The hold adds the release action to the Connector's advertisement.
+      journey.setTelemetryUpload(true)
+      await expect
+        .poll(() => journey.advertisedControls(), { timeout: 90_000 })
+        .toContain('confirm_collection')
+      journey.setTelemetryUpload(false)
 
       await page.goto(detailUrl)
       await selectFile()

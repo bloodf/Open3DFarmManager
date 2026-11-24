@@ -3,8 +3,9 @@ import type { ReplaySend } from '../../utils/replay-live.ts'
 import { computed, ref, watch } from 'vue'
 import Dialog from '../ui/Dialog.vue'
 import Button from '../ui/Button.vue'
-import SpoolIllustration from '../spool-library/SpoolIllustration.vue'
 import { locationLabel } from '../../utils/library-view.ts'
+import type { MatchedSlot } from '../../utils/filament-match.ts'
+import FilamentMatch from './FilamentMatch.vue'
 import { replayOutcomeLocks } from '../../utils/replay-outcome.ts'
 import {
   GROUP_LABELS,
@@ -100,11 +101,25 @@ const slotLabel = (m: ReplayPrinter['materials'][number], index: number) =>
   `Slot ${m.slot || index + 1}: ${m.materialType ?? 'material desconhecido'}`
 const slotValue = (m: ReplayPrinter['materials'][number], index: number) =>
   /^\d{1,3}$/.test(m.slot) ? Number(m.slot) : index
-const matchedSlots = computed(() =>
-  mapping.value.map((value) =>
-    selected.value?.materials.find((m, slot) => slotValue(m, slot) === value),
-  ),
-)
+/** The slot chosen for a filament, as the match view shows it; null until one is chosen.
+ * Spoolman's colour and percentage for the slot's active spool come first. */
+function chosen(index: number): MatchedSlot | null {
+  const printer = selected.value
+  if (!printer) return null
+  const at = printer.materials.findIndex(
+    (m, slot) => slotValue(m, slot) === mapping.value[index],
+  )
+  const m = printer.materials[at]
+  if (!m) return null
+  return {
+    label: `Slot ${m.slot || at + 1}`,
+    materialType: m.materialType,
+    // Spoolman's active spool first, as the local reel did; else the printer.
+    colorHex: m.spoolmanColorHex ?? m.colorHex,
+    remainingPercent: m.remainingPercent,
+    spoolmanRemainingPercent: m.spoolmanRemainingPercent,
+  }
+}
 
 async function confirm() {
   const printer = selected.value
@@ -236,16 +251,13 @@ function confirmPrinterChecked() {
               {{ m.colorHex ? `· #${m.colorHex.slice(0, 6)}` : '' }}
             </option>
           </select>
-          <SpoolIllustration
-            v-if="matchedSlots[index]"
-            :filament="{
-              color_hex:
-                matchedSlots[index]?.spoolmanColorHex ??
-                matchedSlots[index]?.colorHex?.slice(0, 6),
+          <FilamentMatch
+            :index="index + 1"
+            :required="{
+              type: tool.filamentType,
+              colour: tool.filamentColour,
             }"
-            :spoolman-percent="matchedSlots[index]?.spoolmanRemainingPercent"
-            :printer-percent="matchedSlots[index]?.remainingPercent"
-            compact
+            :matched="chosen(index)"
           />
         </div>
       </section>

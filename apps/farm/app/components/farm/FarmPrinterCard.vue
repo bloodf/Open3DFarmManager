@@ -181,6 +181,12 @@ function dateLabel(time: number) {
           :materials="row.observation.state.materials"
         />
         <p
+          v-else-if="row.observation.state.materials?.length"
+          class="farm-card-stale"
+        >
+          Materiais indisponíveis: os dados estão desatualizados.
+        </p>
+        <p
           v-if="
             row.connection !== 'authenticated' ||
             observationAge(row.observation, liveNow()).stale
@@ -190,7 +196,7 @@ function dateLabel(time: number) {
           direta.
         </p>
         <ActiveSpoolAssign
-          v-if="farmId"
+          v-if="farmId && !row.observation.historical"
           :farm-id="farmId"
           :printer-key="row.assignment.printerKey"
           :slots="activeSpoolSlots(row)"
@@ -199,6 +205,7 @@ function dateLabel(time: number) {
             observationAge(row.observation, liveNow()).stale
           "
           :moonraker-managed="moonrakerActiveSpool(row)"
+          :materials="row.observation.state.materials"
         />
         <FarmEnvironment
           :fans="row.observation.state.fans"

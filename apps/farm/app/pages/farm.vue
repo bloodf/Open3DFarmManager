@@ -18,6 +18,7 @@ import FarmScopeSelector from '../components/farm/FarmScopeSelector.vue'
 import PrinterWallFilters from '../components/farm/PrinterWallFilters.vue'
 import FarmDeviceSelector from '../components/farm/FarmDeviceSelector.vue'
 import PrinterWallTable from '../components/farm/PrinterWallTable.vue'
+import FarmMaterials from '../components/FarmMaterials.vue'
 import FarmPrinterCard from '../components/farm/FarmPrinterCard.vue'
 import PrinterWallCard from '../components/farm/PrinterWallCard.vue'
 import PrinterWallSummary from '../components/farm/PrinterWallSummary.vue'
@@ -511,6 +512,17 @@ function cancelPause(event: Event) {
                         row.observation.state.filename
                       }}</span>
                     </button>
+                    <FarmMaterials
+                      v-if="
+                        row.observation?.state.materials?.length &&
+                        !row.observation.historical
+                      "
+                      :materials="row.observation.state.materials"
+                      hide-heading
+                    />
+                    <p v-else-if="row.observation?.state.materials?.length">
+                      Materiais indisponíveis: os dados estão desatualizados.
+                    </p>
                     <CollectionHold
                       :row="row"
                       :keys="ready.keys"

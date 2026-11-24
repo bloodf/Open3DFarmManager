@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import type { PrinterState } from '../../../../../packages/farm-protocol/src/state.ts'
+import { farmSlotLabel, farmSlotViews } from '../../utils/farm-slot-view.ts'
+import FarmSpool from '../spool-art/FarmSpool.vue'
 import {
   safeReadStored,
   safeWriteStored,
@@ -12,6 +15,8 @@ const props = defineProps<{
   slots: readonly string[]
   busy?: boolean
   moonrakerManaged?: boolean
+  /** Live materials of the printer, to draw each slot's spool. Never last-known ones. */
+  materials?: PrinterState['materials']
 }>()
 
 const emit = defineEmits<{
@@ -96,6 +101,15 @@ watch(
   },
 )
 
+const spools = computed(
+  () => new Map((farmSlotViews(props.materials) ?? []).map((v) => [v.key, v])),
+)
+
+function fractionOf(slot: string): number | null {
+  const level = spools.value.get(slot)?.level
+  return level?.kind === 'known' ? level.fraction : null
+}
+
 const disabled = computed(
   () => props.busy === true || props.moonrakerManaged === true,
 )
@@ -130,8 +144,20 @@ function save(slot: string) {
     </p>
     <ul>
       <li v-for="slot in slots" :key="slot">
+        <FarmSpool
+          v-if="spools.get(slot)"
+          :color="spools.get(slot)?.color"
+          :fraction="fractionOf(slot)"
+          :size="32"
+        />
         <label :for="`spool-slot-${printerKey}-${slot}`">
-          {{ slot }}
+          {{ farmSlotLabel(slot) }}
+          <template v-if="spools.get(slot)">
+            · {{ spools.get(slot)?.material }}
+            <template v-if="!spools.get(slot)?.color">
+              · Cor não informada
+            </template>
+          </template>
         </label>
         <input
           :id="`spool-slot-${printerKey}-${slot}`"

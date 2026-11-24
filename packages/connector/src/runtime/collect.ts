@@ -209,7 +209,11 @@ export async function collectIntoQueue(input: {
         diagnostic({ kind: 'unavailable', reason: event.reason })
         const previous = latestStates.get(event.printerKey)
         if (previous && previous.state !== 'offline') {
-          const { controls: _controls, ...rest } = previous
+          const {
+            controls: _controls,
+            materials: _materials,
+            ...rest
+          } = previous
           onEvent({
             kind: 'snapshot',
             printer: {
@@ -572,7 +576,7 @@ export async function collectIntoQueue(input: {
           firmwareObservation = undefined
           latest = undefined
           cached = undefined
-          publishMaterialChange()
+          cachedInventory = undefined
           moonrakerState = undefined
           publishedMaterials = undefined
           input.onRawUnavailable?.(event)

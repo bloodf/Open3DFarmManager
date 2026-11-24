@@ -223,8 +223,11 @@ Certificate-refusal and LAN-off diagnostics come from adapter errors.
   racily in 1.3) its client has already written the client certificate by then.
   The Kobra X client therefore requires TLS 1.3, where that certificate is part
   of the client's last flight, and keeps the flight in memory until the pin
-  (and CA, when given) pass. A mismatching or TLS 1.2-only peer sees the
-  ClientHello and nothing else. The printer negotiated TLS 1.3 in the
+  (and CA, when given) pass. Writes before the server's real ServerHello still
+  leave, so a HelloRetryRequest (for example from a P-256-only peer) gets its
+  second ClientHello and the handshake completes. A mismatching or TLS 1.2-only
+  peer sees the ClientHello(s) and nothing else. (OpenFarm decision, loopback
+  tested with default and P-256-only groups) The printer negotiated TLS 1.3 in the
   November 23 hardware report; firmware that cannot is refused, not downgraded.
   Pairing's first-use pin capture sends the certificate to an unverified peer by
   design.

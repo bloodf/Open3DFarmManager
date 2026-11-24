@@ -95,13 +95,24 @@ describe('spool illustration surfaces', () => {
         const slot = match.getByLabel('Filamento 1: PLA')
         await slot.waitFor()
         expect(await slot.inputValue()).toBe('0')
-        expect(await match.getByRole('img').getAttribute('data-level')).toBe(
-          '6',
-        )
+        // The reels are decorative (FilamentMatch/FarmSpool); the slot's amount is
+        // announced by its level meter, so assert both the drawing and the name.
+        const slotReel = match.locator('[data-side="slot"] [data-level]')
+        expect(await slotReel.getAttribute('data-level')).toBe('6')
+        expect(
+          await match
+            .getByRole('meter', { name: 'Quantidade restante no Slot ams:0:0' })
+            .getAttribute('aria-valuenow'),
+        ).toBe('25')
         await slot.selectOption('2')
-        expect(await match.getByRole('img').getAttribute('data-unknown')).toBe(
-          'true',
-        )
+        expect(await slotReel.getAttribute('data-unknown')).toBe('true')
+        expect(
+          await match
+            .getByRole('img', {
+              name: 'Quantidade restante no Slot 0:0: desconhecido',
+            })
+            .getAttribute('data-unknown'),
+        ).toBe('true')
         await page.keyboard.press('Escape')
         expect(errors).toEqual([])
         await page.close()

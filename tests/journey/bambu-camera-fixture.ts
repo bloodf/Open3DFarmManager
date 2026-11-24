@@ -90,7 +90,8 @@ export async function startBambuCameraFixture(input: {
       sockets.add(socket)
       socket.once('close', () => sockets.delete(socket))
       socket.on('error', () => {})
-      socket.setTimeout(5000, () => socket.destroy())
+      // An RTSPS viewer is silent while it plays; only the JPEG/redirect paths idle out fast.
+      socket.setTimeout(input.rtsps ? 120_000 : 5000, () => socket.destroy())
       if (input.rtsps) {
         const upstream = connect(sourcePort!, host)
         upstream.on('error', () => socket.destroy())

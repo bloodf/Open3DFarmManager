@@ -433,6 +433,8 @@ async function interact(page: Page, screen: Screen, state: State) {
         await page.getByLabel('E-mail da conta Bambu').waitFor()
         break
       case 'connected':
+        // This fixture has two farms, so the page requires an explicit choice.
+        await page.getByLabel('Farm', { exact: true }).selectOption(farm)
         await page.getByRole('button', { name: 'Desconectar' }).waitFor()
         break
       case 'unavailable':

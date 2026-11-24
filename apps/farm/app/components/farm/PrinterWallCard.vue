@@ -146,7 +146,10 @@ function spoolLabel(spool: ActiveSpool) {
         {{ temperature(bedTarget) }}
       </dd>
     </dl>
-    <ul v-if="state?.materials?.length" aria-label="Slots de filamento">
+    <ul
+      v-if="!observation?.historical && state?.materials?.length"
+      aria-label="Slots de filamento"
+    >
       <li v-for="material in state.materials" :key="material.slot">
         {{ material.slot
         }}<template v-if="material.materialType">

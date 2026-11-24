@@ -843,6 +843,15 @@ export async function startKobraXMock(
     }
   }
 
+  // The Connector issues UUID request IDs and requires the answering report to
+  // carry the same ID. Echo only those, set for the synchronous dispatch of one
+  // request; other clients' IDs keep getting the mock's own report IDs.
+  const connectorRequestId =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  let replyMsgid: string | undefined
+  // Latest unanswered Connector request per type/action. A scripted report for
+  // that type/action stands in for the printer's own answer and carries its ID.
+  const openRequestIds = new Map<string, string>()
   function nextMsgId() {
     reportSeq += 1
     return `printer-msg-${reportSeq}`
@@ -923,7 +932,7 @@ export async function startKobraXMock(
     const body = {
       type,
       action,
-      msgid: reportOptions.msgid ?? nextMsgId(),
+      msgid: reportOptions.msgid ?? replyMsgid ?? nextMsgId(),
       timestamp: Date.now(),
       state: reportOptions.state ?? 'done',
       code: reportOptions.code ?? 200,
@@ -1125,6 +1134,11 @@ export async function startKobraXMock(
       publishAck(msgid, clientKind)
 
       // 2. Dispatch per message type
+      replyMsgid = connectorRequestId.test(msgid) ? msgid : undefined
+      if (replyMsgid) openRequestIds.set(`${topicType}/${action}`, replyMsgid)
+      queueMicrotask(() => {
+        replyMsgid = undefined
+      })
       switch (topicType) {
         case 'info': {
           if (action === 'query') {
@@ -1776,7 +1790,20 @@ export async function startKobraXMock(
       scenario,
       publishReport: (data) => publishTypedReport('info', 'report', data),
       publishAck,
-      publishTypedReport,
+      publishTypedReport: (type, action, data, reportOptions = {}) => {
+        // A scripted failure stands in for the printer's own answer to the
+        // open request of that type/action, so it carries that request's ID.
+        const failure =
+          reportOptions.state === 'failed' ||
+          (reportOptions.code !== undefined && reportOptions.code !== 200)
+        const key = `${type}/${action}`
+        const open = failure ? openRequestIds.get(key) : undefined
+        if (open) openRequestIds.delete(key)
+        publishTypedReport(type, action, data, {
+          ...(open ? { msgid: open } : {}),
+          ...reportOptions,
+        })
+      },
       setState: (newState) => {
         state = newState
         infoState =

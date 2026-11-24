@@ -62,7 +62,10 @@ const Document = z.strictObject({
 })
 
 /** Durable collection state. Failure to read or write must refuse queue starts. */
-export function openQueueCollectionJournal(path: string) {
+export function openQueueCollectionJournal(
+  path: string,
+  onRelease?: (printerKey: string) => void,
+) {
   mkdirSync(dirname(path), { recursive: true })
   const data = existsSync(path)
     ? Document.parse(JSON.parse(readFileSync(path, 'utf8')))
@@ -103,6 +106,13 @@ export function openQueueCollectionJournal(path: string) {
       ? printers[printer]!
       : { attempts: [] }
   }
+  function notifyRelease(printer: string) {
+    try {
+      onRelease?.(printer)
+    } catch {
+      // Downstream notification cannot turn a durable confirmation into a refusal.
+    }
+  }
   return {
     read(printer: string): CollectionState {
       return structuredClone(read(printer))
@@ -140,6 +150,7 @@ export function openQueueCollectionJournal(path: string) {
           attempts: [{ id: INITIAL_COLLECTION_ATTEMPT, status: 'collected' }],
         },
       })
+      notifyRelease(printer)
     },
     /** Idempotent: confirming an already collected attempt changes nothing. */
     confirm(printer: string, attempt: string): void {
@@ -152,6 +163,7 @@ export function openQueueCollectionJournal(path: string) {
       )
         return
       save({ ...printers, [printer]: trim(next) })
+      notifyRelease(printer)
     },
     /** Collects every awaiting attempt that ended at or before `endedAt`; returns how many. */
     confirmThrough(printer: string, endedAt: number): number {
@@ -159,7 +171,10 @@ export function openQueueCollectionJournal(path: string) {
       const before = awaitingAttempts(current).length
       const next = confirmCollectionThrough(current, endedAt)
       const released = before - awaitingAttempts(next).length
-      if (released > 0) save({ ...printers, [printer]: trim(next) })
+      if (released > 0) {
+        save({ ...printers, [printer]: trim(next) })
+        notifyRelease(printer)
+      }
       return released
     },
   }

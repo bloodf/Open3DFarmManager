@@ -79,6 +79,11 @@ export type Diagnostic =
       unavailable: number
     }
 
+export type MoonrakerCollectionRefresh = {
+  releasedAtMonoMs?: number
+  request?: () => void
+}
+
 /** Local telemetry persistence only. No identity writes, sending or command path. */
 export async function collectLocalTelemetry(input: {
   configPath: string
@@ -117,6 +122,7 @@ export async function collectIntoQueue(input: {
     printerKey: string,
   ) => readonly ExtendedControlAction[] | undefined
   onControlsRefresh?: (refresh: () => void) => void
+  moonrakerCollectionRefresh?: ReadonlyMap<string, MoonrakerCollectionRefresh>
   onLoss?: (value: Extract<Diagnostic, { kind: 'loss' }>) => void
   linkHealthFor?: (printerKey: string) => MoonrakerLinkHealth | undefined
   discoverMoonrakerObjects?: boolean
@@ -224,6 +230,17 @@ export async function collectIntoQueue(input: {
           })
         }
       } else {
+        const { printerKey, observedAt } = event.printer
+        const refresh = input.moonrakerCollectionRefresh?.get(printerKey)
+        const pendingRelease = refresh?.releasedAtMonoMs
+        const confirmsRelease =
+          pendingRelease !== undefined &&
+          'collectionReleaseAtMonoMs' in event &&
+          event.collectionReleaseAtMonoMs === pendingRelease
+        const latest = latestStates.get(printerKey)
+        // The Farm only replaces its current row with a strictly newer
+        // observation. Wait for another complete read if wall times collide.
+        if (confirmsRelease && latest && observedAt <= latest.observedAt) return
         input.onPrinterState?.(event.printer)
         const now = Date.now()
         // Degraded storage drops records; they count as lost, never as queued.
@@ -251,21 +268,31 @@ export async function collectIntoQueue(input: {
         const controls =
           printer.state === 'offline'
             ? undefined
-            : input.controlsFor?.(printer.printerKey)
+            : pendingRelease !== undefined && !confirmsRelease
+              ? latest?.controls
+              : input.controlsFor?.(printer.printerKey)
         const { controls: _controls, ...withoutControls } = printer
         const current = {
           ...withoutControls,
           ...(controls === undefined ? {} : { controls: [...controls] }),
         }
-        latestStates.set(printer.printerKey, current)
-        lastControls.set(printer.printerKey, JSON.stringify(controls ?? null))
         const queued = machineGate.apply(current)
+        const lostBeforeSnapshot = queue.storageLost
         let receipt
         try {
           receipt = queue.enqueue(queued, now)
         } catch (error) {
           machineGate.forget(printer.printerKey)
           throw error
+        }
+        const snapshotDropped = queue.storageLost !== lostBeforeSnapshot
+        if (confirmsRelease && snapshotDropped)
+          machineGate.forget(printer.printerKey)
+        else {
+          latestStates.set(printer.printerKey, current)
+          lastControls.set(printer.printerKey, JSON.stringify(controls ?? null))
+          if (confirmsRelease && refresh?.releasedAtMonoMs === pendingRelease)
+            delete refresh.releasedAtMonoMs
         }
         totals.queued++
         loss(receipt.loss, 'retention')
@@ -281,6 +308,11 @@ export async function collectIntoQueue(input: {
   input.onControlsRefresh?.(() => {
     for (const printer of latestStates.values()) {
       if (printer.state === 'offline') continue
+      if (
+        input.moonrakerCollectionRefresh?.get(printer.printerKey)
+          ?.releasedAtMonoMs !== undefined
+      )
+        continue
       const controls = input.controlsFor?.(printer.printerKey)
       if (
         lastControls.get(printer.printerKey) !==
@@ -327,6 +359,9 @@ export async function collectIntoQueue(input: {
     }
     for (const assignment of config.printers) {
       if (signal.aborted) break
+      const collectionRefresh = input.moonrakerCollectionRefresh?.get(
+        assignment.printerKey,
+      )
       const selected = validateMoonrakerInput({
         assignment,
         allowedOrigins: config.allowedOrigins,
@@ -356,7 +391,12 @@ export async function collectIntoQueue(input: {
         return cached?.materials
       }
       function publishMaterialChange() {
-        if (!moonrakerState || signal.aborted) return
+        if (
+          !moonrakerState ||
+          signal.aborted ||
+          collectionRefresh?.releasedAtMonoMs !== undefined
+        )
+          return
         const materials = moonrakerState.materials ?? freshMaterials()
         const fingerprint = JSON.stringify(materials ?? null)
         if (fingerprint === publishedMaterials) return
@@ -398,6 +438,12 @@ export async function collectIntoQueue(input: {
         allowedOrigins: config.allowedOrigins,
         limits: config.limits,
         signal,
+        ...(collectionRefresh
+          ? {
+              pendingCollectionRelease: () =>
+                collectionRefresh.releasedAtMonoMs,
+            }
+          : {}),
         onRawObservation(value) {
           input.apiJobs?.observe(value)
           latest = value
@@ -604,6 +650,8 @@ export async function collectIntoQueue(input: {
           else history.observe(event.printer.state)
         },
       })
+      if (collectionRefresh)
+        collectionRefresh.request = subscription.requestCompleteRefresh
       // Attach rejection handling immediately, before starting another printer.
       subscriptions.push({ done: subscription.done.catch(fail) })
     }
@@ -949,6 +997,8 @@ export async function collectIntoQueue(input: {
     fail(error)
   } finally {
     controller.abort()
+    for (const refresh of input.moonrakerCollectionRefresh?.values() ?? [])
+      delete refresh.request
     await Promise.all(materialReads)
     await Promise.all(subscriptions.map((subscription) => subscription.done))
     try {

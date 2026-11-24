@@ -1,5 +1,6 @@
 {
   "name": "@open3dfarmmanager/farm",
+  "license": "AGPL-3.0-or-later",
   "private": true,
   "type": "module",
   "scripts": {

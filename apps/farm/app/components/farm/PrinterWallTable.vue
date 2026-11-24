@@ -195,35 +195,35 @@ function display(value: string | number | null | undefined, index: number) {
               row.cells[0]
             }}</a>
           </th>
-          <td
-            v-for="index in columns.length - 1"
-            :key="index"
-            :class="{ numeric: [4, 5, 6, 7, 11].includes(index) }"
-          >
-            <ul
+          <template v-for="index in columns.length - 1" :key="index">
+            <td
               v-if="
                 columns[index]?.label === 'Materiais' && row.materials?.length
               "
-              class="wall-materials"
+              :class="{ numeric: [4, 5, 6, 7, 11].includes(index) }"
             >
-              <li v-for="material in row.materials" :key="material.slot">
-                <SpoolIllustration
-                  :filament="{
-                    color_hex:
-                      row.spools.get(material.slot)?.colorHex ??
-                      material.colorHex?.slice(0, 6),
-                  }"
-                  :spoolman-percent="
-                    row.spools.get(material.slot)?.remainingPercent
-                  "
-                  :printer-percent="material.remainingPercent"
-                  compact
-                />
-                {{ material.materialType || material.slot }}
-              </li>
-            </ul>
-            <template v-else>{{ display(row.cells[index], index) }}</template>
-          </td>
+              <ul class="wall-materials">
+                <li v-for="material in row.materials" :key="material.slot">
+                  <SpoolIllustration
+                    :filament="{
+                      color_hex:
+                        row.spools.get(material.slot)?.colorHex ??
+                        material.colorHex?.slice(0, 6),
+                    }"
+                    :spoolman-percent="
+                      row.spools.get(material.slot)?.remainingPercent
+                    "
+                    :printer-percent="material.remainingPercent"
+                    compact
+                  />
+                  {{ material.materialType || material.slot }}
+                </li>
+              </ul>
+            </td>
+            <td v-else :class="{ numeric: [4, 5, 6, 7, 11].includes(index) }">
+              {{ display(row.cells[index], index) }}
+            </td>
+          </template>
         </tr>
       </tbody>
     </table>

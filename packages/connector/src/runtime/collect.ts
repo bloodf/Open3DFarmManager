@@ -297,6 +297,9 @@ export async function collectIntoQueue(input: {
           ...(controls === undefined ? {} : { controls: [...controls] }),
         }
         const queued = machineGate.apply(current)
+        // A snapshot that cannot replace the latest row must not consume a
+        // profile change that the next eligible snapshot needs to publish.
+        if (outOfOrder) machineGate.forget(printerKey)
         const lostBeforeSnapshot = queue.storageLost
         let receipt
         try {

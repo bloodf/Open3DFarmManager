@@ -298,7 +298,9 @@ Observed on firmware 2.0.2.8 (S1):
   `action` match, the report's `msgid` is empty or none this connection issued, no other request
   (acknowledged or not) waits on the same `type` and `action`, and no request on them ended without
   a result in the last 30 s, since its report may still arrive. A report that fits and came from
-  another client cannot be told apart, so this mode is opt-in.
+  another client cannot be told apart, so this mode is opt-in. A report settled this way is never
+  evidence that the command took effect: the outcome stays uncorrelated, and a control is confirmed
+  only by fresh state read back after the write.
 - Control readiness is stricter than outcomes. A printer state counts as current only when the
   reply echoes the `msgid` of the latest `info` query. A busy `info` reply is current only after the
   latest `print` query was answered with a successful reply that names a job phase (`printing`,

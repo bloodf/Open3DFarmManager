@@ -80,9 +80,10 @@ import {
 } from './control-timelapse.ts'
 import { z } from 'zod'
 import { decodeMoonrakerFrame } from './frame.ts'
+import { guardIdleConsole, idleConsoleQueryWire } from './console-idle.ts'
 import {
   ConsoleRefusal,
-  classifyIdleConsole,
+  idleConsoleClass,
   consoleQueryWire,
   consoleSupported,
   parseConsoleState,
@@ -927,68 +928,78 @@ export function openFixedMoonrakerPause(input: {
         !consoleSupported(input.objects)
       )
         throw new ConsoleRefusal('unsupported')
-      const consoleState = parseConsoleState(
-        await request(11, consoleQueryWire(11), lifetimeDeadline),
+      const state = parseConsoleState(
+        await request(11, consoleQueryWire(11), lifetimeDeadline).catch(
+          () => undefined,
+        ),
       )
       const line = refuseConsole(
         args,
-        consoleState,
+        state,
         u1
           ? ['SDCARD_PRINT_FILE_WITH_PARAMETERS', 'SDCARD_PRINT_PL_RESTORE']
           : undefined,
+        // U1 `T0`..`T3` is a classified action with its own guard below.
+        u1 ? (candidate) => /^T[0-3]$/i.test(candidate.trim()) : undefined,
       )
-      const active =
-        consoleState.printState === 'printing' ||
-        consoleState.printState === 'paused'
+      const tool = u1 ? u1ConsoleTool(line.trim(), input.objects) : undefined
       let wireArgs = args
       let cap = 5000
-      let tool: string | undefined
-      if (!active) {
-        const classification = classifyIdleConsole(line)
-        const command = line.trim().split(/\s+/)[0]!.toUpperCase()
-        const macroOverride = !!input.objects?.some(
-          (object) => object.toUpperCase() === `GCODE_MACRO ${command}`,
+      if (tool) {
+        const motion = parseMotionState(
+          await request(12, motionQueryWire(12), lifetimeDeadline),
         )
-        if (classification.kind === 'home') {
-          // An advertised `G28` macro replaces canonical homing: refuse it.
-          if (macroOverride) throw new ConsoleRefusal('not-allowed')
-          // Canonical homing runs through the structured `home` action, with
-          // the U1's own X/Y pairing and Z-only checks.
-          const { axes } = classification
-          if (u1 && axes.includes('x') !== axes.includes('y'))
-            throw new ConsoleRefusal('not-allowed')
-          takeConsoleRate(binding, input.clock.monotonicNow())
-          if (u1) return await executeU1Home({ axes }, requested, line.trim())
-          extended = 'gcode'
-          return await send(extendedWire('home', { axes }), requested, 5000)
-        }
-        // Only the U1's recognised tool selection has a guarded path; every
-        // other macro or unclassified line, and any raw motion, is refused.
-        tool =
-          u1 && classification.kind === 'tool'
-            ? u1ConsoleTool(line.trim(), input.objects)
-            : undefined
+        if (!motion.ready || motion.printState === 'error')
+          throw new ConsoleRefusal('unknown-state')
+        if (motion.printState === 'printing' || motion.printState === 'paused')
+          throw new ConsoleRefusal('not-allowed')
+        if (!['x', 'y', 'z'].every((axis) => motion.homedAxes.includes(axis)))
+          throw new ConsoleRefusal('unknown-state')
+        // A0 selects the named physical tool without the current job's remap.
+        wireArgs = { line: `${line.trim().toUpperCase()} A0` }
+        cap = U1_CONTROL_RESULT_TIMEOUT_MS
+      } else if (
+        state.printState !== 'printing' &&
+        state.printState !== 'paused'
+      ) {
+        const command = line.trim().split(/\s+/, 1)[0]!.toUpperCase()
         if (
-          !tool &&
-          (classification.kind === 'unknown' ||
-            classification.kind === 'tool' ||
-            classification.kind === 'move' ||
-            macroOverride)
+          input.objects?.some(
+            (name) => name.toUpperCase() === `GCODE_MACRO ${command}`,
+          )
         )
           throw new ConsoleRefusal('not-allowed')
-        if (tool) {
-          const state = parseMotionState(
-            await request(12, motionQueryWire(12), lifetimeDeadline),
-          )
-          if (!state.ready || state.printState === 'error')
-            throw new ConsoleRefusal('unknown-state')
-          if (state.printState === 'printing' || state.printState === 'paused')
-            throw new ConsoleRefusal('not-allowed')
-          if (!['x', 'y', 'z'].every((axis) => state.homedAxes.includes(axis)))
-            throw new ConsoleRefusal('unknown-state')
-          // A0 selects the named physical tool without the current job's remap.
-          wireArgs = { line: `${line.trim().toUpperCase()} A0` }
-          cap = U1_CONTROL_RESULT_TIMEOUT_MS
+        if (idleConsoleClass(line) === 'guarded') {
+          const homing = command === 'G28'
+          // Homing needs no configured bounds, only a fresh idle state.
+          const config = homing
+            ? undefined
+            : await fetchMoonrakerConfigfile({
+                origin: selected.origin,
+                limits: selected.limits,
+                signal: AbortSignal.any([ownerSignal, requested.signal]),
+              }).catch(() => undefined)
+          const live = await request(
+            12,
+            idleConsoleQueryWire(12, input.objects ?? []),
+            lifetimeDeadline,
+          ).catch(() => undefined)
+          guardIdleConsole(line, live, config)
+          if (homing) {
+            // Canonical homing runs through the structured `home` action, with
+            // the U1's own X/Y pairing and Z-only checks. An advertised `G28`
+            // macro was already refused above.
+            const parts = line.trim().toUpperCase().split(/\s+/).slice(1)
+            const axes = (parts.length ? parts : ['X', 'Y', 'Z']).map(
+              (axis) => axis.toLowerCase() as 'x' | 'y' | 'z',
+            )
+            if (u1 && axes.includes('x') !== axes.includes('y'))
+              throw new ConsoleRefusal('not-allowed')
+            takeConsoleRate(binding, input.clock.monotonicNow())
+            if (u1) return await executeU1Home({ axes }, requested, line.trim())
+            extended = 'gcode'
+            return await send(extendedWire('home', { axes }), requested, 5000)
+          }
         }
       }
       if (u1) u1Audit = u1ConsoleAudit(line.trim(), tool)

@@ -8,11 +8,7 @@ import {
 } from '../anycubic/tls-trust.ts'
 import { readKobraXInfo, recoverKobraXCredentials } from './discovery.ts'
 import { createKobraXControl } from './control.ts'
-import {
-  createKobraXFacts,
-  isKobraXJobPhase,
-  type KobraXFacts,
-} from './facts.ts'
+import { createKobraXFacts, type KobraXFacts } from './facts.ts'
 import {
   createKobraXRequests,
   parseKobraXReport,
@@ -20,6 +16,11 @@ import {
   type KobraXReport,
   type KobraXReportIdentity,
 } from './requests.ts'
+import {
+  createKobraXQueryEvidence,
+  kobraXQueries as queries,
+  type KobraXQuery,
+} from './state-evidence.ts'
 import { createKobraXStatus } from './status.ts'
 import { createKobraXUsage, type KobraXJobUsage } from './usage.ts'
 
@@ -44,7 +45,7 @@ export async function connectKobraX(options: {
     report: KobraXReport,
     snapshot: ReturnType<ReturnType<typeof createKobraXStatus>['snapshot']>,
     facts: KobraXFacts,
-    currentStateQuery: boolean,
+    source: 'query' | 'request' | 'other',
   ) => void
   /** Called once per finished job with the filament used per ACE slot. */
   onJobUsage?: (usage: KobraXJobUsage) => void
@@ -93,13 +94,7 @@ export async function connectKobraX(options: {
   // Reports arrive on `printer/public` with no `slicer/` segment. Queries stay
   // on `path`.
   const reports = `anycubic/anycubicCloud/v1/printer/public/${modeId}/${deviceId}/`
-  const queries = {
-    info: 'query',
-    status: 'query',
-    print: 'query',
-    tempature: 'query',
-    multiColorBox: 'getInfo',
-  }
+  const queryEvidence = createKobraXQueryEvidence()
   let tlsEstablished = false
   const client = new MqttClient(
     () => {
@@ -172,12 +167,7 @@ export async function connectKobraX(options: {
       state.disconnect()
     })
   }
-  let currentInfoQuery: string | undefined
-  let currentPrintQuery: string | undefined
-  /** The print phase was answered by the latest print query. A busy info reply
-   * cannot name the phase, so a cached one never makes it current. */
-  let freshPrintPhase = false
-  function query(type: keyof typeof queries) {
+  function query(type: KobraXQuery) {
     if (!client.connected) return
     // The Orca LAN client sends timestamped, null-data requests for info,
     // print, and multiColorBox. Keep the supplemental query frames as-is.
@@ -186,11 +176,7 @@ export async function connectKobraX(options: {
         ? { data: {} }
         : { timestamp: Date.now(), data: null }
     const msgid = randomUUID()
-    if (type === 'info') currentInfoQuery = msgid
-    if (type === 'print') {
-      currentPrintQuery = msgid
-      freshPrintPhase = false
-    }
+    queryEvidence.issue(type, msgid)
     client.publish(
       `${path}/${modeId}/${deviceId}/${type}`,
       JSON.stringify({
@@ -229,9 +215,7 @@ export async function connectKobraX(options: {
     client.on('close', () => {
       state.disconnect()
       facts.reset()
-      currentInfoQuery = undefined
-      currentPrintQuery = undefined
-      freshPrintPhase = false
+      queryEvidence.reset()
       options.onDisconnect?.()
       if (!ready && !accepted && tlsEstablished) {
         failed(
@@ -281,55 +265,46 @@ export async function connectKobraX(options: {
     if (!type || suffix !== 'report' || extra !== undefined) return
     try {
       const message = JSON.parse(payload.toString())
-      if (Object.hasOwn(queries, type) || type === 'fan' || type === 'light')
-        state.report(type, message)
       const report = parseKobraXReport(type, message)
       if (!report) return
-      const answersInfoQuery =
-        report.type === 'info' &&
-        report.action === 'report' &&
-        report.msgid === currentInfoQuery
-      if (answersInfoQuery) currentInfoQuery = undefined
-      // The print reply re-asks for info, so a busy reply that came first
-      // is superseded rather than trusted with a cached phase.
-      const currentStateQuery =
-        answersInfoQuery && (report.data.state !== 'busy' || freshPrintPhase)
-      facts.report(report)
-      usage.report(report)
-      // The observer is the caller's code. A failure in it must never keep
-      // this report from settling the request that is waiting for it: that
-      // request's command is already on the wire.
-      try {
-        options.onReport?.(
-          report,
-          state.snapshot(),
-          facts.get(),
-          currentStateQuery,
+      const queryMatch = queryEvidence.classify(report)
+      const source =
+        queryMatch === 'current'
+          ? 'query'
+          : requests.isPending(report)
+            ? 'request'
+            : 'other'
+      // Keep passive telemetry for firmware that generates its own IDs.
+      // Delayed replies to our queries cannot update control evidence.
+      if (queryMatch !== 'stale') {
+        if (
+          (reportRefusal(report) === null ||
+            (type === 'print' && report.state === 'stoped')) &&
+          (Object.hasOwn(queries, type) || type === 'fan' || type === 'light')
         )
-      } catch (error) {
+          state.report(type, message)
+        facts.report(report)
+        usage.report(report)
+        // The observer is the caller's code. A failure in it must never keep
+        // this report from settling the request that is waiting for it: that
+        // request's command is already on the wire.
         try {
-          options.onError?.(
-            error instanceof Error
-              ? error
-              : new Error('Kobra X report observer failed'),
-          )
-        } catch {
-          // A failing error handler is no more allowed to block settlement.
+          options.onReport?.(report, state.snapshot(), facts.get(), source)
+        } catch (error) {
+          try {
+            options.onError?.(
+              error instanceof Error
+                ? error
+                : new Error('Kobra X report observer failed'),
+            )
+          } catch {
+            // A failing error handler is no more allowed to block settlement.
+          }
         }
       }
-      requests.handleReport(report)
-      if (
-        report.type === 'print' &&
-        report.action === 'query' &&
-        report.msgid === currentPrintQuery
-      ) {
-        currentPrintQuery = undefined
-        // Only a phase the printer named in this reply is fresh. A success
-        // reply without one leaves the cached phase unproven.
-        freshPrintPhase =
-          reportRefusal(report) === null && isKobraXJobPhase(report.state)
-        query('info')
-      }
+      // A reply carrying the ID of one of our own state queries belongs to
+      // that query and never settles a command.
+      if (queryMatch === 'other') requests.handleReport(report)
     } catch {
       // Invalid telemetry is ignored.
     }
@@ -348,9 +323,12 @@ export async function connectKobraX(options: {
     snapshot: state.snapshot,
     control,
     facts: facts.get,
-    refreshControlState() {
+    refreshControlState(effectType?: string) {
+      queryEvidence.resetPending()
       query('info')
       query('print')
+      if (effectType === 'tempature' || effectType === 'multiColorBox')
+        query(effectType)
     },
     /** Unscoped telemetry hint. It confers no capture ownership and is never
      * used by the Connector's passive camera source. */

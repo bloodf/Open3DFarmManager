@@ -4,7 +4,7 @@ import { lstat, open, opendir } from 'node:fs/promises'
 import { join } from 'node:path'
 
 export const PACKAGED_CONNECTOR_LIMITS = {
-  files: 96,
+  files: 128,
   fileBytes: 2 * 1024 * 1024,
   totalBytes: 16 * 1024 * 1024,
 } as const

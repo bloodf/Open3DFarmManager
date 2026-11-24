@@ -5,3 +5,4 @@
 - [FDM catalog verification](catalog-fdm.md) compares model specifications, protocol claims and OpenFarm driver coverage.
 - [Resin catalog verification](catalog-resin.md) distinguishes local workflows, published interfaces and unverified model support.
 - [Snapshot checks](SNAPSHOT-CHECKS.md) records what ran and what blocked the remaining checks.
+- [End-to-end journeys](E2E.md) maps the shared feature assertions, historical run and remaining acceptance evidence.

@@ -40,6 +40,7 @@ import {
 import { printableFile } from '../../utils/files-view.ts'
 import { kobraXInputs, kobraXMapping } from '../../utils/kobra-x-inputs.ts'
 import { activeSlotSpools } from '../../utils/slot-spools.ts'
+import { filamentLoadArgs } from '../../utils/filament-load.ts'
 import { extendedLabel } from '../../utils/farm-control-extended.ts'
 import {
   formatPrinterStateLabel,
@@ -90,6 +91,22 @@ const selectedKobraInputs = computed(() =>
   ),
 )
 const selectedKobraInput = computed(() => selectedKobraInputs.value[0])
+const selectedLoadInputId = ref('')
+const loadInputError = ref('')
+const selectedLoadInput = computed(() =>
+  availableKobraInputs.value.find(
+    (input) => String(input.id) === selectedLoadInputId.value,
+  ),
+)
+function loadFilament(event: Event) {
+  const args = filamentLoadArgs(selectedLoadInput.value)
+  if (!args) {
+    loadInputError.value = 'Selecione uma entrada de filamento para carregar.'
+    return
+  }
+  loadInputError.value = ''
+  control('load_filament', event, args)
+}
 const selectedKobraMapping = computed(() =>
   kobraXMapping(
     kobraInputs.value,
@@ -194,6 +211,14 @@ const {
   confirmControl,
   closePause,
 } = useFarmControls(view, dialog)
+const loadFilamentConfirmationLabel = computed(() => {
+  const target = pauseTarget.value
+  if (target?.action !== 'load_filament') return undefined
+  return (
+    availableKobraInputs.value.find((input) => input.id === target.args.tray)
+      ?.label ?? 'Não informado'
+  )
+})
 
 const row = computed(
   () =>
@@ -215,6 +240,22 @@ const activeSpools = computed(() => {
 })
 const spoolBySlot = computed(
   () => new Map(activeSpools.value.map((spool) => [spool.slot, spool])),
+)
+watch(
+  availableKobraInputs,
+  (inputs) => {
+    if (selectedLoadInputId.value || !inputs.length) return
+    const active = state.value?.materials?.find((material) => material.active)
+    const activeInput = inputs.find((input) => {
+      if (!active) return false
+      const slot = /^(-1|0):([0-3])$/.exec(active.slot)
+      if (!slot) return false
+      return input.id === Number(slot[2]) + (slot[1] === '0' ? 4 : 0)
+    })
+    if (active && activeInput)
+      selectedLoadInputId.value = String(activeInput.id)
+  },
+  { immediate: true },
 )
 const age = computed(() => {
   void now.value
@@ -1144,18 +1185,36 @@ watch(
             v-if="state?.controls?.includes('load_filament')"
             type="button"
             :disabled="
-              !selectedKobraInput ||
-              !availability('load_filament').available ||
-              commandInFlight
+              !availability('load_filament').available || commandInFlight
             "
-            @click="
-              (event: Event) =>
-                selectedKobraInput &&
-                control('load_filament', event, { tray: selectedKobraInput.id })
-            "
+            @click="(event: Event) => loadFilament(event)"
           >
-            Carregar filamento da entrada 1
+            Carregar filamento
           </Button>
+          <label for="detail-load-filament-input">Entrada para carregar</label>
+          <select
+            id="detail-load-filament-input"
+            v-model="selectedLoadInputId"
+            :aria-describedby="
+              loadInputError ? 'detail-load-filament-error' : undefined
+            "
+            @change="loadInputError = ''"
+          >
+            <option value="">Selecione uma entrada</option>
+            <option
+              v-for="input in availableKobraInputs"
+              :key="input.id"
+              :value="String(input.id)"
+            >
+              {{ input.label }}
+            </option>
+          </select>
+          <span
+            v-if="loadInputError"
+            id="detail-load-filament-error"
+            role="alert"
+            >{{ loadInputError }}</span
+          >
           <span
             >Selecione um arquivo .3mf ou .gcode já armazenado na
             impressora.</span
@@ -1293,6 +1352,10 @@ watch(
             {{ pauseTarget.args.device }} nesta impressora.
           </template>
           <template v-else>Confirme o comando para esta impressora.</template>
+          <template v-if="pauseTarget.action === 'load_filament'">
+            Entrada selecionada:
+            <strong>{{ loadFilamentConfirmationLabel }}</strong>.
+          </template>
           Ele será enviado diretamente ao Connector e não será repetido
           automaticamente.
         </p>

@@ -22,6 +22,9 @@ import StaleNotice from '../components/ui/StaleNotice.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import Tabs from '../components/ui/Tabs.vue'
 import Toast from '../components/ui/Toast.vue'
+import FarmLevel from '../components/spool-art/FarmLevel.vue'
+import FarmSlot from '../components/spool-art/FarmSlot.vue'
+import FarmSpool from '../components/spool-art/FarmSpool.vue'
 
 const dialogOpen = ref(false)
 const selectedTab = ref('jobs')
@@ -107,6 +110,125 @@ const rows = [
     </Card>
 
     <Card>
+      <section
+        class="spool-art"
+        data-testid="spool-art-gallery"
+        aria-labelledby="spool-art-title"
+      >
+        <h2 id="spool-art-title">Carretéis e slots</h2>
+        <p>
+          O nível vem do Spoolman, depois da porcentagem informada pela
+          impressora. Sem nenhum dos dois, o carretel aparece cheio com o aviso
+          “desconhecido”.
+        </p>
+        <h3>Carretel</h3>
+        <ul class="spool-art-row" aria-label="Níveis do carretel">
+          <li>
+            <FarmSpool color="#c0392b" :fraction="1" :size="64" />
+            <span>Cheio</span>
+          </li>
+          <li>
+            <FarmSpool color="#2e86c1" :fraction="0.55" :size="64" />
+            <span>55 %</span>
+          </li>
+          <li>
+            <FarmSpool color="#27ae60" :fraction="0.08" :size="64" />
+            <span>Quase vazio</span>
+          </li>
+          <li>
+            <FarmSpool color="#c0392b" :fraction="0" :size="64" />
+            <span>Vazio</span>
+          </li>
+          <li>
+            <FarmSpool color="#f1c40f" :size="64" />
+            <span>Nível desconhecido</span>
+          </li>
+          <li>
+            <FarmSpool :fraction="0.7" :size="64" />
+            <span>Cor não informada</span>
+          </li>
+          <li>
+            <FarmSpool
+              :colors="['#c0392b', '#f1c40f', '#2e86c1']"
+              :fraction="0.7"
+              :size="64"
+            />
+            <span>Multicolor</span>
+          </li>
+        </ul>
+        <h3>Barra de nível</h3>
+        <ul class="spool-art-levels" aria-label="Tons da barra de nível">
+          <li>
+            <span>Normal, 80 %</span>
+            <FarmLevel :fraction="0.8" label="Nível normal, 80 %" />
+          </li>
+          <li>
+            <span>Baixo, 12 %</span>
+            <FarmLevel :fraction="0.12" tone="low" label="Nível baixo, 12 %" />
+          </li>
+          <li>
+            <span>Crítico, 3 %</span>
+            <FarmLevel
+              :fraction="0.03"
+              tone="critical"
+              label="Nível crítico, 3 %"
+            />
+          </li>
+          <li>
+            <span>Desconhecido</span>
+            <FarmLevel label="Nível desconhecido" />
+          </li>
+        </ul>
+        <h3>Slot da impressora</h3>
+        <div class="spool-art-slots">
+          <FarmSlot
+            label="AMS 1 · A1"
+            name="PLA Vermelho"
+            material="PLA"
+            color="#c0392b"
+            color-name="Vermelho"
+            :spoolman-remaining-weight="820"
+            :spoolman-initial-weight="1000"
+            :printer-percent="90"
+            active
+          />
+          <FarmSlot
+            label="AMS 1 · A2"
+            name="PETG Azul"
+            material="PETG"
+            color="#2e86c1"
+            color-name="Azul"
+            :printer-percent="40"
+          />
+          <FarmSlot
+            label="AMS 1 · A3"
+            name="PLA Preto"
+            material="PLA"
+            color="#202020"
+            color-name="Preto"
+            :spoolman-remaining-weight="90"
+            :spoolman-initial-weight="1000"
+            low
+          />
+          <FarmSlot label="AMS 1 · A4" />
+          <FarmSlot
+            label="Slot externo"
+            name="TPU Amarelo"
+            material="TPU"
+            color="#f1c40f"
+            color-name="Amarelo"
+          />
+          <FarmSlot
+            label="ACE 1 · 2"
+            name="ABS"
+            material="ABS"
+            :printer-percent="60"
+          />
+        </div>
+      </section>
+    </Card>
+
+    <Card>
       <Tabs v-model="selectedTab" label="Dados da impressora" :tabs="tabs">
         <template #jobs>
           <DataTable
@@ -173,6 +295,43 @@ const rows = [
   display: flex;
   flex-wrap: wrap;
   gap: var(--ops-space-2);
+}
+.spool-art > h3 {
+  margin: var(--ops-space-4) 0 var(--ops-space-2);
+  font-size: var(--ops-text-body);
+}
+.spool-art-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--ops-space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.spool-art-row li {
+  display: grid;
+  justify-items: center;
+  gap: var(--ops-space-2);
+  font-size: var(--ops-text-small);
+}
+.spool-art-levels {
+  display: grid;
+  gap: var(--ops-space-3);
+  max-inline-size: 320px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.spool-art-levels li {
+  display: grid;
+  gap: var(--ops-space-1);
+  font-size: var(--ops-text-small);
+}
+.spool-art-slots {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
+  gap: var(--ops-space-3);
 }
 .gallery {
   display: grid;

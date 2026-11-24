@@ -6,8 +6,8 @@ import EmptyState from '../../components/ui/EmptyState.vue'
 import ErrorState from '../../components/ui/ErrorState.vue'
 import Skeleton from '../../components/ui/Skeleton.vue'
 import FeaturePanel from '../../components/spool-library/FeaturePanel.vue'
+import SpoolArt from '../../components/spool-library/SpoolArt.vue'
 import FeatureTable from '../../components/spool-library/FeatureTable.vue'
-import SpoolIllustration from '../../components/spool-library/SpoolIllustration.vue'
 import SpoolLibraryShell from '../../components/spool-library/SpoolLibraryShell.vue'
 import {
   featureFetch,
@@ -362,11 +362,8 @@ async function submitManual() {
         >
           <tr v-for="record in records" :key="record.id">
             <td>{{ formatStamp(record.createdAt) }}</td>
-            <td>
-              <SpoolIllustration
-                :spool="spoolById.get(record.spoolId)"
-                compact
-              />
+            <td class="spool-record-cell">
+              <SpoolArt :spool="spoolById.get(record.spoolId)" :size="40" />
               {{ spoolText(record.spoolId) }}
             </td>
             <td>
@@ -430,10 +427,10 @@ async function submitManual() {
             </option>
           </select>
         </label>
-        <SpoolIllustration
+        <SpoolArt
           v-if="spoolById.has(Number(manual.spoolId))"
           :spool="spoolById.get(Number(manual.spoolId))"
-          compact
+          :size="40"
         />
         <label class="feature-field">
           Gramas usadas

@@ -12,6 +12,8 @@ const MAX_RTSP_MESSAGE_BYTES = 64 * 1024
 /** `$` + channel + 16-bit length, then up to 65535 payload bytes. */
 const MAX_INTERLEAVED_BYTES = 4 + 0xffff
 const UPSTREAM_IDLE_MS = 10_000
+const FIRST_REQUEST_MS = 5_000
+const MAX_QUEUED_BYTES = 128 * 1024
 const CLIENT_IDLE_MS = 30_000
 const METHODS = new Set([
   'OPTIONS',
@@ -44,7 +46,13 @@ function takeFrame(buffer: Buffer): { frame: Frame; rest: Buffer } | undefined {
     return undefined
   }
   const header = buffer.subarray(0, end).toString('latin1')
+  // A bare CR or LF would hide a header from the line-based filters below.
+  if (/\r(?!\n)|(?<!\r)\n/.test(header)) throw Error('RTSP bare line break')
+  const lengths = header.match(/^Content-Length:.*$/gim) ?? []
+  if (lengths.length > 1) throw Error('RTSP duplicate Content-Length')
   const declared = /^Content-Length:[ \t]*(\d+)[ \t]*$/im.exec(header)?.[1]
+  if (lengths.length === 1 && declared === undefined)
+    throw Error('RTSP invalid Content-Length')
   const length = declared === undefined ? 0 : Number(declared)
   if (
     !Number.isSafeInteger(length) ||
@@ -84,7 +92,7 @@ export async function startBambuRtspsBridge(input: {
   let bridgePort = 0
 
   const rewrite = (value: string) =>
-    value.replace(/rtsps?:\/\/[^\s"']+/gi, (raw) => {
+    value.replace(/rtsps?:\/\/[^\s"';,]+/gi, (raw) => {
       let url: URL
       try {
         url = new URL(raw)
@@ -94,13 +102,16 @@ export async function startBambuRtspsBridge(input: {
       if (
         url.protocol !== 'rtsps:' ||
         url.hostname !== input.host ||
-        Number(url.port) !== input.port ||
+        Number(url.port || 322) !== input.port ||
         url.search ||
         url.hash ||
         url.username ||
         url.password ||
-        (url.pathname !== STREAM_PATH &&
-          url.pathname !== `${STREAM_PATH}/trackID=0`)
+        !(
+          url.pathname === STREAM_PATH ||
+          url.pathname === `${STREAM_PATH}/` ||
+          url.pathname === `${STREAM_PATH}/trackID=0`
+        )
       )
         throw Error('Bambu RTSPS camera control URL escaped its source')
       return `rtsp://127.0.0.1:${bridgePort}${prefix}${url.pathname}`
@@ -108,7 +119,7 @@ export async function startBambuRtspsBridge(input: {
 
   /** Writes with backpressure so a stalled consumer cannot grow memory. */
   const forward = (from: Socket, to: Socket, data: Buffer) => {
-    if (to.destroyed || to.write(data)) return
+    if (to.destroyed || to.write(data) || from.isPaused()) return
     from.pause()
     to.once('drain', () => from.resume())
   }
@@ -120,48 +131,71 @@ export async function startBambuRtspsBridge(input: {
     }
     clients.add(client)
     client.on('error', () => {})
-    client.setTimeout(CLIENT_IDLE_MS, () => client.destroy())
-
-    const upstream = connectTls({
-      host: input.host,
-      port: input.port,
-      ca: input.caPem,
-      minVersion: 'TLSv1.2',
-      rejectUnauthorized: true,
-      checkServerIdentity: (_host, certificate) =>
-        checkServerIdentity(input.host, certificate),
-    })
-    servers.add(upstream)
-    upstream.on('error', () => client.destroy())
-    upstream.setTimeout(UPSTREAM_IDLE_MS, () => upstream.destroy())
+    // A squatter that never sends a valid tokened request frees the slot fast.
+    client.setTimeout(FIRST_REQUEST_MS, () => client.destroy())
+    let upstream: TLSSocket | undefined
     const stop = () => {
       client.destroy()
-      upstream.destroy()
+      upstream?.destroy()
     }
     client.once('close', () => {
       clients.delete(client)
-      upstream.destroy()
-    })
-    upstream.once('close', () => {
-      servers.delete(upstream)
-      client.destroy()
+      upstream?.destroy()
     })
 
     // Nothing, credentials included, leaves before the TLS identity checks pass.
     let secure = false
+    let queuedBytes = 0
     const queued: Buffer[] = []
-    const sendUpstream = (data: Buffer) => {
-      if (!secure) queued.push(data)
-      else forward(client, upstream, data)
+    let responseBuffer: Buffer = Buffer.alloc(0)
+
+    /** Dials only after a request carrying the session token has validated. */
+    const open = (): TLSSocket => {
+      if (upstream) return upstream
+      const socket = connectTls({
+        host: input.host,
+        port: input.port,
+        ca: input.caPem,
+        minVersion: 'TLSv1.2',
+        rejectUnauthorized: true,
+        checkServerIdentity: (_host, certificate) =>
+          checkServerIdentity(input.host, certificate),
+      })
+      upstream = socket
+      servers.add(socket)
+      socket.on('error', () => client.destroy())
+      socket.setTimeout(UPSTREAM_IDLE_MS, () => socket.destroy())
+      socket.once('close', () => {
+        servers.delete(socket)
+        client.destroy()
+      })
+      socket.once('secureConnect', () => {
+        if (!socket.authorized) return stop()
+        secure = true
+        for (const data of queued.splice(0)) forward(client, socket, data)
+        queuedBytes = 0
+      })
+      socket.on(
+        'data',
+        pump(
+          () => responseBuffer,
+          (value) => (responseBuffer = value),
+          onResponse,
+          (raw) => forward(socket, client, Buffer.from(raw)),
+        ),
+      )
+      return socket
     }
-    upstream.once('secureConnect', () => {
-      if (!upstream.authorized) return stop()
-      secure = true
-      for (const data of queued.splice(0)) forward(client, upstream, data)
-    })
+    const sendUpstream = (data: Buffer) => {
+      const socket = open()
+      if (secure) return forward(client, socket, data)
+      queuedBytes += data.length
+      if (queuedBytes > MAX_QUEUED_BYTES) throw Error('RTSP queue overflow')
+      queued.push(data)
+    }
 
     let requestBuffer: Buffer = Buffer.alloc(0)
-    let responseBuffer: Buffer = Buffer.alloc(0)
+    let admitted = false
 
     const onRequest = (header: string, body: Buffer) => {
       const requestLine = /^([A-Z_]+) ([^ ]+) RTSP\/1\.0$/.exec(
@@ -171,33 +205,32 @@ export async function startBambuRtspsBridge(input: {
         throw Error('Invalid RTSP request')
       const [, method, targetText] = requestLine
       if (!METHODS.has(method!)) throw Error('RTSP method refused')
-      let path: string
-      if (targetText === '*' && method === 'OPTIONS') {
-        path = STREAM_PATH
-      } else {
-        const target = new URL(targetText!)
-        const route = target.pathname.startsWith(`${prefix}/`)
-          ? target.pathname.slice(prefix.length)
-          : ''
-        if (
-          target.protocol !== 'rtsp:' ||
-          target.hostname !== '127.0.0.1' ||
-          Number(target.port) !== bridgePort ||
-          target.search ||
-          target.hash ||
-          target.username ||
-          target.password ||
-          (route !== STREAM_PATH && route !== `${STREAM_PATH}/trackID=0`)
-        )
-          throw Error('RTSP target refused')
-        path = route
-      }
-      // UDP would open a media path outside the verified TLS connection.
+      // The token is required on every request, `OPTIONS *` included.
+      const target = new URL(targetText!)
+      const route = target.pathname.startsWith(`${prefix}/`)
+        ? target.pathname.slice(prefix.length)
+        : ''
       if (
-        method === 'SETUP' &&
-        !/^Transport:[^\r\n]*RTP\/AVP\/TCP/im.test(header)
+        target.protocol !== 'rtsp:' ||
+        target.hostname !== '127.0.0.1' ||
+        Number(target.port) !== bridgePort ||
+        target.search ||
+        target.hash ||
+        target.username ||
+        target.password ||
+        !(
+          route === STREAM_PATH ||
+          route === `${STREAM_PATH}/` ||
+          route === `${STREAM_PATH}/trackID=0`
+        )
       )
-        throw Error('RTSP transport refused')
+        throw Error('RTSP target refused')
+      // UDP would open a media path outside the verified TLS connection.
+      if (method === 'SETUP') {
+        const transports = header.match(/^Transport:.*$/gim) ?? []
+        if (transports.length !== 1 || !/RTP\/AVP\/TCP/i.test(transports[0]!))
+          throw Error('RTSP transport refused')
+      }
       const headers = header
         .split('\r\n')
         .slice(1)
@@ -205,10 +238,14 @@ export async function startBambuRtspsBridge(input: {
           (line) => !/^(Authorization|Proxy-Authorization|Cookie):/i.test(line),
         )
       headers.push(authorization)
+      if (!admitted) {
+        admitted = true
+        client.setTimeout(CLIENT_IDLE_MS, () => client.destroy())
+      }
       sendUpstream(
         Buffer.concat([
           Buffer.from(
-            `${method} rtsps://${input.host}:${input.port}${path} RTSP/1.0\r\n${headers.join('\r\n')}\r\n\r\n`,
+            `${method} rtsps://${input.host}:${input.port}${route} RTSP/1.0\r\n${headers.join('\r\n')}\r\n\r\n`,
             'latin1',
           ),
           body,
@@ -216,7 +253,7 @@ export async function startBambuRtspsBridge(input: {
       )
     }
 
-    const onResponse = (header: string, body: Buffer) => {
+    function onResponse(header: string, body: Buffer) {
       const status = /^RTSP\/1\.0 (\d{3})\b/.exec(header)?.[1]
       if (!status || (Number(status) >= 300 && Number(status) < 400))
         throw Error('RTSP redirect refused')
@@ -231,7 +268,7 @@ export async function startBambuRtspsBridge(input: {
           `Content-Length: ${rewrittenBody.length}`,
         )
       forward(
-        upstream,
+        upstream!,
         client,
         Buffer.concat([
           Buffer.from(`${rewrittenHeader}\r\n\r\n`, 'latin1'),
@@ -240,14 +277,13 @@ export async function startBambuRtspsBridge(input: {
       )
     }
 
-    const pump =
-      (
-        read: () => Buffer,
-        write: (value: Buffer) => void,
-        onMessage: (header: string, body: Buffer) => void,
-        relay: (raw: Buffer) => void,
-      ) =>
-      (chunk: Buffer) => {
+    function pump(
+      read: () => Buffer,
+      write: (value: Buffer) => void,
+      onMessage: (header: string, body: Buffer) => void,
+      relay: (raw: Buffer) => void,
+    ) {
+      return (chunk: Buffer) => {
         try {
           let buffer: Buffer = Buffer.concat([read(), chunk])
           for (;;) {
@@ -264,22 +300,18 @@ export async function startBambuRtspsBridge(input: {
           stop()
         }
       }
+    }
     client.on(
       'data',
       pump(
         () => requestBuffer,
         (value) => (requestBuffer = value),
         onRequest,
-        (raw) => sendUpstream(Buffer.from(raw)),
-      ),
-    )
-    upstream.on(
-      'data',
-      pump(
-        () => responseBuffer,
-        (value) => (responseBuffer = value),
-        onResponse,
-        (raw) => forward(upstream, client, Buffer.from(raw)),
+        (raw) => {
+          // Interleaved RTCP is only meaningful after a tokened request.
+          if (!admitted) throw Error('RTSP data before request')
+          sendUpstream(Buffer.from(raw))
+        },
       ),
     )
   })

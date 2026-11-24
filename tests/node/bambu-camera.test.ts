@@ -429,6 +429,13 @@ test(
     assert.ok(fixture.requests() > 0)
     assert.equal(fixture.activeConnections(), 1)
     await iterator.return?.()
+    // The peer observes the closed socket asynchronously.
+    for (
+      let waited = 0;
+      fixture.activeConnections() > 0 && waited < 2000;
+      waited += 20
+    )
+      await new Promise((resolve) => setTimeout(resolve, 20))
     assert.equal(fixture.activeConnections(), 0)
     assert.ok(fixture.requests() > 0)
   },
@@ -506,4 +513,84 @@ test('RTSPS bridge forwards only verified, token-scoped read requests', async (t
   await bridge.close()
   await new Promise((resolve) => setTimeout(resolve, 200))
   assert.equal(fixture.activeConnections(), 0)
+})
+
+test('RTSPS bridge needs the token before it dials and rewrites standard response URLs', async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'bambu-rtsps-urls-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  // The fixture only provides the certificate pair; a canned printer answers.
+  const pair = await startBambuCameraFixture({
+    directory,
+    accessCode: 'synthetic',
+  })
+  t.after(() => pair.close())
+  let connections = 0
+  let requestText = ''
+  const printer = createServer(
+    {
+      key: readFileSync(join(directory, 'camera-key.pem')),
+      cert: readFileSync(pair.caFile),
+    },
+    (socket) => {
+      connections++
+      socket.on('error', () => {})
+      socket.on('data', (chunk) => {
+        requestText += chunk.toString('latin1')
+        const base = `rtsps://127.0.0.1:${port}/streaming/live/1`
+        socket.write(
+          `RTSP/1.0 200 OK\r\nCSeq: 1\r\nContent-Base: ${base}/\r\nRTP-Info: url=${base}/trackID=0;seq=1;rtptime=2\r\nContent-Length: 0\r\n\r\n`,
+        )
+      })
+    },
+  )
+  await new Promise<void>((resolve) => printer.listen(0, '127.0.0.1', resolve))
+  t.after(() => printer.close())
+  const port = (printer.address() as import('node:net').AddressInfo).port
+  const abort = new AbortController()
+  const bridge = await startBambuRtspsBridge({
+    host: '127.0.0.1',
+    port,
+    accessCode: 'synthetic',
+    caPem: readFileSync(pair.caFile),
+    signal: abort.signal,
+  })
+  t.after(() => bridge.close())
+  const url = new URL(bridge.url)
+  const exchange = (request: string) =>
+    new Promise<string>((resolve, reject) => {
+      const socket = netConnect(Number(url.port), url.hostname)
+      let received = ''
+      socket.on('data', (chunk) => (received += chunk.toString('latin1')))
+      socket.once('error', reject)
+      socket.once('close', () => resolve(received))
+      socket.once('connect', () => socket.write(request))
+      setTimeout(() => socket.destroy(), 600).unref()
+    })
+  // No token, wildcard target, leading interleaved data and duplicate lengths
+  // never reach the printer, not even as a TLS connection.
+  for (const request of [
+    'OPTIONS * RTSP/1.0\r\nCSeq: 1\r\n\r\n',
+    '$\u0000\u0000\u0001x',
+    `DESCRIBE ${bridge.url} RTSP/1.0\r\nCSeq: 1\r\nContent-Length: 0\r\nContent-Length: 0\r\n\r\n`,
+    `DESCRIBE ${bridge.url} RTSP/1.0\r\nCSeq: 1\nAuthorization: x\r\n\r\n`,
+  ])
+    assert.equal(await exchange(request), '')
+  assert.equal(connections, 0)
+  const response = await exchange(
+    `DESCRIBE ${bridge.url} RTSP/1.0\r\nCSeq: 1\r\n\r\n`,
+  )
+  assert.equal(connections, 1)
+  assert.match(
+    requestText,
+    /^DESCRIBE rtsps:\/\/127\.0\.0\.1:\d+\/streaming\/live\/1 /,
+  )
+  assert.match(requestText, /Authorization: Basic /)
+  assert.match(response, /^RTSP\/1\.0 200 /)
+  const local = `rtsp://127.0.0.1:${url.port}/${url.pathname.split('/')[1]}/streaming/live/1`
+  assert.ok(response.includes(`Content-Base: ${local}/\r\n`), response)
+  assert.ok(
+    response.includes(`url=${local}/trackID=0;seq=1;rtptime=2`),
+    response,
+  )
+  assert.ok(!response.includes('rtsps://'))
 })

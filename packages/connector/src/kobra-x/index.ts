@@ -8,12 +8,17 @@ import {
 } from '../anycubic/tls-trust.ts'
 import { readKobraXInfo, recoverKobraXCredentials } from './discovery.ts'
 import { createKobraXControl } from './control.ts'
-import { createKobraXFacts, type KobraXFacts } from './facts.ts'
+import {
+  createKobraXFacts,
+  isKobraXJobPhase,
+  type KobraXFacts,
+} from './facts.ts'
 import {
   createKobraXRequests,
   parseKobraXReport,
   reportRefusal,
   type KobraXReport,
+  type KobraXReportIdentity,
 } from './requests.ts'
 import { createKobraXStatus } from './status.ts'
 import { createKobraXUsage, type KobraXJobUsage } from './usage.ts'
@@ -47,6 +52,8 @@ export async function connectKobraX(options: {
   resultTimeoutMs?: number
   motionResultTimeoutMs?: number
   usageSettleMs?: number
+  /** `printer-assigned` only for firmware that replaces report msgids. */
+  reportIdentity?: KobraXReportIdentity
 }) {
   const { address, clientIdentity } = options
   if (!clientIdentity?.cert || !clientIdentity.key)
@@ -129,6 +136,9 @@ export async function connectKobraX(options: {
     },
     ...(options.resultTimeoutMs !== undefined
       ? { resultTimeoutMs: options.resultTimeoutMs }
+      : {}),
+    ...(options.reportIdentity
+      ? { reportIdentity: options.reportIdentity }
       : {}),
   })
   const control = createKobraXControl({
@@ -296,7 +306,10 @@ export async function connectKobraX(options: {
         report.msgid === currentPrintQuery
       ) {
         currentPrintQuery = undefined
-        freshPrintPhase = reportRefusal(report) === null
+        // Only a phase the printer named in this reply is fresh. A success
+        // reply without one leaves the cached phase unproven.
+        freshPrintPhase =
+          reportRefusal(report) === null && isKobraXJobPhase(report.state)
         query('info')
       }
     } catch {

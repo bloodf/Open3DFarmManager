@@ -138,25 +138,55 @@ test('Kobra X reference LAN login and status over pinned mutual TLS', async (t) 
       .digest('hex'),
   )
 
-  for (let i = 0; i < 100 && adapter.facts().boxes.length === 0; i++)
+  const infoQueries = () =>
+    broker.calls.all.filter(({ topic }) => topic === `${publishPrefix}info`)
+  // The print reply triggers the second info query asynchronously.
+  for (
+    let i = 0;
+    i < 100 && (adapter.facts().boxes.length === 0 || infoQueries().length < 2);
+    i++
+  )
     await delay(20)
+  const queryMessages = broker.calls.all.filter(({ topic }) =>
+    topic.startsWith(publishPrefix),
+  )
+  const order = queryMessages.map(({ topic }) =>
+    topic.slice(publishPrefix.length),
+  )
   for (const expected of fixture.queries) {
-    const messages = broker.calls.all.filter(
+    const messages = queryMessages.filter(
       ({ topic }) => topic === publishPrefix + expected.type,
     )
-    assert.equal(messages.length, 1, expected.type)
-    const { payload, qos } = messages[0]!
-    const { msgid, timestamp, ...request } = JSON.parse(payload.toString())
-    assert.equal(qos, 0)
-    assert.match(msgid, /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/)
-    assert.deepEqual(request, expected)
-    assert.ok(
-      Number.isInteger(timestamp) &&
-        timestamp >= started &&
-        timestamp <= Date.now(),
+    // The connection asks for each state once. A correlated print reply then
+    // asks for info again, so a busy info reply is never judged against a
+    // cached phase: that is the only repeated query.
+    assert.equal(
+      messages.length,
+      expected.type === 'info' ? 2 : 1,
       expected.type,
     )
+    assert.equal(
+      new Set(
+        messages.map(({ payload }) => JSON.parse(payload.toString()).msgid),
+      ).size,
+      messages.length,
+      `${expected.type} requests carry distinct msgids`,
+    )
+    for (const { payload, qos } of messages) {
+      const { msgid, timestamp, ...request } = JSON.parse(payload.toString())
+      assert.equal(qos, 0)
+      assert.match(msgid, /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/)
+      assert.deepEqual(request, expected)
+      assert.ok(
+        Number.isInteger(timestamp) &&
+          timestamp >= started &&
+          timestamp <= Date.now(),
+        expected.type,
+      )
+    }
   }
+  // The second info query follows the print query that triggered it.
+  assert.ok(order.lastIndexOf('info') > order.indexOf('print'))
   const snapshot = adapter.snapshot()
   assert.equal(snapshot.state, 'printing')
   assert.equal(snapshot.filename, 'fixture-part.gcode')

@@ -271,9 +271,24 @@ Observed on firmware 2.0.2.8 (S1):
 - The answer arrives later on `<type>/report`, with a `msgid` chosen by the printer, `code` 200,
   `state` `done` or `success`, and the request's `action`.
 - `info/query` is answered with action `report`.
-- The report topic is shared with other MQTT clients. Settling rule from S1: a request is settled by
-  the first report of the same type and action that arrives after the request was published, from
-  whichever client caused it. A report carrying the request's own `msgid` always settles it.
+- The report topic is shared with other MQTT clients, and the Connector ignores retained reports.
+  A report settles a request only when it carries the request's own `msgid`, `type` and `action`
+  (`reportIdentity: 'exact'`, the default). A report for another client's request, an empty `msgid`
+  or a retained replay never settles it.
+- Source S1 observed firmware 2.0.2.8 answering with a printer-chosen `msgid`. No hardware report in
+  this repository shows either behavior for a command, so exact matching stays the default and
+  fails closed: the request ends as `received` or `unanswered`. For firmware that replaces or omits
+  report ids, the connection may be opened with `reportIdentity: 'printer-assigned'`. A report then
+  also settles a request when the printer acknowledged that request's `msgid`, the `type` and
+  `action` match, the report's `msgid` is empty or none this connection issued, no other request
+  (acknowledged or not) waits on the same `type` and `action`, and no request on them ended without
+  a result in the last 30 s, since its report may still arrive. A report that fits and came from
+  another client cannot be told apart, so this mode is opt-in.
+- Control readiness is stricter than outcomes. A printer state counts as current only when the
+  reply echoes the `msgid` of the latest `info` query. A busy `info` reply is current only after the
+  latest `print` query was answered with a successful reply that names a job phase (`printing`,
+  `paused`, a preparation phase, `finished` or `stoped`). A reply without a phase proves nothing;
+  the next valid `print` reply restores readiness.
 
 Three outcomes of a request:
 

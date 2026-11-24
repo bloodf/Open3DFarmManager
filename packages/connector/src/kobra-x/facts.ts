@@ -17,6 +17,18 @@ const preparing = new Set([
   'nozzle_cooling_off',
 ])
 
+/** A `print` report state that names where a job stands. */
+export function isKobraXJobPhase(state: string | undefined) {
+  return (
+    state !== undefined &&
+    (state === 'printing' ||
+      state === 'paused' ||
+      state === 'finished' ||
+      state === 'stoped' ||
+      preparing.has(state))
+  )
+}
+
 export interface KobraXAceSlotFact {
   index: number
   materialType?: string

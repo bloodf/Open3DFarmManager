@@ -1,5 +1,5 @@
 import { ApiSpoolMembership } from '../../../../packages/farm-protocol/src/api-query.ts'
-import type { TransactionSql } from 'postgres'
+import type { Sql, TransactionSql } from 'postgres'
 import {
   SPOOL_INVENTORY_STALE_MS,
   SpoolInventory,
@@ -51,23 +51,22 @@ function fresh(receivedAt: number | null, now: number) {
   return age >= 0 && age < SPOOL_INVENTORY_STALE_MS
 }
 
-export async function hasCurrentSpoolObservation(
-  tx: TransactionSql,
-  farmId: string,
+type ObservationRow = InventoryRow & {
+  agentId: string
+  receivedAt: number | null
+}
+
+export type MembershipEvidence = Pick<
+  ObservationRow,
+  'agentId' | 'observedAt' | 'receivedAt'
+> & { repliedAt: number }
+
+function eligibleObservations(
+  rows: ObservationRow[],
   binding: Binding,
-  readMembership?: ReadSpoolMembership,
+  now: number,
 ) {
-  // The bounded lookup runs with the same locks as the summary check. A
-  // revocation, settings update or snapshot replacement that wins these locks
-  // first is visible before the lookup. A later update waits for the write.
-  const rows = await tx<
-    (InventoryRow & { agentId: string; receivedAt: number | null })[]
-  >`
-    SELECT agent_id::text AS "agentId", observed_at::float8 AS "observedAt",
-      received_at::float8 AS "receivedAt", snapshot
-    FROM farm.lock_physical_spool_observations_with_receipt(${farmId}::uuid, ${binding.serviceId}::uuid)`
-  const now = Date.now()
-  const eligible = rows.flatMap((row) => {
+  return rows.flatMap((row) => {
     const snapshot = parseInventorySnapshot(row)
     return snapshot &&
       !snapshot.stale &&
@@ -76,37 +75,75 @@ export async function hasCurrentSpoolObservation(
       ? [{ row, snapshot }]
       : []
   })
-  if (
-    eligible.some(({ snapshot }) =>
-      snapshot.spools.some(({ spoolId }) => spoolId === binding.spoolId),
-    )
-  )
-    return true
-  if (!readMembership) return false
+}
+
+function listsSpool(snapshot: SpoolInventory, binding: Binding) {
+  return snapshot.spools.some(({ spoolId }) => spoolId === binding.spoolId)
+}
+
+export async function prefetchSpoolMembership(
+  sql: Sql,
+  farmId: string,
+  binding: Binding,
+  readMembership: ReadSpoolMembership,
+): Promise<MembershipEvidence[]> {
+  const rows = await sql<ObservationRow[]>`
+    SELECT agent_id::text AS "agentId", observed_at::float8 AS "observedAt",
+      received_at::float8 AS "receivedAt", snapshot
+    FROM farm.read_physical_spool_observations_with_receipt(${farmId}::uuid, ${binding.serviceId}::uuid)`
+  const eligible = eligibleObservations(rows, binding, Date.now())
+  if (eligible.some(({ snapshot }) => listsSpool(snapshot, binding))) return []
 
   const candidates = eligible
-    .filter(
-      ({ snapshot, row }) =>
-        row.agentId && snapshot.total > snapshot.spools.length,
-    )
+    .filter(({ snapshot }) => snapshot.total > snapshot.spools.length)
     .slice(0, 4)
   const results = await Promise.all(
     candidates.map(async ({ row }) => {
-      const reply = ApiSpoolMembership.safeParse(
-        await readMembership(row.agentId, binding),
+      // The signalling runtime correlates the reply to this agent and farm.
+      const result = await readMembership(row.agentId, binding)
+      const repliedAt = Date.now()
+      const reply = ApiSpoolMembership.safeParse(result)
+      if (
+        !reply.success ||
+        !reply.data.present ||
+        reply.data.serviceId !== binding.serviceId ||
+        reply.data.spoolId !== binding.spoolId
       )
-      return { row, reply }
+        return []
+      return [
+        {
+          agentId: row.agentId,
+          observedAt: row.observedAt,
+          receivedAt: row.receivedAt,
+          repliedAt,
+        },
+      ]
     }),
   )
-  // The Connector checks membership age locally. Recheck the locked
-  // snapshot against the server clock after the round trip.
-  const checkedAt = Date.now()
-  return results.some(
-    ({ row, reply }) =>
-      reply.success &&
-      reply.data.present &&
-      reply.data.serviceId === binding.serviceId &&
-      reply.data.spoolId === binding.spoolId &&
-      fresh(row.receivedAt, checkedAt),
+  return results.flat()
+}
+
+export async function hasCurrentSpoolObservation(
+  tx: TransactionSql,
+  farmId: string,
+  binding: Binding,
+  membership: MembershipEvidence[] = [],
+) {
+  const rows = await tx<ObservationRow[]>`
+    SELECT agent_id::text AS "agentId", observed_at::float8 AS "observedAt",
+      received_at::float8 AS "receivedAt", snapshot
+    FROM farm.lock_physical_spool_observations_with_receipt(${farmId}::uuid, ${binding.serviceId}::uuid)`
+  const now = Date.now()
+  return eligibleObservations(rows, binding, now).some(
+    ({ row, snapshot }) =>
+      listsSpool(snapshot, binding) ||
+      (snapshot.total > snapshot.spools.length &&
+        membership.some(
+          (reply) =>
+            reply.agentId === row.agentId &&
+            reply.observedAt === row.observedAt &&
+            reply.receivedAt === row.receivedAt &&
+            fresh(reply.repliedAt, now),
+        )),
   )
 }

@@ -2,8 +2,10 @@ import { createHash } from 'node:crypto'
 import type { Sql, TransactionSql } from 'postgres'
 import { z } from 'zod'
 import {
+  type MembershipEvidence,
   type ReadSpoolMembership,
   hasCurrentSpoolObservation,
+  prefetchSpoolMembership,
 } from '../storage/postgres-inventory-snapshot.ts'
 
 const recordId = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER)
@@ -76,33 +78,52 @@ function physicalSpool(farmId: string, row: SpoolRow) {
   }
 }
 
+async function findGrant(
+  sql: Sql | TransactionSql,
+  access: Access,
+  lock: boolean,
+) {
+  const [grant] = await sql`
+    SELECT g.id FROM farm.integration_apps a
+    JOIN farm.integration_app_grants g ON g.app_id = a.id
+    JOIN farm.farms f ON f.id = g.farm_id
+    WHERE a.id = ${access.appId}::uuid AND g.id = ANY(${access.grantIds}::uuid[])
+      AND f.id = ${access.farmId}::uuid AND (NOT a.sandbox OR f.sandbox)
+      AND a.revoked_at IS NULL AND g.disabled_at IS NULL
+      AND g.printer_assignment_id IS NULL AND ${access.scope} = ANY(g.scopes)
+      AND (${access.scope} <> 'inventory:write' OR NOT g.requires_approval)
+    ${lock ? sql`FOR SHARE OF a, g` : sql``}`
+  return grant
+}
+
 async function authorized<T>(
   sql: Sql,
   access: Access,
   work: (tx: TransactionSql) => Promise<T>,
 ) {
   return sql.begin(async (tx) => {
-    const [grant] = await tx`
-      SELECT g.id FROM farm.integration_apps a
-      JOIN farm.integration_app_grants g ON g.app_id = a.id
-      JOIN farm.farms f ON f.id = g.farm_id
-      WHERE a.id = ${access.appId}::uuid AND g.id = ANY(${access.grantIds}::uuid[])
-        AND f.id = ${access.farmId}::uuid AND (NOT a.sandbox OR f.sandbox)
-        AND a.revoked_at IS NULL AND g.disabled_at IS NULL
-        AND g.printer_assignment_id IS NULL AND ${access.scope} = ANY(g.scopes)
-        AND (${access.scope} <> 'inventory:write' OR NOT g.requires_approval)
-      FOR SHARE OF a, g`
+    const grant = await findGrant(tx, access, true)
     return grant ? await work(tx) : null
   })
 }
 
-export function registerPhysicalSpool(
+export async function registerPhysicalSpool(
   sql: Sql,
   access: Access,
   input: z.infer<typeof registration>,
   key: string,
   readMembership?: ReadSpoolMembership,
 ) {
+  let membership: MembershipEvidence[] | undefined
+  if (input.spoolman && readMembership) {
+    if (!(await findGrant(sql, access, false))) return null
+    membership = await prefetchSpoolMembership(
+      sql,
+      access.farmId,
+      input.spoolman,
+      readMembership,
+    )
+  }
   return authorized(sql, access, async (tx) => {
     const hash = createHash('sha256')
       .update(
@@ -157,7 +178,7 @@ export function registerPhysicalSpool(
           tx,
           access.farmId,
           input.spoolman,
-          readMembership,
+          membership,
         ))
       )
         return { outcome: 'spool-not-observed' as const }

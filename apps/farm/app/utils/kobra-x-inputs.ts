@@ -22,7 +22,7 @@ export function kobraXInputs(materials: PrinterState['materials']) {
 export function kobraXMapping(
   selections: readonly string[],
   count: number,
-  inputs: ReturnType<typeof kobraXInputs>,
+  inputs: readonly Pick<ReturnType<typeof kobraXInputs>[number], 'id'>[],
 ): number[] | undefined {
   if (!Number.isInteger(count) || count < 1 || count > 7) return undefined
   const selected = selections

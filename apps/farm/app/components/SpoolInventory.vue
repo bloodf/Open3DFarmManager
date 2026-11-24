@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { formatWeight } from '../utils/ui-format.ts'
+import FarmSpool from './spool-art/FarmSpool.vue'
+import { resolveSpoolLevel, spoolLevelLabel } from '../utils/spool-level.ts'
 import { computed } from 'vue'
-import SpoolIllustration from './spool-library/SpoolIllustration.vue'
 import {
   spoolInventoryStale,
   type FarmRow,
@@ -36,6 +37,20 @@ const sections = computed(() =>
     }
   }),
 )
+// Spoolman's own percentage first; grams alone (no initial weight in the
+// summary) never become a level, so the reel stays full and marked unknown.
+function spoolFraction(spool: {
+  remainingGrams: number | null
+  remainingPercent?: number
+}) {
+  const percent = spool.remainingPercent
+  if (typeof percent === 'number' && Number.isFinite(percent))
+    return Math.max(0, Math.min(1, percent / 100))
+  const level = resolveSpoolLevel({
+    spoolmanRemainingWeight: spool.remainingGrams,
+  })
+  return level.kind === 'known' ? level.fraction : null
+}
 // Spoolman can report a negative remaining weight after over-consumption;
 // show it as reported instead of hiding it behind "Indisponível".
 function grams(value: number | null) {
@@ -113,11 +128,13 @@ function grams(value: number | null) {
                 <td>{{ spool.material ?? 'Indisponível' }}</td>
                 <td>
                   <!-- Kept out of the row header so its name stays the filament name. -->
-                  <SpoolIllustration
-                    :filament="{ color_hex: spool.colorHex ?? undefined }"
-                    :spoolman-percent="spool.remainingPercent"
+                  <FarmSpool
+                    role="img"
+                    :aria-label="spoolLevelLabel(spoolFraction(spool))"
+                    :color="spool.colorHex ? `#${spool.colorHex}` : null"
+                    :fraction="spoolFraction(spool)"
+                    :size="40"
                     class="cell-spool"
-                    compact
                   />
                   <template v-if="spool.colorHex">
                     #{{ spool.colorHex }}

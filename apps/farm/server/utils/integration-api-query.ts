@@ -81,6 +81,8 @@ export async function readIntegrationApiQuery(input: {
     request.signal,
   )
   if (result.kind === 'error') return integrationProblem(result.error, headers)
+  if (result.kind !== kind)
+    return integrationProblem('connector-unavailable', headers)
   const responseHeaders = new Headers(headers)
   responseHeaders.set('cache-control', 'no-store')
   return Response.json(

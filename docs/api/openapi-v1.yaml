@@ -1339,8 +1339,10 @@ paths:
         Creates a spool using an existing filament in the farm-wide grant. A
         caller with a farm-wide inventory write grant may request a Spoolman
         binding at creation. An approved Connector in the same farm must have
-        the exact service ID configured and include the exact spool ID in its
-        current, non-stale inventory snapshot less than 30 seconds old.
+        the exact service ID configured and a current, non-stale inventory
+        snapshot less than 30 seconds old. If the bounded summary omits the
+        spool, Farm can check that exact ID in the Connector's fresh inventory
+        over its authenticated read-only connection.
         Without that observation the API returns 409 (`spool-not-observed`)
         before creating a spool or recording a receipt.
         The binding is immutable. A second local

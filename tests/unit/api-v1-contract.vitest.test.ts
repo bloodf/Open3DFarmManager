@@ -476,6 +476,7 @@ function physicalSpoolScenarios(): Scenario[] {
         keyConflict?: boolean
         bindingConflict?: boolean
         missingObservation?: boolean
+        targetedObservation?: boolean
         replay?: boolean
       } = {},
     ): Scenario => ({
@@ -494,6 +495,7 @@ function physicalSpoolScenarios(): Scenario[] {
           { sandbox: true },
         )
         const token = options.noToken ? undefined : await tokenFor(world, app)
+        const spoolId = options.targetedObservation ? 99 : 1
         let failPool = false
         let stored: { request_hash: string; response: unknown } | undefined
         const spool = { id: 7, location: 'Gaveta A', revision: '71:(0,1)' }
@@ -532,7 +534,7 @@ function physicalSpoolScenarios(): Scenario[] {
                   farmId: ids.farmA,
                   spoolman: {
                     serviceId,
-                    spoolId: 1,
+                    spoolId,
                   },
                 })
                 return options.bindingConflict ? [{ exists: true }] : []
@@ -541,14 +543,24 @@ function physicalSpoolScenarios(): Scenario[] {
                 expect(values).toEqual([ids.farmA, serviceId])
                 if (options.missingObservation || stored) return []
                 const observedAt = Date.now()
+                if (options.targetedObservation) {
+                  world.inbox = {
+                    kind: 'spool-membership',
+                    serviceId,
+                    spoolId,
+                    present: true,
+                    observedAt,
+                  }
+                }
                 return [
                   {
+                    agentId: ids.agentA,
                     observedAt,
                     snapshot: {
                       observedAt,
                       serviceId,
                       stale: false,
-                      total: 1,
+                      total: options.targetedObservation ? 9 : 1,
                       spools: [
                         {
                           spoolId: 1,
@@ -622,6 +634,20 @@ function physicalSpoolScenarios(): Scenario[] {
           await call(input)
         }
         const result = await call(input)
+        if (options.targetedObservation) {
+          expect(world.inboxCalls).toEqual([
+            {
+              farmId: ids.farmA,
+              agentId: ids.agentA,
+              query: {
+                kind: 'spool-membership',
+                farmId: ids.farmA,
+                serviceId,
+                spoolId,
+              },
+            },
+          ])
+        }
         if (options.missingObservation) {
           expect(result.json).toMatchObject({ code: 'spool-not-observed' })
           expect(stored).toBeUndefined()
@@ -687,6 +713,19 @@ function physicalSpoolScenarios(): Scenario[] {
           input: bindingInput,
           replay: true,
         }),
+        scenario(
+          '201',
+          'registers a spool omitted from its inventory summary',
+          {
+            input: {
+              body: {
+                ...bindingInput.body,
+                spoolman: { serviceId, spoolId: 99 },
+              },
+            },
+            targetedObservation: true,
+          },
+        ),
         scenario('409', 'external spool has no current trusted observation', {
           input: bindingInput,
           missingObservation: true,

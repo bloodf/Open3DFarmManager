@@ -14,6 +14,9 @@ export function farmMaterialsView(materials: PrinterState['materials']) {
       colorLabel: material.colorHex
         ? `Cor #${material.colorHex}`
         : 'Cor desconhecida',
+      ...(material.remainingPercent !== undefined
+        ? { remainingPercent: material.remainingPercent }
+        : {}),
       remaining:
         material.remainingPercent === undefined
           ? 'desconhecido'

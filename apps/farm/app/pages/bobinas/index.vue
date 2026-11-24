@@ -651,16 +651,7 @@ onBeforeUnmount(() => {
         >
           <header class="card-head">
             <div class="card-title-group">
-              <SpoolIllustration
-                :filament="spool.filament"
-                :fraction="
-                  spoolBaseWeight(spool) !== null &&
-                  spoolBaseWeight(spool)! > 0 &&
-                  spool.remaining_weight != null
-                    ? spool.remaining_weight / spoolBaseWeight(spool)!
-                    : null
-                "
-              />
+              <SpoolIllustration :spool="spool" />
               <div class="card-title-text">
                 <h3>
                   {{ spoolDisplayTitle(spool) }}

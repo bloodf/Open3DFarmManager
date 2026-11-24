@@ -3,7 +3,8 @@ import type { ReplaySend } from '../../utils/replay-live.ts'
 import { computed, ref, watch } from 'vue'
 import Dialog from '../ui/Dialog.vue'
 import Button from '../ui/Button.vue'
-import { locationLabel, safeColour } from '../../utils/library-view.ts'
+import SpoolIllustration from '../spool-library/SpoolIllustration.vue'
+import { locationLabel } from '../../utils/library-view.ts'
 import { replayOutcomeLocks } from '../../utils/replay-outcome.ts'
 import {
   GROUP_LABELS,
@@ -99,15 +100,11 @@ const slotLabel = (m: ReplayPrinter['materials'][number], index: number) =>
   `Slot ${m.slot || index + 1}: ${m.materialType ?? 'material desconhecido'}`
 const slotValue = (m: ReplayPrinter['materials'][number], index: number) =>
   /^\d{1,3}$/.test(m.slot) ? Number(m.slot) : index
-/** Colour of the slot chosen for a filament, painted only when it is a safe hex. */
-function paint(index: number) {
-  const hex = selected.value?.materials.find(
-    (m, slot) => slotValue(m, slot) === mapping.value[index],
-  )?.colorHex
-  return safeColour(
-    hex && /^[0-9A-F]{8}$/i.test(hex) ? `#${hex.slice(0, 6)}` : '',
-  )
-}
+const matchedSlots = computed(() =>
+  mapping.value.map((value) =>
+    selected.value?.materials.find((m, slot) => slotValue(m, slot) === value),
+  ),
+)
 
 async function confirm() {
   const printer = selected.value
@@ -239,12 +236,17 @@ function confirmPrinterChecked() {
               {{ m.colorHex ? `· #${m.colorHex.slice(0, 6)}` : '' }}
             </option>
           </select>
-          <span
-            v-if="paint(index)"
-            class="swatch"
-            aria-hidden="true"
-            :style="{ background: paint(index) }"
-          ></span>
+          <SpoolIllustration
+            v-if="matchedSlots[index]"
+            :filament="{
+              color_hex:
+                matchedSlots[index]?.spoolmanColorHex ??
+                matchedSlots[index]?.colorHex?.slice(0, 6),
+            }"
+            :spoolman-percent="matchedSlots[index]?.spoolmanRemainingPercent"
+            :printer-percent="matchedSlots[index]?.remainingPercent"
+            compact
+          />
         </div>
       </section>
 
@@ -292,11 +294,5 @@ fieldset {
 ul {
   margin-block: 0 var(--space-2);
   color: var(--text-muted);
-}
-.swatch {
-  display: inline-block;
-  inline-size: 1rem;
-  block-size: 1rem;
-  border: 1px solid var(--text-muted);
 }
 </style>

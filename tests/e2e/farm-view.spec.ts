@@ -338,7 +338,12 @@ for (const width of [320, 1280]) {
     const table = page.getByRole('table')
     await expect(table).toBeVisible()
     await expect(table.getByRole('columnheader')).toHaveCount(6)
-    await expect(table.getByRole('rowheader').first()).toHaveText('PLA Branco')
+    const firstSpool = table.getByRole('rowheader', { name: /PLA Branco/ })
+    await expect(firstSpool).toBeVisible()
+    await expect(firstSpool).toHaveText('? PLA Branco')
+    await expect(
+      firstSpool.getByRole('img', { name: 'Nível restante desconhecido' }),
+    ).toHaveAttribute('data-level', '1')
     await expect(table).toContainText('742 g')
     await expect(table).toContainText('-12 g')
     await expect(page.getByText('Exibindo parte do estoque')).toBeVisible()

@@ -17,7 +17,7 @@ describe('spool illustration', () => {
       root: 'tests/spool-illustration',
       cacheDir,
       plugins: [vue()],
-      server: { host: '127.0.0.1', port: 0, fs: { allow: ['.'] } },
+      server: { host: '127.0.0.1', port: 0, fs: { allow: [process.cwd()] } },
       logLevel: 'error',
     })
     await server.listen()
@@ -32,7 +32,7 @@ describe('spool illustration', () => {
   })
 
   it.each(['light', 'dark'] as const)(
-    'renders colors, zero and unknown in %s mode',
+    'renders stock, printer slots and job matches in %s mode',
     async (scheme) => {
       await withBrowser({}, async (browser) => {
         const page = await browser.newPage({
@@ -41,13 +41,23 @@ describe('spool illustration', () => {
         })
         const errors: string[] = []
         page.on('pageerror', (error) => errors.push(error.message))
+        await page.route('**/*', (route) =>
+          route
+            .request()
+            .url()
+            .startsWith(origin + '/')
+            ? route.continue()
+            : route.abort(),
+        )
         await page.goto(origin)
         expect(
           await page
             .locator('main')
             .evaluate((element) => getComputedStyle(element).backgroundColor),
         ).toBe(scheme === 'light' ? 'rgb(244, 245, 243)' : 'rgb(24, 28, 25)')
-        const spools = page.locator('.spool-illustration')
+        const spools = page
+          .getByRole('region', { name: 'Níveis da bobina' })
+          .getByRole('img')
         await spools.first().waitFor()
         expect(
           await spools.evaluateAll((elements) =>
@@ -66,6 +76,63 @@ describe('spool illustration', () => {
         expect(
           await spools.nth(3).locator('.spool-unknown').textContent(),
         ).toBe('?')
+        expect(await spools.nth(3).getAttribute('aria-label')).toBe(
+          'Nível restante desconhecido',
+        )
+        expect(await spools.nth(3).locator('.spool-wind').count()).toBe(1)
+        const inventory = page.getByRole('region', {
+          name: 'Estoque de filamento',
+        })
+        const oldSpool = inventory.getByRole('row', { name: /Bobina antiga/ })
+        expect(await oldSpool.getByRole('img').getAttribute('data-level')).toBe(
+          '1',
+        )
+        expect(
+          await oldSpool.getByRole('img').getAttribute('data-unknown'),
+        ).toBe('true')
+        expect(
+          await inventory
+            .getByRole('row', { name: /PLA com peso inicial/ })
+            .getByRole('img', { name: 'Nível restante: 25%' })
+            .getAttribute('data-level'),
+        ).toBe('6')
+        expect(
+          await page
+            .getByRole('region', { name: 'Slots ACE' })
+            .getByRole('img', { name: 'Nível restante desconhecido' })
+            .getAttribute('data-level'),
+        ).toBe('1')
+        const wallSlots = page.getByRole('list', { name: 'Slots de filamento' })
+        expect(
+          await wallSlots
+            .getByRole('img', { name: 'Nível restante: 25%' })
+            .getAttribute('data-level'),
+        ).toBe('6')
+        expect(
+          await wallSlots
+            .getByRole('img', { name: 'Nível restante: 0%' })
+            .getAttribute('data-level'),
+        ).toBe('8')
+        await page.getByRole('button', { name: 'Tabela', exact: true }).click()
+        expect(
+          await page
+            .getByRole('table', { name: 'Impressoras atribuídas' })
+            .getByRole('img', { name: 'Nível restante: 70%' })
+            .getAttribute('data-level'),
+        ).toBe('3')
+        await page.getByRole('button', { name: 'Abrir mapeamento' }).click()
+        const match = page.getByRole('region', { name: 'Mapeamento do AMS' })
+        const slot = match.getByLabel('Filamento 1: PLA')
+        await slot.waitFor()
+        expect(await slot.inputValue()).toBe('0')
+        expect(await match.getByRole('img').getAttribute('data-level')).toBe(
+          '6',
+        )
+        await slot.selectOption('2')
+        expect(await match.getByRole('img').getAttribute('data-unknown')).toBe(
+          'true',
+        )
+        await page.keyboard.press('Escape')
         const paints = await page
           .locator('.spool-wind')
           .evaluateAll((elements) =>
@@ -75,16 +142,25 @@ describe('spool illustration', () => {
           )
         expect(paints[0]).not.toBe(paints[1])
         expect(
-          await page
-            .locator('.spool-illustration img')
-            .evaluateAll((images) =>
-              images.every(
-                (image) =>
-                  image instanceof HTMLImageElement &&
-                  image.complete &&
-                  image.naturalWidth > 0,
+          await spools.evaluateAll(async (reels) => {
+            const urls = reels.flatMap((reel) => [
+              getComputedStyle(reel, '::before').backgroundImage,
+              ...[...reel.querySelectorAll('.spool-wind')].map(
+                (winding) => getComputedStyle(winding).maskImage,
               ),
-            ),
+            ])
+            const sizes = await Promise.all(
+              urls.map(async (url) => {
+                const source = /^url\("(.*)"\)$/.exec(url)?.[1]
+                if (!source) return 0
+                const image = new Image()
+                image.src = source
+                await image.decode()
+                return image.naturalWidth
+              }),
+            )
+            return sizes.every((size) => size > 0)
+          }),
         ).toBe(true)
         expect(errors).toEqual([])
         await page.close()

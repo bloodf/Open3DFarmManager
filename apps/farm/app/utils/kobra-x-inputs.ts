@@ -13,6 +13,7 @@ export function kobraXInputs(materials: PrinterState['materials']) {
       {
         id: holder ? slot : slot + 4,
         label: `${holder ? 'Suporte' : 'ACE'} ${slot + 1}${material.materialType ? ` — ${material.materialType}` : ''}`,
+        material,
       },
     ]
   })

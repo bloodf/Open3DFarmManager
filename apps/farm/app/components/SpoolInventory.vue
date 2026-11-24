@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { formatWeight } from '../utils/ui-format.ts'
 import { computed } from 'vue'
+import SpoolIllustration from './spool-library/SpoolIllustration.vue'
 import {
   spoolInventoryStale,
   type FarmRow,
@@ -108,15 +109,17 @@ function grams(value: number | null) {
                 v-for="(spool, index) in section.item.inventory.spools"
                 :key="index"
               >
-                <th scope="row">{{ spool.name ?? 'Sem nome' }}</th>
+                <th scope="row">
+                  <SpoolIllustration
+                    :filament="{ color_hex: spool.colorHex ?? undefined }"
+                    :spoolman-percent="spool.remainingPercent"
+                    compact
+                  />
+                  {{ spool.name ?? 'Sem nome' }}
+                </th>
                 <td>{{ spool.material ?? 'Indisponível' }}</td>
                 <td>
                   <template v-if="spool.colorHex">
-                    <span
-                      class="swatch"
-                      aria-hidden="true"
-                      :style="{ backgroundColor: `#${spool.colorHex}` }"
-                    ></span>
                     #{{ spool.colorHex }}
                   </template>
                   <template v-else>Indisponível</template>
@@ -150,7 +153,7 @@ function grams(value: number | null) {
 }
 table {
   border-collapse: collapse;
-  min-width: 100%;
+  min-inline-size: max(100%, 36rem);
 }
 caption {
   text-align: left;
@@ -163,13 +166,6 @@ td {
   padding: 0.4rem 0.6rem;
   text-align: left;
   overflow-wrap: anywhere;
-}
-.swatch {
-  display: inline-block;
-  width: 1rem;
-  height: 1rem;
-  vertical-align: middle;
-  border: 1px solid currentColor;
 }
 .opaque {
   overflow-wrap: anywhere;

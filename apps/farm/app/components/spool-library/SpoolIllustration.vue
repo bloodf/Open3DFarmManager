@@ -1,99 +1,109 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { filamentSwatchBackground } from '../../utils/spool-library-format.ts'
-import type { FilamentItem } from '../../utils/spool-library-types.ts'
+import {
+  filamentSwatchBackground,
+  spoolRemainingFraction,
+} from '../../utils/spool-library-format.ts'
+import type {
+  FilamentItem,
+  SpoolItem,
+} from '../../utils/spool-library-types.ts'
+import { formatPercentage } from '../../utils/ui-format.ts'
 
 // Reel and winding layers adapted from orca-ui-foundation (MIT); see THIRD_PARTY_NOTICES.md.
 const props = defineProps<{
-  filament: Pick<
+  spool?: SpoolItem
+  filament?: Pick<
     FilamentItem,
     'color_hex' | 'multi_color_hexes' | 'multi_color_direction'
   >
-  fraction: number | null
+  spoolmanPercent?: number | null
+  printerPercent?: number | null
+  compact?: boolean
 }>()
-const files = import.meta.glob<string>('../../assets/spool/*.webp', {
-  eager: true,
-  import: 'default',
-})
 const fill = [1, 0.85, 0.7, 0.55, 0.4, 0.25, 0.08]
-const paint = computed(() => filamentSwatchBackground(props.filament))
-const known = computed(
-  () => props.fraction !== null && Number.isFinite(props.fraction),
+const paint = computed(() =>
+  filamentSwatchBackground(props.spool?.filament ?? props.filament ?? {}),
 )
-const unknown = computed(() => !known.value)
+function percentFraction(percent: number | null | undefined) {
+  return percent != null && Number.isFinite(percent)
+    ? Math.max(0, Math.min(1, percent / 100))
+    : null
+}
+const fraction = computed(
+  () =>
+    (props.spool ? spoolRemainingFraction(props.spool) : null) ??
+    percentFraction(props.spoolmanPercent) ??
+    percentFraction(props.printerPercent),
+)
+const unknown = computed(() => fraction.value === null)
 const level = computed(() => {
-  if (!known.value) return paint.value ? 1 : 8
-  const fraction = props.fraction ?? 0
-  if (fraction <= 0) return 8
+  const remaining = fraction.value
+  if (remaining === null) return 1
+  if (remaining === 0) return 8
   let best = 0
   for (let i = 1; i < fill.length; i++) {
-    if (Math.abs(fill[i]! - fraction) < Math.abs(fill[best]! - fraction))
+    if (Math.abs(fill[i]! - remaining) < Math.abs(fill[best]! - remaining))
       best = i
   }
   return best + 1
 })
-const body = computed(
-  () => files[`../../assets/spool/n${level.value}-corpo.webp`],
-)
-const wind = computed(
-  () => files[`../../assets/spool/n${level.value}-fio.webp`],
+const label = computed(() =>
+  fraction.value === null
+    ? 'Nível restante desconhecido'
+    : `Nível restante: ${formatPercentage(fraction.value * 100)}`,
 )
 </script>
 
 <template>
   <span
     class="spool-illustration"
+    :class="{ compact }"
     :data-level="level"
     :data-unknown="unknown || undefined"
-    aria-hidden="true"
+    role="img"
+    :aria-label="label"
   >
-    <img
-      class="spool-body"
-      :src="body"
-      alt=""
-      width="160"
-      height="160"
-      draggable="false"
-    />
     <span
-      v-if="wind"
+      v-if="level !== 8"
       class="spool-wind"
-      :style="{
-        background: paint || 'var(--color-text-muted)',
-        maskImage: `url(${wind})`,
-        WebkitMaskImage: `url(${wind})`,
-      }"
-    >
-      <img :src="wind" alt="" width="160" height="160" draggable="false" />
-    </span>
-    <span v-if="unknown" class="spool-unknown">?</span>
+      :style="{ background: paint || 'var(--color-text-muted)' }"
+    />
+    <span v-if="unknown" class="spool-unknown" aria-hidden="true">?</span>
   </span>
 </template>
 
 <style scoped>
 .spool-illustration {
   position: relative;
-  display: block;
+  display: inline-block;
   flex: none;
-  width: 4rem;
-  height: 4rem;
+  inline-size: 4rem;
+  block-size: 4rem;
+  vertical-align: middle;
   isolation: isolate;
 }
-.spool-illustration img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  user-select: none;
+.spool-illustration.compact {
+  inline-size: 2.5rem;
+  block-size: 2.5rem;
+}
+.spool-illustration::before,
+.spool-wind::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--reel-image) center / contain no-repeat;
+}
+.spool-illustration::before {
+  filter: drop-shadow(0 0 1px var(--color-text-muted));
 }
 .spool-wind {
   position: absolute;
   inset: 0;
-  mask-position: center;
-  mask-size: 100% 100%;
-  mask-repeat: no-repeat;
+  mask: var(--winding-image) center / contain no-repeat;
 }
-.spool-wind img {
+.spool-wind::after {
+  background-image: var(--winding-image);
   mix-blend-mode: hard-light;
 }
 .spool-unknown {
@@ -112,7 +122,39 @@ const wind = computed(
   font-weight: 700;
   line-height: 1;
 }
-.spool-body {
-  filter: drop-shadow(0 0 1px var(--color-text-muted));
+.compact .spool-unknown {
+  width: 1rem;
+  height: 1rem;
+}
+[data-level='1'] {
+  --reel-image: url('../../assets/spool/n1-corpo.webp');
+  --winding-image: url('../../assets/spool/n1-fio.webp');
+}
+[data-level='2'] {
+  --reel-image: url('../../assets/spool/n2-corpo.webp');
+  --winding-image: url('../../assets/spool/n2-fio.webp');
+}
+[data-level='3'] {
+  --reel-image: url('../../assets/spool/n3-corpo.webp');
+  --winding-image: url('../../assets/spool/n3-fio.webp');
+}
+[data-level='4'] {
+  --reel-image: url('../../assets/spool/n4-corpo.webp');
+  --winding-image: url('../../assets/spool/n4-fio.webp');
+}
+[data-level='5'] {
+  --reel-image: url('../../assets/spool/n5-corpo.webp');
+  --winding-image: url('../../assets/spool/n5-fio.webp');
+}
+[data-level='6'] {
+  --reel-image: url('../../assets/spool/n6-corpo.webp');
+  --winding-image: url('../../assets/spool/n6-fio.webp');
+}
+[data-level='7'] {
+  --reel-image: url('../../assets/spool/n7-corpo.webp');
+  --winding-image: url('../../assets/spool/n7-fio.webp');
+}
+[data-level='8'] {
+  --reel-image: url('../../assets/spool/n8-corpo.webp');
 }
 </style>

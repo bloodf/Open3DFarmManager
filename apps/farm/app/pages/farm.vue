@@ -27,6 +27,7 @@ import {
   useStatusSummary,
 } from '../composables/useStatusSummary.ts'
 import { wallCardProps } from '../utils/farm-wall-card.ts'
+import { activeSlotSpools } from '../utils/slot-spools.ts'
 import FarmCardControls from '../components/farm/FarmCardControls.vue'
 import ExtendedControlStatus from '../components/farm/ExtendedControlStatus.vue'
 import ToolTemperatureConfirmation from '../components/farm/ToolTemperatureConfirmation.vue'
@@ -73,6 +74,20 @@ const {
 const liveFeedConnected = computed(() =>
   (ready.value?.rows ?? []).some((row) => row.connection === 'authenticated'),
 )
+const spoolAssignments = ref<Record<string, Readonly<Record<string, number>>>>(
+  {},
+)
+function spoolsFor(row: FarmRow) {
+  const current = ready.value
+  if (!current?.scope) return []
+  return activeSlotSpools({
+    farmId: current.scope.farmId,
+    row,
+    inventory: current.spools,
+    now: now.value,
+    assignments: spoolAssignments.value[row.assignment.assignmentId],
+  })
+}
 const lastKnown = useLastKnownStates({
   farmId: () => ready.value?.scope?.farmId,
   live: () => liveFeedConnected.value,
@@ -460,6 +475,7 @@ function cancelPause(event: Event) {
               :rows="renderedRows"
               :farm-id="ready.scope.farmId"
               :live-now="liveNow"
+              :active-spools-for="spoolsFor"
             >
               <template
                 v-for="group in groupFarmRows(wallRows, wallQuery.groupBy)"
@@ -575,6 +591,7 @@ function cancelPause(event: Event) {
           :farm-id="ready.scope.farmId"
           :camera-for="cameraFor"
           :live-now="liveNow"
+          :active-spools="spoolsFor(inspectedRow)"
           :alerts="
             alertsSummary.byAssignment[inspectedRow.assignment.assignmentId] ??
             []
@@ -582,8 +599,11 @@ function cancelPause(event: Event) {
           @setup="setupLink(inspectedRow.assignment.assignmentId)"
           @save="saveLink(inspectedRow.assignment.assignmentId)"
           @cancel="delete drafts[inspectedRow.assignment.assignmentId]"
+          @spool-assignments="
+            spoolAssignments[inspectedRow.assignment.assignmentId] = $event
+          "
         >
-          <template #summary>
+          <template #summary="{ activeSpools }">
             <PrinterWallCard
               v-bind="
                 wallCardProps(
@@ -595,6 +615,7 @@ function cancelPause(event: Event) {
                 )
               "
               :now="liveNow()"
+              :active-spools="activeSpools"
               :heading-level="wallQuery.groupBy ? 4 : 3"
               embedded
             />
@@ -612,6 +633,7 @@ function cancelPause(event: Event) {
           </template>
           <FarmCardControls
             :row="inspectedRow"
+            :active-spools="spoolsFor(inspectedRow)"
             :keys="ready.keys"
             :control-enabled="pauseEnabled"
             :command-in-flight="commandInFlight"

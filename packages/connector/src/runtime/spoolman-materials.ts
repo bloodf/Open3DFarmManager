@@ -1,6 +1,7 @@
 import { boundPrinterString } from '@open3dfarmmanager/farm-protocol'
 import type { SpoolmanSnapshot } from './spoolman-provider.ts'
 import type { ActiveSpoolAssignment } from '../spoolman/active-assignments.ts'
+import { spoolmanRemainingPercent } from '../spoolman/read.ts'
 
 type Spool = NonNullable<SpoolmanSnapshot['inventory']>['items'][number]
 
@@ -10,8 +11,7 @@ export function mapSpoolmanMaterial(spool: Spool, slot = 'external') {
     ? boundPrinterString(spool.filament.material, 64)
     : undefined
   const color = spool.filament.color_hex?.toUpperCase()
-  const remaining = spool.remaining_weight
-  const initial = spool.initial_weight
+  const remainingPercent = spoolmanRemainingPercent(spool)
   return {
     slot,
     active: true,
@@ -23,14 +23,7 @@ export function mapSpoolmanMaterial(spool: Spool, slot = 'external') {
       ? {}
       : { filamentDensityGramsPerCm3: spool.filament.density }),
     ...(color ? { colorHex: color.length === 6 ? `${color}FF` : color } : {}),
-    ...(remaining !== null && initial !== null && initial > 0
-      ? {
-          remainingPercent: Math.max(
-            0,
-            Math.min(100, (remaining / initial) * 100),
-          ),
-        }
-      : {}),
+    ...(remainingPercent !== undefined ? { remainingPercent } : {}),
   }
 }
 

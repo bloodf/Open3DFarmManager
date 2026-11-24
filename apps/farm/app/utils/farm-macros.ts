@@ -26,6 +26,7 @@ export function filamentTrays(state: PrinterState | undefined) {
           {
             id: Number(match[1]) * 4 + Number(match[2]),
             label: `${material.slot}${material.materialType ? ` — ${material.materialType}` : ''}`,
+            material,
           },
         ]
       : []

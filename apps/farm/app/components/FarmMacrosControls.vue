@@ -3,13 +3,16 @@ import { computed, ref } from 'vue'
 import type { FarmKeyState, FarmRow } from '../utils/farm-view.ts'
 import { controlActionAvailability, type Clock } from '../utils/farm-control.ts'
 import { filamentTrays, macroActions, macroArgs } from '../utils/farm-macros.ts'
+import SpoolIllustration from './spool-library/SpoolIllustration.vue'
 import type { ExtendedControlAction } from '../../../../packages/farm-protocol/src/control-actions.ts'
+import type { ActiveSpool } from '../../../../packages/farm-protocol/src/status.ts'
 const props = defineProps<{
   row: FarmRow
   keys: FarmKeyState
   controlEnabled: boolean
   commandInFlight: boolean
   now: Clock
+  activeSpools?: readonly ActiveSpool[]
 }>()
 const emit = defineEmits<{
   (
@@ -22,6 +25,14 @@ const emit = defineEmits<{
 const actions = computed(() => macroActions(props.row.observation?.state))
 const trays = computed(() => filamentTrays(props.row.observation?.state))
 const tray = ref('')
+const selected = computed(() =>
+  trays.value.find((item) => String(item.id) === tray.value),
+)
+const assigned = computed(() =>
+  props.activeSpools?.find(
+    (spool) => spool.slot === selected.value?.material.slot,
+  ),
+)
 function available(action: ExtendedControlAction) {
   return (
     !props.commandInFlight &&
@@ -40,9 +51,13 @@ function run(name: string, event: Event) {
 }
 function load(event: Event) {
   if (!available('load_filament')) return
-  const selected = trays.value.find((item) => String(item.id) === tray.value)
-  if (tray.value && !selected) return
-  emit('action', 'load_filament', selected ? { tray: selected.id } : {}, event)
+  if (tray.value && !selected.value) return
+  emit(
+    'action',
+    'load_filament',
+    selected.value ? { tray: selected.value.id } : {},
+    event,
+  )
 }
 </script>
 <template>
@@ -70,6 +85,16 @@ function load(event: Event) {
           </option>
         </select>
       </label>
+      <SpoolIllustration
+        v-if="selected && !row.observation?.historical"
+        :filament="{
+          color_hex:
+            assigned?.colorHex ?? selected.material.colorHex?.slice(0, 6),
+        }"
+        :spoolman-percent="assigned?.remainingPercent"
+        :printer-percent="selected.material.remainingPercent"
+        compact
+      />
       <button
         type="button"
         :disabled="!available('load_filament')"

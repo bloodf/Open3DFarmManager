@@ -157,6 +157,7 @@ export async function configureSpoolmanOnConnectors(input: {
   report: (result: {
     agentId: string
     origin: string
+    serviceId?: string
     status: SpoolmanStatus
     configured: boolean
   }) => Promise<void>
@@ -231,7 +232,15 @@ export async function configureSpoolmanOnConnectors(input: {
         continue
       }
       await input
-        .report({ agentId, origin, status: 'reachable', configured: true })
+        .report({
+          agentId,
+          origin,
+          status: 'reachable',
+          configured: true,
+          ...(input.target.service_id
+            ? { serviceId: input.target.service_id }
+            : {}),
+        })
         .catch(() => {})
       done({ agentId, status: 'reachable', configured: true })
     } catch {

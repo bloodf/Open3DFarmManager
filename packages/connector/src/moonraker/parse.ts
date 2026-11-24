@@ -69,7 +69,7 @@ export class MoonrakerReadError extends Error {
   }
 }
 
-function result(wire: string): unknown {
+export function parseMoonrakerHttpResult(wire: string): unknown {
   if (typeof wire !== 'string') throw new MoonrakerReadError('invalid-frame')
   if (Buffer.byteLength(wire, 'utf8') > MAX_FRAME_BYTES)
     throw new MoonrakerReadError('frame-too-large')
@@ -104,7 +104,7 @@ export function parseMoonrakerServerInfo(wire: string): {
   state: z.infer<typeof klippyState>
   ready: boolean
 } {
-  const info = validate(ServerInfo, result(wire))
+  const info = validate(ServerInfo, parseMoonrakerHttpResult(wire))
   return {
     connected: info.klippy_connected,
     state: info.klippy_state,
@@ -119,6 +119,6 @@ export function parseMoonrakerSnapshot(
 ): { sourceEventtime: number; printer: PrinterState } {
   const parsedContext = Context.safeParse(input)
   if (!parsedContext.success) throw new MoonrakerReadError('invalid-context')
-  const snapshot = validate(Snapshot, result(wire))
+  const snapshot = validate(Snapshot, parseMoonrakerHttpResult(wire))
   return normalizeMoonrakerSnapshot(snapshot, parsedContext.data)
 }

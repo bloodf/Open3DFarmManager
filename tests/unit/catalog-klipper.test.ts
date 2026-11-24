@@ -77,12 +77,14 @@ describe('catálogo Klipper/Moonraker', () => {
   })
 
   it('usa os status decididos e nunca documented sem fonte', () => {
+    const telemetryGrades: Record<string, string> = {
+      'klipper-generic-moonraker': 'hardware',
+      'snapmaker-u1': 'reference-matched',
+    }
     for (const product of klipperCatalog) {
       const c = product.capabilities
       // Only the generic entry has recorded hardware qualification reports.
-      expect(c.telemetry).toBe(
-        product.id === 'klipper-generic-moonraker' ? 'hardware' : 'simulated',
-      )
+      expect(c.telemetry).toBe(telemetryGrades[product.id] ?? 'simulated')
       expect(c.pause).toBe('simulated')
       expect(c.resume).toBe('simulated')
       expect(c.cancel).toBe('simulated')

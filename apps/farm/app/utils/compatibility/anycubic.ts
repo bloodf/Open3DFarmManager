@@ -10,7 +10,12 @@ import type {
 } from './control-areas.ts'
 
 export type CatalogCapability =
-  'hardware' | 'documented' | 'simulated' | 'unknown' | 'unsupported'
+  | 'hardware'
+  | 'reference-matched'
+  | 'documented'
+  | 'simulated'
+  | 'unknown'
+  | 'unsupported'
 
 export interface AnycubicCatalogProduct {
   readonly id: string

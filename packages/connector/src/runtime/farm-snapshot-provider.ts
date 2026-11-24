@@ -510,6 +510,9 @@ export function createFarmSnapshotSource(input: {
         : {}),
       printerKey: parsedPrinter.data.printerKey,
       state: parsedPrinter.data.state,
+      ...(parsedPrinter.data.statusMessage
+        ? { statusMessage: parsedPrinter.data.statusMessage }
+        : {}),
       ...(parsedPrinter.data.preformStatus
         ? { preformStatus: parsedPrinter.data.preformStatus }
         : {}),

@@ -164,9 +164,9 @@ async function fixture(
   }
 
   /** Advances signalling to the RTC offer phase; returns the proof delivery. */
-  async function reachOffer() {
+  async function reachOffer(openSocket = true) {
     await vi.waitFor(() => expect(socket.isBound()).toBe(true))
-    socket.open()
+    if (openSocket) socket.open()
     const now = Date.now()
     socket.deliver({
       v: 1,
@@ -325,6 +325,74 @@ describe('configuration session refusal', () => {
     expect(socket.state.closeCalls).toBe(1)
     expect(peer.sent).toEqual([])
     expect(authority).not.toHaveBeenCalled()
+  })
+
+  it('retries only configuration admission before the Connector is ready', async () => {
+    const { input, socket, peer, reachOffer, controller, authority } =
+      await fixture()
+    const opening = openConfigurationBrowserSession(input)
+    void opening.catch(() => {})
+    try {
+      await vi.waitFor(() => expect(socket.isBound()).toBe(true))
+      socket.open()
+      socket.deliver({ v: 1, t: 'config.retry', retry_after_ms: 10 })
+      await vi.waitFor(() => expect(socket.state.sent).toHaveLength(2))
+      expect(socket.state.sent[1]).toBe(socket.state.sent[0])
+      const deliverProofs = await reachOffer(false)
+      deliverProofs()
+      await opening
+      expect(peer.sent).toEqual([])
+      expect(authority).not.toHaveBeenCalled()
+    } finally {
+      controller.abort()
+    }
+  })
+
+  it('cancels a scheduled admission retry when the caller aborts', async () => {
+    const { input, socket, controller } = await fixture()
+    vi.useFakeTimers()
+    try {
+      const opening = openConfigurationBrowserSession(input)
+      void opening.catch(() => {})
+      await vi.advanceTimersByTimeAsync(0)
+      expect(socket.isBound()).toBe(true)
+      socket.open()
+      socket.deliver({ v: 1, t: 'config.retry', retry_after_ms: 50 })
+      await vi.advanceTimersByTimeAsync(49)
+      expect(socket.state.bound).toBe(true)
+      controller.abort()
+      await expect(opening).rejects.toThrow('aborted')
+      await vi.advanceTimersByTimeAsync(1)
+      expect(socket.state.sent).toHaveLength(1)
+    } finally {
+      controller.abort()
+      vi.useRealTimers()
+    }
+  })
+
+  it('refuses further admission retries after two attempts to renew', async () => {
+    const { input, socket, controller } = await fixture()
+    vi.useFakeTimers()
+    try {
+      const opening = openConfigurationBrowserSession(input)
+      void opening.catch(() => {})
+      await vi.advanceTimersByTimeAsync(0)
+      expect(socket.isBound()).toBe(true)
+      socket.open()
+      const retry = { v: 1, t: 'config.retry', retry_after_ms: 10 }
+      socket.deliver(retry)
+      await vi.advanceTimersByTimeAsync(10)
+      socket.deliver(retry)
+      await vi.advanceTimersByTimeAsync(10)
+      socket.deliver(retry)
+      await expect(opening).rejects.toThrow('frame-failed')
+      await vi.advanceTimersByTimeAsync(10)
+      expect(socket.state.sent).toHaveLength(3)
+      expect(socket.state.closeCalls).toBe(1)
+    } finally {
+      controller.abort()
+      vi.useRealTimers()
+    }
   })
 
   it('stays refused when proofs arrive after the socket closed', async () => {

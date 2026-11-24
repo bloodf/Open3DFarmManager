@@ -395,7 +395,10 @@ async function fixture() {
     const connectorSide = inbox ?? (await connectInbox())
     const browserSide = endpoint()
     const opened = await coordinator.open(scope, browserSide.port)
-    assert.ok(opened, 'owner browser admitted without any assignment')
+    assert.ok(
+      opened?.kind === 'ready',
+      'owner browser admitted without any assignment',
+    )
     const ready = decodeConfigurationSignallingServerFrame(opened.readyWire)
     assert.equal(ready.t, 'config.ready')
     if (ready.t !== 'config.ready') throw new Error('unreachable')
@@ -901,7 +904,7 @@ test('binding expiry and relay rules close the configuration transport', async (
   const inbox = await g.connectInbox()
   const browserSide = endpoint()
   const opened = await g.coordinator.open(g.scope, browserSide.port)
-  assert.ok(opened)
+  assert.ok(opened?.kind === 'ready')
   const ready = decodeConfigurationSignallingServerFrame(opened.readyWire)
   if (ready.t !== 'config.ready') throw new Error('unreachable')
   const offer = (transportId: string) =>
@@ -920,7 +923,10 @@ test('binding expiry and relay rules close the configuration transport', async (
   assert.equal(inbox.ep.frames().at(-1)?.t, 'config.context-closed')
   const again = endpoint()
   const reopened = await g.coordinator.open(g.scope, again.port)
-  assert.ok(reopened, 'the Connector inbox survives a refused transport')
+  assert.ok(
+    reopened?.kind === 'ready',
+    'the Connector inbox survives a refused transport',
+  )
   const next = decodeConfigurationSignallingServerFrame(reopened.readyWire)
   if (next.t !== 'config.ready') throw new Error('unreachable')
   assert.equal(
@@ -931,7 +937,7 @@ test('binding expiry and relay rules close the configuration transport', async (
   // Revocation while negotiating closes before any binding exists.
   const third = endpoint()
   const last = await g.coordinator.open(g.scope, third.port)
-  assert.ok(last)
+  assert.ok(last?.kind === 'ready')
   const lastReady = decodeConfigurationSignallingServerFrame(last.readyWire)
   if (lastReady.t !== 'config.ready') throw new Error('unreachable')
   g.state.authority = null

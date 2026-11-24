@@ -159,13 +159,19 @@ export async function connectKobraX(options: {
   }
   function query(type: keyof typeof queries) {
     if (!client.connected) return
+    // The Orca LAN client sends timestamped, null-data requests for info,
+    // print, and multiColorBox. Keep the supplemental query frames as-is.
+    const envelope =
+      type === 'status' || type === 'tempature'
+        ? { data: {} }
+        : { timestamp: Date.now(), data: null }
     client.publish(
       `${path}/${modeId}/${deviceId}/${type}`,
       JSON.stringify({
         type,
         action: queries[type],
         msgid: randomUUID(),
-        data: {},
+        ...envelope,
       }),
     )
   }

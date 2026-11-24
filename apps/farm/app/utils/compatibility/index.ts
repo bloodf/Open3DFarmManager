@@ -36,6 +36,7 @@ export const capabilityLabels: Record<
 }
 export const capabilityStatusLabels: Record<CatalogCapability, string> = {
   hardware: 'Comprovado em hardware',
+  'reference-matched': 'Validado com a referência',
   documented: 'Documentado',
   simulated: 'Simulado',
   unknown: 'Desconhecido',

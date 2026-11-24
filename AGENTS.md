@@ -1,6 +1,6 @@
 # Development rules
 
-- This is an independent MIT project. Write original code. Check dependency licenses; retain required notices.
+- This is an independent AGPL-3.0-or-later project. Write original code. Check dependency licenses; retain required notices, including the previous MIT notice.
 - Private hosting configuration, account identifiers, credentials and the original private planning documents stay outside this repository.
 - Use independent accounts, a host-only session cookie and a dedicated database. Never reuse another product's session or secrets.
 - Phase 0 and v1 target Klipper/Moonraker and Spoolman. Build and test with simulators before hardware.

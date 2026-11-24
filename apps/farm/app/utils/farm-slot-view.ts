@@ -108,8 +108,8 @@ export function verifiedSlotBindings(
     const slots =
       index.get(assignment.printerId) ?? new Map<SlotBindingKey, SlotBinding>()
     slots.set(`${assignment.slotKind}:${assignment.slotIndex}`, {
-      remainingGrams: spool.remaining_weight,
-      initialGrams: spool.initial_weight ?? spool.filament.weight,
+      remainingGrams: spool.remaining_weight ?? null,
+      initialGrams: spool.initial_weight ?? spool.filament.weight ?? null,
     })
     index.set(assignment.printerId, slots)
   }

@@ -215,7 +215,9 @@ export async function collectIntoQueue(input: {
         totals.unavailable++
         diagnostic({ kind: 'unavailable', reason: event.reason })
         const previous = latestStates.get(event.printerKey)
-        if (previous && previous.state !== 'offline') {
+        // Live observations can advance even when their wall time cannot
+        // replace the latest snapshot. Use the live state for the transition.
+        if (previous && lastState.get(event.printerKey) !== 'offline') {
           const {
             controls: _controls,
             materials: _materials,
@@ -270,14 +272,14 @@ export async function collectIntoQueue(input: {
         }
         const printer =
           input.libraryLinks?.attach(event.printer) ?? event.printer
-        // On reconnect the offline row has no controls. Read current
-        // capabilities and withhold starts until the release is recorded.
+        // At startup or after an offline snapshot there are no prior controls
+        // to carry forward. Read current capabilities and withhold starts.
         const advertised = () => input.controlsFor?.(printerKey)
         const controls =
           printer.state === 'offline'
             ? undefined
             : pendingRelease !== undefined && !confirmsRelease
-              ? (latest?.state === 'offline'
+              ? (!latest || latest.state === 'offline'
                   ? advertised()
                   : latest?.controls
                 )?.filter((action) => !COLLECTION_HELD_ACTIONS.has(action))

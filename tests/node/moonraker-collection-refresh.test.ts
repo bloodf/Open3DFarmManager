@@ -259,6 +259,26 @@ test('an idle connection records unchanged status after an immediate release rea
   assert.equal(runtime.pending.get('a')?.releasedAtMonoMs, undefined)
 })
 
+test('a pre-release startup request reports unaffected controls until the next read', async (t) => {
+  const {
+    runtime,
+    fixtures: [a],
+  } = await startRuntime(t, ['a'])
+  assert.ok(a)
+  const initial = await a.request(0, 'subscribe')
+  assert.equal((await runtime.confirm('a', '20')).acknowledged, true)
+  initial.reply(10)
+  const first = await until(() => runtime.states('a')[0], 'Startup snapshot')
+  assert.deepEqual(first.controls, ['pause'])
+  assert.ok(runtime.pending.get('a')?.releasedAtMonoMs !== undefined)
+
+  const next = await a.request(1, 'query')
+  next.reply(10)
+  const second = await until(() => runtime.states('a')[1], 'Release snapshot')
+  assert.deepEqual(second.controls, released)
+  assert.equal(runtime.pending.get('a')?.releasedAtMonoMs, undefined)
+})
+
 test('collection release publishes an unchanged complete read for that printer only', async (t) => {
   const {
     runtime,
@@ -341,7 +361,7 @@ test('collection release publishes an unchanged complete read for that printer o
   assert.equal(runtime.states('b').length, 1)
 })
 
-test('release survives disconnect and a dropped telemetry write', async (t) => {
+test('release survives repeated disconnects, a timestamp tie, and a dropped write', async (t) => {
   const {
     directory,
     runtime,
@@ -394,9 +414,28 @@ test('release survives disconnect and a dropped telemetry write', async (t) => {
     wall.mock.restore()
   }
 
-  const storageAttempt = await a.request(3, 'query')
+  reconnect.socket.terminate()
+  const storageAttempt = await a.request(3, 'subscribe')
+  const offlineAgain = runtime.observed.at(-1)
+  assert.equal(offlineAgain?.state, 'offline')
+  assert.ok(offlineAgain.observedAt > offline.observedAt)
+  assert.equal(runtime.states('a')[3]?.observedAt, offlineAgain.observedAt)
+  assert.ok(
+    runtime.queue
+      .batch(Date.now())
+      .records.some(
+        (row) =>
+          row.kind === 'printer-transition' &&
+          row.transition.from === first.state &&
+          row.transition.to === 'offline' &&
+          row.transition.observedAt === offlineAgain.observedAt,
+      ),
+  )
+  assert.ok(runtime.pending.get('a')?.releasedAtMonoMs !== undefined)
+
   const logPath = join(directory, 'telemetry', 'telemetry.jsonl')
   const open = fs.openSync
+  let appends = 0
   const fault = t.mock.method(
     fs,
     'openSync',
@@ -404,7 +443,8 @@ test('release survives disconnect and a dropped telemetry write', async (t) => {
       if (
         path === logPath &&
         typeof flags === 'number' &&
-        flags & fs.constants.O_APPEND
+        flags & fs.constants.O_APPEND &&
+        ++appends === 2
       )
         throw Object.assign(new Error('Simulated full disk'), {
           code: 'ENOSPC',
@@ -423,20 +463,21 @@ test('release survives disconnect and a dropped telemetry write', async (t) => {
     'Dropped enqueue',
   )
   assert.ok(runtime.pending.get('a')?.releasedAtMonoMs !== undefined)
+  assert.equal(runtime.queue.storageLost, 1)
   assert.equal(runtime.queue.storageDegraded, true)
   fault.mock.restore()
   syncBuiltinESMExports()
   assert.equal(runtime.queue.retryStorage(), true)
   assert.deepEqual(
     runtime.states('a').map((state) => state.controls),
-    [held, undefined, ['pause']],
+    [held, undefined, ['pause'], undefined],
   )
 
   const next = await a.request(4, 'query')
   const sentAt = Date.now()
   next.reply(1)
   const last = await until(
-    () => runtime.states('a')[3],
+    () => runtime.states('a')[4],
     'Release after storage recovery',
   )
   assert.deepEqual(last.controls, released)

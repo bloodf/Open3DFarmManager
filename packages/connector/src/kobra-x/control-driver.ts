@@ -34,6 +34,7 @@ function reportedEffect(
 ): ControlObservation['effect'] {
   switch (action) {
     case 'set_temperature': {
+      if (type !== 'tempature' && type !== 'print') return
       const heater = args.heater
       if (heater !== 'extruder' && heater !== 'bed') return
       const target_c =
@@ -45,6 +46,7 @@ function reportedEffect(
       return
     }
     case 'set_fan': {
+      if (type !== 'fan' && type !== 'print') return
       const percent = (type === 'print' ? record(data.settings) : data)
         .fan_speed_pct
       if (typeof percent === 'number')
@@ -52,16 +54,18 @@ function reportedEffect(
       return
     }
     case 'set_light':
-      if (data.status === 0 || data.status === 1)
+      if (type === 'light' && (data.status === 0 || data.status === 1))
         return { kind: 'light', on: data.status === 1, observedMono }
       return
     case 'load_filament':
       // The native executor matches both box id and loaded slot before this result.
-      if (typeof args.tray === 'number')
+      if (type === 'multiColorBox' && typeof args.tray === 'number')
         return { kind: 'filament', tray: args.tray, observedMono }
       return
     case 'unload_filament':
-      return { kind: 'filament', tray: null, observedMono }
+      if (type === 'multiColorBox')
+        return { kind: 'filament', tray: null, observedMono }
+      return
   }
 }
 
@@ -87,6 +91,13 @@ export function openFixedKobraXControl(input: {
   let confirmed: ControlObservation | undefined
   let filename: string | undefined
   let currentFacts: KobraXFacts | undefined
+  let activeAction: ExtendedControlAction | undefined
+  let activeArgs: Record<string, unknown> = {}
+  let currentEffect: ControlObservation['effect']
+  let ready = false
+  let effectCaptured = false
+  let confirmedTaskId: string | undefined
+  let verifiedTaskId: string | undefined
   let sequence = 0
   let notify: (() => void) | undefined
   const reportTimes = new WeakMap<KobraXReport, number>()
@@ -138,6 +149,9 @@ export function openFixedKobraXControl(input: {
       (action === 'start_print' && args.ams_mapping !== undefined)
     )
       await waitFor(() => !!currentFacts?.boxes.length)
+    const previousTaskId = currentFacts?.taskId
+    activeAction = action
+    activeArgs = args
     let sent = false
     const outcome = await adapter.control.execute(action, args, {
       signal: request.signal,
@@ -174,7 +188,25 @@ export function openFixedKobraXControl(input: {
     if (effectAt === undefined || stopped || request.signal.aborted)
       return { acknowledged: false }
     const effect = reportedEffect(action, args, outcome.report, effectAt)
-    if (effect || action === 'start_print') {
+    effectCaptured = true
+    const startedTaskId =
+      typeof outcome.report.data.taskid === 'string'
+        ? outcome.report.data.taskid
+        : undefined
+    if (
+      action === 'start_print' &&
+      (!startedTaskId ||
+        startedTaskId === '-1' ||
+        startedTaskId === previousTaskId)
+    )
+      return { acknowledged: false }
+    if (
+      effect ||
+      action === 'start_print' ||
+      action === 'pause' ||
+      action === 'resume' ||
+      action === 'cancel'
+    ) {
       // The effect report need not say whether the printer is still ready.
       // Ask for current state once, without resending the command.
       const before = sequence
@@ -184,16 +216,20 @@ export function openFixedKobraXControl(input: {
           !!latest &&
           latest.sequence > before &&
           (action !== 'start_print' ||
-            (latest.printState === 'printing' && filename === args.file)),
+            (latest.printState === 'printing' &&
+              filename === args.file &&
+              verifiedTaskId === startedTaskId)),
       )
-      if (latest)
+      if (latest) {
+        confirmedTaskId = startedTaskId
         confirmed = {
           ...latest,
           effect:
             action === 'start_print' && filename !== undefined
               ? { kind: 'file', filename, observedMono: latest.receivedMono }
-              : effect,
+              : currentEffect,
         }
+      }
     } else {
       confirmed = latest
     }
@@ -213,7 +249,13 @@ export function openFixedKobraXControl(input: {
         confirmed.sequence <= after.sequence ||
         confirmed.connectionGeneration !== after.connectionGeneration ||
         confirmed.receivedMono <= after.sentMono ||
-        latest?.printState !== confirmed.printState
+        latest?.printState !== confirmed.printState ||
+        !ready ||
+        (confirmed.effect?.kind === 'file' &&
+          verifiedTaskId !== confirmedTaskId) ||
+        (confirmed.effect !== undefined &&
+          confirmed.effect.kind !== 'file' &&
+          currentEffect !== confirmed.effect)
       )
         return null
       // The dispatcher aborts its command signal before persisting a confirmed
@@ -239,12 +281,79 @@ export function openFixedKobraXControl(input: {
         reconnectMs: 0,
         signal: input.signal,
         onDisconnect: stop,
-        onReport(report, snapshot, facts) {
+        onReport(report, snapshot, facts, currentStateQuery) {
           if (stopped) return
           currentFacts = facts
           const now = input.clock.monotonicNow()
           reportTimes.set(report, now)
           const { type, data, state, action } = report
+          const successful = reportRefusal(report) === null
+          if (
+            !successful ||
+            ((type === 'info' || type === 'status') &&
+              ((data.state === 'busy' && latest?.printState === 'idle') ||
+                (data.state === 'free' &&
+                  (latest?.printState === 'printing' ||
+                    latest?.printState === 'paused')))) ||
+            (type === 'print' &&
+              ((state === 'printing' && latest?.printState !== 'printing') ||
+                (state === 'paused' && latest?.printState !== 'paused') ||
+                ((state === 'finished' || state === 'stoped') &&
+                  latest?.printState !== 'idle' &&
+                  latest?.printState !== 'cancelled')))
+          )
+            ready = false
+          if (currentStateQuery)
+            ready =
+              successful &&
+              (report.code === 0 || report.code === 200) &&
+              state === 'done' &&
+              (data.state === 'free' || data.state === 'busy') &&
+              (data.project == null ||
+                (typeof data.project === 'object' &&
+                  !Array.isArray(data.project)))
+          if (currentStateQuery && ready) {
+            const project = record(data.project)
+            verifiedTaskId =
+              typeof project.taskid === 'string' ? project.taskid : undefined
+          }
+          if (activeAction && successful) {
+            if (
+              effectCaptured &&
+              type === 'multiColorBox' &&
+              (activeAction === 'load_filament' ||
+                activeAction === 'unload_filament')
+            )
+              currentEffect = undefined
+            const nextEffect = reportedEffect(
+              activeAction,
+              activeArgs,
+              report,
+              now,
+            )
+            if (
+              nextEffect &&
+              !(
+                effectCaptured &&
+                type === 'multiColorBox' &&
+                (activeAction === 'load_filament' ||
+                  activeAction === 'unload_filament')
+              )
+            )
+              currentEffect = nextEffect
+          }
+          if (!ready && latest?.ready) {
+            latest = { ...latest, ready: false }
+            input.publish(latest)
+          }
+          if (!successful) {
+            if (latest) {
+              latest = { ...latest, ready: false }
+              input.publish(latest)
+            }
+            notify?.()
+            return
+          }
           let printState: ControlObservation['printState'] | undefined
           if (type === 'print' && action !== 'getSliceParam') {
             if (state === 'stoped')
@@ -260,7 +369,8 @@ export function openFixedKobraXControl(input: {
               printState =
                 snapshot.state === 'error'
                   ? 'error'
-                  : latest?.printState === 'cancelled'
+                  : latest?.printState === 'cancelled' ||
+                      (activeAction === 'cancel' && effectCaptured)
                     ? 'cancelled'
                     : 'idle'
             if (data.state === 'busy')
@@ -271,15 +381,20 @@ export function openFixedKobraXControl(input: {
                     : 'printing'
                   : 'unknown'
           }
-          if (printState) {
-            filename = facts.filename
+          if (printState && currentStateQuery && ready) {
+            const project = record(data.project)
+            filename =
+              typeof project.filename === 'string'
+                ? project.filename
+                : undefined
             latest = {
               assignmentId,
               printerKey,
               printState,
               connectionGeneration: input.connectionGeneration,
               sequence: ++sequence,
-              ready: printState !== 'error' && printState !== 'unknown',
+              ready:
+                ready && printState !== 'error' && printState !== 'unknown',
               readyObservedMono: now,
               printStateObservedMono: now,
               receivedMono: now,
@@ -293,7 +408,9 @@ export function openFixedKobraXControl(input: {
         await adapter.close()
         throw failure()
       }
-      await waitFor(() => !!latest && currentFacts?.infoState !== undefined)
+      await waitFor(
+        () => !!latest?.ready && ready && currentFacts?.infoState !== undefined,
+      )
     },
     async close() {
       input.signal.removeEventListener('abort', stop)

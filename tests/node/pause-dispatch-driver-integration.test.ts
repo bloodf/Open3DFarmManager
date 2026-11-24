@@ -760,9 +760,9 @@ test(
           task_settings: { auto_leveling: 1 },
         },
       },
-      { type: 'print', action: 'pause', data: { taskid: '-1' } },
-      { type: 'print', action: 'resume', data: { taskid: '-1' } },
-      { type: 'print', action: 'stop', data: { taskid: '-1' } },
+      { type: 'print', action: 'pause', data: { taskid: 'job-1' } },
+      { type: 'print', action: 'resume', data: { taskid: 'job-1' } },
+      { type: 'print', action: 'stop', data: { taskid: 'job-1' } },
       {
         type: 'tempature',
         action: 'set',

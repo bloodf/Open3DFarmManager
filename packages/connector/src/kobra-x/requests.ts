@@ -81,8 +81,6 @@ export function createKobraXRequests(input: {
   const defaultTimeout = input.resultTimeoutMs ?? 5000
   const acks = new Map<string, (code: number | undefined) => void>()
   const listeners = new Set<(report: KobraXReport) => void>()
-  /** In-flight request msgids so a reply named for another request cannot settle this one. */
-  const inflight = new Set<string>()
 
   /** Acknowledgement on `<deviceId>/response`: "received" only. */
   function handleAck(payload: unknown) {
@@ -119,7 +117,6 @@ export function createKobraXRequests(input: {
         finished = true
         clearTimeout(timer)
         acks.delete(msgid)
-        inflight.delete(msgid)
         stop()
         spec.signal?.removeEventListener('abort', onAbort)
         resolve(outcome)
@@ -127,14 +124,11 @@ export function createKobraXRequests(input: {
       function onAbort() {
         finish(acked ? { kind: 'received' } : { kind: 'unanswered' })
       }
-      // Own msgid always matches. A report msgid that names another in-flight
-      // request must not settle this one (#616). Otherwise S1 printers choose
-      // their own report msgid (or omit it), so type+action still applies.
-      const ownsReport = (report: KobraXReport) => {
-        if (report.msgid === msgid) return true
-        if (report.msgid && inflight.has(report.msgid)) return false
-        return report.type === spec.type && report.action === spec.action
-      }
+      // A result belongs to this request only when all envelope fields match.
+      const ownsReport = (report: KobraXReport) =>
+        report.msgid === msgid &&
+        report.type === spec.type &&
+        report.action === spec.action
       stop = onReport((report) => {
         if (!ownsReport(report)) return
         const refusal = reportRefusal(report)
@@ -160,7 +154,6 @@ export function createKobraXRequests(input: {
           data: (spec.result ? spec.result(report) : undefined) as T,
         })
       })
-      inflight.add(msgid)
       acks.set(msgid, (code) => {
         if (code !== undefined && code !== 0 && code !== 200) {
           finish({

@@ -1,5 +1,5 @@
 import { record } from './discovery.ts'
-import type { KobraXReport } from './requests.ts'
+import { reportRefusal, type KobraXReport } from './requests.ts'
 
 const preparing = new Set([
   'checking',
@@ -135,6 +135,7 @@ export function createKobraXFacts() {
   >()
 
   function report(input: KobraXReport) {
+    if (reportRefusal(input) !== null) return
     if (input.type === 'print' && input.action === 'getSliceParam') return
     const { data } = input
     const previous = facts

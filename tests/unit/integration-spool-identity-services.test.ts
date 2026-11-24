@@ -1,5 +1,6 @@
 import {
   hasCurrentSpoolObservation,
+  prefetchSpoolMembership,
   recordInventorySnapshot,
 } from '../../apps/farm/server/storage/postgres-inventory-snapshot.ts'
 import {
@@ -229,6 +230,81 @@ test.each([-20_000, 20_000])(
     ).toBe(true)
   },
 )
+
+test('rejects inventory snapshots reported too far in the future before writing', async () => {
+  const tx = Object.assign(vi.fn(), { json: (value: unknown) => value })
+  await recordInventorySnapshot(
+    tx as unknown as TransactionSql,
+    { farmId, agentId: connectorA },
+    observation(serviceA, connectorA, 0, 40_001, [1]).snapshot,
+    10_000,
+  )
+  expect(tx).not.toHaveBeenCalled()
+})
+
+test('rejects targeted membership replies for a different service', async () => {
+  const now = Date.now()
+  const rows = [
+    {
+      agentId: connectorA,
+      observedAt: now,
+      receivedAt: now,
+      snapshot: {
+        ...observation(serviceA, connectorA, 0, now, [1]).snapshot,
+        total: 2,
+      },
+    },
+  ]
+  const sql = vi.fn(async () => rows)
+  const evidence = await prefetchSpoolMembership(
+    sql as unknown as Sql,
+    farmId,
+    { serviceId: serviceA, spoolId: 99 },
+    async () => ({
+      kind: 'spool-membership',
+      serviceId: serviceB,
+      spoolId: 99,
+      present: true,
+      observedAt: now,
+    }),
+  )
+  expect(evidence).toEqual([])
+})
+
+test('does not use targeted membership after its reply freshness window expires', async () => {
+  vi.useFakeTimers()
+  try {
+    vi.setSystemTime(100_000)
+    const row = {
+      agentId: connectorA,
+      observedAt: 100_000,
+      receivedAt: 100_000,
+      snapshot: {
+        ...observation(serviceA, connectorA, 0, 100_000, [1]).snapshot,
+        total: 2,
+      },
+    }
+    const evidence = [
+      {
+        agentId: connectorA,
+        observedAt: 100_000,
+        receivedAt: 100_000,
+        repliedAt: 70_000,
+      },
+    ]
+    const tx = vi.fn(async () => [row])
+    expect(
+      await hasCurrentSpoolObservation(
+        tx as unknown as TransactionSql,
+        farmId,
+        { serviceId: serviceA, spoolId: 99 },
+        evidence,
+      ),
+    ).toBe(false)
+  } finally {
+    vi.useRealTimers()
+  }
+})
 
 const cappedIds = [1, 2, 3, 4, 5, 6, 7, 8, 99]
 

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { ref, watch } from 'vue'
+
 const origin = defineModel<string>('origin', { required: true })
 const serviceId = defineModel<string>('serviceId', { required: true })
 const token = defineModel<string>('token', { required: true })
@@ -7,6 +9,21 @@ const password = defineModel<string>('password', { required: true })
 
 defineProps<{ busy: boolean; connectorCount: number }>()
 const emit = defineEmits<{ submit: [] }>()
+const serviceIdError = ref('')
+
+watch(serviceId, () => {
+  serviceIdError.value = ''
+})
+
+function validateServiceId() {
+  serviceIdError.value =
+    serviceId.value &&
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      serviceId.value,
+    )
+      ? 'Informe um UUID válido para o serviço Spoolman.'
+      : ''
+}
 </script>
 
 <template>
@@ -33,7 +50,13 @@ const emit = defineEmits<{ submit: [] }>()
       maxlength="36"
       autocomplete="off"
       spellcheck="false"
-      aria-describedby="spoolman-service-id-help"
+      :aria-invalid="serviceIdError ? 'true' : undefined"
+      :aria-describedby="
+        serviceIdError
+          ? 'spoolman-service-id-help spoolman-service-id-error'
+          : 'spoolman-service-id-help'
+      "
+      @blur="validateServiceId"
     />
     <p id="spoolman-service-id-help">
       Ao mudar o endereço da mesma instalação, informe o UUID que ela já usa. Se
@@ -43,6 +66,14 @@ const emit = defineEmits<{ submit: [] }>()
       endereço. Sem UUID neste campo, cada Connector mantém o ID no mesmo
       endereço e cria outro quando o endereço muda. Atualize Connectors antigos
       antes de usar um UUID explícito.
+    </p>
+    <p
+      v-if="serviceIdError"
+      id="spoolman-service-id-error"
+      class="service-id-error"
+      role="alert"
+    >
+      {{ serviceIdError }}
     </p>
 
     <label for="spoolman-username">Usuário (opcional)</label>

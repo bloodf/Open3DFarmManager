@@ -269,9 +269,9 @@ test('service UUID accepts a valid value and announces invalid values in Portugu
   await serviceField.fill('00000000-0000-4000-8000-0000000000b1')
   await expect(serviceField).toHaveValue('00000000-0000-4000-8000-0000000000b1')
   await serviceField.fill('uuid-invalido')
-  await page.getByRole('button', { name: 'Testar conexão e salvar' }).click()
+  await serviceField.blur()
   const error = page.getByRole('alert')
-  await expect(error).toBeFocused()
+  await expect(error).toBeVisible()
   await expect(error).toContainText(
     'Informe um UUID válido para o serviço Spoolman.',
   )

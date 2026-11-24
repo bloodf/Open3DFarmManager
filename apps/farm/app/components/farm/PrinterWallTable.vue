@@ -84,9 +84,11 @@ const sortedRows = computed(() => {
         state?.toolTemperatureCelsius,
         state?.bedTemperatureCelsius,
         state?.filename,
-        state?.materials
-          ?.map((material) => material.materialType || material.slot)
-          .join(', '),
+        row.observation?.historical
+          ? undefined
+          : state?.materials
+              ?.map((material) => material.materialType || material.slot)
+              .join(', '),
         alerts.length ? alerts.join(', ') : 'Nenhum',
         age?.seconds,
       ]

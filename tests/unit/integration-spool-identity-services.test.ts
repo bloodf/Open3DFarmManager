@@ -115,7 +115,10 @@ test('search and usage expose only explicitly bound provenance even when spool I
   }
 })
 
-test.runIf(process.env.OPENFARM_TEST_SPOOL_IDENTITY_PG === '1')(
+test.runIf(
+  process.env.OPENFARM_TEST_SPOOL_IDENTITY_PG === '1' ||
+    process.env.OPENFARM_PG === 'docker',
+)(
   'sandbox ledger joins only explicit bindings across a service replacement',
   async () => {
     const fixture = disposablePostgres({

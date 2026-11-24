@@ -31,7 +31,10 @@ describe('physical spool input', () => {
   })
 })
 
-it.runIf(process.env.OPENFARM_TEST_PHYSICAL_PG === '1')(
+it.runIf(
+  process.env.OPENFARM_TEST_PHYSICAL_PG === '1' ||
+    process.env.OPENFARM_PG === 'docker',
+)(
   'registers and withdraws two similar spools against the sandbox library',
   async () => {
     const ledgerPath = process.env.OPENFARM_PHYSICAL_RESOURCE_LEDGER

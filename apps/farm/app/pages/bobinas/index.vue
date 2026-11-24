@@ -7,6 +7,7 @@ import Meter from '../../components/ui/Meter.vue'
 import Skeleton from '../../components/ui/Skeleton.vue'
 import StatusBadge from '../../components/ui/StatusBadge.vue'
 import ColorSwatch from '../../components/spool-library/ColorSwatch.vue'
+import SpoolIllustration from '../../components/spool-library/SpoolIllustration.vue'
 import ConfirmDeleteDialog from '../../components/spool-library/ConfirmDeleteDialog.vue'
 import SpoolFormDialog from '../../components/spool-library/SpoolFormDialog.vue'
 import SpoolLibraryShell from '../../components/spool-library/SpoolLibraryShell.vue'
@@ -650,7 +651,16 @@ onBeforeUnmount(() => {
         >
           <header class="card-head">
             <div class="card-title-group">
-              <ColorSwatch :filament="spool.filament" :show-label="false" />
+              <SpoolIllustration
+                :filament="spool.filament"
+                :fraction="
+                  spoolBaseWeight(spool) !== null &&
+                  spoolBaseWeight(spool)! > 0 &&
+                  spool.remaining_weight != null
+                    ? spool.remaining_weight / spoolBaseWeight(spool)!
+                    : null
+                "
+              />
               <div class="card-title-text">
                 <h3>
                   {{ spoolDisplayTitle(spool) }}
@@ -682,6 +692,9 @@ onBeforeUnmount(() => {
               label="Bobina com pouco material"
             />
             <div class="stock-numbers">
+              <span v-if="spoolRemainingPercent(spool) === null" class="muted"
+                >Nível restante desconhecido</span
+              >
               <strong>
                 Restante: {{ formatSpoolWeight(spool.remaining_weight) }}
               </strong>

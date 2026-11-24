@@ -275,6 +275,8 @@ export const SpoolmanConfigurationTarget = z
       provisional: z.literal(true),
     }),
     origin: ConfigurationMoonrakerOrigin,
+    /** Shared UUID of this Spoolman installation, independent of its address. */
+    service_id: z.string().uuid().optional(),
     /** Bearer token for a reverse proxy in front of Spoolman. */
     token: z
       .string()

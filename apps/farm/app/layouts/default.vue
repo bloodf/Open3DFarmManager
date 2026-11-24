@@ -236,7 +236,7 @@ const paletteGroups = computed(() => {
     },
     {
       label: 'Bobinas',
-      items: spools.value.map((item) => ({
+      items: (query.value.trim() ? spools.value : []).map((item) => ({
         label: `${spoolDisplayTitle(item)} · #${item.id}`,
         to: scopedHref('/bobinas', { q: String(item.id) }),
       })),

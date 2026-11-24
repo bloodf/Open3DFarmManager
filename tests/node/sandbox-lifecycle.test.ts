@@ -22,13 +22,16 @@ import {
   disposablePostgres,
   findPostgresBin,
 } from '../helpers/disposable-postgres.ts'
+import { vitestPostgresOptions } from '../helpers/vitest-postgres.ts'
 import postgres from 'postgres'
 
 let missing = ''
-try {
-  findPostgresBin()
-} catch (error) {
-  missing = String(error)
+if (process.env.OPENFARM_PG !== 'docker') {
+  try {
+    findPostgresBin()
+  } catch (error) {
+    missing = String(error)
+  }
 }
 if (missing && process.env.CI) throw new Error(missing)
 if (missing) console.warn(`SKIP sandbox lifecycle: ${missing}`)
@@ -37,17 +40,13 @@ test(
   'launcher advances an old journal, aborts a failed migration, and retries',
   { timeout: 120_000, skip: missing || false },
   async () => {
-    const root = mkdtempSync(join(tmpdir(), 'sandbox-launch-test-'))
-    const previousProvider = process.env.OPENFARM_PG
-    delete process.env.OPENFARM_PG
     const pg = disposablePostgres({
-      name: 'sandbox-launch-716',
+      ...vitestPostgresOptions('sandbox-launch-716'),
       isolated: true,
       through: false,
       additionalScramRoles: ['sandbox_bootstrap'],
     })
-    if (previousProvider !== undefined)
-      process.env.OPENFARM_PG = previousProvider
+    const root = mkdtempSync(join(tmpdir(), 'sandbox-launch-test-'))
     let sql: ReturnType<typeof postgres> | undefined
     try {
       const admin = await pg.start()

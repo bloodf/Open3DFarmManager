@@ -1,6 +1,8 @@
 import {
   API_DISPATCH_QUERY_SUPPORT_HEADER,
   API_QUERY_SUPPORT_HEADER,
+  API_SPOOL_QUERY_SUPPORT_HEADER,
+  type ApiQueryInput,
   MAX_API_QUERY_ITEMS,
   MAX_API_QUERY_RESULT_BYTES,
   ApiQueryResult,
@@ -150,6 +152,7 @@ interface Connection {
   lastSample: SignallingClockSample
   readonly supportsApiQueries: boolean
   readonly supportsDispatchQueries: boolean
+  readonly supportsSpoolQueries: boolean
   readonly inboxId: string
   inboxGeneration: number
   state: State
@@ -291,7 +294,7 @@ export class SignallingRuntime {
   async queryAgentInbox(
     farmId: string,
     agentId: string,
-    input: Pick<ApiQueryRequest, 'assignment_id' | 'kind' | 'offset' | 'limit'>,
+    input: ApiQueryInput,
     signal?: AbortSignal,
   ): Promise<ApiQueryResult | { kind: 'error'; error: 'connector-timeout' }> {
     const connection = this.#inboxes.get('read-only:' + agentId)
@@ -302,6 +305,8 @@ export class SignallingRuntime {
     if (
       !connection?.supportsApiQueries ||
       (input.kind === 'dispatch' && !connection.supportsDispatchQueries) ||
+      (input.kind === 'spool-membership' &&
+        (!connection.supportsSpoolQueries || input.farmId !== farmId)) ||
       this.#apiIdentity(connection)?.farm_id !== farmId ||
       signal?.aborted ||
       this.#apiQueries.size >= 32 ||
@@ -322,7 +327,7 @@ export class SignallingRuntime {
       const cancel = () => finish(unavailable)
       const timeout = setTimeout(
         () => finish({ kind: 'error', error: 'connector-timeout' }),
-        10_000,
+        input.kind === 'spool-membership' ? 2_000 : 10_000,
       )
       const finish = (
         result: ApiQueryResult | { kind: 'error'; error: 'connector-timeout' },
@@ -352,17 +357,27 @@ export class SignallingRuntime {
       if (Buffer.byteLength(reply.wire) > MAX_API_QUERY_RESULT_BYTES)
         throw Error('Oversized API query result')
       const result = ApiQueryResult.parse(JSON.parse(reply.wire))
-      const { kind, limit, offset } = pending.query
-      if (
-        result.kind !== 'error' &&
-        (result.kind !== kind ||
-          result.data.length > limit ||
-          offset + result.data.length > MAX_API_QUERY_ITEMS ||
+      const query = pending.query
+      if (result.kind !== 'error') {
+        if (result.kind !== query.kind)
+          throw Error('Mismatched API query result')
+        if (query.kind === 'spool-membership') {
+          if (
+            result.kind !== 'spool-membership' ||
+            result.serviceId !== query.serviceId ||
+            result.spoolId !== query.spoolId
+          )
+            throw Error('Mismatched spool membership result')
+        } else if (
+          result.kind === 'spool-membership' ||
+          result.data.length > query.limit ||
+          query.offset + result.data.length > MAX_API_QUERY_ITEMS ||
           (result.nextOffset !== null &&
             (!result.data.length ||
-              result.nextOffset !== offset + result.data.length)))
-      )
-        throw Error('Mismatched API query result')
+              result.nextOffset !== query.offset + result.data.length))
+        )
+          throw Error('Mismatched API query page')
+      }
       pending.finish(result)
     } catch {
       pending.finish({ kind: 'error', error: 'connector-unavailable' })
@@ -485,6 +500,8 @@ export class SignallingRuntime {
           role === 'connector' &&
           mode === 'read-only' &&
           inspected.headers.get(API_QUERY_SUPPORT_HEADER) === '1',
+        supportsSpoolQueries:
+          inspected.headers.get(API_SPOOL_QUERY_SUPPORT_HEADER) === '1',
         supportsDispatchQueries:
           inspected.headers.get(API_DISPATCH_QUERY_SUPPORT_HEADER) === '1',
         inboxId: randomUUID(),

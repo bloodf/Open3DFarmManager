@@ -10,6 +10,7 @@ import {
   MAX_API_QUERY_RESULT_BYTES,
   type ApiDispatchObservation,
   type ApiQueryReply,
+  type ApiSpoolMembership,
   type ApiQueryRequest,
   type ApiQueryResult,
 } from '../../../farm-protocol/src/api-query.ts'
@@ -22,13 +23,68 @@ import { listMoonrakerMacros } from '../moonraker/macros.ts'
 import { createFileTargets } from './file-targets.ts'
 import { readPrinterFiles, type FileListTarget } from './file-list.ts'
 import { moonrakerQueryClient } from './api-query-moonraker.ts'
+import { SPOOL_INVENTORY_STALE_MS } from '../../../farm-protocol/src/inventory.ts'
+import type { SpoolmanSnapshot } from './spoolman-provider.ts'
+
+export function createSpoolMembershipReader() {
+  let current:
+    | {
+        inventory: NonNullable<SpoolmanSnapshot['inventory']>
+        deadline: number
+        observedAt: number
+      }
+    | undefined
+  return {
+    update(snapshot: SpoolmanSnapshot) {
+      const { inventory, ageMs } = snapshot
+      current = undefined
+      if (snapshot.kind !== 'observed' || !inventory || ageMs === null) return
+      const now = Date.now()
+      const observedAt = Math.min(
+        inventory.observedFrom,
+        Math.floor(now - ageMs),
+      )
+      current = {
+        inventory,
+        observedAt,
+        deadline:
+          performance.now() + SPOOL_INVENTORY_STALE_MS - (now - observedAt),
+      }
+    },
+    read(
+      query: Extract<ApiQueryRequest, { kind: 'spool-membership' }>,
+    ): ApiSpoolMembership | undefined {
+      if (!current) return undefined
+      const { inventory, deadline, observedAt } = current
+      if (
+        inventory.farmId.toLowerCase() !== query.farmId ||
+        inventory.serviceId.toLowerCase() !== query.serviceId ||
+        observedAt < 0 ||
+        performance.now() >= deadline
+      )
+        return undefined
+      return {
+        kind: query.kind,
+        serviceId: query.serviceId,
+        spoolId: query.spoolId,
+        present: inventory.items.some(({ id }) => id === query.spoolId),
+        observedAt,
+      }
+    },
+  }
+}
 
 export function createApiQueryReader(
   config: AgentRuntimeConfig,
   dataDirectory: string,
   collectionJournal?: QueueCollectionJournal,
+  readSpoolMembership?: ReturnType<typeof createSpoolMembershipReader>['read'],
 ) {
   return async (query: ApiQueryRequest, signal: AbortSignal) => {
+    if (query.kind === 'spool-membership') {
+      const membership = readSpoolMembership?.(query)
+      return membership ? { membership } : undefined
+    }
     const binding = config.bindingFor(query.assignment_id)
     const assignment = binding && readRuntimePrinterBinding(binding)
     if (!assignment || assignment.assignment_id !== query.assignment_id)
@@ -148,6 +204,7 @@ type QuerySource =
   | { files: FileListTarget }
   | { macros: readonly string[] }
   | { dispatch: ApiDispatchObservation }
+  | { membership: ApiSpoolMembership }
   | undefined
 
 export async function answerApiQuery(
@@ -168,6 +225,8 @@ export async function answerApiQuery(
         kind: 'error',
         error: 'unsupported',
       } satisfies ApiQueryResult)
+    } else if (query.kind === 'spool-membership' && 'membership' in source) {
+      wire = JSON.stringify(source.membership)
     } else if (query.kind === 'dispatch' && 'dispatch' in source) {
       wire = JSON.stringify({
         kind: 'dispatch',
@@ -225,7 +284,7 @@ export async function answerApiQuery(
 
 function pageWire(
   page: Extract<ApiQueryResult, { kind: 'files' | 'macros' }>,
-  query: ApiQueryRequest,
+  query: Extract<ApiQueryRequest, { assignment_id: string }>,
 ) {
   const total = Math.min(page.data.length, MAX_API_QUERY_ITEMS)
   let end = Math.min(query.offset + query.limit, total)

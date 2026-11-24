@@ -209,7 +209,11 @@ export async function collectIntoQueue(input: {
         diagnostic({ kind: 'unavailable', reason: event.reason })
         const previous = latestStates.get(event.printerKey)
         if (previous && previous.state !== 'offline') {
-          const { controls: _controls, ...rest } = previous
+          const {
+            controls: _controls,
+            materials: _materials,
+            ...rest
+          } = previous
           onEvent({
             kind: 'snapshot',
             printer: {
@@ -338,6 +342,35 @@ export async function collectIntoQueue(input: {
       let nextMachineRead = -Infinity
       let machinePending = false
       let latest: RawPrinterObservation | undefined
+      // Keep the driver-owned snapshot separate from the optional Spoolman
+      // enrichment so expired evidence cannot be copied into later records.
+      let moonrakerState: PrinterState | undefined
+      let publishedMaterials: string | undefined
+      function freshMaterials() {
+        if (
+          cachedInventory !== inventory ||
+          inventory?.kind !== 'observed' ||
+          (cached && cached.observedAtMonoMs + 5000 <= performance.now())
+        )
+          cached = undefined
+        return cached?.materials
+      }
+      function publishMaterialChange() {
+        if (!moonrakerState || signal.aborted) return
+        const materials = moonrakerState.materials ?? freshMaterials()
+        const fingerprint = JSON.stringify(materials ?? null)
+        if (fingerprint === publishedMaterials) return
+        publishedMaterials = fingerprint
+        const previous = latestStates.get(assignment.printerKey)
+        onEvent({
+          kind: 'snapshot',
+          printer: {
+            ...moonrakerState,
+            ...(materials ? { materials } : {}),
+            observedAt: Math.max(Date.now(), (previous?.observedAt ?? 0) + 1),
+          },
+        })
+      }
       const history = input.importMoonrakerHistory
         ? createMoonrakerHistoryImport({
             printerKey: assignment.printerKey,
@@ -463,12 +496,8 @@ export async function collectIntoQueue(input: {
               })
             materialReads.add(machineRead)
           }
-          if (
-            cachedInventory !== inventory ||
-            inventory?.kind !== 'observed' ||
-            (cached && cached.observedAtMonoMs + 5000 <= performance.now())
-          )
-            cached = undefined
+          freshMaterials()
+          publishMaterialChange()
           input.onRawObservation?.({
             ...value,
             ...(firmwareObservation ? { firmwareObservation } : {}),
@@ -527,6 +556,7 @@ export async function collectIntoQueue(input: {
                 return
               cached = { materials, observedAtMonoMs: started }
               cachedInventory = snapshot
+              publishMaterialChange()
               const current = latest
               input.onRawObservation?.({
                 ...current,
@@ -542,22 +572,30 @@ export async function collectIntoQueue(input: {
             })
           materialReads.add(read)
         },
-        ...(input.onRawUnavailable
-          ? {
-              onRawUnavailable(event) {
-                firmwareObservation = undefined
-                latest = undefined
-                cached = undefined
-                input.onRawUnavailable?.(event)
-              },
-            }
-          : {}),
+        onRawUnavailable(event) {
+          firmwareObservation = undefined
+          latest = undefined
+          cached = undefined
+          cachedInventory = undefined
+          moonrakerState = undefined
+          publishedMaterials = undefined
+          input.onRawUnavailable?.(event)
+        },
         onEvent: (event) => {
-          onEvent(
-            event.kind === 'snapshot' && machine
-              ? { ...event, printer: { ...event.printer, machine } }
-              : event,
-          )
+          if (event.kind === 'snapshot') {
+            moonrakerState = machine
+              ? { ...event.printer, machine }
+              : event.printer
+            const materials = moonrakerState.materials ?? freshMaterials()
+            publishedMaterials = JSON.stringify(materials ?? null)
+            onEvent({
+              ...event,
+              printer: {
+                ...moonrakerState,
+                ...(materials ? { materials } : {}),
+              },
+            })
+          } else onEvent(event)
           if (event.kind === 'unavailable')
             input.apiJobs?.unavailable(assignment.printerKey)
           else if (!signal.aborted) input.apiJobs?.record(event.printer)

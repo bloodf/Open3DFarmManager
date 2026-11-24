@@ -9,7 +9,10 @@ export async function moonrakerSpoolmanFixture() {
     authorization: string | undefined
   }[] = []
   let spoolReply: unknown = { result: { spool_id: 42 } }
+  let held: (() => void) | undefined
+  let holdNext = false
   let peer: WebSocket | undefined
+  let spoolmanPeer: WebSocket | undefined
   let eventtime = 1
   const token = `x.${Buffer.from(JSON.stringify({ exp: Date.now() / 1000 + 3600 })).toString('base64url')}.x`
   const server = createServer((req, res) => {
@@ -26,9 +29,13 @@ export async function moonrakerSpoolmanFixture() {
           result: { klippy_connected: true, klippy_state: 'ready' },
         }),
       )
-    else if (path === '/server/spoolman/spool_id')
-      res.end(JSON.stringify(spoolReply))
-    else if (path === '/api/v1/spool')
+    else if (path === '/server/spoolman/spool_id') {
+      const reply = JSON.stringify(spoolReply)
+      if (holdNext) {
+        holdNext = false
+        held = () => res.end(reply)
+      } else res.end(reply)
+    } else if (path === '/api/v1/spool')
       res.end(
         JSON.stringify([
           {
@@ -36,6 +43,13 @@ export async function moonrakerSpoolmanFixture() {
             filament: { id: 1, material: 'PLA', color_hex: 'aabbcc' },
             initial_weight: 1000,
             remaining_weight: 500,
+            archived: false,
+          },
+          {
+            id: 43,
+            filament: { id: 2, material: 'PETG', color_hex: '112233' },
+            initial_weight: 1000,
+            remaining_weight: 250,
             archived: false,
           },
         ]),
@@ -51,7 +65,10 @@ export async function moonrakerSpoolmanFixture() {
   })
   const ws = new WebSocketServer({ server })
   ws.on('connection', (socket, req) => {
-    if (req.url?.startsWith('/api/v1/')) return
+    if (req.url?.startsWith('/api/v1/')) {
+      spoolmanPeer = socket
+      return
+    }
     peer = socket
     socket.on('message', (wire) => {
       const request = JSON.parse(wire.toString())
@@ -92,6 +109,24 @@ export async function moonrakerSpoolmanFixture() {
     reply(value: unknown) {
       spoolReply = value
     },
+    holdNext() {
+      holdNext = true
+    },
+    release() {
+      held?.()
+      held = undefined
+    },
+    invalidateInventory() {
+      if (!spoolmanPeer) throw Error('Spoolman not connected')
+      spoolmanPeer.send(
+        JSON.stringify({
+          type: 'updated',
+          resource: 'spool',
+          date: '2026-01-01',
+          payload: {},
+        }),
+      )
+    },
     update() {
       if (!peer) throw Error('Moonraker not connected')
       peer.send(
@@ -101,6 +136,10 @@ export async function moonrakerSpoolmanFixture() {
           params: [{ virtual_sdcard: { progress: 0.2 } }, eventtime++],
         }),
       )
+    },
+    disconnect() {
+      if (!peer) throw Error('Moonraker not connected')
+      peer.terminate()
     },
     async close() {
       for (const socket of ws.clients) socket.terminate()

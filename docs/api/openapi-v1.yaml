@@ -1279,6 +1279,9 @@ paths:
       description: |
         Requires a farm-wide inventory grant. Each observation is bounded;
         partial snapshots omit spools and updates may change page membership.
+        Use `spoolKey` to identify a spool across Connector changes. A service
+        replacement needs a new service UUID, including at the same address.
+        Legacy observations may omit the service identity.
       security:
         - clientCredentials: ['inventory:read']
       parameters:
@@ -1307,6 +1310,9 @@ paths:
                           { type: integer, description: Unix milliseconds }
                         stale: { type: boolean }
                         partial: { type: boolean }
+                        serviceId: { type: string, format: uuid }
+                        spoolKey:
+                          $ref: '#/components/schemas/SpoolmanSpoolKey'
                         spool:
                           $ref: '#/components/schemas/Spool'
                   nextCursor: { type: [string, 'null'] }
@@ -1329,7 +1335,19 @@ paths:
       operationId: registerPhysicalSpool
       tags: [Inventory]
       summary: Register a physical spool
-      description: Creates a spool using an existing filament in the farm-wide grant. A retry with the same key, farm and body returns the original response; reuse with different input returns 409.
+      description: |
+        Creates a spool using an existing filament in the farm-wide grant. A
+        caller with a farm-wide inventory write grant may request a Spoolman
+        binding at creation. An approved Connector in the same farm must have
+        the exact service ID configured and include the exact spool ID in its
+        current, non-stale inventory snapshot less than 30 seconds old.
+        Without that observation the API returns 409 (`spool-not-observed`)
+        before creating a spool or recording a receipt.
+        The binding is immutable. A second local
+        spool cannot claim the same external identity in the same farm.
+        A retry with the same key, farm and body returns the original response.
+        Reusing the key with different input returns 409 (`idempotency-key-reused`).
+        A duplicate binding returns 409 (`spool-already-bound`).
       security:
         - clientCredentials: ['inventory:write']
       parameters:
@@ -1453,7 +1471,10 @@ paths:
       operationId: searchInventorySpools
       tags: [Inventory]
       summary: Rank matching spools in the OpenFarm library
-      description: Requires a farm-wide inventory grant and the spool usage runtime. Orders by Euclidean RGB distance, farm and spool ID.
+      description: |
+        Requires a farm-wide inventory grant and the spool usage runtime.
+        Orders by Euclidean RGB distance, farm and local spool ID. Rows without
+        an explicit Spoolman binding omit serviceId, serviceSpoolId and spoolKey.
       security:
         - clientCredentials: ['inventory:read']
       parameters:
@@ -1500,7 +1521,21 @@ paths:
                         ]
                       properties:
                         farmId: { type: string, format: uuid }
-                        spoolId: { type: integer, minimum: 1 }
+                        spoolId:
+                          type: integer
+                          minimum: 1
+                          description: Numeric ID in the OpenFarm spool library.
+                        serviceId:
+                          type: string
+                          format: uuid
+                          description: Explicitly bound Spoolman service.
+                        serviceSpoolId:
+                          type: integer
+                          minimum: 1
+                          maximum: 9007199254740991
+                          description: Numeric spool ID in the bound Spoolman service.
+                        spoolKey:
+                          $ref: '#/components/schemas/SpoolmanSpoolKey'
                         name: { type: [string, 'null'] }
                         material: { type: [string, 'null'] }
                         colorHex: { type: [string, 'null'] }
@@ -1543,7 +1578,12 @@ paths:
       operationId: listInventorySpoolUsage
       tags: [Inventory]
       summary: List spool ledger records for a finished run
-      description: Requires a farm-wide inventory grant and the spool usage runtime. Upsert records by farm and usage ID. Corrections replace grams under the same usage ID.
+      description: |
+        Requires a farm-wide inventory grant and the spool usage runtime.
+        Upsert records by farm and usage ID. Corrections replace grams under
+        the same usage ID. Rows without an explicit Spoolman binding omit
+        serviceId, serviceSpoolId and spoolKey. Join to service observations
+        only by spoolKey when present, using farmId to preserve farm scope.
       security:
         - clientCredentials: ['inventory:read']
       parameters:
@@ -1584,7 +1624,21 @@ paths:
                         usageId: { type: string, format: uuid }
                         farmId: { type: string, format: uuid }
                         jobId: { type: string }
-                        spoolId: { type: integer, minimum: 1 }
+                        spoolId:
+                          type: integer
+                          minimum: 1
+                          description: Numeric ID in the OpenFarm spool library.
+                        serviceId:
+                          type: string
+                          format: uuid
+                          description: Explicitly bound Spoolman service.
+                        serviceSpoolId:
+                          type: integer
+                          minimum: 1
+                          maximum: 9007199254740991
+                          description: Numeric spool ID in the bound Spoolman service.
+                        spoolKey:
+                          $ref: '#/components/schemas/SpoolmanSpoolKey'
                         printerId: { type: [string, 'null'], format: uuid }
                         grams: { type: number, minimum: 0 }
                         source: { type: string, enum: [telemetry, manual, api] }
@@ -3141,7 +3195,8 @@ components:
     Conflict:
       description: |
         `idempotency-key-reused`, `intent-conflict`, `request-conflict`,
-        `webhook-limit-reached`, `device-stale` or `device-not-ready`.
+        `webhook-limit-reached`, `spool-already-bound`, `spool-not-observed`,
+        `device-stale` or `device-not-ready`.
       headers:
         RateLimit-Limit:
           $ref: '#/components/headers/RateLimit-Limit'
@@ -3292,6 +3347,10 @@ components:
               type: string
               const: unsupported
               description: No qualified bin-light capability is available.
+    SpoolmanSpoolKey:
+      type: string
+      pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[1-9][0-9]*$'
+      description: Lowercase service UUID followed by a colon and the service's numeric spool ID.
     PhysicalSpoolRegistration:
       type: object
       additionalProperties: false
@@ -3305,6 +3364,14 @@ components:
           pattern: '^[^\u0000-\u001F\u007F-\u009F]*\S[^\u0000-\u001F\u007F-\u009F]*$'
           description: Initial bin location. Outer whitespace is trimmed.
         initialWeightGrams: { type: number, minimum: 0 }
+        spoolman:
+          type: object
+          additionalProperties: false
+          required: [serviceId, spoolId]
+          description: Explicit binding to the external spool represented by this new library record.
+          properties:
+            serviceId: { type: string, format: uuid }
+            spoolId: { type: integer, minimum: 1, maximum: 9007199254740991 }
     PhysicalSpoolWithdrawal:
       type: object
       additionalProperties: false
@@ -3347,6 +3414,8 @@ components:
         - intent-conflict
         - request-conflict
         - webhook-limit-reached
+        - spool-already-bound
+        - spool-not-observed
         - spool-location-changed
         - payload-too-large
         - unsupported-media-type
@@ -3988,6 +4057,10 @@ components:
           $ref: '#/components/schemas/Uuid'
         connectorId:
           $ref: '#/components/schemas/Uuid'
+        serviceId:
+          type: string
+          format: uuid
+          description: Configured Spoolman service UUID, omitted in legacy snapshots.
         observedAt:
           $ref: '#/components/schemas/TimestampMs'
         stale:

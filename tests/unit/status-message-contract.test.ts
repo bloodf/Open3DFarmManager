@@ -46,18 +46,6 @@ describe('firmware shutdown reader contract', () => {
     expect(
       PrinterState.safeParse({ ...state, statusReason: undefined }).success,
     ).toBe(false)
-    for (const otherState of [
-      'idle',
-      'printing',
-      'paused',
-      'unknown',
-      'offline',
-    ] as const)
-      for (const progress of [undefined, 0.5])
-        expect(
-          PrinterState.safeParse({ ...state, state: otherState, progress })
-            .success,
-        ).toBe(false)
     expect(
       PrinterState.safeParse({ ...state, statusMessage: undefined }).success,
     ).toBe(true)
@@ -73,6 +61,27 @@ describe('firmware shutdown reader contract', () => {
       PrinterState.parse({ ...state, statusMessage: message }).statusMessage,
     ).toBe(message)
   })
+  it.each([{}, { progress: 0.5 }])(
+    'accepts an error with firmware shutdown and progress fields %j',
+    (progressFields) => {
+      const snapshot = { ...state, ...progressFields }
+      expect(PrinterState.parse(snapshot)).toEqual(snapshot)
+    },
+  )
+  it.each(['idle', 'printing', 'paused', 'offline', 'unknown'])(
+    'rejects firmware shutdown in %s with and without progress',
+    (otherState) => {
+      const snapshot = { ...state, state: otherState }
+      for (const input of [snapshot, { ...snapshot, progress: 0.5 }]) {
+        const result = PrinterState.safeParse(input)
+        expect(result.error?.issues).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ path: ['statusReason'] }),
+          ]),
+        )
+      }
+    },
+  )
   it('exposes the reason and leaves unknown progress absent', async () => {
     expect(parseStoredPrinterState(JSON.parse(JSON.stringify(state)))).toEqual(
       state,

@@ -1,5 +1,6 @@
 import type { Sql } from 'postgres'
 import { uuidPattern } from './integration-auth.ts'
+import { publishSpoolBinding } from './integration-spool-identity.ts'
 
 export function spoolLedgerQuery(query: URLSearchParams, fields: string[]) {
   const allowed = ['farmId', 'limit', ...fields]
@@ -83,17 +84,26 @@ export async function searchIntegrationSpools(
       WHERE s.farm_id = ANY(${farmIds}::uuid[]) AND NOT s.archived
         AND (${material}::text IS NULL OR lower(f.material) = lower(${material}::text))
         AND (${red}::int IS NULL OR f.color_hex IS NOT NULL)
+    ), page AS (
+      SELECT * FROM stock
+      WHERE (${minRemainingGrams}::float8 IS NULL OR remaining >= ${minRemainingGrams}::float8)
+        AND (${availability} = 'any' OR (loaded_at IS NOT NULL) = (${availability} = 'loaded'))
+      ORDER BY distance NULLS LAST, farm_id, id
+      LIMIT ${limit}
     )
     SELECT farm_id::text AS "farmId", id::float8 AS "spoolId", name, material,
       color_hex AS "colorHex", location, remaining AS "remainingGrams",
       distance::float8 AS "colorDistance", loaded_at IS NOT NULL AS loaded,
-      COALESCE(loaded_at, '[]'::jsonb) AS "loadedAt"
-    FROM stock
-    WHERE (${minRemainingGrams}::float8 IS NULL OR remaining >= ${minRemainingGrams}::float8)
-      AND (${availability} = 'any' OR (loaded_at IS NOT NULL) = (${availability} = 'loaded'))
-    ORDER BY distance NULLS LAST, farm_id, id
-    LIMIT ${limit}`
-  return { data: rows, assessedAt: Date.now() }
+      COALESCE(loaded_at, '[]'::jsonb) AS "loadedAt",
+      r.response->'spoolman'->>'serviceId' AS "serviceId",
+      (r.response->'spoolman'->>'spoolId')::float8 AS "serviceSpoolId"
+    FROM page
+    LEFT JOIN farm.integration_physical_spool_registrations r
+      ON r.response ? 'spoolman'
+      AND r.response->>'farmId' = page.farm_id::text
+      AND r.response->>'spoolId' = page.id::text
+    ORDER BY distance NULLS LAST, farm_id, id`
+  return { data: rows.map(publishSpoolBinding), assessedAt: Date.now() }
 }
 
 export function spoolUsageQuery(query: URLSearchParams) {
@@ -116,15 +126,26 @@ export async function listIntegrationSpoolUsage(
   farmIds: string[],
   { jobId, cursor, limit }: NonNullable<ReturnType<typeof spoolUsageQuery>>,
 ) {
-  const rows = await sql<{ usageId: string }[]>`
+  const rows = await sql<(Record<string, unknown> & { usageId: string })[]>`
+    WITH page AS (
+      SELECT u.id, u.farm_id, u.job_id, u.spool_id, u.printer_id, u.grams, u.source, u.created_at, u.corrected_by
+      FROM farm.spool_usage_records u
+      WHERE u.farm_id = ANY(${farmIds}::uuid[]) AND u.job_id = ${jobId}::bigint
+        AND (${cursor}::uuid IS NULL OR u.id > ${cursor}::uuid)
+      ORDER BY u.id LIMIT ${limit + 1}
+    )
     SELECT u.id::text AS "usageId", u.farm_id::text AS "farmId",
       u.job_id::text AS "jobId", u.spool_id::float8 AS "spoolId",
       u.printer_id::text AS "printerId", u.grams, u.source,
-      u.created_at::float8 AS "observedAt", u.corrected_by IS NOT NULL AS corrected
-    FROM farm.spool_usage_records u
-    WHERE u.farm_id = ANY(${farmIds}::uuid[]) AND u.job_id = ${jobId}::bigint
-      AND (${cursor}::uuid IS NULL OR u.id > ${cursor}::uuid)
-    ORDER BY u.id LIMIT ${limit + 1}`
-  const data = rows.slice(0, limit)
+      u.created_at::float8 AS "observedAt", u.corrected_by IS NOT NULL AS corrected,
+      r.response->'spoolman'->>'serviceId' AS "serviceId",
+      (r.response->'spoolman'->>'spoolId')::float8 AS "serviceSpoolId"
+    FROM page u
+    LEFT JOIN farm.integration_physical_spool_registrations r
+      ON r.response ? 'spoolman'
+      AND r.response->>'farmId' = u.farm_id::text
+      AND r.response->>'spoolId' = u.spool_id::text
+    ORDER BY u.id`
+  const data = rows.slice(0, limit).map(publishSpoolBinding)
   return { data, nextCursor: rows.length > limit ? data.at(-1)!.usageId : null }
 }

@@ -17,7 +17,9 @@ export async function membersPageBundle() {
   const result = await build({
     stdin: {
       contents: `const calls = []
-const $fetch = async (url, options = {}) => {
+globalThis.useRoute = () => ({ path: '/membros', query: {}, hash: '' })
+globalThis.useRouter = () => ({ replace: async () => {} })
+globalThis.$fetch = async (url, options = {}) => {
   calls.push({ url: String(url), method: options.method ?? 'GET', body: options.body ?? null })
   if (String(url) === '/api/farms' && !options.method) {
     return { farms: [{ farmId: ${JSON.stringify(farmId)} }], nextAfter: null }

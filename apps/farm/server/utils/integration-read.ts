@@ -1,6 +1,6 @@
 import type { Sql } from 'postgres'
 import { useRuntimeConfig } from 'nuxt/server'
-import { SpoolInventory } from '@open3dfarmmanager/farm-protocol'
+import { parseInventorySnapshot } from '../storage/postgres-inventory-snapshot.ts'
 import { uuidPattern, type IntegrationPrincipal } from './integration-auth.ts'
 
 import { integrationHistoryJobIds } from '../storage/integration-jobs-history.ts'
@@ -128,10 +128,9 @@ export async function listIntegrationInventory(
       ORDER BY farm_id, agent_id
       LIMIT ${input.limit + 1}`
   const data = rows.slice(0, input.limit).map((row) => {
-    const parsed = SpoolInventory.safeParse(row.snapshot)
-    if (!parsed.success || parsed.data.observedAt !== row.observedAt)
-      throw new Error('Stored inventory does not match its schema')
-    return { farmId: row.farmId, connectorId: row.connectorId, ...parsed.data }
+    const snapshot = parseInventorySnapshot(row)
+    if (!snapshot) throw new Error('Stored inventory does not match its schema')
+    return { farmId: row.farmId, connectorId: row.connectorId, ...snapshot }
   })
   const last = data.at(-1)
   return {

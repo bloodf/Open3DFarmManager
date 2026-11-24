@@ -22,6 +22,7 @@ import {
   findPostgresBin,
   getFreePort,
 } from '../helpers/disposable-postgres.ts'
+import { vitestPostgresOptions } from '../helpers/vitest-postgres.ts'
 import { startMoonrakerMock } from '../../packages/sim-tools/src/mocks/moonraker-mock.ts'
 import {
   packet,
@@ -30,10 +31,12 @@ import {
 import { syntheticBambuTls } from '../../infra/sandbox/bambu-synthetic-identity.ts'
 
 let missing = ''
-try {
-  findPostgresBin()
-} catch (error) {
-  missing = String(error)
+if (process.env.OPENFARM_PG !== 'docker') {
+  try {
+    findPostgresBin()
+  } catch (error) {
+    missing = String(error)
+  }
 }
 if (missing && process.env.CI) throw new Error(missing)
 if (missing) console.warn(`SKIP sandbox integration: ${missing}`)
@@ -44,12 +47,12 @@ test(
   async () => {
     const production = await readFile('apps/farm/nuxt.config.ts', 'utf8')
     assert.match(production, /integrationJobs:\s*\{\s*enabled:\s*false/)
-    const state = await mkdtemp(join(tmpdir(), 'openfarm-625-'))
     const pg = disposablePostgres({
-      name: 'sandbox-625',
+      ...vitestPostgresOptions('sandbox-625'),
       isolated: true,
       through: false,
     })
+    const state = await mkdtemp(join(tmpdir(), 'openfarm-625-'))
     let sim: Awaited<ReturnType<typeof startMoonrakerMock>> | undefined
     const children: ChildProcess[] = []
     let fileServer: ReturnType<typeof createHttpsServer> | undefined

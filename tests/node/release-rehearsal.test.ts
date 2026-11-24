@@ -38,7 +38,7 @@ test('release upload and publication require a successful rehearsed build', () =
   assert.doesNotMatch(workflow, /pull_request(?:_target)?:/)
 })
 
-test('Docker rehearsal failure blocks archives and cleans only its own project', (t) => {
+test('Docker rehearsal failure blocks archives and cleans only its own project', async (t) => {
   const directory = mkdtempSync(
     join(realpathSync(tmpdir()), 'release-rehearsal-'),
   )
@@ -76,9 +76,7 @@ fi
     { mode: 0o755 },
   )
 
-  const projects = new Set<string>()
-  for (const attempt of ['first', 'second']) {
-    const cleanupFails = attempt === 'second'
+  function release(attempt: string, freeBytes: number, cleanupFails = false) {
     const trace = join(directory, attempt + '.log')
     const evidence = join(directory, attempt + '-evidence')
     const artifacts = join(directory, attempt + '-artifacts')
@@ -96,6 +94,7 @@ fi
           COMPOSE_PROJECT_NAME: 'foreign-project',
           OPENFARM_DOCKER_REHEARSAL: '0',
           OPENFARM_REHEARSAL_EVIDENCE: evidence,
+          OPENFARM_REHEARSAL_FREE_BYTES: String(freeBytes),
           DOCKER_TRACE: trace,
           DOCKER_DOWN_STATUS: cleanupFails ? '43' : '0',
         },
@@ -103,18 +102,29 @@ fi
     )
     assert.ifError(result.error)
     assert.equal(result.status, 1, result.stdout + result.stderr)
-    if (cleanupFails) {
-      assert.match(
-        result.stdout + result.stderr,
-        /Cleanup incomplete; manifest retained/,
-      )
-    } else {
-      assert.match(
-        result.stdout + result.stderr,
-        /docker compose failed \(42\)/,
-      )
-    }
     assert.equal(existsSync(artifacts), false)
+    return { output: result.stdout + result.stderr, trace, evidence }
+  }
+
+  await t.test('low free space blocks builds and archives', () => {
+    const { output, trace } = release('low-space', 9 * 1024 ** 3)
+    assert.match(output, /Need 10 GiB free for two builds/)
+    assert.doesNotMatch(readFileSync(trace, 'utf8'), /^(buildx|compose) /m)
+  })
+
+  const projects = new Set<string>()
+  for (const attempt of ['first', 'second']) {
+    const cleanupFails = attempt === 'second'
+    const { output, trace, evidence } = release(
+      attempt,
+      11 * 1024 ** 3,
+      cleanupFails,
+    )
+    if (cleanupFails) {
+      assert.match(output, /Cleanup incomplete; manifest retained/)
+    } else {
+      assert.match(output, /docker compose failed \(42\)/)
+    }
 
     const { project, succeeded, failures } = JSON.parse(
       readFileSync(join(evidence, 'cleanup.json'), 'utf8'),

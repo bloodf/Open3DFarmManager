@@ -192,7 +192,7 @@ describe('allow-list while printing or paused', () => {
   })
 
   it('accepts more while stopped, but never restarts or saves config', () => {
-    for (const line of ['G28', 'G1 X10 F3000', 'M104 S0', 'BED_MESH_CALIBRATE'])
+    for (const line of ['G1 X10 F3000', 'M104 S0', 'M105'])
       expect(consoleAllowedWhenStopped(line)).toBe(true)
     for (const line of [
       'RESTART',
@@ -200,6 +200,8 @@ describe('allow-list while printing or paused', () => {
       'SAVE_CONFIG',
       'SDCARD_PRINT_FILE FILENAME=a.gcode',
       'G28;RESTART',
+      'G28',
+      'BED_MESH_CALIBRATE',
     ])
       expect(consoleAllowedWhenStopped(line)).toBe(false)
   })
@@ -221,8 +223,8 @@ describe('allow-list while printing or paused', () => {
         return (error as ConsoleRefusal).code
       }
     }
-    expect(code('G28', 'standby')).toBe('sent')
-    expect(code('G28', 'cancelled')).toBe('sent')
+    expect(code('G28', 'standby')).toBe('not-allowed')
+    expect(code('G28', 'cancelled')).toBe('not-allowed')
     expect(code('G28', 'printing')).toBe('not-allowed')
     expect(code('G28', 'paused')).toBe('not-allowed')
     expect(code('M220 S110', 'printing')).toBe('sent')
@@ -363,11 +365,19 @@ describe('Moonraker console on the E16 mock', () => {
 
   it('sends one line when enabled and stopped', async () => {
     await withMock({}, true, async (mock, attempt) => {
-      expect(await attempt('gcode', { line: ' G28 ' })).toMatchObject({
+      expect(await attempt('gcode', { line: ' M105 ' })).toMatchObject({
         ok: true,
         guard: 1,
       })
-      expect(mock.control.gcodeScripts).toEqual(['G28'])
+      expect(mock.control.gcodeScripts).toEqual(['M105'])
+      for (const line of [' G28 ', 'BED_MESH_CALIBRATE', 'MY_MACRO']) {
+        expect(await attempt('gcode', { line })).toMatchObject({
+          ok: false,
+          guard: 0,
+          error: { code: 'not-allowed', refusal: 'invalid-command' },
+        })
+        expect(mock.control.gcodeScripts).toEqual(['M105'])
+      }
     })
   })
 

@@ -75,6 +75,9 @@ const Read = z.strictObject({
 })
 const ADMISSION_MS = 8000
 const MIN_CONTEXT_MS = 5000
+// The Connector's default reconnect delay is one second after a healthy session.
+const INBOX_RENEWAL_GRACE_MS = 1500
+const INBOX_RENEWAL_POLL_MS = 750
 const nonce = () => randomBytes(32).toString('base64url')
 
 type Inbox = {
@@ -404,10 +407,16 @@ export class ConfigurationSignallingCoordinator implements ConfigurationLiveRegi
   async open(
     input: unknown,
     endpoint: ConfigurationSignallingEndpoint,
-  ): Promise<Readonly<{
-    handle: ConfigurationSignallingHandle
-    readyWire: string
-  }> | null> {
+    retryingInbox = false,
+  ): Promise<
+    | Readonly<{
+        kind: 'ready'
+        handle: ConfigurationSignallingHandle
+        readyWire: string
+      }>
+    | Readonly<{ kind: 'retry'; retryAfterMs: number }>
+    | null
+  > {
     const scope = ConfigurationScope.safeParse(input)
     if (
       !scope.success ||
@@ -429,26 +438,34 @@ export class ConfigurationSignallingCoordinator implements ConfigurationLiveRegi
       )
         return null
       const a = read.authority
+      const admissionWall = Math.max(read.observedAt, now.wall)
+      const authorityDeadline = Math.min(
+        a.validUntil,
+        read.observedAt + CONFIGURATION_HARD_MAXIMUMS.bindingMs,
+      )
+      if (authorityDeadline - admissionWall < MIN_CONTEXT_MS) return null
       const inbox = this.currentInbox(a.farm_id, a.agent_id)
-      // Stale or foreign Connector: the live socket must hold the current credential.
       if (
-        !inbox ||
-        inbox.revision === null ||
-        inbox.jti !== a.credential_jti ||
-        inbox.context ||
+        (inbox && (inbox.jti !== a.credential_jti || inbox.context)) ||
         [...this.contexts].some((c) => c.authority.key_id === a.key_id)
       )
         return null
-      const deadline = Math.min(
-        a.validUntil,
-        read.observedAt + CONFIGURATION_HARD_MAXIMUMS.bindingMs,
-        inbox.expiresAt,
-      )
-      const remaining = Math.min(
-        deadline - Math.max(read.observedAt, now.wall),
+      if (!inbox || inbox.revision === null)
+        return retryingInbox
+          ? { kind: 'retry', retryAfterMs: INBOX_RENEWAL_POLL_MS }
+          : null
+      const inboxRemaining = Math.min(
+        inbox.expiresAt - admissionWall,
         inbox.deadlineMono - now.monotonic,
       )
-      if (remaining < MIN_CONTEXT_MS) return null
+      if (inboxRemaining < MIN_CONTEXT_MS)
+        return {
+          kind: 'retry',
+          retryAfterMs:
+            Math.max(0, Math.ceil(inboxRemaining)) + INBOX_RENEWAL_GRACE_MS,
+        }
+      const deadline = Math.min(authorityDeadline, inbox.expiresAt)
+      const remaining = Math.min(deadline - admissionWall, inboxRemaining)
       const handle = new Handle(this)
       Object.freeze(handle)
       const c: Context = {
@@ -513,7 +530,9 @@ export class ConfigurationSignallingCoordinator implements ConfigurationLiveRegi
           browser_nonce: c.browserNonce,
           ...lease,
         })
-        return this.live(c) ? Object.freeze({ handle, readyWire }) : null
+        return this.live(c)
+          ? Object.freeze({ kind: 'ready', handle, readyWire })
+          : null
       } catch {
         this.close(c)
         return null

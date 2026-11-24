@@ -381,8 +381,7 @@ async function fixture(
       },
     }
   }
-  /** Drives both peers through the exported socket session, exactly as the routes do. */
-  async function handshake() {
+  async function connect() {
     const c = socket('connector')
     await c.send({
       v: 1,
@@ -414,6 +413,11 @@ async function fixture(
       enabled: true,
       revision: 0,
     })
+    return c
+  }
+  /** Drives both peers through the exported socket session, exactly as the routes do. */
+  async function handshake() {
+    const c = await connect()
     const b = socket('browser', sessionRecordId)
     await b.send({
       v: 1,
@@ -492,6 +496,7 @@ async function fixture(
     coordinator,
     runtime,
     socket,
+    connect,
     handshake,
     event,
   }
@@ -702,7 +707,7 @@ test('socket sessions enforce order, authentication and a session-bound browser'
   expect(f.coordinator.snapshot()).toMatchObject({ inboxes: 0, contexts: 0 })
 })
 
-test('bootstrap stops advertising before the Connector can no longer admit configuration', async () => {
+test('browser waits for inbox renewal when configuration bootstrap goes stale', async () => {
   const started = Date.now()
   let elapsed = 0
   const f = await fixture({
@@ -715,34 +720,87 @@ test('bootstrap stops advertising before the Connector can no longer admit confi
   const scope = { farmId: ids.farm, agentId: ids.agent }
   const bootstrap = () =>
     configurationBootstrapRequest(f.event(bootstrapPath), f.runtime, scope)
-  const openBrowser = async () => {
-    const browser = f.socket('browser', sessionRecordId)
-    await browser.send({
-      v: 1,
-      t: 'config.begin',
-      farm_id: ids.farm,
-      agent_id: ids.agent,
-      key_id: ids.key,
-    })
-    return browser
+  const begin = {
+    v: 1,
+    t: 'config.begin',
+    farm_id: ids.farm,
+    agent_id: ids.agent,
+    key_id: ids.key,
   }
 
   elapsed = 55_000
   expect(await bootstrap()).toMatchObject({ available: true, revision: 0 })
-  const lastChance = await openBrowser()
+  const lastChance = f.socket('browser', sessionRecordId)
+  await lastChance.send(begin)
   expect(lastChance.last().t).toBe('config.ready')
   lastChance.session.close()
 
+  const beforeRetry = live.c.count()
   elapsed++
-  const browser = await openBrowser()
-  expect(browser.closed).toBe(true)
+  const browser = f.socket('browser', sessionRecordId)
+  await browser.send(begin)
+  expect(browser.closed).toBe(false)
+  expect(browser.last()).toEqual({
+    v: 1,
+    t: 'config.retry',
+    retry_after_ms: 6499,
+  })
+  expect(f.coordinator.snapshot().contexts).toBe(0)
+  expect(live.c.count()).toBe(beforeRetry)
   expect(await bootstrap()).toMatchObject({ available: false, revision: null })
-  expect(live.c.closed).toBe(false)
 
-  const fresh = await f.handshake()
+  const noRenewal = f.socket('browser', sessionRecordId)
+  await noRenewal.send(begin)
+  expect(noRenewal.last()).toEqual(browser.last())
+
+  elapsed += 6499
+  live.c.session.close()
+  await browser.send(begin)
+  expect(browser.last()).toEqual({
+    v: 1,
+    t: 'config.retry',
+    retry_after_ms: 750,
+  })
+  await noRenewal.send(begin)
+  expect(noRenewal.last()).toEqual(browser.last())
+  expect(f.coordinator.snapshot().contexts).toBe(0)
+
+  elapsed += 750
+  await noRenewal.send(begin)
+  expect(noRenewal.closed).toBe(true)
+  expect(noRenewal.count()).toBe(2)
+
+  const fresh = await f.connect()
   expect(await bootstrap()).toMatchObject({ available: true, revision: 0 })
-  fresh.b.session.close()
-  fresh.c.session.close()
+  await browser.send(begin)
+  expect(browser.last().t).toBe('config.ready')
+  expect(fresh.last().t).toBe('config.context-request')
+  expect(fresh.count()).toBe(3)
+  expect(f.coordinator.snapshot().contexts).toBe(1)
+  await browser.send(begin)
+  expect(browser.closed).toBe(true)
+  expect(f.coordinator.snapshot().contexts).toBe(0)
+  fresh.session.close()
+})
+
+test('configuration admission fails closed when owner authority has too little time left', async () => {
+  const started = Date.now()
+  const f = await fixture({ wall: () => started, monotonic: () => 0 })
+  const connector = await f.connect()
+  f.authority.validUntil = started + 4999
+  const browser = f.socket('browser', sessionRecordId)
+  await browser.send({
+    v: 1,
+    t: 'config.begin',
+    farm_id: ids.farm,
+    agent_id: ids.agent,
+    key_id: ids.key,
+  })
+  expect(browser.closed).toBe(true)
+  expect(browser.count()).toBe(0)
+  expect(connector.count()).toBe(2)
+  expect(f.coordinator.snapshot().contexts).toBe(0)
+  connector.session.close()
 })
 
 test('HTTP handlers issue a capability and register the committed receipt end to end', async () => {

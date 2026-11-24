@@ -137,6 +137,10 @@ export async function moonrakerSpoolmanFixture() {
         }),
       )
     },
+    disconnect() {
+      if (!peer) throw Error('Moonraker not connected')
+      peer.terminate()
+    },
     async close() {
       for (const socket of ws.clients) socket.terminate()
       await new Promise<void>((resolve) => ws.close(() => resolve()))

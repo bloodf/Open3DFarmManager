@@ -8,6 +8,96 @@ import { TelemetryQueue } from '../../packages/connector/src/cloud/queue.ts'
 import { moonrakerSpoolmanFixture } from '../../packages/connector/test/moonraker-spoolman-fixture.ts'
 import type { RawPrinterObservation } from '../../packages/connector/src/runtime/farm-snapshot-provider.ts'
 
+test(
+  'disconnect clears offline materials without publishing a fresh online row',
+  { timeout: 10000 },
+  async () => {
+    const fixture = await moonrakerSpoolmanFixture()
+    const dir = mkdtempSync(join(tmpdir(), 'active-spool-disconnect-'))
+    const queue = new TelemetryQueue(join(dir, 'queue'), Date.now())
+    const controller = new AbortController()
+    let invalidationRowCount: number | undefined
+    let inventoryReady = false
+    const states = () =>
+      queue
+        .batch(Date.now())
+        .records.filter((record) => record.kind === 'printer-state')
+        .map((record) => record.state)
+    const done = collectIntoQueue({
+      config: {
+        version: 1,
+        allowedOrigins: [fixture.origin],
+        printers: [{ printerKey: 'printer', origin: fixture.origin }],
+        limits: {
+          maxMessageBytes: 4096,
+          connectTimeoutMs: 1000,
+          requestTimeoutMs: 1000,
+          staleAfterMs: 30000,
+          reconnectMinMs: 5000,
+          reconnectMaxMs: 5000,
+        },
+        spoolman: {
+          origin: fixture.origin,
+          farmId: '00000000-0000-4000-8000-000000000001',
+          serviceId: '00000000-0000-4000-8000-000000000002',
+          limit: 200,
+        },
+      },
+      queue,
+      signal: controller.signal,
+      onDiagnostic() {},
+      onInventory(value) {
+        inventoryReady = value.kind === 'observed'
+      },
+      onRawObservation() {},
+      onRawUnavailable() {
+        invalidationRowCount = states().length
+      },
+    })
+    async function waitFor(predicate: () => boolean) {
+      const deadline = Date.now() + 4000
+      while (!predicate()) {
+        if (Date.now() > deadline)
+          throw Error('Timed out waiting for collection')
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+    }
+    try {
+      await waitFor(() => inventoryReady && states().length > 0)
+      fixture.update()
+      await waitFor(
+        () => states().at(-1)?.materials?.[0]?.materialType === 'PLA',
+      )
+      const before = states().length
+      const readsBefore = fixture.requests.filter(
+        (request) => request.path === '/server/spoolman/spool_id',
+      ).length
+      fixture.disconnect()
+      await waitFor(() => states().at(-1)?.state === 'offline')
+      assert.equal(invalidationRowCount, before)
+      assert.deepEqual(
+        states()
+          .slice(before)
+          .map((state) => state.state),
+        ['offline'],
+      )
+      assert.equal(states().at(-1)?.materials, undefined)
+      assert.equal(
+        fixture.requests.filter(
+          (request) => request.path === '/server/spoolman/spool_id',
+        ).length,
+        readsBefore,
+      )
+    } finally {
+      controller.abort()
+      await done
+      queue.close()
+      await fixture.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  },
+)
+
 for (const auth of ['key', 'jwt'] as const) {
   test(
     `active Spoolman spool through collection with ${auth}`,

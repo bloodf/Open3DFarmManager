@@ -94,23 +94,6 @@ const selectedLoadInput = computed(() =>
     (input) => String(input.id) === selectedLoadInputId.value,
   ),
 )
-watch(
-  availableKobraInputs,
-  (inputs) => {
-    if (selectedLoadInputId.value || !inputs.length) return
-    const active = state.value?.materials?.find((material) => material.active)
-    const activeInput = inputs.find((input) => {
-      const material = state.value?.materials?.find((item) => item.active)
-      if (!material) return false
-      const slot = /^(-1|0):([0-3])$/.exec(material.slot)
-      if (!slot) return false
-      return input.id === Number(slot[2]) + (slot[1] === '0' ? 4 : 0)
-    })
-    if (active && activeInput)
-      selectedLoadInputId.value = String(activeInput.id)
-  },
-  { immediate: true },
-)
 function loadFilament(event: Event) {
   const args = filamentLoadArgs(selectedLoadInput.value)
   if (!args) {
@@ -240,6 +223,22 @@ const row = computed(
     ) ?? null,
 )
 const state = computed(() => row.value?.observation?.state)
+watch(
+  availableKobraInputs,
+  (inputs) => {
+    if (selectedLoadInputId.value || !inputs.length) return
+    const active = state.value?.materials?.find((material) => material.active)
+    const activeInput = inputs.find((input) => {
+      if (!active) return false
+      const slot = /^(-1|0):([0-3])$/.exec(active.slot)
+      if (!slot) return false
+      return input.id === Number(slot[2]) + (slot[1] === '0' ? 4 : 0)
+    })
+    if (active && activeInput)
+      selectedLoadInputId.value = String(activeInput.id)
+  },
+  { immediate: true },
+)
 const age = computed(() => {
   void now.value
   const observation = row.value?.observation

@@ -15,14 +15,15 @@ import {
   type MoonrakerCollectionRefresh,
 } from '../../packages/connector/src/runtime/collect.ts'
 import { serveWsTestServer, type WsTestSocket } from '../unit/ws-serve.ts'
+import type { PrinterState } from '../../packages/farm-protocol/src/state.ts'
 
 const status = {
   webhooks: { state: 'ready' },
   print_stats: { state: 'complete' },
   virtual_sdcard: { progress: 1 },
 }
-const held = ['confirm_collection']
-const released = ['start_print']
+const held = ['pause', 'confirm_collection']
+const released = ['pause', 'start_print']
 
 async function until<T>(
   read: () => T | undefined,
@@ -117,7 +118,7 @@ function setup(
   })
   for (const { printerKey } of printers) journal.complete(printerKey, '20')
   const baseDriver: PauseDriver = {
-    controls: () => ['start_print'],
+    controls: () => ['pause', 'start_print'],
     async execute() {
       assert.fail('Collection confirmation reached the printer driver')
     },
@@ -135,6 +136,7 @@ function setup(
   const binding = (key: string) => ({ key }) as unknown as PrinterBinding
   const queue = new TelemetryQueue(join(directory, 'telemetry'), Date.now())
   const controller = new AbortController()
+  const observed: PrinterState[] = []
   let refreshCachedControls: (() => void) | undefined
   const collection = collectIntoQueue({
     config: {
@@ -154,6 +156,9 @@ function setup(
     signal: controller.signal,
     moonrakerCollectionRefresh: pending,
     controlsFor: (key) => driver.controls!(binding(key)),
+    onPrinterState: (state) => {
+      observed.push(state)
+    },
     onControlsRefresh(refresh) {
       refreshCachedControls = refresh
     },
@@ -163,6 +168,7 @@ function setup(
     queue,
     pending,
     releases,
+    observed,
     refreshCachedControls: () => refreshCachedControls?.(),
     blocked: (key: string) =>
       openQueueCollectionJournal(journalPath).blocked(key),
@@ -222,6 +228,36 @@ async function startRuntime(t: TestContext, keys: string[]) {
   )
   return { directory, runtime, fixtures }
 }
+
+test('an idle connection records unchanged status after an immediate release read', async (t) => {
+  const {
+    runtime,
+    fixtures: [a],
+  } = await startRuntime(t, ['a'])
+  assert.ok(a)
+  const initial = await a.request(0, 'subscribe')
+  initial.reply(10)
+  const first = await until(() => runtime.states('a')[0], 'Initial state')
+  assert.deepEqual(first.controls, held)
+
+  const releasedAt = performance.now()
+  assert.equal((await runtime.confirm('a', '20')).acknowledged, true)
+  const immediate = await a.request(1, 'query')
+  assert.ok(
+    performance.now() - releasedAt < 800,
+    'Read scheduled before normal cadence',
+  )
+  const sentAt = Date.now()
+  immediate.reply(10)
+  const second = await until(() => runtime.states('a')[1], 'Release snapshot')
+  assert.deepEqual(second, {
+    ...first,
+    controls: released,
+    observedAt: second.observedAt,
+  })
+  assert.ok(second.observedAt >= sentAt && second.observedAt > first.observedAt)
+  assert.equal(runtime.pending.get('a')?.releasedAtMonoMs, undefined)
+})
 
 test('collection release publishes an unchanged complete read for that printer only', async (t) => {
   const {
@@ -325,10 +361,40 @@ test('release survives disconnect and a dropped telemetry write', async (t) => {
   )
   inFlight.socket.terminate()
   const reconnect = await a.request(2, 'subscribe')
-  assert.equal(runtime.states('a').at(-1)?.state, 'offline')
-  assert.equal(runtime.states('a').at(-1)?.controls, undefined)
+  const offline = runtime.observed.at(-1)
+  assert.equal(offline?.state, 'offline')
   assert.ok(runtime.pending.get('a')?.releasedAtMonoMs !== undefined)
 
+  // An online observation with the same wall time cannot replace the offline
+  // row, but still reports the status and transition with safe capabilities.
+  const wall = t.mock.method(Date, 'now', () => offline.observedAt)
+  try {
+    reconnect.reply(1)
+    const online = await until(
+      () => runtime.states('a')[2],
+      'Colliding snapshot',
+    )
+    assert.equal(online.observedAt, offline.observedAt)
+    assert.equal(online.state, first.state)
+    assert.deepEqual(online.controls, ['pause'])
+    assert.equal(runtime.observed.at(-1)?.state, first.state)
+    assert.ok(
+      runtime.queue
+        .batch(Date.now())
+        .records.some(
+          (row) =>
+            row.kind === 'printer-transition' &&
+            row.transition.from === 'offline' &&
+            row.transition.to === first.state &&
+            row.transition.observedAt === offline.observedAt,
+        ),
+    )
+    assert.ok(runtime.pending.get('a')?.releasedAtMonoMs !== undefined)
+  } finally {
+    wall.mock.restore()
+  }
+
+  const storageAttempt = await a.request(3, 'query')
   const logPath = join(directory, 'telemetry', 'telemetry.jsonl')
   const open = fs.openSync
   const fault = t.mock.method(
@@ -351,7 +417,7 @@ test('release survives disconnect and a dropped telemetry write', async (t) => {
     fault.mock.restore()
     syncBuiltinESMExports()
   })
-  reconnect.reply(1)
+  storageAttempt.reply(1)
   await until(
     () => (runtime.queue.storageLost > 0 ? true : undefined),
     'Dropped enqueue',
@@ -363,14 +429,14 @@ test('release survives disconnect and a dropped telemetry write', async (t) => {
   assert.equal(runtime.queue.retryStorage(), true)
   assert.deepEqual(
     runtime.states('a').map((state) => state.controls),
-    [held, undefined],
+    [held, undefined, ['pause']],
   )
 
-  const next = await a.request(3, 'query')
+  const next = await a.request(4, 'query')
   const sentAt = Date.now()
   next.reply(1)
   const last = await until(
-    () => runtime.states('a')[2],
+    () => runtime.states('a')[3],
     'Release after storage recovery',
   )
   assert.deepEqual(last.controls, released)

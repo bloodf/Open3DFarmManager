@@ -48,6 +48,7 @@ import { TelemetryQueue, type QueueLoss } from '../cloud/queue.ts'
 import { type LocalCollectorConfig } from '../config/local.ts'
 import { assertUnscopedCollection } from './queue-scope.ts'
 import type { LibraryJobLinks } from './library-job-links.ts'
+import { COLLECTION_HELD_ACTIONS } from '../control/queue-collection-hold.ts'
 
 export type Diagnostic =
   | { kind: 'queued'; depth: number }
@@ -233,14 +234,18 @@ export async function collectIntoQueue(input: {
         const { printerKey, observedAt } = event.printer
         const refresh = input.moonrakerCollectionRefresh?.get(printerKey)
         const pendingRelease = refresh?.releasedAtMonoMs
+        const latest = latestStates.get(printerKey)
+        // The Farm's latest row requires a strictly newer wall timestamp.
+        // Keep observing status and transitions while waiting for a new row.
+        const outOfOrder =
+          pendingRelease !== undefined &&
+          latest &&
+          observedAt <= latest.observedAt
         const confirmsRelease =
           pendingRelease !== undefined &&
+          !outOfOrder &&
           'collectionReleaseAtMonoMs' in event &&
           event.collectionReleaseAtMonoMs === pendingRelease
-        const latest = latestStates.get(printerKey)
-        // The Farm only replaces its current row with a strictly newer
-        // observation. Wait for another complete read if wall times collide.
-        if (confirmsRelease && latest && observedAt <= latest.observedAt) return
         input.onPrinterState?.(event.printer)
         const now = Date.now()
         // Degraded storage drops records; they count as lost, never as queued.
@@ -265,12 +270,18 @@ export async function collectIntoQueue(input: {
         }
         const printer =
           input.libraryLinks?.attach(event.printer) ?? event.printer
+        // On reconnect the offline row has no controls. Read current
+        // capabilities and withhold starts until the release is recorded.
+        const advertised = () => input.controlsFor?.(printerKey)
         const controls =
           printer.state === 'offline'
             ? undefined
             : pendingRelease !== undefined && !confirmsRelease
-              ? latest?.controls
-              : input.controlsFor?.(printer.printerKey)
+              ? (latest?.state === 'offline'
+                  ? advertised()
+                  : latest?.controls
+                )?.filter((action) => !COLLECTION_HELD_ACTIONS.has(action))
+              : advertised()
         const { controls: _controls, ...withoutControls } = printer
         const current = {
           ...withoutControls,
@@ -288,7 +299,7 @@ export async function collectIntoQueue(input: {
         const snapshotDropped = queue.storageLost !== lostBeforeSnapshot
         if (confirmsRelease && snapshotDropped)
           machineGate.forget(printer.printerKey)
-        else {
+        else if (!outOfOrder) {
           latestStates.set(printer.printerKey, current)
           lastControls.set(printer.printerKey, JSON.stringify(controls ?? null))
           if (confirmsRelease && refresh?.releasedAtMonoMs === pendingRelease)

@@ -895,6 +895,23 @@ export function createApiCommandRunner(config: {
         })
       } else await executeDriver()
     } catch (error) {
+      // Like the browser dispatcher, trust only the driver's typed local
+      // refusals before the write guard. They certify that nothing was sent.
+      const refusal = (error as { refusal?: unknown } | null)?.refusal
+      if (
+        attempted &&
+        !permitted &&
+        !guardCalled &&
+        (refusal === 'state' ||
+          refusal === 'unsupported-action' ||
+          refusal === 'invalid-command')
+      ) {
+        attempted = false
+        lastRefusal = [
+          refusal === 'state' ? 'wrong-state' : 'unsupported',
+          refusal,
+        ]
+      }
       if (
         !guardCalled &&
         error instanceof Error &&

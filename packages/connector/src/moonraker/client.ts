@@ -151,6 +151,8 @@ export type MoonrakerCompleteObservation = Readonly<{
   activeToolQuery: boolean
   requestStartedAtMonoMs: number
   receivedAtMonoMs: number
+  /** A newer delta is waiting to be replayed after the initial snapshot. */
+  hasNewerBufferedStatus?: true
 }>
 type StatusMethod = 'printer.objects.subscribe' | 'printer.objects.query'
 /** Reserved request id for the identify call that precedes every subscription. */
@@ -214,6 +216,7 @@ export function openMoonrakerClient(input: {
   snapshot: Promise<unknown>
   closed: Promise<MoonrakerFailureReason>
   close: () => void
+  requestCompleteRefresh: () => void
 } {
   // Let the snapshot promise continuation install its baseline before a delta.
   let socket: ReturnType<typeof createMoonrakerSocket> | undefined
@@ -385,8 +388,11 @@ export function openMoonrakerClient(input: {
       }),
     )
   }
-  function scheduleQuery() {
+  function scheduleQuery(
+    delayMs = 1000 - (performance.now() - lastRequestStarted),
+  ) {
     if (!input.onComplete || finished) return
+    clearTimeout(queryTimer)
     queryTimer = setTimeout(
       () => {
         if (input.httpStatus) {
@@ -410,8 +416,13 @@ export function openMoonrakerClient(input: {
           finish('offline')
         }
       },
-      Math.max(0, 1000 - (performance.now() - lastRequestStarted)),
+      Math.max(0, delayMs),
     )
+  }
+  function requestCompleteRefresh() {
+    // Join the existing cadence when a request is in flight, including the
+    // initial subscription. The subscriber decides whether its start qualifies.
+    if (subscribed && !pending && !httpPoll) scheduleQuery(0)
   }
   async function pollHttpStatus(queryTimeoutMs: number) {
     const timeoutMs = Math.min(queryTimeoutMs, input.limits.requestTimeoutMs)
@@ -454,6 +465,7 @@ export function openMoonrakerClient(input: {
     started: number,
     received: number,
     activeToolQuery: boolean,
+    hasNewerBufferedStatus = false,
   ) {
     lastRequestStarted = started
     input.onRequestSuccess?.(started, received)
@@ -463,6 +475,7 @@ export function openMoonrakerClient(input: {
         activeToolQuery,
         requestStartedAtMonoMs: started,
         receivedAtMonoMs: received,
+        ...(hasNewerBufferedStatus ? { hasNewerBufferedStatus: true } : {}),
       }),
     )
   }
@@ -577,7 +590,14 @@ export function openMoonrakerClient(input: {
         }
         pending = undefined
         clearTimeout(queryTimeout)
-        observeComplete(reply.data.result, started, received, activeToolQuery)
+        observeComplete(
+          reply.data.result,
+          started,
+          received,
+          activeToolQuery,
+          replayAfter !== undefined &&
+            earlyUpdates.some((update) => update[1] > replayAfter),
+        )
         if (!subscribed) {
           subscribed = true
           clearTimeout(timer)
@@ -653,5 +673,5 @@ export function openMoonrakerClient(input: {
   void connect()
   input.signal.addEventListener('abort', abort, { once: true })
   if (input.signal.aborted) abort()
-  return { snapshot, closed, close: abort }
+  return { snapshot, closed, close: abort, requestCompleteRefresh }
 }

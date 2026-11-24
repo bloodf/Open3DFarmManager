@@ -10,6 +10,8 @@ import {
   validateMigrationHistory,
 } from './db/migrations.ts'
 import { ExtendedControlAction } from '../packages/farm-protocol/src/control-actions.ts'
+import { freshAdvertisedActions } from '../apps/farm/server/storage/postgres-pause-authority.ts'
+import { OBSERVATION_FRESH_MS } from '../apps/farm/server/utils/integration-telemetry.ts'
 import {
   testPostgresPauseAuthority,
   verifyPauseAuthorityReplayRestart,
@@ -264,6 +266,24 @@ try {
       for (const migration of controlsMigrations)
         await tx.unsafe(migration.up).simple()
     })
+    const farmId = randomUUID(),
+      agentId = randomUUID(),
+      now = Date.now()
+    await admin`INSERT INTO farm.printer_latest_state (farm_id, agent_id, printer_key, observed_at, state) VALUES (${farmId}::uuid, ${agentId}::uuid, 'freshness-fixture', ${now - OBSERVATION_FRESH_MS - 1}, ${admin.json({ controls: ['pause', 'start_print'] })})`
+    const readControls = () =>
+      admin`SELECT controls, observed_at::float8 AS observed_at FROM farm.pause_authority_advertised_controls WHERE farm_id=${farmId}::uuid AND agent_id=${agentId}::uuid AND printer_key='freshness-fixture'`
+    const stale = (await readControls())[0]!
+    assert.deepEqual(
+      freshAdvertisedActions(stale.controls, stale.observed_at, now),
+      [],
+    )
+    await admin`UPDATE farm.printer_latest_state SET observed_at=${now}, state=${admin.json({ controls: ['pause', 'start_print'] })} WHERE farm_id=${farmId}::uuid AND agent_id=${agentId}::uuid AND printer_key='freshness-fixture'`
+    const released = (await readControls())[0]!
+    assert.deepEqual(
+      freshAdvertisedActions(released.controls, released.observed_at, now),
+      ['pause', 'start_print'],
+    )
+    await admin`DELETE FROM farm.printer_latest_state WHERE farm_id=${farmId}::uuid AND agent_id=${agentId}::uuid AND printer_key='freshness-fixture'`
     // The catalog check rebuilds 0018, so the shipped constraint comes next.
     const constraintChecks = await applyConfirmCollectionConstraint(admin)
     const revocationChecks = await testPauseConnectorRevocations(admin, port)

@@ -333,6 +333,7 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
               options.runtime,
               new URL(op.target.origin).origin,
               op.plan,
+              op.target.service_id,
             )
           )
             return finalizeCommit(op)
@@ -1199,9 +1200,17 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
           origin,
           plan,
           spoolmanStagedPath(options.stateDirectory, op.operation_id),
+          op.target.service_id,
         )
       } catch {
-        if (!spoolmanRuntimeContains(options.runtime, origin, plan)) {
+        if (
+          !spoolmanRuntimeContains(
+            options.runtime,
+            origin,
+            plan,
+            op.target.service_id,
+          )
+        ) {
           save(committing, 'prepared', { plan: null })
           return errorFrame(frame.request_id, 'not-available')
         }

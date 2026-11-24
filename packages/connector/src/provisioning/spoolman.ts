@@ -183,16 +183,19 @@ function currentSpoolman(scope: RuntimeScope) {
   return parsed.success ? parsed.data : null
 }
 
-/** True when the runtime already carries exactly this origin and credential file. */
+/** True when the runtime carries the expected service, origin and credential file. */
 export function spoolmanRuntimeContains(
   scope: RuntimeScope,
   origin: string,
   plan: CommitPlan,
+  serviceId?: string,
 ): boolean {
   const current = currentSpoolman(scope)
   return (
     current !== null &&
     current.origin === origin &&
+    (serviceId === undefined ||
+      current.serviceId === serviceId.toLowerCase()) &&
     current.credentialFile === plan.credential_file
   )
 }
@@ -207,6 +210,7 @@ export function commitSpoolman(
   origin: string,
   plan: CommitPlan,
   stagedPath: string,
+  serviceId?: string,
 ) {
   const current = runtime(scope)
   const staged = SpoolmanCredential.parse(readPrivateJson(stagedPath))
@@ -222,7 +226,10 @@ export function commitSpoolman(
         origin,
         farmId: scope.farm_id,
         serviceId:
-          (previous.success ? previous.data.serviceId : undefined) ??
+          serviceId?.toLowerCase() ??
+          (previous.success && previous.data.origin === origin
+            ? previous.data.serviceId
+            : undefined) ??
           randomUUID(),
         limit: (previous.success ? previous.data.limit : undefined) ?? 200,
         credentialFile: plan.credential_file,

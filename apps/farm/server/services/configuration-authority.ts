@@ -165,7 +165,11 @@ export function createConfigurationAuthorityService(input: {
       active--
     }
   }
-  /** The binding must be one this process issued and the Connector must still be current. */
+  /**
+   * The binding must be one this process issued, still open and unexpired, for the
+   * pinned credential. The inbox admission floor is for new admissions only: a
+   * bound context keeps its authority until its own deadline.
+   */
   function liveBinding(
     bindingSha256: string,
     binding: Pick<
@@ -174,11 +178,11 @@ export function createConfigurationAuthorityService(input: {
     >,
   ) {
     const bound = registry.bound(bindingSha256)
-    const advertised = registry.advertised(binding.farm_id, binding.agent_id)
     return bound &&
       bound.transportId === binding.transport_id &&
-      advertised &&
-      advertised.jti === binding.credential_jti
+      bound.farmId === binding.farm_id &&
+      bound.agentId === binding.agent_id &&
+      bound.credentialJti === binding.credential_jti
       ? bound
       : null
   }

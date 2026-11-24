@@ -176,7 +176,10 @@ function dateLabel(time: number) {
             </dd>
           </div>
         </dl>
-        <FarmMaterials :materials="row.observation.state.materials" />
+        <FarmMaterials
+          v-if="!row.observation.historical"
+          :materials="row.observation.state.materials"
+        />
         <p
           v-if="
             row.connection !== 'authenticated' ||

@@ -1,4 +1,5 @@
 import { defineEventHandler } from 'nuxt/server'
+import { signallingRuntime } from '../../../../../../services/signalling-runtime-bootstrap.ts'
 import { integrationSpoolPool } from '../../../../../../services/spool-usage.ts'
 import {
   integrationBase,
@@ -38,10 +39,21 @@ export default defineEventHandler(async (event) => {
       access,
       body,
       key,
+      (agentId, binding) =>
+        signallingRuntime()?.queryAgentInbox(
+          access.farmId,
+          agentId,
+          { kind: 'spool-membership', farmId: access.farmId, ...binding },
+          event.req.signal,
+        ),
     )
     if (!spool) return integrationProblem('not-found', headers)
     if (spool.outcome === 'key-reused')
       return integrationProblem('idempotency-key-reused', headers)
+    if (spool.outcome === 'already-bound')
+      return integrationProblem('spool-already-bound', headers)
+    if (spool.outcome === 'spool-not-observed')
+      return integrationProblem('spool-not-observed', headers)
     const responseHeaders = new Headers(headers)
     responseHeaders.set(
       'location',

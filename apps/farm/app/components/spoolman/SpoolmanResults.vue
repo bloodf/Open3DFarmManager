@@ -10,6 +10,7 @@ import {
 export type SpoolmanSavedSetting = {
   agentId: string
   origin: string
+  serviceId?: string | null
   status: 'reachable' | 'unreachable' | 'unauthorized'
   configured: boolean
   checkedAt: number
@@ -52,26 +53,47 @@ const when = (value: number) => formatDateTime(value, 'short') ?? 'Indisponível
           : 'Peça a um proprietário ou administrador para configurar o Spoolman. Até lá, os Connectors continuam usando a configuração local existente, se houver.'
       "
     />
-    <table v-else>
-      <thead>
-        <tr>
-          <th scope="col">Connector</th>
-          <th scope="col">Endereço</th>
-          <th scope="col">Situação</th>
-          <th scope="col">Última verificação</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="setting in settings" :key="setting.agentId">
-          <td>{{ setting.agentId.slice(0, 8) }}</td>
-          <td>{{ setting.origin }}</td>
-          <td>
-            {{ describeSpoolmanStatus(setting.status)
-            }}{{ setting.configured ? '' : ' (não aplicado)' }}
-          </td>
-          <td>{{ when(setting.checkedAt) }}</td>
-        </tr>
-      </tbody>
-    </table>
+    <div
+      v-else
+      class="spoolman-table-wrap"
+      role="region"
+      tabindex="0"
+      aria-label="Tabela de configuração atual do Spoolman"
+    >
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Connector</th>
+            <th scope="col">Endereço</th>
+            <th scope="col">UUID do serviço</th>
+            <th scope="col">Situação</th>
+            <th scope="col">Última verificação</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="setting in settings" :key="setting.agentId">
+            <td>{{ setting.agentId.slice(0, 8) }}</td>
+            <td>{{ setting.origin }}</td>
+            <td>{{ setting.serviceId ?? 'Não informado' }}</td>
+            <td>
+              {{ describeSpoolmanStatus(setting.status)
+              }}{{ setting.configured ? '' : ' (não aplicado)' }}
+            </td>
+            <td>{{ when(setting.checkedAt) }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </section>
 </template>
+
+<style scoped>
+.spoolman-table-wrap {
+  max-inline-size: 100%;
+  overflow-x: auto;
+}
+.spoolman-table-wrap:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+</style>

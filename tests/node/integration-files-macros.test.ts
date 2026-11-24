@@ -71,6 +71,7 @@ function fixture(
           calls++
           assert.equal(farm, farmId)
           assert.equal(agent, agentId)
+          assert.ok('assignment_id' in query)
           assert.equal(query.assignment_id, printerId)
           if (replyError) return { kind: 'error', error: replyError }
           const delivered = decodeSignallingServerFrame(

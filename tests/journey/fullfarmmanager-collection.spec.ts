@@ -52,6 +52,12 @@ if (journeyEnabled())
         await inboxReady()
         const listens = journey.simulatorObservation().pauseInboxes
         await files.getByRole('button', { name: 'Atualizar arquivos' }).click()
+        await expect(files.getByRole('status')).toHaveText(
+          'Arquivos atualizados.',
+          {
+            timeout: 30_000,
+          },
+        )
         await files.getByRole('radio', { name: /collection\.gcode/ }).check()
         await inboxReady(listens)
       }

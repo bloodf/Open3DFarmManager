@@ -13,18 +13,12 @@ import { record } from './discovery.ts'
 import type { KobraXFacts } from './facts.ts'
 import { connectKobraX } from './index.ts'
 import { reportRefusal, type KobraXReport } from './requests.ts'
+import {
+  KOBRA_X_REPORT_WAIT_MS,
+  KOBRA_X_SIGNED_ACTIONS,
+} from './control-support.ts'
 
-export const KOBRA_X_SIGNED_ACTIONS: readonly ExtendedControlAction[] = [
-  'pause',
-  'resume',
-  'cancel',
-  'set_temperature',
-  'set_fan',
-  'set_light',
-  'start_print',
-  'load_filament',
-  'unload_filament',
-]
+export { KOBRA_X_SIGNED_ACTIONS }
 
 function reportedEffect(
   action: ExtendedControlAction,
@@ -117,7 +111,7 @@ export function openFixedKobraXControl(input: {
       const timer = setTimeout(() => {
         notify = undefined
         reject(failure())
-      }, 3000)
+      }, KOBRA_X_REPORT_WAIT_MS)
       notify = () => {
         if (!stopped && !predicate()) return
         clearTimeout(timer)

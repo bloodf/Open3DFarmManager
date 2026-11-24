@@ -213,6 +213,21 @@ Certificate-refusal and LAN-off diagnostics come from adapter errors.
   certificate dates do not block them. Unpinned connections use normal TLS
   verification. A generated 1970–1979 certificate exercises expiry handling
   in loopback tests.
+- Trust modes. With no pin the connection uses normal TLS verification. With
+  a pin only, the pin alone decides. With a CA and a pin together, both must
+  hold: the chain must verify against the CA and the peer must match the pin,
+  and either failing refuses the connection. (OpenFarm decision, loopback
+  tested)
+- The client certificate is held back until the printer is authenticated. Node
+  verifies a server certificate only after its handshake, and in TLS 1.2 (and
+  racily in 1.3) its client has already written the client certificate by then.
+  The Kobra X client therefore requires TLS 1.3, where that certificate is part
+  of the client's last flight, and keeps the flight in memory until the pin
+  (and CA, when given) pass. A mismatching or TLS 1.2-only peer sees the
+  ClientHello and nothing else. The printer negotiated TLS 1.3 in the
+  November 23 hardware report; firmware that cannot is refused, not downgraded.
+  Pairing's first-use pin capture sends the certificate to an unverified peer by
+  design.
 - S1 reports that a working connection from OrcaSlicer's runtime (OpenSSL 1.1.1) used the cipher
   string `DEFAULT:@SECLEVEL=0`. (reported, S1; the adapter's TLS stack may need a different setting)
 
@@ -305,6 +320,30 @@ connection per printer on its side.
 
 The Connector ignores MQTT reports carrying the retained flag and requests
 fresh state before permitting a signed command.
+
+### Result window and advertised controls
+
+A signed Kobra X command can take longer than the dispatcher's default
+five-second result deadline: the request's own result wait (5 s), `start_print`'s
+1.5 s watch for the printer ending the task itself, and one 3 s wait for fresh
+state. The Connector therefore gives these actions a bounded result window
+counted from the write (`kobraXResultWindowMs`, at most 24 s). Waits before the
+write never count, and a command not yet written is never uncertain. The
+state-freshness limit (2 s between the effect and the confirming state) still
+applies, so a late state answer ends as `state-unconfirmed`. An uncertain outcome
+stays uncertain, blocks later commands on that printer and is never retried.
+
+A report observer that throws cannot skip settlement: the observer is called
+before the waiting request is settled, and its failure is reported through
+`onError` only.
+
+Advertised controls follow evidence from the printer's own reports: the ACE
+(`load_filament`, `unload_filament`) once a box with id 0 to 3 is reported, the
+light (`set_light`) once the chamber light is reported, and the fan (`set_fan`)
+once the part fan speed is reported. Until evidence exists, or once the printer is
+unreachable, only `pause`, `resume`, `cancel`, `set_temperature` and
+`start_print` are offered. The status collection publishes the evidence and the
+advertisement is refreshed when it changes.
 
 ## Status and reports
 

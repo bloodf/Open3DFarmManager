@@ -62,7 +62,9 @@ export async function connectKobraX(options: {
   try {
     secureContext = createSecureContext({
       ...clientIdentity,
-      minVersion: 'TLSv1.2',
+      // The client certificate is held back until the printer passes its
+      // pin check, which needs TLS 1.3 (see `connectAnycubicTls`).
+      minVersion: 'TLSv1.3',
     })
   } catch {
     throw new Error('Kobra X client certificate or key is invalid')
@@ -105,6 +107,7 @@ export async function connectKobraX(options: {
       const socket = connectAnycubicTls(
         { host: address, port: options.mqttPort ?? 9883, secureContext },
         pin,
+        { holdClientIdentity: true },
       )
       socket.once('secureConnect', () => {
         tlsEstablished = !socket.destroyed
@@ -293,12 +296,27 @@ export async function connectKobraX(options: {
         answersInfoQuery && (report.data.state !== 'busy' || freshPrintPhase)
       facts.report(report)
       usage.report(report)
-      options.onReport?.(
-        report,
-        state.snapshot(),
-        facts.get(),
-        currentStateQuery,
-      )
+      // The observer is the caller's code. A failure in it must never keep
+      // this report from settling the request that is waiting for it: that
+      // request's command is already on the wire.
+      try {
+        options.onReport?.(
+          report,
+          state.snapshot(),
+          facts.get(),
+          currentStateQuery,
+        )
+      } catch (error) {
+        try {
+          options.onError?.(
+            error instanceof Error
+              ? error
+              : new Error('Kobra X report observer failed'),
+          )
+        } catch {
+          // A failing error handler is no more allowed to block settlement.
+        }
+      }
       requests.handleReport(report)
       if (
         report.type === 'print' &&

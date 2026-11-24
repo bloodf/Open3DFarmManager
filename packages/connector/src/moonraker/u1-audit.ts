@@ -185,16 +185,88 @@ export function u1ConsoleTool(
   return tool
 }
 
-export function u1ConsoleAudit(line: string, tool?: string): U1Audit {
+const BedTargetStatus = z.object({
+  heater_bed: z.object({ target: z.number().finite() }),
+})
+const SpeedFactorStatus = z.object({
+  gcode_move: z.object({ speed_factor: z.number().finite() }),
+})
+
+type Readback = {
+  objects: Record<string, string[]>
+  confirmed: (status: unknown) => boolean
+}
+
+/** Output-only commands: the script acknowledgement is all the evidence there is. */
+const READ_ONLY_COMMANDS = new Set([
+  'M105',
+  'M114',
+  'M115',
+  'M118',
+  'GET_POSITION',
+])
+
+/**
+ * How to read back the state a console line leaves behind. `undefined` means
+ * the effect cannot be read: the line was sent and acknowledged, but it is
+ * reported as unconfirmed rather than applied.
+ */
+function consoleReadback(line: string): Readback | undefined {
+  const [word = '', ...params] = line.trim().split(/\s+/)
+  const command = word.toUpperCase()
+  if (READ_ONLY_COMMANDS.has(command) || /^QUERY_[A-Z0-9_]+$/.test(command))
+    return { objects: {}, confirmed: () => true }
+  if (
+    command === 'M140' &&
+    params.length === 1 &&
+    /^S0(?:\.0+)?$/i.test(params[0]!)
+  )
+    return {
+      objects: { heater_bed: ['target'] },
+      confirmed(status) {
+        const result = BedTargetStatus.safeParse(status)
+        return result.success && result.data.heater_bed.target === 0
+      },
+    }
+  const speed = /^S(\d{1,3})$/i.exec(params[0] ?? '')
+  if (command === 'M220' && params.length === 1 && speed)
+    return {
+      objects: { gcode_move: ['speed_factor'] },
+      confirmed(status) {
+        const result = SpeedFactorStatus.safeParse(status)
+        return (
+          result.success &&
+          Math.abs(
+            result.data.gcode_move.speed_factor - Number(speed[1]) / 100,
+          ) <= 0.0005
+        )
+      },
+    }
+}
+
+/**
+ * Evidence for a console line. Only tool selection, canonical homing and the
+ * few lines whose state can be read back are ever confirmed; any other line
+ * has no effect to offer, so it ends as sent but unconfirmed and is not retried.
+ */
+export function u1ConsoleAudit(
+  line: string,
+  tool?: string,
+  home?: U1Audit,
+): U1Audit {
+  const readback = tool || home ? undefined : consoleReadback(line)
   return {
-    objects: tool ? { toolhead: ['extruder'] } : {},
+    objects: tool
+      ? { toolhead: ['extruder'] }
+      : (home?.objects ?? readback?.objects ?? {}),
     effect(status, observedMono) {
       if (tool) {
         const result = ActiveToolhead.safeParse(status)
         if (!result.success || result.data.toolhead.extruder !== tool) return
-      }
-      // Arbitrary console lines only have the matching script acknowledgement.
-      // Their output is still delivered by the separate console response stream.
+      } else if (home) {
+        // The console home is signed as `gcode` but proven by the homed axes.
+        if (!home.effect(status, observedMono)) return
+      } else if (!readback?.confirmed(status)) return
       return { kind: 'gcode', line, observedMono }
     },
   }

@@ -27,6 +27,61 @@ const event = {
 }
 const body = JSON.stringify([event])
 
+test('invalid diagnostics never reach storage and a subsequent valid batch persists', async () => {
+  const raw = readFileSync(
+    new URL('../fixtures/moonraker/printing.json', import.meta.url),
+    'utf8',
+  )
+  const fixture = parseMoonrakerSnapshot(raw, {
+    printerKey: 'synthetic',
+    observedAt: 1000,
+  }).printer
+  const diagnostic = 'Falha 🌡️\nDetalhes'
+  const valid = {
+    ...event,
+    state: {
+      ...fixture,
+      state: 'error',
+      progress: undefined,
+      statusReason: 'firmware-shutdown',
+      statusMessage: diagnostic,
+    },
+  }
+  const store = new MemoryTelemetryStore()
+  let calls = 0
+  let savedMessage: string | undefined
+  const recordingStore = {
+    commitBatch: async (...args: Parameters<typeof store.commitBatch>) => {
+      calls++
+      const record = args[1][0]
+      if (record?.kind === 'printer-state')
+        savedMessage = record.state.statusMessage
+      return store.commitBatch(...args)
+    },
+  }
+  const invalid = {
+    ...valid,
+    state: { ...valid.state, statusMessage: 'fault\0detail' },
+  }
+  assert.deepEqual(
+    await ingestTelemetry(JSON.stringify([invalid]), context, recordingStore),
+    {
+      ok: false,
+      reason: 'invalid-batch',
+    },
+  )
+  assert.equal(calls, 0)
+  assert.equal(store.size, 0)
+  assert.equal(
+    (await ingestTelemetry(JSON.stringify([valid]), context, recordingStore))
+      .ok,
+    true,
+  )
+  assert.equal(calls, 1)
+  assert.equal(store.size, 1)
+  assert.equal(savedMessage, diagnostic)
+})
+
 test('queue drains through actual ingestion validation after lost response without duplicate insertion', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'open3d-ingestion-'))
   let queue = new TelemetryQueue(directory, 1000)
@@ -36,11 +91,15 @@ test('queue drains through actual ingestion validation after lost response witho
       new URL('../fixtures/moonraker/printing.json', import.meta.url),
       'utf8',
     )
-    queue.enqueue(
-      parseMoonrakerSnapshot(raw, { printerKey: 'synthetic', observedAt: 1000 })
-        .printer,
-      1000,
+    const fixture = parseMoonrakerSnapshot(raw, {
+      printerKey: 'synthetic',
+      observedAt: 1000,
+    }).printer
+    assert.throws(() =>
+      queue.enqueue({ ...fixture, statusMessage: 'fault\0detail' }, 1000),
     )
+    assert.equal(queue.depth, 0)
+    queue.enqueue(fixture, 1000)
     const first = await drainTelemetryOnce(
       queue,
       async (body) => {

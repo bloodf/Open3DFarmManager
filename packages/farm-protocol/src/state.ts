@@ -162,7 +162,9 @@ function printerStateSchema(legacy: boolean) {
         'unknown',
       ]),
       preformStatus: text(256, 1).optional(),
-      statusMessage: text(256, 1, 256).optional(),
+      statusMessage: text(256, 1, 256)
+        .refine((value) => !value.includes('\0'), 'Invalid diagnostic text')
+        .optional(),
       statusReason: z
         .enum([
           'client-certificate-missing',

@@ -1,5 +1,19 @@
 import { z } from 'zod'
 
+// Existing readers accept statusMessage but leave unknown states read-only.
+// This reserved diagnostic marks current, verified Moonraker terminal evidence;
+// a historical lastJob alone must never be used to infer current state.
+export const MOONRAKER_CANCELLED_STATUS = 'moonraker:print_stats:cancelled'
+export function controlObservationState(observation: {
+  state: string
+  statusMessage?: string | undefined
+}): string {
+  return observation.state === 'unknown' &&
+    observation.statusMessage === MOONRAKER_CANCELLED_STATUS
+    ? 'cancelled'
+    : observation.state
+}
+
 export const ToolIndex = z.literal([0, 1, 2, 3])
 export const ToolTemperatureArgs = z.strictObject({
   tool: ToolIndex,

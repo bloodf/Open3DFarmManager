@@ -31,6 +31,40 @@ if (journeyEnabled())
       await expect(
         resin.getByText('Filme (camadas)', { exact: true }),
       ).toBeVisible()
+      const kind = resin.getByRole('combobox', {
+        name: 'Tipo de registro',
+        exact: true,
+      })
+      for (const label of [
+        'Cuba atual',
+        'Volume da cuba',
+        'Filme (camadas)',
+        'LCD (horas)',
+      ]) {
+        await expect(
+          resin
+            .locator('dl.resin-summary > div')
+            .filter({ has: resin.getByText(label, { exact: true }) })
+            .locator('dd'),
+        ).toHaveText('Não informado')
+      }
+      await kind.selectOption('vat')
+      await resin
+        .getByRole('textbox', { name: 'Nome', exact: true })
+        .fill('Cuba A')
+      await resin.getByRole('button', { name: 'Salvar registro' }).click()
+      await expect(
+        resin.getByText('Cuba A · Manual', { exact: true }),
+      ).toBeVisible()
+      await kind.selectOption('volume')
+      await resin
+        .getByRole('textbox', { name: 'Nome', exact: true })
+        .fill('Cuba A')
+      await resin
+        .getByRole('textbox', { name: 'Volume (mL)', exact: true })
+        .fill('250')
+      await resin.getByRole('button', { name: 'Salvar registro' }).click()
+      await expect(resin.getByText(/^250 mL · Manual/)).toBeVisible()
       await resin
         .getByRole('combobox', { name: 'Tipo de registro', exact: true })
         .selectOption('film')
@@ -40,8 +74,19 @@ if (journeyEnabled())
       await resin.getByRole('button', { name: 'Salvar registro' }).click()
       await expect(resin.getByRole('status')).toContainText('Registro salvo.')
       await expect(resin.getByText(/^125 · Manual$/)).toBeVisible()
+      await kind.selectOption('lcd')
+      await resin
+        .getByRole('textbox', { name: 'Horas', exact: true })
+        .fill('12')
+      await resin.getByRole('button', { name: 'Salvar registro' }).click()
+      await expect(resin.getByText(/^12 · Manual$/)).toBeVisible()
       await page.reload()
       await expect(resin.getByText(/^125 · Manual$/)).toBeVisible()
+      await expect(resin.getByText(/^12 · Manual$/)).toBeVisible()
+      await expect(
+        resin.getByText('Cuba A · Manual', { exact: true }),
+      ).toBeVisible()
+      await expect(resin.getByText(/^250 mL · Manual/)).toBeVisible()
     } finally {
       try {
         await journey?.close()

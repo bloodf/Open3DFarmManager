@@ -24,13 +24,30 @@ OPENFARM_JOURNEY=1 npx playwright test -c playwright.journey.config.ts tests/jou
   before and after initial clearance, approval, completion, plate
   acknowledgement replay, and history linkage to the submitted `jobId`.
 
-These are source-level assertions. Their presence does not establish that they
-passed on the current revision. The journey suite is opt-in and is not invoked
-by `check:all` or the Checks workflow. The workflow's browser `e2e` job runs
+These are source-level assertions. The local acceptance run below establishes
+results for its exact tested candidate, not for every subsequent revision. The
+journey suite is opt-in and is not invoked by `check:all` or the Checks workflow. The workflow's browser `e2e` job runs
 only on `workflow_dispatch` and runs `test:e2e:auth-session` and `test:e2e`,
 not `test:journey`.
 
-## Earlier run and remaining acceptance
+## Local acceptance for #667
+
+On 2026-11-24, the exact composed candidate `9cb88b5c`, based on
+`cffa6cafb79b` with the collection fixture conflict reconciled, ran
+`npm run test:journey -- tests/journey/fullfarmmanager` through Google Chrome,
+disposable PostgreSQL, and loopback simulators. All five journeys passed:
+collection hold and release, Integration API work and plate confirmation,
+printer and resin, responsive shell, and spool finder.
+
+The collection journey holds Start disabled and verifies that no extra
+simulated start occurs. It then confirms collection and uses a fresh synthetic
+standby observation for the next start. The separate nine-case Connector hold
+suite also passed, including refusal and verification that the driver was not
+invoked again. An earlier browser launch failure occurred before test execution.
+Earlier baseline file-listing failures and a post-clearance stale advertisement
+are historical context; the production refresh is tracked in #818.
+
+## Earlier runs and remaining acceptance
 
 The resin-only regate passed on `06c3def2`, the cherry-pick of `afcea4d6`
 onto integrated head `0a617cdf`, which includes `ea86fb60`. The command
@@ -39,7 +56,7 @@ exited 0 with one passing test using disposable local PostgreSQL and a
 loopback Moonraker simulator. The journey checked the four initial unknown
 values and verified the manual entries for vat (Cuba A), volume (250 mL),
 film (125 layers), and LCD (12 hours), including after reload. Only the resin
-journey ran in this regate. Collection acceptance remains pending.
+journey ran in this regate. It predates the local acceptance run above.
 
 On 2026-11-24, an independent local run of the unchanged `3d1a3f22`
 baseline timed out waiting for the seeded file radio in the collection
@@ -64,13 +81,11 @@ assertions in those journeys.
 
 Both journeys are enabled in the current source. The collection confirmation
 fix (`b32b2e60`) and the Integration API history-link fix (`fa0f2bc8`)
-removed their respective `test.fixme` markers. Run the journeys again on the
-candidate under review before recording their results; the historical run does
-not establish that either now passes.
+removed their respective `test.fixme` markers. The historical run does not
+establish that either passed; the later candidate run is recorded above.
 
-The repository-owned acceptance work still needs a recorded journey run for
-each completed phase, including the updated finder and resin assertions, and a
-manual Checks workflow run on `main`. A workflow definition or a local run is
+The repository-owned acceptance work still needs a fresh manual Checks
+workflow run on `main`. A workflow definition or a local run is
 not evidence that the manual workflow ran. The final summary on #668 remains
 pending those results and the other phases. No physical printer is used in
 these journeys; hardware qualification remains deferred to #255.
@@ -87,10 +102,9 @@ reports or restart. A recorded resin run and reported readings remain separate
 from the manual entries exercised here. Shared design (#809), Integration API,
 and vendor-driver work are owned by sibling workstreams.
 
-The remaining acceptance items in this repository are a new run of the five
-journeys after these changes, the manual Checks workflow on `main`, and the
-remaining simulator cases above. Current issue ownership is separate: #809 is
-the active shared-design request; #663 is open for catalog and vendor-driver
+The remaining acceptance items in this repository include the fresh manual
+Checks workflow on `main` and the remaining simulator cases above. Current
+issue ownership is separate: #809 is the active shared-design request; #663 is open for catalog and vendor-driver
 work; #666 and its request issues #669, #670, and #675–#684 are closed. API
 follow-up stays with its sibling orchestrator. Hardware qualification is
 deferred to the owner under #255 and is not part of automated acceptance.

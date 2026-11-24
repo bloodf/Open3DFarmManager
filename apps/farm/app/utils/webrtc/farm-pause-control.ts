@@ -10,6 +10,7 @@ import type {
 import { PauseBrowserSignallingClient } from './pause-signalling-client.ts'
 import {
   createPauseCommandClient,
+  type PauseResultDriverFamily,
   type PauseCommandIssuer,
 } from './pause-command-client.ts'
 import { createPauseCommandIssuer } from './pause-command-issuer.ts'
@@ -55,6 +56,7 @@ export type FarmPauseControlInput = Readonly<{
   keyId: string
   agentId: string
   assignmentId: string
+  driverFamily?: PauseResultDriverFamily
   /** Resolves the approved local key and the pause metadata, or throws. */
   resolveKey(signal: AbortSignal): Promise<FarmPauseKey>
   onState(state: FarmPauseControlState): void
@@ -129,6 +131,7 @@ export function openFarmPauseControl(input: FarmPauseControlInput) {
     command = createPauseCommandClient({
       privateKey: key.privateKey,
       issuer,
+      ...(input.driverFamily ? { driverFamily: input.driverFamily } : {}),
       signal: controller.signal,
       transport: {
         sendPhase(message) {

@@ -27,6 +27,7 @@ import {
   type FarmPauseControlState,
 } from '../../utils/webrtc/farm-pause-control.ts'
 import { createFarmStatusKeyResolver } from '../../utils/webrtc/farm-status-key-resolver.ts'
+import { pauseResultDriverFamilyFromIdentity } from '../../utils/webrtc/pause-command-client.ts'
 
 export function useFarmControls(
   { ready, now }: ReturnType<typeof useFarmView>,
@@ -131,6 +132,9 @@ export function useFarmControls(
       keyId,
       agentId: row.assignment.agentId,
       assignmentId: row.assignment.assignmentId,
+      driverFamily: pauseResultDriverFamilyFromIdentity(
+        row.observation?.state.identity,
+      ),
       async resolveKey(signal) {
         const resolved = await pauseResolver({
           scope,

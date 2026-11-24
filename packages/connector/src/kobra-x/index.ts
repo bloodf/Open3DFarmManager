@@ -12,6 +12,7 @@ import { createKobraXFacts, type KobraXFacts } from './facts.ts'
 import {
   createKobraXRequests,
   parseKobraXReport,
+  reportRefusal,
   type KobraXReport,
 } from './requests.ts'
 import { createKobraXStatus } from './status.ts'
@@ -160,6 +161,9 @@ export async function connectKobraX(options: {
   }
   let currentInfoQuery: string | undefined
   let currentPrintQuery: string | undefined
+  /** The print phase was answered by the latest print query. A busy info reply
+   * cannot name the phase, so a cached one never makes it current. */
+  let freshPrintPhase = false
   function query(type: keyof typeof queries) {
     if (!client.connected) return
     // The Orca LAN client sends timestamped, null-data requests for info,
@@ -170,7 +174,10 @@ export async function connectKobraX(options: {
         : { timestamp: Date.now(), data: null }
     const msgid = randomUUID()
     if (type === 'info') currentInfoQuery = msgid
-    if (type === 'print') currentPrintQuery = msgid
+    if (type === 'print') {
+      currentPrintQuery = msgid
+      freshPrintPhase = false
+    }
     client.publish(
       `${path}/${modeId}/${deviceId}/${type}`,
       JSON.stringify({
@@ -211,6 +218,7 @@ export async function connectKobraX(options: {
       facts.reset()
       currentInfoQuery = undefined
       currentPrintQuery = undefined
+      freshPrintPhase = false
       options.onDisconnect?.()
       if (!ready && !accepted && tlsEstablished) {
         failed(
@@ -264,11 +272,15 @@ export async function connectKobraX(options: {
         state.report(type, message)
       const report = parseKobraXReport(type, message)
       if (!report) return
-      const currentStateQuery =
+      const answersInfoQuery =
         report.type === 'info' &&
         report.action === 'report' &&
         report.msgid === currentInfoQuery
-      if (currentStateQuery) currentInfoQuery = undefined
+      if (answersInfoQuery) currentInfoQuery = undefined
+      // The print reply re-asks for info, so a busy reply that came first
+      // is superseded rather than trusted with a cached phase.
+      const currentStateQuery =
+        answersInfoQuery && (report.data.state !== 'busy' || freshPrintPhase)
       facts.report(report)
       usage.report(report)
       options.onReport?.(
@@ -284,6 +296,7 @@ export async function connectKobraX(options: {
         report.msgid === currentPrintQuery
       ) {
         currentPrintQuery = undefined
+        freshPrintPhase = reportRefusal(report) === null
         query('info')
       }
     } catch {

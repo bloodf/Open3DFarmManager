@@ -157,6 +157,8 @@ import {
   installNetworkGuard,
   uninstallNetworkGuard,
 } from '../../packages/sim-tools/src/mocks/network-guard.ts'
+import { openFixedKobraXControl } from '../../packages/connector/src/kobra-x/control-driver.ts'
+import type { ControlObservation } from '../../packages/connector/src/control/pause-dispatcher.ts'
 import type { ExtendedControlAction } from '../../packages/farm-protocol/src/control-actions.ts'
 
 async function commandFixture() {
@@ -638,5 +640,87 @@ test(
     )
     assert.equal((await pending).kind, 'outcome-unknown')
     assert.equal(commands().length, 1)
+  },
+)
+
+test(
+  'a cached job phase cannot authorize readiness before the print reply',
+  { timeout: 20000 },
+  async (t) => {
+    const { printer, printerBinding, commands } = await nativeSignedFixture(t)
+    const events: string[] = []
+    const published: ControlObservation[] = []
+    const abort = new AbortController()
+    t.after(() => abort.abort())
+    const control = openFixedKobraXControl({
+      binding: printerBinding,
+      connectionGeneration: 1,
+      clock: { monotonicNow: () => performance.now() },
+      publish: (observation) => {
+        if (!observation) return
+        published.push(observation)
+        events.push(
+          `publish:${observation.printState}:${observation.ready ? 'ready' : 'unready'}`,
+        )
+      },
+      signal: abort.signal,
+      connect: (options) =>
+        connectKobraX({
+          ...options,
+          httpPort: printer.httpPort,
+          mqttPort: printer.mqttPort,
+          onReport(report, snapshot, facts, current) {
+            events.push(
+              `report:${report.type}:${report.action}:${report.state}${current ? ':current' : ''}`,
+            )
+            options.onReport?.(report, snapshot, facts, current)
+          },
+        }),
+    })
+    t.after(() => control.close())
+    await control.prepare()
+    // An earlier job is printing on this connection: the cached phase is
+    // `printing`.
+    await printer.control.startPrint('old.gcode', {
+      preparationPhases: [],
+      taskid: 'old-job',
+    })
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    // The printer moves on to another job and its print reports are lost, so
+    // only the old job's cached phase is left. The printer is busy with a project, so the info reply
+    // arrives first and says so, while the print reply comes after it.
+    printer.control.faults.addFault({
+      fault: { type: 'refuse' },
+      topic: /\/print\/report$/,
+      method: 'REPORT',
+      count: 1,
+    })
+    await printer.control.startPrint('new.gcode', {
+      preparationPhases: [],
+      taskid: 'new-job',
+    })
+    events.length = 0
+    const result = await control.driver.execute?.(
+      'set_light',
+      { on: true },
+      {
+        binding: printerBinding,
+        beforeSend: () => true,
+        signal: abort.signal,
+      },
+    )
+    assert.ok(result)
+    const firstPublish = events.findIndex((event) =>
+      /^publish:(printing|paused):ready$/.test(event),
+    )
+    const phaseReply = events.findIndex((event) =>
+      /^report:print:query:printing/.test(event),
+    )
+    assert.notEqual(phaseReply, -1, events.join('\n'))
+    assert.ok(
+      firstPublish === -1 || phaseReply < firstPublish,
+      `readiness published before the print reply:\n${events.join('\n')}`,
+    )
+    assert.equal(commands().filter(({ type }) => type === 'light').length, 1)
   },
 )

@@ -724,3 +724,215 @@ test(
     assert.equal(commands().filter(({ type }) => type === 'light').length, 1)
   },
 )
+
+test('a correlated print reply without a usable phase cannot make busy info current', async (t) => {
+  const { connectKobraX } =
+    await import('../../packages/connector/src/kobra-x/index.ts')
+  const { startKobraXMock, installNetworkGuard, uninstallNetworkGuard } =
+    await import('../../packages/sim-tools/src/mocks/index.ts')
+  installNetworkGuard()
+  t.after(uninstallNetworkGuard)
+  const mock = await startKobraXMock({
+    ssdp: false,
+    camera: false,
+    reportIntervalMs: 0,
+  })
+  t.after(() => mock.close())
+  const observed: { report: KobraXReport; current: boolean }[] = []
+  const adapter = await connectKobraX({
+    address: '127.0.0.1',
+    printerKey: 'phase-test',
+    clientIdentity: { cert: mock.tls.clientCert, key: mock.tls.clientKey },
+    pinSha256: mock.tls.serverFingerprintSha256!,
+    httpPort: mock.httpPort,
+    mqttPort: mock.mqttPort,
+    onReport: (report, _snapshot, _facts, current) =>
+      observed.push({ report, current }),
+  })
+  t.after(() => adapter.close())
+  async function until(predicate: () => boolean, what: string) {
+    for (let i = 0; i < 150; i++) {
+      if (predicate()) return
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+    assert.fail(what)
+  }
+  const printQueries = () =>
+    mock.calls.all.filter(
+      ({ topic, payload }) =>
+        topic.endsWith('/print') &&
+        JSON.parse(payload.toString()).action === 'query',
+    )
+  const busyInfo = ({ report }: { report: KobraXReport }) =>
+    report.type === 'info' &&
+    report.action === 'report' &&
+    report.data.state === 'busy'
+
+  await until(() => observed.some(({ current }) => current), 'initial state')
+  // A job is running, so a busy info reply may only be trusted once the print
+  // reply of the same refresh names the phase.
+  await mock.control.startPrint('phase.gcode', {
+    preparationPhases: [],
+    taskid: 'phase-job',
+  })
+  await new Promise((resolve) => setTimeout(resolve, 100))
+
+  // The real print reply is withheld; the printer instead answers the exact
+  // print query with a success code, the job's file and task, and no phase.
+  mock.control.faults.addFault({
+    fault: { type: 'refuse' },
+    topic: /\/print\/report$/,
+    method: 'REPORT',
+    count: 1,
+  })
+  const askedBefore = printQueries().length
+  const seen = observed.length
+  adapter.refreshControlState()
+  await until(() => printQueries().length > askedBefore, 'print query')
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  const query = JSON.parse(printQueries().at(-1)!.payload.toString())
+  mock.control.publishTypedReport(
+    'print',
+    'query',
+    { filename: 'phase.gcode', taskid: 'phase-job' },
+    { msgid: query.msgid, state: 'unrecognized-phase', code: 200 },
+  )
+  // The reply re-asks info; wait for its busy answer.
+  await until(
+    () => observed.slice(seen).filter(busyInfo).length >= 2,
+    'busy info after the phase-less print reply',
+  )
+  assert.equal(
+    observed.slice(seen).filter(({ current }) => current).length,
+    0,
+    'no reply of the phase-less refresh may be current',
+  )
+
+  // A later refresh whose print reply names the phase restores readiness.
+  const restored = observed.length
+  adapter.refreshControlState()
+  await until(
+    () =>
+      observed
+        .slice(restored)
+        .some((entry) => busyInfo(entry) && entry.current),
+    'busy info current after a valid phase',
+  )
+  const phase = observed
+    .slice(restored)
+    .findIndex(
+      ({ report }) =>
+        report.type === 'print' &&
+        report.action === 'query' &&
+        report.state === 'printing',
+    )
+  const current = observed
+    .slice(restored)
+    .findIndex((entry) => busyInfo(entry) && entry.current)
+  assert.ok(phase !== -1 && phase < current)
+})
+
+function printerAssigned() {
+  const sent: { msgid: string; type: string; action: string }[] = []
+  const requests = createKobraXRequests({
+    topic: (type) => type,
+    publish(_topic, payload) {
+      sent.push(JSON.parse(payload))
+    },
+    resultTimeoutMs: 40,
+    reportIdentity: 'printer-assigned',
+  })
+  const report = (overrides: Partial<KobraXReport> = {}): KobraXReport => ({
+    type: 'light',
+    action: 'control',
+    msgid: 'printer-chosen',
+    state: 'done',
+    code: 200,
+    data: { status: 1 },
+    ...overrides,
+  })
+  const light = (extra: { accept?: (r: KobraXReport) => boolean } = {}) =>
+    requests.send({
+      type: 'light',
+      action: 'control',
+      beforeSend: () => true,
+      ...extra,
+    })
+  const ack = (msgid = sent.at(-1)!.msgid) =>
+    requests.handleAck({ msgid, code: 0 })
+  return { sent, requests, report, light, ack }
+}
+
+test('printer-assigned ids never settle an unacknowledged request', async () => {
+  const { requests, report, light } = printerAssigned()
+  const silent = light()
+  requests.handleReport(report())
+  assert.equal((await silent).kind, 'unanswered')
+})
+
+test('printer-assigned ids still need the same type, action and an id we did not issue', async () => {
+  const { sent, requests, report, light, ack } = printerAssigned()
+  const done = light()
+  ack()
+  requests.handleReport(report({ msgid: sent[0]!.msgid }))
+  assert.equal((await done).kind, 'confirmed', 'its own id is an exact match')
+  const next = light()
+  ack()
+  requests.handleReport(report({ type: 'fan' }))
+  requests.handleReport(report({ action: 'query' }))
+  // An id this connection issued belongs to an earlier request of ours.
+  requests.handleReport(report({ msgid: sent[0]!.msgid }))
+  assert.deepEqual(await next, { kind: 'received' })
+})
+
+test('printer-assigned ids do not settle with a rival request, acknowledged or not', async () => {
+  const both = printerAssigned()
+  const first = both.light()
+  const second = both.light()
+  for (const { msgid } of both.sent) both.ack(msgid)
+  both.requests.handleReport(both.report())
+  both.requests.handleReport(both.report({ msgid: '' }))
+  assert.deepEqual(await first, { kind: 'received' })
+  assert.deepEqual(await second, { kind: 'received' })
+
+  // The rival's acknowledgement was lost; its report cannot settle the other.
+  const lost = printerAssigned()
+  const unacked = lost.light()
+  const acked = lost.light()
+  lost.ack(lost.sent[1]!.msgid)
+  lost.requests.handleReport(lost.report({ msgid: '' }))
+  assert.deepEqual(await acked, { kind: 'received' })
+  assert.equal((await unacked).kind, 'unanswered')
+})
+
+test('printer-assigned ids do not let a late report of a finished request settle the next one', async () => {
+  const late = printerAssigned()
+  const earlier = late.light()
+  late.ack()
+  assert.deepEqual(await earlier, { kind: 'received' })
+  const next = late.light()
+  late.ack()
+  late.requests.handleReport(late.report({ msgid: '' }))
+  assert.deepEqual(await next, { kind: 'received' })
+})
+
+test('printer-assigned ids settle one acknowledged request, with an id or without', async () => {
+  for (const msgid of ['printer-chosen', '']) {
+    const { requests, report, light, ack } = printerAssigned()
+    const alone = light()
+    ack()
+    requests.handleReport(report({ msgid }))
+    assert.equal((await alone).kind, 'confirmed')
+  }
+  // A failure report with no payload still refuses; the accept filter holds.
+  const refused = printerAssigned()
+  const pending = refused.light()
+  refused.ack()
+  refused.requests.handleReport(refused.report({ code: 500, data: {} }))
+  assert.equal((await pending).kind, 'refused')
+  const filtered = printerAssigned()
+  const rejected = filtered.light({ accept: (r) => r.data.status === 0 })
+  filtered.ack()
+  filtered.requests.handleReport(filtered.report())
+  assert.deepEqual(await rejected, { kind: 'received' })
+})

@@ -152,11 +152,22 @@ export interface ConfigurationAuthorityStore {
 
 /** Live in-process signalling facts. Presence is advisory and grants nothing alone. */
 export interface ConfigurationLiveRegistry {
-  /** A binding this server issued for a still-open, unexpired transport. */
-  bound(
-    bindingSha256: string,
-  ): Readonly<{ transportId: string; expiresAt: number }> | null
-  /** The authenticated Connector currently advertising config-v1 for the agent. */
+  /**
+   * A binding this server issued for a still-open, unexpired transport, with the
+   * credential it was admitted under. No minimum-remaining floor applies.
+   */
+  bound(bindingSha256: string): Readonly<{
+    transportId: string
+    farmId: string
+    agentId: string
+    credentialJti: string
+    expiresAt: number
+  }> | null
+  /**
+   * The authenticated Connector currently advertising config-v1 for the agent,
+   * only while enough inbox lease remains to admit a new context. Use it for
+   * bootstrap and new admissions, never for contexts that are already bound.
+   */
   advertised(
     farmId: string,
     agentId: string,

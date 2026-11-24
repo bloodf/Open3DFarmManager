@@ -22,6 +22,8 @@ export type ReplayMaterial = {
   materialType?: string
   /** `RRGGBBAA`, as the Connector reports it. */
   colorHex?: string
+  /** Percentage the printer reports for the slot, 0 to 100. */
+  remainingPercent?: number
 }
 export type ReplayPrinter = {
   key: string

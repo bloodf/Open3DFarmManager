@@ -4,6 +4,7 @@ import type {
   ExtendedControlAction,
 } from '../../../../packages/farm-protocol/src/control-actions.ts'
 import {
+  controlObservationState,
   controlSourceState,
   controlTargetState,
 } from '../../../../packages/farm-protocol/src/control-actions.ts'
@@ -136,7 +137,7 @@ export function controlActionAvailability(
   }
 
   // Check state compatibility via controlSourceState
-  const currentState = observation.state.state
+  const currentState = controlObservationState(observation.state)
   if (!controlSourceState(action, currentState)) {
     let stateReason = 'O estado da impressora não permite esta ação.'
     switch (action) {

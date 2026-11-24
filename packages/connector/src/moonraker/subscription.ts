@@ -60,7 +60,12 @@ export type RawMoonrakerUnavailable = Readonly<{
 }>
 
 export type MoonrakerEvent =
-  | { kind: 'snapshot'; printer: PrinterState; sourceEventtime: number }
+  | {
+      kind: 'snapshot'
+      printer: PrinterState
+      sourceEventtime: number
+      collectionReleaseAtMonoMs?: number
+    }
   | {
       kind: 'unavailable'
       printerKey: string
@@ -190,11 +195,13 @@ export function createMoonrakerSubscription(input: {
    */
   hasPendingDispatch?: () => boolean
   linkHealth?: MoonrakerLinkHealth
+  /** Monotonic time of the latest release still awaiting durable telemetry. */
+  pendingCollectionRelease?: () => number | undefined
   onEvent: (event: MoonrakerEvent) => void
   onRawObservation?: (observation: RawMoonrakerObservation) => void
   onRawUnavailable?: (event: RawMoonrakerUnavailable) => void
   signal: AbortSignal
-}): { done: Promise<void> } {
+}): { done: Promise<void>; requestCompleteRefresh: () => void } {
   const { printerKey, origin, limits } = validateMoonrakerInput(input)
   const snapmakerU1 = isSnapmakerU1Model(input.assignment.model)
   const controller = new AbortController()
@@ -240,6 +247,7 @@ export function createMoonrakerSubscription(input: {
   // status that Moonraker retains.
   let lastJob: PrinterState['lastJob']
   let hasObservedStatus = false
+  let activeClient: ReturnType<typeof openMoonrakerClient> | undefined
   async function run() {
     let backoff = limits.reconnectMinMs
     emit({ kind: 'unavailable', printerKey, reason: 'connecting' })
@@ -298,6 +306,7 @@ export function createMoonrakerSubscription(input: {
         value: z.infer<typeof Snapshot>,
         temperatureObservation?: RawMoonrakerObservation['temperatureObservation'],
         durationSourceTime?: number,
+        collectionReleaseAtMonoMs?: number,
       ) {
         if (signal.aborted) return
         const firstObservation = !hasObservedStatus
@@ -474,7 +483,7 @@ export function createMoonrakerSubscription(input: {
             now - lastChamberAtMonoMs >= CHAMBER_TEMPERATURE_MIN_INTERVAL_MS
           changed = significant || due
         }
-        if (!changed) return
+        if (!changed && collectionReleaseAtMonoMs === undefined) return
         fingerprint = nextFingerprint
         if (durableChamber !== undefined) {
           lastChamberReading = durableChamber
@@ -489,6 +498,9 @@ export function createMoonrakerSubscription(input: {
           kind: 'snapshot',
           ...parsed,
           printer: lastJob ? { ...printer, lastJob } : printer,
+          ...(collectionReleaseAtMonoMs === undefined
+            ? {}
+            : { collectionReleaseAtMonoMs }),
         })
       }
       try {
@@ -587,10 +599,16 @@ export function createMoonrakerSubscription(input: {
                     printState: stamp,
                     progress: stamp,
                   }
+                  const release = input.pendingCollectionRelease?.()
                   publish(
                     value,
                     { fields, observedAtMonoMs: stamp },
                     value.eventtime,
+                    release !== undefined &&
+                      stamp > release &&
+                      !observation.hasNewerBufferedStatus
+                      ? release
+                      : undefined,
                   )
                 },
               }
@@ -672,6 +690,7 @@ export function createMoonrakerSubscription(input: {
             )
           },
         })
+        activeClient = client
         const raw = await client.snapshot
         const initial = Snapshot.parse(raw)
         observeTools((raw as { status?: unknown }).status)
@@ -693,6 +712,7 @@ export function createMoonrakerSubscription(input: {
           emit({ kind: 'unavailable', printerKey, reason })
         }
       } finally {
+        activeClient = undefined
         try {
           invalidate()
         } finally {
@@ -711,5 +731,8 @@ export function createMoonrakerSubscription(input: {
     }
     if (callbackFailure) throw callbackFailure.error
   }
-  return { done: run() }
+  return {
+    done: run(),
+    requestCompleteRefresh: () => activeClient?.requestCompleteRefresh(),
+  }
 }

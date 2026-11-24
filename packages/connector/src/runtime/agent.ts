@@ -44,7 +44,10 @@ import { loadExistingIdentity } from '../identity/store.ts'
 import { readCredentialEnvelope } from '../config/credential.ts'
 import { readAgentRuntimeConfig } from '../config/runtime.ts'
 import { openScopedTelemetryQueue } from './queue-scope.ts'
-import type { Diagnostic as CollectionDiagnostic } from './collect.ts'
+import type {
+  Diagnostic as CollectionDiagnostic,
+  MoonrakerCollectionRefresh,
+} from './collect.ts'
 import type { TelemetrySender } from '../cloud/drain.ts'
 import type { RenewalDiagnostic } from '../cloud/credential-renewal.ts'
 import { credentialLookupId } from '../config/signalling.ts'
@@ -309,6 +312,12 @@ async function runConnectorAgentOnce(
   // checked against what each printer itself reported. Never stops the agent.
   const printerProfiles = createPrinterProfiles()
   const jobLinks = createLibraryJobLinks()
+  const moonrakerPrinters =
+    'printers' in config.collection ? config.collection.printers : []
+  const moonrakerCollectionRefresh = new Map<
+    string,
+    MoonrakerCollectionRefresh
+  >(moonrakerPrinters.map(({ printerKey }) => [printerKey, {}]))
   // Bed-collection hold (durable): a run OpenFarm started is held when it
   // finishes until an operator confirms the plate is clear. An unreadable
   // journal refuses every OpenFarm start.
@@ -316,6 +325,12 @@ async function runConnectorAgentOnce(
   try {
     collection = openQueueCollectionJournal(
       join(input.dataDirectory, 'queue-collection.json'),
+      (printerKey) => {
+        const refresh = moonrakerCollectionRefresh.get(printerKey)
+        if (!refresh) return
+        refresh.releasedAtMonoMs = performance.now()
+        refresh.request?.()
+      },
     )
   } catch (error) {
     logger.warn('queue-collection-unavailable', { error })
@@ -323,8 +338,6 @@ async function runConnectorAgentOnce(
   }
   // Locally declared Snapmaker U1 printers get the U1 tool mapping and
   // command capability set; withdrawn when this run ends.
-  const moonrakerPrinters =
-    'printers' in config.collection ? config.collection.printers : []
   const withdrawU1 = declareSnapmakerU1Printers(moonrakerPrinters)
   // A job already finished on connect is reported only when OpenFarm has a
   // pending dispatch on that printer; otherwise the history import owns it.
@@ -1111,6 +1124,7 @@ async function runConnectorAgentOnce(
           refreshControls = refresh
           refresh()
         },
+        moonrakerCollectionRefresh,
         linkHealthFor: (printerKey) => links.get(printerKey),
         libraryLinks,
         discoverMoonrakerObjects: true,

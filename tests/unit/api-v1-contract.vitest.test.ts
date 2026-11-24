@@ -555,6 +555,7 @@ function physicalSpoolScenarios(): Scenario[] {
                 return [
                   {
                     agentId: ids.agentA,
+                    receivedAt: observedAt,
                     observedAt,
                     snapshot: {
                       observedAt,

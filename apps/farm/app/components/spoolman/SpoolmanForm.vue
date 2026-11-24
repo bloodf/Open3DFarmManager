@@ -36,11 +36,13 @@ const emit = defineEmits<{ submit: [] }>()
       aria-describedby="spoolman-service-id-help"
     />
     <p id="spoolman-service-id-help">
-      Para reutilizar a mesma instalação, copie o ID atual abaixo, inclusive ao
-      mudar o endereço. Para identificar outra instalação, informe um novo UUID,
-      mesmo no mesmo endereço. Sem UUID, cada Connector mantém o ID no mesmo
-      endereço e cria outro quando o endereço muda. Connectors antigos podem não
-      aceitar um UUID explícito; atualize-os antes de reutilizá-lo.
+      Ao mudar o endereço da mesma instalação, informe o UUID que ela já usa. Se
+      a tabela abaixo mostrar um UUID, use esse valor. Se nenhum UUID estiver
+      salvo, confirme o ID na configuração do Connector antes de mudar o
+      endereço. Para outra instalação, informe um novo UUID, mesmo no mesmo
+      endereço. Sem UUID neste campo, cada Connector mantém o ID no mesmo
+      endereço e cria outro quando o endereço muda. Atualize Connectors antigos
+      antes de usar um UUID explícito.
     </p>
 
     <label for="spoolman-username">Usuário (opcional)</label>

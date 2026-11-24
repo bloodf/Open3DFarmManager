@@ -58,7 +58,7 @@ const when = (value: number) => formatDateTime(value, 'short') ?? 'Indisponível
         <tr>
           <th scope="col">Connector</th>
           <th scope="col">Endereço</th>
-          <th scope="col">ID do serviço</th>
+          <th scope="col">UUID do serviço</th>
           <th scope="col">Situação</th>
           <th scope="col">Última verificação</th>
         </tr>

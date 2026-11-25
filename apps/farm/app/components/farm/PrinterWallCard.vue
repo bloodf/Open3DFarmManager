@@ -232,9 +232,6 @@ const alertKind = (alert: string | FarmAlert) =>
   padding: 0;
   list-style: none;
 }
-.wall-printer__remaining {
-  margin: 0;
-}
 .wall-printer__alerts {
   display: flex;
   flex-wrap: wrap;

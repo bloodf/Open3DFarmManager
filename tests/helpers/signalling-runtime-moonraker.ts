@@ -131,6 +131,11 @@ export async function createRuntimeMoonrakerFixture() {
       model?: string
       camera?: Record<string, unknown>
       /**
+       * Simulator tests only: a test entry run in place of the packaged CLI,
+       * with the same arguments.
+       */
+      connectorEntry?: URL
+      /**
        * Journey harness only: another vendor's collection and assignment
        * replace the Moonraker ones (the packaged Connector is unchanged).
        */
@@ -331,7 +336,7 @@ export async function createRuntimeMoonrakerFixture() {
         const child = spawn(
           process.execPath,
           [
-            entry.pathname,
+            (input.connectorEntry ?? entry).pathname,
             'run',
             '--config',
             configPath,

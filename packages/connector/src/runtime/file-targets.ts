@@ -15,11 +15,13 @@ import {
   readAnycubicPrinterBinding,
   readCrealityPrinterBinding,
   readSdcpPrinterBinding,
+  readPhrozenPrinterBinding,
 } from '../control/printer-binding.ts'
 import { createKobraLinkFilesTarget } from '../kobralink/runtime.ts'
 import type { KobraLinkFetch } from '../kobralink/client.ts'
 import type { FileListOptions, FileListTarget } from './file-list.ts'
 import type { FileUploadOptions, FileUploadTarget } from './file-upload.ts'
+import type { PhrozenQualification } from '../phrozen/qualification.ts'
 
 type Targets = Readonly<{
   upload: FileUploadTarget
@@ -38,6 +40,8 @@ export function createFileTargets(input: {
   assignmentId: string
   dataDirectory: string
   kobraLinkFetch?: KobraLinkFetch
+  /** Test override of the empty shipped Phrozen qualification list. */
+  phrozenQualifiedWrites?: readonly PhrozenQualification[] | undefined
   /** Local diagnostics for a failed listing; never sent to the browser. */
   onListFailure?: FileListOptions['onFailure']
 }): { fileTransfer: FileUploadOptions; fileList: FileListOptions } {
@@ -167,6 +171,19 @@ export function createFileTargets(input: {
       const local = handle && readSdcpPrinterBinding(handle)
       if (handle && local?.printerKey === controlledKey)
         return { upload: { backend: 'sdcp', binding: handle } }
+    }
+    if (collection.version === 8) {
+      // Only a binding opted in to control has an upload target.
+      const handle = input.config.bindingFor(input.assignmentId)
+      const local = handle && readPhrozenPrinterBinding(handle)
+      if (handle && local?.printerKey === controlledKey)
+        return {
+          upload: {
+            backend: 'phrozen',
+            binding: handle,
+            qualifiedWrites: input.phrozenQualifiedWrites,
+          },
+        }
     }
     return undefined
   }

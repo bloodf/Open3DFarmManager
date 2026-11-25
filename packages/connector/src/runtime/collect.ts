@@ -935,6 +935,42 @@ export async function collectIntoQueue(input: {
       }
     }
     if (config.version === 8) {
+      // A Phrozen printer with advertised controls also goes to telemetry, so
+      // the server can issue authority for them. Read-only stays live only.
+      const phrozen = (
+        binding: Parameters<typeof createPhrozenCollection>[0]['binding'],
+        options: Pick<
+          Parameters<typeof createPhrozenCollection>[0],
+          | 'allowedOrigins'
+          | 'signal'
+          | 'timeoutMs'
+          | 'onObservation'
+          | 'onUnavailable'
+        >,
+      ) => {
+        let queued = false
+        return createPhrozenCollection({
+          ...options,
+          binding,
+          controllable: () => !!input.controlsFor?.(binding.printerKey)?.length,
+          onObservation(value) {
+            options.onObservation(value)
+            if (value.printer.progress === undefined) return
+            queued = true
+            onEvent({ kind: 'snapshot', printer: value.printer })
+          },
+          onUnavailable(epoch) {
+            options.onUnavailable(epoch)
+            if (!queued) return
+            queued = false
+            onEvent({
+              kind: 'unavailable',
+              printerKey: binding.printerKey,
+              reason: 'stale',
+            })
+          },
+        })
+      }
       for (const binding of config.drivers) {
         const options = {
           allowedOrigins: config.allowedOrigins,
@@ -962,7 +998,7 @@ export async function collectIntoQueue(input: {
             : binding.family === 'flashforge'
               ? createFlashforgeCollection({ ...options, binding })
               : binding.family === 'phrozen'
-                ? createPhrozenCollection({ ...options, binding })
+                ? phrozen(binding, options)
                 : createQidiCollection({
                     ...options,
                     binding,

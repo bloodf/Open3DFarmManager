@@ -86,6 +86,8 @@ export type JourneyOptions = Readonly<{
    * Off by default: the read-only journey stays unchanged.
    */
   signedControl?: boolean
+  /** A test Connector entry in place of the packaged CLI (see the helper). */
+  connectorEntry?: URL
   /**
    * Moonraker fixture only: the admin's per-printer G-code console switch in
    * the Connector configuration (`consoleAssignmentIds`). Off by default, as
@@ -809,6 +811,9 @@ export async function startJourneyHarness(
     }
     await runtime.start({
       origin,
+      ...(options.connectorEntry
+        ? { connectorEntry: options.connectorEntry }
+        : {}),
       ...(kobraXCamera ? { camera: kobraXCamera } : {}),
       audience: AUDIENCE,
       claim,

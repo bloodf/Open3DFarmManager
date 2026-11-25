@@ -2,6 +2,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import type { RawPrinterObservation } from '../runtime/farm-snapshot-provider.ts'
 import { parsePhrozenBinding, type PhrozenBinding } from './config.ts'
 import { connectPhrozen } from './index.ts'
+import { phrozenPrintState } from './operations.ts'
 import type { PhrozenSession } from './transport.ts'
 import {
   READ_ONLY_POLL_BUDGET_MS,
@@ -14,12 +15,26 @@ export type PhrozenObservation = Omit<RawPrinterObservation, 'printer'> & {
   }
 }
 
+/** SDCP "PrintInfo > CurrentLayer / TotalLayer". Display only. */
+function layerFraction(info: unknown) {
+  const { CurrentLayer, TotalLayer } = (info ?? {}) as Record<string, unknown>
+  return typeof CurrentLayer === 'number' &&
+    typeof TotalLayer === 'number' &&
+    CurrentLayer >= 0 &&
+    TotalLayer > 0 &&
+    CurrentLayer <= TotalLayer
+    ? CurrentLayer / TotalLayer
+    : undefined
+}
+
 export function createPhrozenCollection(input: {
   binding: PhrozenBinding
   allowedOrigins: readonly string[]
   signal: AbortSignal
   timeoutMs: number
   pollMs?: number
+  /** True once the Connector advertises controls for this printer. */
+  controllable?: () => boolean
   onObservation: (observation: PhrozenObservation) => void
   onUnavailable: (epoch: number) => void
 }) {
@@ -64,12 +79,22 @@ export function createPhrozenCollection(input: {
         const status = await adapter.readStatus()
         if (signal.aborted) return
         const current = status.CurrentStatus
+        const reported = phrozenPrintState(status).state
         const state =
           Array.isArray(current) && current.includes(1)
-            ? 'printing'
+            ? reported === 'paused'
+              ? 'paused'
+              : 'printing'
             : Array.isArray(current) && current.length === 1 && current[0] === 0
               ? 'idle'
               : 'unknown'
+        // Controls require progress (PrinterState); read-only reports none.
+        const progress =
+          input.controllable?.() && state !== 'unknown'
+            ? state === 'idle'
+              ? 0
+              : layerFraction(status.PrintInfo)
+            : undefined
         const mono = performance.now()
         input.onObservation({
           printerKey: binding.printerKey,
@@ -80,6 +105,7 @@ export function createPhrozenCollection(input: {
             identity: { vendor: 'Phrozen', model, firmware },
             controls: [],
             statusReason,
+            ...(progress === undefined ? {} : { progress }),
             observedAt: Date.now(),
           },
           receivedAtMonoMs: mono,
@@ -88,6 +114,7 @@ export function createPhrozenCollection(input: {
               state: mono,
               identity: mono,
               statusReason: mono,
+              ...(progress === undefined ? {} : { progress: mono }),
             },
           },
         })

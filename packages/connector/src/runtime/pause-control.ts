@@ -180,6 +180,10 @@ type PauseControlInput = {
   ) => Parameters<typeof receiveApiCommand>[0]['libraryPrint']
   /** Remembers what a library start printed so the finished job links to it (#385). */
   libraryLinks?: Parameters<typeof receiveApiCommand>[0]['libraryLinks']
+  /** Test override only; the shipped Phrozen qualification list is empty. */
+  phrozenQualifiedWrites?:
+    | readonly import('../phrozen/qualification.ts').PhrozenQualification[]
+    | undefined
   resinCapabilities?: Parameters<
     typeof receiveApiCommand
   >[0]['resinCapabilities']
@@ -368,6 +372,7 @@ async function runAssignmentControl(
       config,
       assignmentId,
       dataDirectory: input.dataDirectory,
+      phrozenQualifiedWrites: input.phrozenQualifiedWrites,
     }).fileTransfer.targetFor(printerKey)
   }
   let relay: ReturnType<typeof createPauseCommandRelay>
@@ -383,6 +388,7 @@ async function runAssignmentControl(
       ],
       limits: config.collection.limits,
       clock,
+      phrozenQualifiedWrites: input.phrozenQualifiedWrites,
       kobraXControlEvidence(binding) {
         const mapping =
           binding === printerBinding ? readPrinterBinding(binding) : null
@@ -608,6 +614,7 @@ async function runAssignmentControl(
       config,
       assignmentId,
       dataDirectory: input.dataDirectory,
+      phrozenQualifiedWrites: input.phrozenQualifiedWrites,
       onListFailure: (_printerKey, reason, requestSent) =>
         diagnostic({ kind: 'file-list-failed', reason, requestSent }),
     }),

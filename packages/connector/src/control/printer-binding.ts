@@ -1,3 +1,7 @@
+import {
+  Binding as PhrozenControlBinding,
+  type PhrozenBinding,
+} from '../phrozen/config.ts'
 import { KobraLinkRuntimeBinding } from '../kobralink/configuration.ts'
 import { AnycubicBinding } from '../config/anycubic.ts'
 import { KobraXBinding } from '../config/kobra-x.ts'
@@ -183,6 +187,16 @@ export function readRuntimePrinterBinding(binding: PrinterBinding) {
       backend: 'sdcp' as const,
     }
   }
+  if (mapping && phrozenBindings.has(binding)) {
+    const { assignment_id, farm_id, agent_id, printer_key } = mapping
+    return {
+      assignment_id,
+      farm_id,
+      agent_id,
+      printer_key,
+      backend: 'phrozen' as const,
+    }
+  }
   return mapping ?? readonlyBindings.get(binding) ?? null
 }
 
@@ -225,6 +239,35 @@ export function provisionSdcpPrinter(
 export function readSdcpPrinterBinding(binding: PrinterBinding) {
   return readPrinterBinding(binding)
     ? (sdcpBindings.get(binding) ?? null)
+    : null
+}
+
+const phrozenBindings = new WeakMap<
+  PrinterBinding,
+  Readonly<Required<PhrozenBinding>>
+>()
+/** Explicit local command opt-in; other Phrozen handles stay read-only. */
+export function provisionPhrozenPrinter(
+  assignmentInput: unknown,
+  bindingInput: unknown,
+): PrinterBinding {
+  const local = Object.freeze(PhrozenControlBinding.parse(bindingInput))
+  const scope = Assignment.omit({ moonraker_origin: true }).parse(
+    assignmentInput,
+  )
+  if (scope.printer_key !== local.printerKey)
+    throw new Error('Phrozen assignment mismatch')
+  const binding = new BoundPrinter()
+  bindings.set(binding, {
+    assignment: Object.freeze({ ...scope, moonraker_origin: '' }),
+    active: true,
+  })
+  phrozenBindings.set(binding, local)
+  return binding
+}
+export function readPhrozenPrinterBinding(binding: PrinterBinding) {
+  return readPrinterBinding(binding)
+    ? (phrozenBindings.get(binding) ?? null)
     : null
 }
 

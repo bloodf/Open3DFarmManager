@@ -326,7 +326,7 @@ test('browser: service then firmware_restart or a save with restart is refused',
 
 test('browser: a save with restart then firmware_restart or service is refused', async (t) => {
   const f = await browser(t)
-  assert.match(await f.send(SAVE_RESTART), RAN)
+  assert.equal(await f.send(SAVE_RESTART), 'applied:applied')
   assert.equal(await f.send(FIRMWARE), 'rejected:storage')
   assert.equal(await f.send(SERVICE), 'rejected:storage')
   assert.equal(await f.send(SAVE_RESTART), 'rejected:storage')
@@ -348,7 +348,7 @@ test('browser: a driver refusal before the send leaves the restart available', a
   assert.equal(await f.send(SERVICE), 'not-sent:state')
   assert.equal(await f.send(SAVE_RESTART), 'not-sent:state')
   f.driverState.mode = 'ack'
-  assert.match(await f.send(SAVE_RESTART), RAN)
+  assert.equal(await f.send(SAVE_RESTART), 'applied:applied')
   assert.deepEqual(f.sent, ['config_write'])
 })
 

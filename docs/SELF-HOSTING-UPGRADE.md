@@ -57,11 +57,15 @@ node scripts/connector-config-migrate.ts /private/connector/runtime-config.json
 
 The command validates and migrates the versioned runtime configuration in place. Preserve the separate backup until verification and rollback are no longer needed. If migration reports an error, keep services in the safe state and follow rollback before reopening access.
 
+A journal upgraded from v18 cannot recover whether an earlier `config_write` requested a restart. If one was sent immediately before the upgrade, wait 60 seconds from that send before allowing another printer restart; it may not count toward the restart cap during that window.
+
 ## 5. Verify
 
 Confirm the application and Connector services are healthy, `/readyz` reports database readiness, and expected application data is available. Confirm the Connector runtime configuration loads in the new version. Reopen writers only after these checks succeed. Do not use automated tests to command physical printers.
 
 ## 6. Roll back
+
+A Connector version that predates journal v19 refuses to open a journal already upgraded to v19 (`Unknown command journal version`). Keep that Connector stopped and retain the journal; do not replace or delete it to bypass the refusal, because it contains command safety and replay history. Use a Connector compatible with v19 while resolving the rollback.
 
 Keep all backups and volumes. Restoring the dump discards writes made after the backup. Coordinate downtime and retain forensic copies. Never use a partial or failed dump as a backup.
 

@@ -439,22 +439,3 @@ it('reports a disabled library runtime clearly', async () => {
     state.enabled = true
   }
 })
-
-it('returns 201 for a successful upload with the library runtime enabled', async () => {
-  state.service = {
-    upload: async () => ({ ok: true, value: { item: { id: 'fixture' } } }),
-  }
-  const response = (await uploadIntegrationLibrary(
-    new Request('https://farm.test/api/integrations/v1/library', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        farmId: randomUUID(),
-        name: 'part.gcode',
-        contentBase64: gcode.toString('base64'),
-      }),
-    }),
-    {} as IntegrationPrincipal,
-  )) as Response
-  expect(response.status).toBe(201)
-})

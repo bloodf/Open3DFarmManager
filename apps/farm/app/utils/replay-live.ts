@@ -149,9 +149,10 @@ export async function sendLibraryReplay(
     }
     if (result.outcome !== 'not-sent' || result.code || attempt === 2)
       return result
-    // A Connector serves one command session at a time and waits at least
-    // `retryMinMs` (default 1 s, packages/connector/src/runtime/signalling.ts)
-    // before it listens again: the retries have to outlast that gap.
+    // A Connector serves one command session at a time and waits at least 1 s
+    // before it listens again (`RETRY_MIN_MS` in
+    // packages/connector/src/runtime/pause-control.ts). The retries outlast
+    // that minimum only; its backoff grows to 30 s, which is left to the user.
     await new Promise((resolve) => setTimeout(resolve, 1_000 * (attempt + 1)))
   }
   return { outcome: 'not-sent' }

@@ -101,7 +101,7 @@ Tests: `tests/node/creality-file-journeys.test.ts`, `tests/journey/creality.spec
 - Nothing is uploaded or commanded when the listing fails. A `start_print` sent by name through the integration API is not preceded by a listing.
 - A secure printer is uploaded to over HTTPS on `httpsPort` (default 443), as M does in `Device/Klipper4408Interface.cpp`. An endpoint that cannot be verified is refused, never downgraded.
 - **Unproven:** M checks the printer's certificate against its bundled CA but skips the host name and the certificate dates. The Connector checks both, so a real secure printer may be refused even with the right `caFile`.
-- **Journey finding:** since `d822e386` the issuer grants only controls advertised by telemetry in the last two minutes. The Creality journeys kept telemetry upload closed, so `POST /api/pause-authority/capabilities` returned 403 and the page failed before any request reached the Connector or the printer. Both specs now keep upload open. With it open, the live session dropped in one of three runs of the stock journey, at the cancel step.
+- **Journey finding:** since `d822e386` the issuer grants only controls advertised by telemetry in the last two minutes. The Creality journeys kept telemetry upload closed, so `POST /api/pause-authority/capabilities` returned 403 and the page failed before any request reached the Connector or the printer. Both specs now keep upload open. With it open, the live session dropped once in four runs of the stock journey, at the cancel step.
 
 ### Camera profiles
 

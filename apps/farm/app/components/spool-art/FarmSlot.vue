@@ -88,16 +88,21 @@ const meta = computed(() =>
 )
 const amount = computed(() => {
   const l = level.value
-  if (l.kind === 'unknown') return { main: 'Quantidade desconhecida', note: '' }
+  if (l.kind === 'unknown')
+    return { main: 'Quantidade desconhecida', note: '', showsWeight: false }
   const pct = formatPercentage(l.fraction * 100) ?? ''
   if (l.source === 'spoolman') {
     const left = formatWeight(props.spoolmanRemainingWeight)
     const total = formatWeight(props.spoolmanInitialWeight)
     return left && total
-      ? { main: `${left} de ${total}`, note: pct }
-      : { main: pct, note: 'informado pelo Spoolman' }
+      ? { main: `${left} de ${total}`, note: pct, showsWeight: true }
+      : { main: pct, note: 'informado pelo Spoolman', showsWeight: false }
   }
-  return { main: `${pct} restante`, note: 'informado pela impressora' }
+  return {
+    main: `${pct} restante`,
+    note: 'informado pela impressora',
+    showsWeight: false,
+  }
 })
 </script>
 
@@ -127,6 +132,7 @@ const amount = computed(() => {
         :colors="empty ? null : colors"
         :fraction="empty ? 0 : fraction"
         :size="52"
+        aria-hidden="true"
       />
       <div class="farm-slot-id">
         <p class="farm-slot-name" :title="name ?? undefined">
@@ -137,8 +143,14 @@ const amount = computed(() => {
     </div>
     <div v-if="!empty" class="farm-slot-amount">
       <p class="farm-slot-amount-text">
-        <strong>{{ amount.main }}</strong>
-        <span v-if="amount.note" class="farm-slot-muted">
+        <strong :aria-hidden="!amount.showsWeight || undefined">{{
+          amount.main
+        }}</strong>
+        <span
+          v-if="amount.note"
+          class="farm-slot-muted"
+          :aria-hidden="amount.showsWeight || undefined"
+        >
           · {{ amount.note }}</span
         >
       </p>

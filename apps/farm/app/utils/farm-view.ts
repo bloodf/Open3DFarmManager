@@ -327,6 +327,7 @@ const unqualifiedSource = 'somente leitura, não qualificada em hardware'
 const statusSourceLabel: Partial<
   Record<NonNullable<PrinterState['statusReason']>, string>
 > = {
+  'printer-fault': 'falha informada pela impressora',
   'flashforge-simulated': simulatedSource,
   'flashforge-unqualified': unqualifiedSource,
   'phrozen-simulated': simulatedSource,

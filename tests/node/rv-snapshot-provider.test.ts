@@ -383,7 +383,7 @@ for (const [wire, state] of [
 }
 
 for (const [wire, code, expected] of [
-  ['stoped', 10601, 0],
+  ['stoped', 10601, undefined],
   ['stoped', 10111, undefined],
 ] as const) {
   test(`#886 a print-report stop with code ${code} drops the old progress`, async (t) => {
@@ -402,11 +402,11 @@ for (const [wire, code, expected] of [
     assert.equal(stopped.progress, expected)
     assert.equal(stopped.currentLayer, undefined)
     assert.equal(stopped.totalLayer, undefined)
-    // A later bare idle report is still published, from zero.
+    // A later bare idle report is still published without progress.
     printer.report({ data: { state: 'free', project: null } })
     const idle = printer.observations.at(-1)!.printer
     assert.equal(idle.state, 'idle')
-    assert.equal(idle.progress, 0)
+    assert.equal(idle.progress, undefined)
   })
 }
 

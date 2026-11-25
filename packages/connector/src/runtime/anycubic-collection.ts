@@ -60,8 +60,6 @@ export function createAnycubicCollection(input: {
   let estimateActive = false
   let activeJob = false
   let activeFilename: string | undefined
-  // A stopped job's progress is gone; an idle printer then reports from zero.
-  let progressReset = false
   // Repeated in every observation until the next job starts, so a telemetry
   // batch that misses the transition report still carries the finished job.
   let lastJob: PrinterState['lastJob']
@@ -76,7 +74,6 @@ export function createAnycubicCollection(input: {
     estimateActive = false
     activeJob = false
     activeFilename = undefined
-    progressReset = false
     alert = undefined
     clearTimeout(timer)
     values = {}
@@ -185,18 +182,12 @@ export function createAnycubicCollection(input: {
                 : value
         times[key as keyof PrinterState] = now
       }
-      if (printing || fields.progress !== undefined) progressReset = false
       if (stopped) {
         for (const key of ['progress', 'currentLayer', 'totalLayer'] as const) {
           if (fields[key] !== undefined) continue
           delete values[key]
           delete times[key]
         }
-        progressReset = fields.progress === undefined
-      }
-      if (progressReset && values.state === 'idle' && times.state) {
-        values.progress = 0
-        times.progress = times.state
       }
       const faultOnly =
         values.progress === undefined &&
@@ -205,6 +196,7 @@ export function createAnycubicCollection(input: {
       if (
         !values.state ||
         (values.state !== 'offline' &&
+          !(values.state === 'idle' && lastJob) &&
           values.progress === undefined &&
           !faultOnly)
       )

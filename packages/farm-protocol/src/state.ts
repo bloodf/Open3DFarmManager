@@ -295,6 +295,9 @@ function printerStateSchema(legacy: boolean) {
     .refine(
       (value) =>
         value.state === 'offline' ||
+        (value.state === 'idle' &&
+          value.lastJob !== undefined &&
+          value.statusReason === undefined) ||
         (value.state === 'error' &&
           value.statusReason === 'firmware-shutdown') ||
         (value.state === 'unknown' && value.preformStatus !== undefined) ||

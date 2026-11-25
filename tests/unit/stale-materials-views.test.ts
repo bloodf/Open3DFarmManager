@@ -135,5 +135,6 @@ it('hides historical material data in all three views and keeps live data', asyn
     )
   }
   expect(rowCells('Printer-001')[8]).toBe('Indisponível')
-  expect(rowCells('Printer-002')[8]).toBe('PLA-TESTE')
+  // A live row shows its spool illustration beside the material name.
+  expect(rowCells('Printer-002')[8]).toContain('PLA-TESTE')
 })

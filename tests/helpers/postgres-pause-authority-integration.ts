@@ -962,8 +962,11 @@ export async function testPostgresPauseAuthority(
         ).ok,
       )
       const alternateAssignment = randomUUID(),
+        alternatePrinterKey = 'synthetic-' + kind + '-' + randomUUID(),
         assignedAt = await databaseNow()
-      await admin`INSERT INTO farm.printer_assignments(id,farm_id,agent_id,printer_key,created_at,created_by) VALUES (${alternateAssignment}::uuid,${farm}::uuid,${binding.agent_id}::uuid,${'synthetic-' + kind + '-' + randomUUID()},${assignedAt},${account})`
+      await admin`INSERT INTO farm.printer_assignments(id,farm_id,agent_id,printer_key,created_at,created_by) VALUES (${alternateAssignment}::uuid,${farm}::uuid,${binding.agent_id}::uuid,${alternatePrinterKey},${assignedAt},${account})`
+      await admin`INSERT INTO farm.printer_latest_state (farm_id, agent_id, printer_key, observed_at, state)
+        VALUES (${farm}::uuid, ${binding.agent_id}::uuid, ${alternatePrinterKey}, ${assignedAt}, ${admin.json({ controls: ['pause'] })})`
       const nowBinding = await databaseNow(),
         b = {
           ...binding,

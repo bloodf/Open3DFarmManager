@@ -6,6 +6,7 @@ import {
 } from '../../utils/ui-format.ts'
 import { computed } from 'vue'
 import type { ActiveSpool } from '../../../../../packages/farm-protocol/src/status.ts'
+import SpoolIllustration from '../spool-library/SpoolIllustration.vue'
 import type { FarmAlert } from '../../utils/farm-alerts.ts'
 import { farmJobView } from '../../utils/farm-job-view.ts'
 import {
@@ -46,6 +47,42 @@ const icons = {
 }
 const state = computed(() => props.observation?.state)
 const job = computed(() => state.value && farmJobView(state.value))
+const materialBySlot = computed(
+  () =>
+    new Map(
+      state.value?.materials?.map((material) => [material.slot, material]),
+    ),
+)
+const spoolmanBySlot = computed(
+  () =>
+    new Map(
+      props.activeSpools
+        ?.filter((spool) => spool.spoolId !== undefined)
+        .map((spool) => [spool.slot, spool]),
+    ),
+)
+const materialRows = computed(() =>
+  state.value?.materials?.map((material) => {
+    const spool = spoolmanBySlot.value.get(material.slot)
+    return {
+      ...material,
+      color: spool?.colorHex ?? material.colorHex?.slice(0, 6),
+      percent: spool?.remainingPercent ?? material.remainingPercent,
+    }
+  }),
+)
+const activeSpoolRows = computed(() =>
+  props.activeSpools?.map((spool) => {
+    const material = props.observation?.historical
+      ? undefined
+      : materialBySlot.value.get(spool.slot)
+    return {
+      ...spool,
+      color: spool.colorHex ?? material?.colorHex?.slice(0, 6),
+      percent: spool.remainingPercent ?? material?.remainingPercent,
+    }
+  }),
+)
 const age = computed(
   () => props.observation && observationAge(props.observation, props.now),
 )
@@ -147,38 +184,41 @@ function spoolLabel(spool: ActiveSpool) {
       </dd>
     </dl>
     <ul
-      v-if="!observation?.historical && state?.materials?.length"
+      v-if="!observation?.historical && materialRows?.length"
       aria-label="Slots de filamento"
     >
-      <li v-for="material in state.materials" :key="material.slot">
+      <li v-for="material in materialRows" :key="material.slot">
+        <SpoolIllustration
+          :filament="{ color_hex: material.color }"
+          :printer-percent="material.percent"
+          compact
+        />
         {{ material.slot
         }}<template v-if="material.materialType">
           · {{ material.materialType }}</template
         >
-        <template v-if="material.colorHex">
-          <span
-            class="wall-printer__swatch"
-            :style="{ backgroundColor: '#' + material.colorHex.slice(0, 6) }"
-            aria-hidden="true"
-          />
-          <span class="wall-printer__color"
-            >Cor #{{ material.colorHex.slice(0, 6) }}</span
-          >
+        <template v-if="material.color">
+          <span class="wall-printer__color">Cor #{{ material.color }}</span>
         </template>
         <template v-if="material.active"> · Em uso</template>
-        <template v-if="material.remainingPercent !== undefined">
-          · {{ material.remainingPercent }}% restante</template
+        <template v-if="material.percent !== undefined">
+          · {{ formatPercentage(material.percent) }} restante</template
         >
       </li>
     </ul>
-    <ul v-if="activeSpools?.length" aria-label="Carretéis ativos">
-      <li v-for="spool in activeSpools" :key="spool.slot">
+    <ul v-if="activeSpoolRows?.length" aria-label="Carretéis ativos">
+      <li v-for="spool in activeSpoolRows" :key="spool.slot">
+        <SpoolIllustration
+          :filament="{ color_hex: spool.color }"
+          :spoolman-percent="spool.percent"
+          compact
+        />
         {{ spoolLabel(spool)
         }}<template v-if="spoolLabel(spool) !== spool.slot">
           · {{ spool.slot }}</template
         >
-        <template v-if="spool.remainingPercent !== undefined">
-          · {{ spool.remainingPercent }}% restante</template
+        <template v-if="spool.percent !== undefined">
+          · {{ formatPercentage(spool.percent) }} restante</template
         >
       </li>
     </ul>
@@ -224,13 +264,6 @@ function spoolLabel(spool: ActiveSpool) {
   border: 1px solid currentColor;
   border-radius: 0.5rem;
   padding: 0.125rem 0.5rem;
-}
-.wall-printer__swatch {
-  display: inline-block;
-  width: 1em;
-  height: 1em;
-  border: 1px solid currentColor;
-  vertical-align: middle;
 }
 .wall-printer__color {
   position: absolute;

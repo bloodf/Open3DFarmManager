@@ -135,6 +135,24 @@ describe('filament match view', () => {
     expect(html).not.toContain('data-unknown')
   })
 
+  it('prefers the Spoolman percentage over the printer one when no weights are known', async () => {
+    const html = await render('FilamentMatch', {
+      index: 1,
+      required,
+      matched: {
+        label: 'Slot 2',
+        materialType: 'PLA',
+        colorHex: 'FF0000FF',
+        remainingPercent: 85,
+        spoolmanRemainingPercent: 25,
+      },
+    })
+    const t = text(html)
+    expect(html).toContain('aria-valuenow="25"')
+    expect(t).toContain('25%, informado pelo Spoolman')
+    expect(t).not.toContain('informado pela impressora')
+  })
+
   it('draws the full reel with a "desconhecido" badge when the level is unknown', async () => {
     const html = await render('FilamentMatch', {
       index: 1,

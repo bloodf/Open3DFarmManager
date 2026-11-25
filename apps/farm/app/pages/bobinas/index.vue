@@ -683,6 +683,9 @@ onBeforeUnmount(() => {
               label="Bobina com pouco material"
             />
             <div class="stock-numbers">
+              <span v-if="spoolRemainingPercent(spool) === null" class="muted"
+                >Nível restante desconhecido</span
+              >
               <strong>
                 Restante: {{ formatSpoolWeight(spool.remaining_weight) }}
               </strong>

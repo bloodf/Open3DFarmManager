@@ -70,6 +70,27 @@ for (const [label, type, action] of [
   })
 }
 
+test('by default a printer-chosen or missing ID never settles a command', async () => {
+  for (const msgid of ['printer-chosen', '']) {
+    let id = ''
+    const requests = createKobraXRequests({
+      topic: (type) => type,
+      publish(_topic, payload) {
+        id = JSON.parse(payload).msgid
+      },
+      resultTimeoutMs: 20,
+    })
+    const result = requests.send({
+      type: 'print',
+      action: 'stop',
+      beforeSend: () => true,
+    })
+    requests.handleAck({ msgid: id, code: 0 })
+    requests.handleReport(frame('print', 'stop', msgid))
+    assert.equal((await result).kind, 'received')
+  }
+})
+
 test('a report owned by another pending request cannot settle a command', async () => {
   const ids: string[] = []
   const requests = createKobraXRequests({
@@ -93,18 +114,23 @@ test('a report owned by another pending request cannot settle a command', async 
   assert.equal((await first).kind, 'unanswered')
 })
 
-test('a report with a printer-chosen or missing ID still settles by type and action, uncorrelated', async () => {
+test('on printer-assigned firmware, a printer-chosen or missing ID settles by type and action, uncorrelated', async () => {
   for (const msgid of ['printer-chosen', '']) {
+    let id = ''
     const requests = createKobraXRequests({
       topic: (type) => type,
-      publish() {},
+      publish(_topic, payload) {
+        id = JSON.parse(payload).msgid
+      },
       resultTimeoutMs: 40,
+      reportIdentity: 'printer-assigned',
     })
     const result = requests.send({
       type: 'print',
       action: 'stop',
       beforeSend: () => true,
     })
+    requests.handleAck({ msgid: id, code: 0 })
     requests.handleReport(frame('print', 'stop', msgid))
     const outcome = await result
     assert.equal(outcome.kind, 'confirmed')
@@ -112,17 +138,22 @@ test('a report with a printer-chosen or missing ID still settles by type and act
   }
 })
 
-test('a failed report without an ID still refuses and a wrong action never does', async () => {
+test('on printer-assigned firmware, a failed report without an ID still refuses and a wrong action never does', async () => {
+  let id = ''
   const requests = createKobraXRequests({
     topic: (type) => type,
-    publish() {},
+    publish(_topic, payload) {
+      id = JSON.parse(payload).msgid
+    },
     resultTimeoutMs: 40,
+    reportIdentity: 'printer-assigned',
   })
   const result = requests.send({
     type: 'print',
     action: 'stop',
     beforeSend: () => true,
   })
+  requests.handleAck({ msgid: id, code: 0 })
   requests.handleReport(frame('print', 'pause', '', {}, 'failed', 500))
   requests.handleReport(frame('print', 'stop', '', {}, 'failed', 500))
   assert.deepEqual(await result, {

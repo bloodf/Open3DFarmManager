@@ -25,6 +25,8 @@ export type MatchedSlot = {
   /** `RRGGBBAA`, as the Connector reports it. */
   colorHex?: string | undefined
   remainingPercent?: number | null | undefined
+  /** Percentage Spoolman reports for the slot's active spool, 0 to 100. */
+  spoolmanRemainingPercent?: number | null | undefined
   spoolmanRemainingWeight?: number | null | undefined
   spoolmanInitialWeight?: number | null | undefined
 }

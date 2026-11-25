@@ -145,6 +145,13 @@ export async function collectIntoQueue(input: {
     bindings: readonly KobraXBinding[]
     endpoints?: Parameters<typeof createKobraXCollection>[0]['endpoints']
     connect?: Parameters<typeof createKobraXCollection>[0]['connect']
+    /** Accessory evidence per printer; `undefined` once it is unreachable. */
+    onControlEvidence?: (
+      printerKey: string,
+      evidence:
+        | import('../kobra-x/control-support.ts').KobraXControlEvidence
+        | undefined,
+    ) => void
   }
   config:
     | LocalCollectorConfig
@@ -995,6 +1002,12 @@ export async function collectIntoQueue(input: {
           ? { endpoints: input.kobraX.endpoints }
           : {}),
         ...(input.kobraX?.connect ? { connect: input.kobraX.connect } : {}),
+        ...(input.kobraX?.onControlEvidence
+          ? {
+              onControlEvidence: (evidence) =>
+                input.kobraX?.onControlEvidence?.(binding.printerKey, evidence),
+            }
+          : {}),
         onObservation(value) {
           input.onRawObservation?.(value)
           onEvent({ kind: 'snapshot', printer: value.printer })

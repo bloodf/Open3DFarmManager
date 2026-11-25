@@ -5,6 +5,7 @@ import EmptyState from '../../components/ui/EmptyState.vue'
 import ErrorState from '../../components/ui/ErrorState.vue'
 import Skeleton from '../../components/ui/Skeleton.vue'
 import FeaturePanel from '../../components/spool-library/FeaturePanel.vue'
+import SpoolIllustration from '../../components/spool-library/SpoolIllustration.vue'
 import SpoolLibraryShell from '../../components/spool-library/SpoolLibraryShell.vue'
 import {
   fetchSpools,
@@ -121,10 +122,13 @@ function toggleAll() {
       </div>
       <fieldset class="picker">
         <legend>Bobinas para etiquetar</legend>
-        <label v-for="spool in spools" :key="spool.id" class="pick">
-          <input v-model="selected" type="checkbox" :value="spool.id" />
-          <span>#{{ spool.id }} · {{ spoolDisplayTitle(spool) }}</span>
-        </label>
+        <div v-for="spool in spools" :key="spool.id" class="pick">
+          <label class="pick">
+            <input v-model="selected" type="checkbox" :value="spool.id" />
+            <span>#{{ spool.id }} · {{ spoolDisplayTitle(spool) }}</span>
+          </label>
+          <SpoolIllustration :spool="spool" compact />
+        </div>
       </fieldset>
     </FeaturePanel>
   </SpoolLibraryShell>

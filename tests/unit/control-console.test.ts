@@ -367,7 +367,7 @@ describe('Moonraker console on the E16 mock', () => {
         ok: true,
         guard: 1,
       })
-      expect(mock.control.gcodeScripts).toEqual(['G28'])
+      expect(mock.control.gcodeScripts).toEqual(['G28 X Y Z'])
     })
   })
 

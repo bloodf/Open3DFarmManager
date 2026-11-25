@@ -162,6 +162,19 @@ const Snapshot = z.strictObject({
     }),
   }),
 })
+/**
+ * A builder's typed refusal says why nothing was written. Anything else the
+ * builder throws is a malformed request and stays `invalid-command`.
+ */
+function isTypedRefusal(error: unknown): error is Error {
+  const refusal = (error as { refusal?: unknown } | null)?.refusal
+  return (
+    error instanceof Error &&
+    (refusal === 'state' ||
+      refusal === 'unsupported-action' ||
+      refusal === 'invalid-command')
+  )
+}
 const U1AuditSnapshot = Snapshot.extend({
   status: Snapshot.shape.status.loose(),
 })
@@ -637,7 +650,9 @@ export function openFixedMoonrakerPause(input: {
         method: call.method,
         ...(call.params ? { params: call.params } : {}),
       })
-    } catch {
+    } catch (error) {
+      // Keep the builder's own reason; the caller closes the attempt.
+      if (isTypedRefusal(error)) throw error
       return undefined
     }
   }
@@ -696,6 +711,7 @@ export function openFixedMoonrakerPause(input: {
                 ? 'unsupported-action'
                 : 'state',
         })
+      if (isTypedRefusal(error)) throw error
       throw error instanceof MotionRefusal ? error : failure()
     }
   }
@@ -758,7 +774,9 @@ export function openFixedMoonrakerPause(input: {
     } catch (error) {
       stop()
       await closed
-      throw error instanceof QueueRefused ? error : failure()
+      throw error instanceof QueueRefused || isTypedRefusal(error)
+        ? error
+        : failure()
     }
   }
   /**
@@ -794,7 +812,9 @@ export function openFixedMoonrakerPause(input: {
     } catch (error) {
       stop()
       await closed
-      throw error instanceof TimelapseRefused ? error : failure()
+      throw error instanceof TimelapseRefused || isTypedRefusal(error)
+        ? error
+        : failure()
     }
   }
   /**
@@ -886,7 +906,9 @@ export function openFixedMoonrakerPause(input: {
     } catch (error) {
       stop()
       await closed
-      throw error instanceof BedMeshRefused ? error : failure()
+      throw error instanceof BedMeshRefused || isTypedRefusal(error)
+        ? error
+        : failure()
     }
   }
   /**
@@ -948,17 +970,36 @@ export function openFixedMoonrakerPause(input: {
         )
           throw new ConsoleRefusal('not-allowed')
         if (idleConsoleClass(line) === 'guarded') {
-          const config = await fetchMoonrakerConfigfile({
-            origin: selected.origin,
-            limits: selected.limits,
-            signal: AbortSignal.any([ownerSignal, requested.signal]),
-          }).catch(() => undefined)
+          const homing = command === 'G28'
+          // Homing needs no configured bounds, only a fresh idle state.
+          const config = homing
+            ? undefined
+            : await fetchMoonrakerConfigfile({
+                origin: selected.origin,
+                limits: selected.limits,
+                signal: AbortSignal.any([ownerSignal, requested.signal]),
+              }).catch(() => undefined)
           const live = await request(
             12,
             idleConsoleQueryWire(12, input.objects ?? []),
             lifetimeDeadline,
           ).catch(() => undefined)
           guardIdleConsole(line, live, config)
+          if (homing) {
+            // Canonical homing runs through the structured `home` action, with
+            // the U1's own X/Y pairing and Z-only checks. An advertised `G28`
+            // macro was already refused above.
+            const parts = line.trim().toUpperCase().split(/\s+/).slice(1)
+            const axes = (parts.length ? parts : ['X', 'Y', 'Z']).map(
+              (axis) => axis.toLowerCase() as 'x' | 'y' | 'z',
+            )
+            if (u1 && axes.includes('x') !== axes.includes('y'))
+              throw new ConsoleRefusal('not-allowed')
+            takeConsoleRate(binding, input.clock.monotonicNow())
+            if (u1) return await executeU1Home({ axes }, requested, line.trim())
+            extended = 'gcode'
+            return await send(extendedWire('home', { axes }), requested, 5000)
+          }
         }
       }
       if (u1) u1Audit = u1ConsoleAudit(line.trim(), tool)
@@ -970,9 +1011,11 @@ export function openFixedMoonrakerPause(input: {
     } catch (error) {
       stop()
       await closed
-      if (u1 && error instanceof MotionRefusal)
+      if (error instanceof MotionRefusal || error instanceof U1ConfigRefusal)
         throw new ConsoleRefusal('unknown-state')
-      throw error instanceof ConsoleRefusal ? error : failure()
+      throw error instanceof ConsoleRefusal || isTypedRefusal(error)
+        ? error
+        : failure()
     }
   }
   const requestRead = (id: number, wire: string) =>
@@ -1001,6 +1044,7 @@ export function openFixedMoonrakerPause(input: {
   async function executeU1Home(
     args: Record<string, unknown>,
     requested: Parameters<PauseDriver['pauseOnce']>[0],
+    consoleLine?: string,
   ) {
     const wire = extendedWire('home', args)
     if (wire === undefined)
@@ -1020,8 +1064,11 @@ export function openFixedMoonrakerPause(input: {
       )
         throw new U1ConfigRefusal('U1 Z homing requires homed X and Y axes')
     }
-    extended = 'home'
-    u1Audit = audit
+    // A console line is confirmed as the signed `gcode` action, not as `home`.
+    extended = consoleLine ? 'gcode' : 'home'
+    u1Audit = consoleLine
+      ? u1ConsoleAudit(consoleLine, undefined, audit)
+      : audit
     return send(wire, requested, U1_CONTROL_RESULT_TIMEOUT_MS)
   }
   async function configWrite(

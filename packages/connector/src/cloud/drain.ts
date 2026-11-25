@@ -19,8 +19,11 @@ export type TelemetrySender = (
  * stored with other content), so sending it again can never succeed.
  */
 export class TelemetryBatchRefused extends Error {
-  constructor() {
+  /** The records the server named; empty when it names none. */
+  readonly conflictingEventIds: readonly string[]
+  constructor(conflictingEventIds: readonly string[] = []) {
     super('Telemetry batch refused')
+    this.conflictingEventIds = conflictingEventIds
   }
 }
 export type DrainResult =
@@ -85,7 +88,8 @@ function fittingPrefix(
 /**
  * One bounded attempt. Sender returns the exact ordered event-ID array only after
  * authenticated durable acceptance. A `TelemetryBatchRefused` rejection drops
- * the batch so newer records can drain; any other failure retains it.
+ * the records the server named (the whole batch when it names none) so the rest
+ * can drain; any other failure retains the batch.
  * No command payloads, implicit retries or HTTP client.
  * Caller supplies a deadline-bearing signal; server deduplication by event ID is required.
  */
@@ -176,13 +180,17 @@ export async function drainTelemetryOnce(
       accepted = await Promise.race([delivery, cancelled])
     } catch (error) {
       if (error instanceof TelemetryBatchRefused && !signal.aborted) {
+        const named = new Set(error.conflictingEventIds)
+        const conflicting = ids.filter((id) => named.has(id))
+        // A server that names no record of this batch refuses all of it.
+        const refused = conflicting.length ? conflicting : ids
         try {
-          queue.acknowledge(ids, now())
+          queue.remove(refused, now())
         } catch {
           return { status: 'uncertain', reason: 'queue', loss }
         }
-        onRefused(ids.length)
-        return { status: 'refused', count: ids.length, loss }
+        onRefused(refused.length)
+        return { status: 'refused', count: refused.length, loss }
       }
       return {
         status: 'retained',

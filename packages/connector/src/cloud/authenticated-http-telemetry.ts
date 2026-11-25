@@ -11,6 +11,28 @@ import { TelemetryBatchRefused, type TelemetrySender } from './drain.ts'
 class RequestRefused extends Error {}
 
 /**
+ * The record IDs a 409 names. Older servers name none, and an unreadable
+ * answer counts as naming none. A failed read throws, so the batch is retried.
+ */
+async function conflictingIds(response: Response): Promise<string[]> {
+  const text = await response.text()
+  try {
+    const value = parseBoundedJson(text, {
+      maxBytes: 8192,
+      maxDepth: 3,
+      maxValues: 150,
+      maxStringChars: 2048,
+    })
+    const ids = (value as { conflictingEventIds?: unknown }).conflictingEventIds
+    return Array.isArray(ids)
+      ? ids.filter((id): id is string => typeof id === 'string')
+      : []
+  } catch {
+    return []
+  }
+}
+
+/**
  * Older servers parse records strictly and refuse the whole batch for a shape
  * they do not know: an idle printer with no progress, or a send age. This
  * returns the shapes to try after a refusal, least changed first. Idle
@@ -120,8 +142,7 @@ export function createAuthenticatedTelemetrySender(options: {
         }
         // Only the commit compares event IDs, so only its 409 is permanent.
         if (response.status === 409 && path === endpoint) {
-          await response.body?.cancel().catch(() => {})
-          throw new TelemetryBatchRefused()
+          throw new TelemetryBatchRefused(await conflictingIds(response))
         }
         if (
           ![200, 429].includes(response.status) ||

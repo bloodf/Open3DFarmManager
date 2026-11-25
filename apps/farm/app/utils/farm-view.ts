@@ -328,6 +328,8 @@ const statusSourceLabel: Partial<
   Record<NonNullable<PrinterState['statusReason']>, string>
 > = {
   'printer-fault': 'falha informada pela impressora',
+  'anycubic-resin-simulated': simulatedSource,
+  'anycubic-resin-unqualified': 'não qualificada em hardware',
   'flashforge-simulated': simulatedSource,
   'flashforge-unqualified': unqualifiedSource,
   'phrozen-simulated': simulatedSource,
@@ -335,6 +337,12 @@ const statusSourceLabel: Partial<
   'qidi-simulated': simulatedSource,
   'qidi-unqualified': unqualifiedSource,
 }
+
+/** PrusaLink states with no normalized equivalent, by their wire word. */
+const prusaLinkStateLabel: ReadonlyMap<string, string> = new Map([
+  ['BUSY', 'Impressora ocupada'],
+  ['ATTENTION', 'A impressora pede atenção na tela'],
+])
 
 export function formatPrinterOperationalStateLabel(
   printer: PrinterOperationalState,
@@ -344,6 +352,13 @@ export function formatPrinterOperationalStateLabel(
       ? `Firmware desligado — ${printer.statusMessage}`
       : 'Firmware desligado'
   if (printer.preformStatus) return `PreForm informou: ${printer.preformStatus}`
+  if (
+    printer.state === 'unknown' &&
+    printer.statusReason === 'prusa-link-unqualified'
+  ) {
+    const label = prusaLinkStateLabel.get(printer.statusMessage ?? '')
+    if (label) return label
+  }
   if (
     printer.state === 'offline' &&
     printer.statusReason === 'client-certificate-missing'

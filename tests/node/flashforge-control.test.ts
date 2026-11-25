@@ -869,12 +869,14 @@ test('a version 19 journal upgrades in place and records the new actions', (t) =
   }
 })
 
-test('migration 0126 adds both actions and guards its rollback', async () => {
+test('migration 0127 adds both actions and guards its rollback', async () => {
   const catalog = await loadMigrationCatalog()
   const migration = catalog.find(
-    (entry) => entry.id === '0126_camera_stream_filament_slot',
+    (entry) => entry.id === '0127_camera_stream_filament_slot',
   )
-  const previous = catalog.find((entry) => entry.id === '0107_tool_temperature')
+  const previous = catalog.find(
+    (entry) => entry.id === '0126_clear_hold_capability',
+  )
   assert.ok(migration && previous)
   const constraint = (sql: string) =>
     sql
@@ -885,10 +887,10 @@ test('migration 0126 adds both actions and guards its rollback', async () => {
   assert.equal(
     constraint(migration.up),
     constraint(previous.up)
-      .replace('BETWEEN 1 AND 33', 'BETWEEN 1 AND 35')
+      .replace('BETWEEN 1 AND 34', 'BETWEEN 1 AND 36')
       .replace(
-        '"confirm_collection"]',
-        '"confirm_collection","set_camera_stream","set_filament_slot"]',
+        '"clear_hold"]',
+        '"clear_hold","set_camera_stream","set_filament_slot"]',
       ),
   )
   assert.equal(constraint(migration.down), constraint(previous.up))

@@ -712,11 +712,13 @@ function cancelPause(event: Event) {
                 )
               : pauseTarget.action === 'confirm_collection'
                 ? COLLECTION_DIALOG_DESCRIPTION
-                : (writeDialogDescription(
-                    pauseTarget.action,
-                    pauseTarget.args,
-                  ) ??
-                  'Confirme o comando para esta impressora. Ele será enviado diretamente ao Connector e não será repetido automaticamente.')
+                : pauseTarget.action === 'clear_hold'
+                  ? 'Antes de confirmar, verifique pessoalmente o estado da impressora. O bloqueio deixado por um comando sem resultado confirmado será removido e registrado no Connector. Nenhum comando será repetido.'
+                  : (writeDialogDescription(
+                      pauseTarget.action,
+                      pauseTarget.args,
+                    ) ??
+                    'Confirme o comando para esta impressora. Ele será enviado diretamente ao Connector e não será repetido automaticamente.')
           }}
         </p>
         <p

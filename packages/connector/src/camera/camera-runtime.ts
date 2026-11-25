@@ -206,6 +206,8 @@ export async function createCameraMediaFactory(input: {
       source: BambuCameraSource
     }[]
   }
+  /** One printer-controlled source per viewing of a Photon resin camera. */
+  photonResin?: (assignmentId: string) => AnycubicCameraSource
 }) {
   const { Video, RtpPacketizationConfig, H264RtpPacketizer } =
     await import('node-datachannel')
@@ -268,6 +270,19 @@ export async function createCameraMediaFactory(input: {
       }
       selectAnycubicCamera(source)
       return [['camera-' + index, Object.freeze(source)] as const]
+    }),
+  )
+  const photonResin = new Map(
+    config.cameras.flatMap((camera, index) => {
+      const open = input.photonResin
+      if (
+        !open ||
+        !('kind' in camera.source) ||
+        camera.source.kind !== 'anycubic-photon-resin'
+      )
+        return []
+      const { assignmentId } = camera
+      return [['camera-' + index, () => open(assignmentId)] as const]
     }),
   )
   const sdcpSources = new Map(
@@ -437,7 +452,9 @@ export async function createCameraMediaFactory(input: {
           })
         }
         const anycubicSource =
-          anycubic.get(handle) ?? configuredAnycubic.get(handle)
+          photonResin.get(handle)?.() ??
+          anycubic.get(handle) ??
+          configuredAnycubic.get(handle)
         if (anycubicSource && (anycubicFfmpeg ?? helper)) {
           if (
             !isCurrent() ||

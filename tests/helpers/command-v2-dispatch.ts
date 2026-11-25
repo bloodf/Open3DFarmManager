@@ -309,15 +309,16 @@ export async function openV2Dispatch(
     if (owned) rmSync(directory, { recursive: true, force: true })
   }
   let admitted: Awaited<ReturnType<typeof dispatcher.admit>>
-  try {
-    await loopbackDriver?.detect(printerBinding)
-    const peer = dispatcher.createPeer(1)
+  let generation = 0
+  /** Admits one capability for `binding` on this dispatcher. */
+  async function admit(binding: ControlSessionBinding, expiresAt: number) {
+    const peer = dispatcher.createPeer(++generation)
     const admission = dispatcher.beginAdmission({
-      binding: authority.binding,
+      binding,
       printerBinding,
       peer: peer.peer,
     })
-    const bindingHash = await controlBindingHash(authority.binding)
+    const bindingHash = await controlBindingHash(binding)
     const nonce = admission.challenge.admissionNonce
     const issuedAt = clock.wallNow()
     const capability: PauseCapabilityV1 = {
@@ -326,10 +327,10 @@ export async function openV2Dispatch(
       capability_id: authority.ids.capability_id,
       kid: 'issuer-1',
       issuer: 'farm:issuer',
-      audience: authority.binding.audience,
-      origin: authority.binding.origin,
+      audience: binding.audience,
+      origin: binding.origin,
       issued_at: issuedAt,
-      expires_at: 30000,
+      expires_at: expiresAt,
       account_id: authority.ids.account_id,
       role: 'operator',
       farm_id: authority.ids.farm_id,
@@ -339,8 +340,8 @@ export async function openV2Dispatch(
       transport_id: authority.ids.transport_id,
       browser_public_key: authority.publicKey,
       browser_thumbprint: authority.thumbprint,
-      connector_fingerprint: authority.binding.connector_fingerprint,
-      credential_jti: authority.binding.credential_jti,
+      connector_fingerprint: binding.connector_fingerprint,
+      credential_jti: binding.credential_jti,
       printer_key: authority.printerKey,
       control_binding_sha256: bindingHash,
       admission_nonce: nonce,
@@ -358,14 +359,14 @@ export async function openV2Dispatch(
       transport_id: authority.ids.transport_id,
       account_id: authority.ids.account_id,
       browser_thumbprint: authority.thumbprint,
-      origin: authority.binding.origin,
-      audience: authority.binding.audience,
+      origin: binding.origin,
+      audience: binding.audience,
       control_binding_sha256: bindingHash,
       admission_nonce: nonce,
       issued_at: issuedAt,
       expires_at: issuedAt + 8000,
     }
-    admitted = await dispatcher.admit(admission.token, {
+    return dispatcher.admit(admission.token, {
       capabilityWire: encodePauseCapability(
         await signPauseCapability(capability, authority.issuer.privateKey),
       ),
@@ -375,15 +376,15 @@ export async function openV2Dispatch(
       browserProofWire: encodeControlProof({
         v: 1,
         role: 'browser',
-        binding: authority.binding,
-        signature: await authority.signer.signControlProof(authority.binding),
+        binding,
+        signature: await authority.signer.signControlProof(binding),
       }),
       connectorProofWire: encodeControlProof({
         v: 1,
         role: 'connector',
-        binding: authority.binding,
+        binding,
         signature: await signControlSessionProof(
-          authority.binding,
+          binding,
           'connector',
           authority.connector.privateKey,
         ),
@@ -395,6 +396,10 @@ export async function openV2Dispatch(
         ),
       }),
     })
+  }
+  try {
+    await loopbackDriver?.detect(printerBinding)
+    admitted = await admit(authority.binding, 30000)
     if (!admitted.ok)
       throw new Error(`Capability admission failed: ${admitted.reason}`)
   } catch (error) {
@@ -402,6 +407,7 @@ export async function openV2Dispatch(
     throw error
   }
   let closed = false
+  let handleNow = admitted.handle
   return {
     dispatcher,
     printerBinding,
@@ -412,7 +418,7 @@ export async function openV2Dispatch(
     dispatch(wire: unknown, ...handle: [unknown?]) {
       return dispatcher.dispatch({
         wire,
-        capability: handle.length ? handle[0] : admitted.handle,
+        capability: handle.length ? handle[0] : handleNow,
         printerBinding,
       })
     },
@@ -428,6 +434,21 @@ export async function openV2Dispatch(
       } finally {
         db.close()
       }
+    },
+    /** A new session on the same running dispatcher, after time has passed. */
+    async readmit() {
+      const issuedAt = clock.wallNow()
+      const next = await admit(
+        {
+          ...authority.binding,
+          issued_at: issuedAt,
+          expires_at: issuedAt + 29000,
+        },
+        issuedAt + 29000,
+      )
+      if (!next.ok)
+        throw new Error(`Capability admission failed: ${next.reason}`)
+      handleNow = next.handle
     },
     writes: () => writes,
     now: clock.wallNow,

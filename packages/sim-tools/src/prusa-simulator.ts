@@ -34,7 +34,14 @@ export async function startPrusaSimulator(reply: RequestListener) {
 //   lib/WUI/nhttp/gcode_upload.cpp, server.cpp      upload 201/409/501
 //   utils/gen-automata/http.py                      Overwrite, Print-After-Upload
 //   src/state/printer_state.cpp                     reported states: pausing and
-//     resuming report PAUSED, aborting reports PRINTING
+//     resuming report PAUSED, aborting reports PRINTING; BUSY has no job,
+//     ATTENTION keeps it and reports PAUSED on /api/v1/job; READY is never
+//     reported because the status route asks get_state(false)
+//   src/common/marlin_client.cpp                    a start that stops at a
+//     print preview question still counts as started (204)
+//   src/common/marlin_server.cpp                    aborting that question ends
+//     in IDLE
+//   lib/WUI/nhttp/gcode_upload.cpp                  one transfer at a time (409)
 //
 // pi: prusa3d/Prusa-Link @ 58a0ab1703680c32d39c76684e906c8f2ea91464
 //   prusa/link/web/{main,files,cameras}.py, web/lib/{auth,files}.py,
@@ -55,6 +62,9 @@ export type PrusaLinkSimulatorOptions = Readonly<{
   /** Enables the synthetic Connect Local read view of this printer. */
   connect?: Readonly<{ token: string; deviceId: string; camera: string }>
 }>
+
+/** Buddy states that override the print state until the printer leaves them. */
+export type PrusaLinkSimulatorCondition = 'BUSY' | 'ATTENTION'
 
 type Job = { id: number; file: string; progress: number }
 
@@ -81,13 +91,28 @@ export async function startPrusaLinkPrinterSimulator(
   let dropReply = false
   // The transition an accepted command still has to complete.
   let pending: (() => void) | undefined
+  let condition: PrusaLinkSimulatorCondition | undefined
+  // ATTENTION raised by a print preview question: the print never began.
+  let preview = false
+  let askNextStart = false
+  let transferring = false
+  let uploadedPreview: string | undefined
   // 'absent': no camera. 'empty': no photo taken yet.
   let camera: 'absent' | 'empty' | Buffer = 'absent'
 
   function begin(file: string) {
+    uploadedPreview = undefined
     job = { id: ++jobId, file, progress: 0 }
     state = 'PRINTING'
     pending = undefined
+    preview = askNextStart
+    condition = askNextStart ? 'ATTENTION' : undefined
+    askNextStart = false
+  }
+
+  function leaveCondition() {
+    condition = undefined
+    preview = false
   }
 
   function end(next: 'FINISHED' | 'STOPPED' | 'ERROR') {
@@ -99,11 +124,16 @@ export async function startPrusaLinkPrinterSimulator(
       })
     state = next
     pending = undefined
+    leaveCondition()
   }
 
   const active = () => state === 'PRINTING' || state === 'PAUSED'
   const ready = () =>
-    state === 'IDLE' || state === 'FINISHED' || state === 'STOPPED'
+    !condition &&
+    (state === 'IDLE' || state === 'FINISHED' || state === 'STOPPED')
+  const reported = () => condition ?? state
+  // BUSY reports no job at all.
+  const hasJob = () => active() && condition !== 'BUSY'
 
   type Reply = { status: number; body?: unknown; image?: Buffer }
   const json = (body: unknown): Reply => ({ status: 200, body })
@@ -141,11 +171,21 @@ export async function startPrusaLinkPrinterSimulator(
   function status() {
     const printing = state === 'PRINTING'
     return {
-      ...(job && active()
+      ...(job && hasJob()
         ? { job: { id: job.id, progress: job.progress, time_printing: 60 } }
         : {}),
+      ...(transferring
+        ? {
+            transfer: {
+              id: 1,
+              time_transferring: 3,
+              progress: 40,
+              transferred: 4,
+            },
+          }
+        : {}),
       printer: {
-        state,
+        state: reported(),
         temp_nozzle: active() ? 214.9 : 24.1,
         target_nozzle: active() ? 215 : 0,
         temp_bed: active() ? 59.5 : 23.8,
@@ -157,10 +197,10 @@ export async function startPrusaLinkPrinterSimulator(
   }
 
   function currentJob(): Reply {
-    if (!job || !active()) return code(204)
+    if (!job || !hasJob()) return code(204)
     return json({
       id: job.id,
-      state,
+      state: condition === 'ATTENTION' ? 'PAUSED' : state,
       progress: job.progress,
       file: { name: job.file, display_name: job.file },
     })
@@ -169,13 +209,19 @@ export async function startPrusaLinkPrinterSimulator(
   function jobCommand(method: string, id: number, command?: string): Reply {
     if (id !== jobId || !jobId) return code(404)
     if (method === 'DELETE' && command === undefined) {
-      if (!active()) return code(409)
-      pending = () => end('STOPPED')
+      if (condition === 'BUSY' || (!condition && !active())) return code(409)
+      pending = preview
+        ? () => {
+            state = 'IDLE'
+            job = undefined
+            leaveCondition()
+          }
+        : () => end('STOPPED')
       return code(204)
     }
     if (method !== 'PUT') return code(405)
     if (command === 'pause') {
-      if (state !== 'PRINTING') return code(409)
+      if (reported() !== 'PRINTING') return code(409)
       if (isBuddy) {
         // Pausing already reports PAUSED.
         state = 'PAUSED'
@@ -184,7 +230,7 @@ export async function startPrusaLinkPrinterSimulator(
       return code(204)
     }
     if (command === 'resume') {
-      if (state !== 'PAUSED') return code(409)
+      if (reported() !== 'PAUSED') return code(409)
       pending = () => (state = 'PRINTING')
       return code(204)
     }
@@ -217,12 +263,17 @@ export async function startPrusaLinkPrinterSimulator(
     }
     if (method === 'PUT') {
       if (!body.byteLength) return code(isBuddy ? 501 : 411)
+      if (transferring) return code(409)
       if (files.has(key) && headers.overwrite !== '?1') return code(409)
       files.set(key, body)
       const flag = String(headers['print-after-upload'] ?? '')
       if ((isBuddy ? ['true', '1', '?1'] : ['?1']).includes(flag)) {
         if (!ready()) return code(409)
         begin(name)
+      } else if (isBuddy && ready() && !uploadedPreview) {
+        // Buddy wui_api.cpp, wui_start_print: best-effort preview is
+        // permitted only when another image preview is not already open.
+        uploadedPreview = name
       }
       return code(201)
     }
@@ -278,7 +329,7 @@ export async function startPrusaLinkPrinterSimulator(
       id: connect.deviceId,
       connected: true,
       issues: [],
-      state: { '/state': state },
+      state: { '/state': reported() },
     }
     const prefix = `/api/v1/devices/${connect.deviceId}`
     if (url.pathname === '/api/v1/devices') return json({ items: [device] })
@@ -354,6 +405,23 @@ export async function startPrusaLinkPrinterSimulator(
     startLocalPrint(file: string) {
       begin(file)
     },
+    /** Buddy only: raises or clears a dialog or an internal busy phase. */
+    setCondition(next: PrusaLinkSimulatorCondition | undefined) {
+      if (!isBuddy) throw new Error('Only the Buddy simulator has conditions')
+      if (next) {
+        condition = next
+        preview = false
+      } else leaveCondition()
+    },
+    /** Buddy only: the next start stops at a print preview question. */
+    askBeforeNextStart() {
+      if (!isBuddy) throw new Error('Only the Buddy simulator asks')
+      askNextStart = true
+    },
+    /** Another transfer holds the printer's single transfer slot. */
+    setTransfer(next: boolean) {
+      transferring = next
+    },
     setCamera(next: 'absent' | 'empty' | Buffer) {
       camera = next
     },
@@ -364,5 +432,6 @@ export async function startPrusaLinkPrinterSimulator(
       dropReply = true
     },
     storedFile: (path: string) => files.get(path),
+    uploadedPreview: () => uploadedPreview,
   }
 }

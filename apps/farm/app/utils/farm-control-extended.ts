@@ -16,14 +16,19 @@ export const extendedActions = [
   'set_speed',
   'firmware_restart',
   'emergency_stop',
+  'clear_hold',
   'set_camera_stream',
   'set_filament_slot',
 ] as const
-/** Model-specific writes: shown when advertised, never listed as missing. */
+/**
+ * Model-specific writes and `clear_hold`, which is only advertised while a
+ * command is stuck: shown when advertised, never listed as missing.
+ */
 const ADVERTISED_ONLY: ReadonlySet<ExtendedControlAction> = new Set([
   'set_tool_temperature',
   'set_camera_stream',
   'set_filament_slot',
+  'clear_hold',
 ])
 export const slotMaterials = FILAMENT_SLOT_MATERIALS
 /** The signed slot record, or nothing while the form is incomplete. */
@@ -83,6 +88,7 @@ const labels: Partial<Record<ExtendedControlAction, string>> = {
   queue_op: 'Gerenciar fila de impressão',
   gcode: 'Enviar G-code',
   confirm_collection: 'Confirmar placa livre',
+  clear_hold: 'Liberar comando sem confirmação',
   set_camera_stream: 'Controlar transmissão da câmera',
   set_filament_slot: 'Salvar material do compartimento',
 }
@@ -156,7 +162,9 @@ export function buildExtendedArgs(
 export function requiresExtendedConfirmation(
   action: FarmExtendedAction,
 ): boolean {
-  return ['home', 'firmware_restart', 'emergency_stop'].includes(action)
+  return ['home', 'firmware_restart', 'emergency_stop', 'clear_hold'].includes(
+    action,
+  )
 }
 
 export function speedModeOptions(modes: readonly SpeedMode[] | undefined) {

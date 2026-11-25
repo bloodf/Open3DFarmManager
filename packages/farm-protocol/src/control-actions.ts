@@ -79,6 +79,7 @@ export const ExtendedControlAction = z.enum([
   'bed_mesh',
   'gcode',
   'confirm_collection',
+  'clear_hold',
   'set_camera_stream',
   'set_filament_slot',
 ])
@@ -303,7 +304,8 @@ export function controlRoleAllowed(
     action === 'power' ||
     action === 'run_macro' ||
     action === 'config_write' ||
-    action === 'gcode'
+    action === 'gcode' ||
+    action === 'clear_hold'
   )
     return role === 'owner' || role === 'admin'
   return ['owner', 'admin', 'operator'].includes(role)
@@ -337,7 +339,8 @@ export function controlSourceState(
     return state === 'idle'
   if (action === 'exclude_object')
     return state === 'printing' || state === 'paused'
-  if (action === 'emergency_stop') return true
+  // `clear_hold` never reaches the printer: the operator has checked it.
+  if (action === 'emergency_stop' || action === 'clear_hold') return true
   // The operator says the bed is clear: only while no job owns the printer.
   if (action === 'confirm_collection')
     return state === 'idle' || state === 'cancelled' || state === 'error'
@@ -545,6 +548,7 @@ export const ControlArguments = z.discriminatedUnion('action', [
       'firmware_restart',
       'unload_filament',
       'motors_off',
+      'clear_hold',
     ]),
     args: z.strictObject({}),
   }),

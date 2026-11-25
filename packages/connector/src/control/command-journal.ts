@@ -13,6 +13,7 @@ import {
   ApiRunAction,
   ApiEnvelopeV1,
 } from '../../../farm-protocol/src/api-envelope.ts'
+import { appendPrivateAudit } from './private-audit.ts'
 
 const originalEmitWarning = process.emitWarning.bind(process)
 process.emitWarning = ((warning: string | Error, ...args: unknown[]) => {
@@ -75,8 +76,8 @@ export type CommandJournalOutcome = 'not-sent' | 'applied' | 'outcome-unknown'
  * reported back (`state-unconfirmed`). They are shown as an unknown result, yet
  * must not hold the printer's single active row: nothing later depends on them
  * the way it depends on an unconfirmed pause, cancel, emergency stop or
- * firmware restart. Of those, only the firmware restart hold is ever released
- * (see FIRMWARE_RESTART_HOLD_MS).
+ * firmware restart. Of those, only the restart holds are released on their own
+ * (see RESTART_HOLDS); the others wait for the operator's `clear_hold`.
  */
 const holdsPrinterWhenUnconfirmed = new Set([
   'pause',
@@ -85,15 +86,41 @@ const holdsPrinterWhenUnconfirmed = new Set([
   'emergency_stop',
   'firmware_restart',
 ])
-const actionlessCommands = new Set(['confirm_collection'])
+const actionlessCommands = new Set(['confirm_collection', 'clear_hold'])
 /**
- * How long an unconfirmed `firmware_restart` keeps its printer busy (#938).
- * The restart drops the state read-back, so its outcome is usually never
+ * The longest a restart hold (RESTART_HOLDS) keeps its printer busy (#938,
+ * #947). A restart drops the state read-back, so its outcome is usually never
  * learned. It matches the Service restart window, so the release never admits an
  * earlier second restart. Releasing authorizes nothing: every later command
- * still needs fresh ready state, and the restart itself is never retried.
+ * still needs fresh ready state, and nothing is ever retried.
  */
 export const FIRMWARE_RESTART_HOLD_MS = 60_000
+/**
+ * How long after the unknown outcome a ready printer counts as evidence. A
+ * printer that has not yet begun to restart still reports ready.
+ */
+export const READY_EVIDENCE_SETTLE_MS = 5_000
+/** Local audit of every operator `clear_hold`, beside the journal. */
+export const HOLD_AUDIT_FILE = 'hold-audit.jsonl'
+/**
+ * Unconfirmed commands a restart explains: a firmware restart, a config save
+ * with restart, and an emergency stop claimed while a restart that may have been
+ * sent was in progress or recorded less than the hold time before.
+ */
+const RESTART_HOLDS = `SELECT h.cmd_id FROM pause_commands h
+  JOIN control_command_actions a ON a.cmd_id=h.cmd_id
+  WHERE h.status='outcome-unknown' AND (
+    a.action='firmware_restart'
+    OR (a.action='config_write' AND h.cmd_id IN (SELECT cmd_id FROM control_command_restarts))
+    OR (a.action='emergency_stop' AND EXISTS (
+      SELECT 1 FROM pause_commands r
+      JOIN control_command_restarts x ON x.cmd_id=r.cmd_id
+      WHERE r.status<>'not-sent'
+        AND (r.assignment_id=h.assignment_id OR (r.farm_id=h.farm_id AND r.printer_key=h.printer_key))
+        AND r.claimed_at<=h.claimed_at
+        AND (r.finished_at IS NULL OR h.claimed_at<r.finished_at+${FIRMWARE_RESTART_HOLD_MS}))))`
+/** The rows that exclude one printer; parameters: assignment, farm, printer. */
+const SAME_PRINTER = '(assignment_id=? OR (farm_id=? AND printer_key=?))'
 /**
  * Accepted claims per printer in one minute. Every action shares this allowance
  * except `exclude_object`, which has its own of the same size.
@@ -477,19 +504,20 @@ function clockStep(state: State, observedWall = sample(state)): number | null {
   return now
 }
 /**
- * Settles unconfirmed firmware restarts finished by `finishedBy`, in the form
- * every released row takes: kept for replay protection and the restart cap,
- * read back as an unknown outcome, and no longer excluding other commands.
+ * The form every released row takes: kept for replay protection and the restart
+ * cap, read back as an unknown outcome, and no longer excluding other commands.
  */
-function releaseFirmwareRestarts(
+const SETTLE_UNCONFIRMED = `UPDATE pause_commands SET status='applied',reason='state-unconfirmed',write_started_at=COALESCE(write_started_at,finished_at),retain_until=finished_at+${RETENTION_MS} WHERE status='outcome-unknown'`
+/** Settles the restart holds whose outcome was recorded by `finishedBy`. */
+function releaseRestartHolds(
   database: DatabaseSyncType,
   finishedBy: number,
 ): void {
   database
     .prepare(
-      "UPDATE pause_commands SET status='applied',reason='state-unconfirmed',write_started_at=COALESCE(write_started_at,finished_at),retain_until=finished_at+? WHERE status='outcome-unknown' AND finished_at<=? AND cmd_id IN (SELECT cmd_id FROM control_command_actions WHERE action='firmware_restart')",
+      `${SETTLE_UNCONFIRMED} AND finished_at<=? AND cmd_id IN (${RESTART_HOLDS})`,
     )
-    .run(RETENTION_MS, finishedBy)
+    .run(finishedBy)
 }
 function transaction<T>(state: State, run: () => T): T {
   privateStorage(state)
@@ -758,8 +786,8 @@ export function openCommandJournal(input: {
           "UPDATE pause_commands SET status='outcome-unknown', reason='outcome-unknown', finished_at=COALESCE(write_started_at, claimed_at), retain_until=NULL WHERE writer_id<>? AND status IN ('claimed','write-started')",
         )
         .run(writerId)
-      // The firmware restart hold never outlives the Connector that sent it.
-      releaseFirmwareRestarts(database, Number.MAX_SAFE_INTEGER)
+      // A restart hold never outlives the Connector that sent it.
+      releaseRestartHolds(database, Number.MAX_SAFE_INTEGER)
       database.exec('COMMIT')
     } catch (error) {
       try {
@@ -876,6 +904,9 @@ function claimRow(
         if (now === null) return { ok: false, reason: 'clock-regressed' }
         if (now < command.not_before || now >= command.expires_at)
           return { ok: false, reason: 'storage-unavailable' }
+        // Before the retention sweep: a released emergency stop is judged
+        // against the restart row, which that sweep may remove.
+        releaseRestartHolds(state.database, now - FIRMWARE_RESTART_HOLD_MS)
         state.database
           .prepare(
             "DELETE FROM pause_commands WHERE status IN ('not-sent','applied') AND retain_until<=?",
@@ -889,12 +920,16 @@ function claimRow(
             .get(command.cmd_id, command.key_id, command.nonce)
         )
           return { ok: false, reason: 'replay' }
-        releaseFirmwareRestarts(state.database, now - FIRMWARE_RESTART_HOLD_MS)
+        // `clear_hold` exists to pass unconfirmed rows, never in-flight ones.
+        const excluding =
+          command.action === 'clear_hold'
+            ? "'claimed','write-started'"
+            : "'claimed','write-started','outcome-unknown'"
         if (
           command.action !== 'emergency_stop' &&
           state.database
             .prepare(
-              "SELECT 1 FROM pause_commands WHERE status IN ('claimed','write-started','outcome-unknown') AND (assignment_id=? OR (farm_id=? AND printer_key=?)) LIMIT 1",
+              `SELECT 1 FROM pause_commands WHERE status IN (${excluding}) AND ${SAME_PRINTER} LIMIT 1`,
             )
             .get(command.assignment_id, command.farm_id, printerKey)
         )
@@ -976,8 +1011,8 @@ function claimRow(
           state.database
             .prepare('INSERT INTO control_command_restarts VALUES(?)')
             .run(command.cmd_id)
-        // A plate confirmation is a local collection-journal write with no
-        // printer effect. The v17 action table predates it, so its row keeps
+        // A plate confirmation and a hold clear are local journal writes with
+        // no printer effect. The action table has neither, so their rows keep
         // replay protection, exclusion and the rate limit without an action.
         if (!actionlessCommands.has(command.action))
           state.database
@@ -1122,6 +1157,140 @@ function finishCommandInternal(
             state.writerId,
           ).changes === 1
       )
+    })
+  } catch {
+    return false
+  }
+}
+export type HoldScope = Readonly<{
+  assignmentId: string
+  farmId: string
+  printerKey: string
+}>
+const scopeParams = (scope: HoldScope) =>
+  [scope.assignmentId, scope.farmId, scope.printerKey] as const
+const READY_HOLD = `finished_at<=? AND ${SAME_PRINTER} AND cmd_id IN (${RESTART_HOLDS})`
+/**
+ * True when ready evidence could release a hold of this printer now. The clock
+ * is only sampled when the printer has a restart hold at all.
+ */
+export function hasReadyReleasableHold(
+  handle: CommandJournalHandle,
+  scope: HoldScope,
+): boolean {
+  const state = stateOf(handle)
+  if (!state) return false
+  try {
+    const held = (finishedBy: number) =>
+      !!state.database
+        .prepare(`SELECT 1 FROM pause_commands WHERE ${READY_HOLD} LIMIT 1`)
+        .get(finishedBy, ...scopeParams(scope))
+    if (!held(Number.MAX_SAFE_INTEGER)) return false
+    return transaction(state, () => {
+      const now = clockStep(state)
+      return now !== null && held(now - READY_EVIDENCE_SETTLE_MS)
+    })
+  } catch {
+    return false
+  }
+}
+/**
+ * Releases the restart holds of a printer that was just observed ready. Only
+ * trusted local evidence may call this; it sends and retries nothing.
+ */
+export function releaseHoldsOnReady(
+  handle: CommandJournalHandle,
+  scope: HoldScope,
+): void {
+  const state = stateOf(handle)
+  if (!state) return
+  try {
+    transaction(state, () => {
+      const now = clockStep(state)
+      if (now === null) return
+      state.database
+        .prepare(`${SETTLE_UNCONFIRMED} AND ${READY_HOLD}`)
+        .run(now - READY_EVIDENCE_SETTLE_MS, ...scopeParams(scope))
+    })
+  } catch {
+    /* The hold stays: the timed release still bounds it. */
+  }
+}
+/** True while an unconfirmed command holds this printer: offer `clear_hold`. */
+export function hasUncertainHold(
+  handle: CommandJournalHandle,
+  scope: HoldScope,
+): boolean {
+  const state = stateOf(handle)
+  if (!state) return false
+  try {
+    const held = () =>
+      !!state.database
+        .prepare(
+          `SELECT 1 FROM pause_commands WHERE status='outcome-unknown' AND ${SAME_PRINTER} LIMIT 1`,
+        )
+        .get(...scopeParams(scope))
+    if (!held()) return false
+    return transaction(state, () => {
+      const now = clockStep(state)
+      if (now === null) return false
+      releaseRestartHolds(state.database, now - FIRMWARE_RESTART_HOLD_MS)
+      return held()
+    })
+  } catch {
+    return false
+  }
+}
+/**
+ * The operator action behind a verified, claimed `clear_hold`: settles every
+ * unconfirmed row of that printer. In-flight rows are left alone and nothing is
+ * resent. The audit line is durable before the rows change; if it cannot be
+ * written, every hold stays.
+ */
+export function clearUncertainHolds(
+  handle: CommandJournalHandle,
+  claim: CommandClaimHandle,
+  role: string,
+): boolean {
+  const state = stateOf(handle),
+    receipt = state && receiptOf(state, claim)
+  if (!state || !receipt || !receipt.marked) return false
+  try {
+    return transaction(state, () => {
+      const now = clockStep(state)
+      if (now === null) return false
+      const own = state.database
+        .prepare(
+          "SELECT p.farm_id,p.agent_id,p.assignment_id,p.printer_key,p.account_id,p.key_id,p.capability_id FROM pause_commands p LEFT JOIN control_command_actions a ON a.cmd_id=p.cmd_id WHERE p.cmd_id=? AND p.writer_id=? AND p.status='write-started' AND a.action IS NULL",
+        )
+        .get(receipt.cmdId, state.writerId)
+      if (!own) return false
+      const printer = [
+        String(own.assignment_id),
+        String(own.farm_id),
+        String(own.printer_key),
+      ] as const
+      const cleared = state.database
+        .prepare(
+          `SELECT p.cmd_id,a.action,p.reason,p.claimed_at,p.finished_at FROM pause_commands p LEFT JOIN control_command_actions a ON a.cmd_id=p.cmd_id WHERE p.status='outcome-unknown' AND ${SAME_PRINTER}`,
+        )
+        .all(...printer)
+      appendPrivateAudit(
+        state.directory,
+        HOLD_AUDIT_FILE,
+        JSON.stringify({
+          at: now,
+          event: 'hold-cleared',
+          cmd_id: receipt.cmdId,
+          role,
+          ...own,
+          cleared,
+        }) + '\n',
+      )
+      state.database
+        .prepare(`${SETTLE_UNCONFIRMED} AND ${SAME_PRINTER}`)
+        .run(...printer)
+      return true
     })
   } catch {
     return false

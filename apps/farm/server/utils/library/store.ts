@@ -343,6 +343,27 @@ export class PostgresLibrary {
     )
   }
 
+  /**
+   * Runs `discard` for bytes an upload wrote only while no record points at
+   * them. It holds the upload locks, so none can appear meanwhile. A server
+   * file (no `agentId`) is shared by every farm.
+   */
+  async discardUnused(
+    file: { farmId: string; sha256: string; agentId?: string },
+    discard: () => Promise<void>,
+  ): Promise<void> {
+    await this.sql.begin(async (tx) => {
+      await tx`SET LOCAL lock_timeout = '2000ms'`
+      await tx`SELECT pg_advisory_xact_lock(hashtextextended(${'library:' + file.farmId}, 0))`
+      await lockLibraryBlob(tx as unknown as Sql, file.sha256)
+      const kept =
+        file.agentId === undefined
+          ? await tx`SELECT 1 FROM farm.library_blobs WHERE sha256=${file.sha256} AND storage_location='server' AND purged_at IS NULL LIMIT 1`
+          : await tx`SELECT 1 FROM farm.library_blobs WHERE farm_id=${file.farmId}::uuid AND sha256=${file.sha256} AND storage_location='connector' AND agent_id=${file.agentId}::uuid AND purged_at IS NULL`
+      if (!kept[0]) await discard()
+    })
+  }
+
   addVersion(
     input: Authority & {
       version: AddVersionInput

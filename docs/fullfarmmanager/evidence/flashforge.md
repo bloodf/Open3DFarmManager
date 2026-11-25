@@ -75,7 +75,7 @@ and [HTTP REST operations](https://github.com/Parallel-7/flashforge-api-docs/wik
   against the intended firmware's readback.
 - `set_camera_stream` and `set_filament_slot` are new browser-only signed
   actions. No API envelope carries them. They need command journal version 20
-  and database migration `0126_camera_stream_filament_slot`.
+  and database migration `0127_camera_stream_filament_slot`.
 - `/control` acknowledges commands the firmware ignores. Only a `/detail` read
   that began after the acknowledgement confirms a result. Without it the
   outcome is unknown and nothing is sent again.

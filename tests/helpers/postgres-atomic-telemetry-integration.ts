@@ -497,7 +497,7 @@ export async function testPostgresAtomicTelemetry(
         signed(conflict, conflicting, conflictChallenge),
         conflicting,
       ),
-      { ok: false, reason: 'conflict' },
+      { ok: false, reason: 'conflict', conflictingEventIds: [old.eventId] },
     )
     assert.equal(await count(conflict), 1)
     assert.equal(
@@ -572,11 +572,73 @@ export async function testPostgresAtomicTelemetry(
         signed(mixed, reused, reusedChallenge),
         reused,
       ),
-      { ok: false, reason: 'conflict' },
+      {
+        ok: false,
+        reason: 'conflict',
+        conflictingEventIds: [mixedRecords[1]!.eventId],
+      },
     )
     assert.equal(await count(mixed), 2)
     checks.push(
       'printer-transition-events-batch-with-state-idempotently-deduplicate-and-roll-back-on-unauthorized-printer-or-conflicting-id',
+    )
+    // #948: the production comparison, on real jsonb. An idle printer with no
+    // progress and one at 0 are one observation; anything else is a conflict.
+    const resend = await assigned()
+    const commit = async (records: object[]) => {
+      const body = bytes(records)
+      now += 31000
+      const issuedChallenge = await challenge(resend, body)
+      now += 1000
+      return service().commitTelemetryWithProof(
+        signed(resend, body, issuedChallenge),
+        body,
+      )
+    }
+    const idle = (eventId: string, progress?: number, state = 'idle') => ({
+      eventId,
+      queuedAt: 1,
+      kind: 'printer-state',
+      state: {
+        printerKey: resend.printerKey,
+        state,
+        observedAt: 1,
+        // A shape that may omit progress. A `lastJob` would also do, but this
+        // fixture stops before the job history migration.
+        identity: { vendor: 'Phrozen' },
+        statusReason: 'phrozen-simulated',
+        ...(progress === undefined ? {} : { progress }),
+      },
+    })
+    const bare = randomUUID(),
+      zero = randomUUID(),
+      busy = randomUUID()
+    assert.equal(
+      committed(
+        await commit([idle(bare), idle(zero, 0), idle(busy, 0, 'printing')]),
+      ),
+      true,
+    )
+    assert.equal(
+      committed(await commit([idle(bare, 0), idle(zero)])),
+      true,
+      'idle resend with or without zero progress',
+    )
+    const fresh948 = randomUUID()
+    for (const [changed, named] of [
+      [[idle(bare, 0.5)], [bare]],
+      [[idle(busy, 0.5, 'printing')], [busy]],
+      [[idle(busy, 0)], [busy]],
+      [[idle(zero, 0), idle(fresh948), idle(bare, 0.5)], [bare]],
+    ] as const)
+      assert.deepEqual(await commit([...changed]), {
+        ok: false,
+        reason: 'conflict',
+        conflictingEventIds: named,
+      })
+    assert.equal(await count(resend), 3)
+    checks.push(
+      'idle-resend-equality-on-postgres-and-conflicts-name-only-the-changed-records',
     )
     for (const mutation of ['connector', 'ownership'])
       for (const order of ['mutation-first', 'ingest-first']) {
@@ -1217,7 +1279,11 @@ export async function testPostgresAtomicTelemetry(
         signed(successor, conflictBytes, successorConflictChallenge),
         conflictBytes,
       ),
-      { ok: false, reason: 'conflict' },
+      {
+        ok: false,
+        reason: 'conflict',
+        conflictingEventIds: [conflictedEvent.eventId],
+      },
     )
     assert.equal((await successorSlot())?.status, 'pending')
     checks.push(

@@ -132,7 +132,17 @@ type PhotonJob = {
   filename: string
   state: 'printing' | 'waiting'
   code: number
+  progress: number
+  layer: number
 }
+
+/** Synthetic FLV: the header, then one placeholder video tag per frame. */
+const flvHeader = Buffer.from([0x46, 0x4c, 0x56, 1, 1, 0, 0, 0, 9])
+const flvVideoTag = Buffer.from([
+  ...[9, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+  0x17,
+  ...[0, 0, 0, 12],
+])
 
 /**
  * Synthetic Photon P1 Max in LAN Mode. Report shapes follow the public captures
@@ -148,6 +158,7 @@ export async function startPhotonP1MaxSimulator({
   usbDisk = true,
   camera = true,
   weakCertificate = false,
+  liveStream = false,
 }: {
   identity: Record<string, unknown> & { token: string }
   credentials: Record<string, unknown> & {
@@ -162,6 +173,8 @@ export async function startPhotonP1MaxSimulator({
   usbDisk?: boolean
   camera?: boolean
   weakCertificate?: boolean
+  /** Keep `/flv` open and send synthetic tags until capture stops. */
+  liveStream?: boolean
 }) {
   const root = 'anycubic/anycubicCloud/v1'
   const reports = `${root}/printer/public/132/${credentials.deviceId}/`
@@ -189,11 +202,17 @@ export async function startPhotonP1MaxSimulator({
       return
     }
     // `ok` when idle, FLV bytes while capturing (protocol notes above).
-    response.end(
-      state.cameraStreaming
-        ? Buffer.from([0x46, 0x4c, 0x56, 0x01, 0x01, 0, 0, 0, 9])
-        : 'ok',
-    )
+    if (!state.cameraStreaming || !liveStream) {
+      response.end(state.cameraStreaming ? flvHeader : 'ok')
+      return
+    }
+    response.writeHead(200, { 'content-type': 'video/x-flv' })
+    response.write(Buffer.concat([flvHeader, Buffer.alloc(4)]))
+    const frames = setInterval(() => {
+      if (state.cameraStreaming) response.write(flvVideoTag)
+      else response.end()
+    }, 100)
+    response.on('close', () => clearInterval(frames))
   })
   const cameraPort = await listen(video)
 
@@ -219,8 +238,8 @@ export async function startPhotonP1MaxSimulator({
   const jobData = (job: PhotonJob) => ({
     taskid: job.taskid,
     filename: job.filename,
-    progress: 0,
-    curr_layer: 0,
+    progress: job.progress,
+    curr_layer: job.layer,
     total_layers: 697,
     // Present at layer 0: the whole job's estimate.
     supplies_usage: 25.17914,
@@ -311,6 +330,8 @@ export async function startPhotonP1MaxSimulator({
         filename: data.filename,
         state: vatEmpty ? 'waiting' : 'printing',
         code: vatEmpty ? 1301 : 200,
+        progress: 0,
+        layer: 0,
       }
       report('print', 'start', 'copying', { taskid: '-1', progress: 50 })
       report(
@@ -375,6 +396,17 @@ export async function startPhotonP1MaxSimulator({
       pushResinTemperature()
     },
     disconnect: broker.control.disconnectClients,
+    /** A job started at the printer, outside the LAN client. */
+    startJob(filename: string, progress = 0, layer = 0) {
+      state.job = {
+        taskid: '0',
+        filename,
+        state: 'printing',
+        code: 200,
+        progress,
+        layer,
+      }
+    },
     async close() {
       const closed = once(video, 'close')
       video.close()

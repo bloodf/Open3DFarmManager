@@ -1,4 +1,10 @@
 import { moonrakerOrigins } from '../config/moonraker.ts'
+import type { PhotonResinSessions } from '../anycubic-resin/collection.ts'
+import { createPhotonResinCameraSource } from '../anycubic-resin/camera.ts'
+import {
+  photonResinWriteQualified,
+  type PhotonResinQualification,
+} from '../anycubic-resin/qualification.ts'
 import { MAX_HEARTBEAT_HEALTH_BYTES } from '@open3dfarmmanager/farm-protocol'
 import { join, resolve } from 'node:path'
 import {
@@ -131,6 +137,7 @@ type AgentDiagnostic =
       capacity: number
       credentialExpired: boolean
       storageLost: number
+      refusedRecords: number
     }
 
 let bootstrapped = false
@@ -166,6 +173,8 @@ type AgentInput = {
   resinCapabilities?: Parameters<
     typeof import('./pause-control.ts').runPauseControl
   >[0]['resinCapabilities']
+  /** Test seam: the shipped resin write list is empty and only code adds one. */
+  photonResinQualifiedWrites?: readonly PhotonResinQualification[]
   clock?: AgentClock
   /**
    * Test composition only: replaces the shipped SDCP video qualification list,
@@ -282,7 +291,7 @@ async function runConnectorAgentOnce(
     capacity: 0,
     credentialExpired: false,
   }
-  /** Records dropped since start because the server refused their batch. */
+  /** Records dropped since start because the server refused them. */
   let refusedRecords = 0
   function diagnostic(value: AgentDiagnostic) {
     if (value.kind === 'drain-loss') {
@@ -328,6 +337,7 @@ async function runConnectorAgentOnce(
       import('../../../farm-protocol/src/state.ts').PrinterState['speedModes']
     >
   >()
+  const photonResinSessions: PhotonResinSessions = new Map()
   // One state for the signed video command, the camera and the detail page.
   const sdcpVideo = createSdcpVideo({
     boards: config.camera?.cameras.flatMap(({ source }) =>
@@ -534,6 +544,7 @@ async function runConnectorAgentOnce(
             totals.credentialExpired || clock.now() >= credential.expires_at,
           storageDegraded: queue.storageDegraded,
           storageLost: queue.storageLost,
+          refusedRecords,
           rtc: rtcBackend,
         }),
         onError: fail,
@@ -553,6 +564,31 @@ async function runConnectorAgentOnce(
             agentId: credential.agent_id,
             farmId: credential.farm_id,
             assignmentRefs: refs,
+            photonResin(assignmentId) {
+              const key = refs.find(
+                (ref) => ref.assignmentId === assignmentId,
+              )?.printerKey
+              const binding =
+                config.collection.version === 8
+                  ? config.collection.drivers.find(
+                      (driver) => driver.printerKey === key,
+                    )
+                  : undefined
+              if (binding?.family !== 'anycubic-resin')
+                throw Error('Photon resin camera is not configured')
+              return createPhotonResinCameraSource({
+                host: new URL(binding.origin).hostname,
+                port: binding.cameraPort ?? 18088,
+                qualified: photonResinWriteQualified(
+                  'camera',
+                  binding.expect.model,
+                  input.photonResinQualifiedWrites,
+                ),
+                session: () => photonResinSessions.get(binding.printerKey),
+                onRefused: (reason) =>
+                  logger.warn('photon-camera-refused', { reason }),
+              })
+            },
             sdcpVideo,
           })
         : undefined
@@ -629,6 +665,13 @@ async function runConnectorAgentOnce(
               assignment.backend === 'prusa-link'
             )
               return []
+            // An absent list would offer the legacy pause button.
+            if (
+              assignment &&
+              'backend' in assignment &&
+              assignment.backend === 'anycubic-resin'
+            )
+              return controlsFor?.(id) ?? []
             const ref = refs.find((item) => item.assignmentId === id)
             if (
               config.collection.version === 7 &&
@@ -1013,6 +1056,10 @@ async function runConnectorAgentOnce(
           },
           kobraXControlEvidenceFor: (printerKey) =>
             kobraXControlEvidence.get(printerKey),
+          photonResinSessions,
+          ...(input.photonResinQualifiedWrites
+            ? { photonResinQualifiedWrites: input.photonResinQualifiedWrites }
+            : {}),
           libraryPrint(assignmentId) {
             const key = refs.find(
               (ref) => ref.assignmentId === assignmentId,
@@ -1177,6 +1224,10 @@ async function runConnectorAgentOnce(
     tasks.push(
       collectIntoQueue({
         config: config.collection,
+        photonResin: {
+          sessions: photonResinSessions,
+          onCapabilitiesChange: () => refreshControls?.(),
+        },
         ...(config.kobraX
           ? {
               kobraX: {
@@ -1289,6 +1340,7 @@ async function runConnectorAgentOnce(
         kind: 'agent-summary',
         ...totals,
         storageLost: queue.storageLost,
+        refusedRecords,
       })
     } catch (error) {
       fail(error)

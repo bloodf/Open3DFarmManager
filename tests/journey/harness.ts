@@ -134,6 +134,11 @@ export type JourneyOptions = Readonly<{
    * on 127.0.0.1 only.
    */
   kobraX?: boolean
+  /**
+   * TEST-ONLY Connector entry run instead of the packaged CLI, for a code seam
+   * the product does not expose (a qualification list).
+   */
+  connectorEntry?: string
   /** Serve an always-live Kobra X camera for the packaged runtime journey. */
   kobraXCamera?: HelperExecutable
   /**
@@ -818,6 +823,7 @@ export async function startJourneyHarness(
       audience: AUDIENCE,
       claim,
       assignmentRefs,
+      ...(options.connectorEntry ? { entry: options.connectorEntry } : {}),
       ...(options.moonraker?.declaredModel
         ? { model: options.moonraker.declaredModel }
         : options.moonraker?.mock?.profile === 'u1'

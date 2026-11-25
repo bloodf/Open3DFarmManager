@@ -212,6 +212,94 @@ test('Buddy refusals leave the reported state and files unchanged', async (t) =>
   assert.equal((await read('/api/v1/cameras/snap')).status, 404)
 })
 
+// prusa3d/Prusa-Firmware-Buddy @ b1043d68be188ad27ea72a14e160140e30e589f0:
+// src/state/printer_state.cpp (get_state, has_job, remote_print_ready) and
+// lib/WUI/link_content/prusa_link_api_v1.cpp (job command gates).
+test('Buddy ATTENTION and BUSY refuse commands as the firmware does', async (t) => {
+  const { sim, link, state, jobId, read } = await printer(t)
+  await link.upload('usb', 'part.gcode', gcode(), allow)
+  await link.start('usb', 'part.gcode', allow)
+  const id = await jobId()
+
+  // ATTENTION keeps the job, which /api/v1/job reports as PAUSED.
+  sim.setCondition('ATTENTION')
+  assert.equal(await state(), 'ATTENTION')
+  assert.equal(await jobId(), id)
+  assert.equal((await read('/api/v1/job')).body.state, 'PAUSED')
+  for (const action of ['pause', 'resume'] as const)
+    await assert.rejects(link.control(id, action, allow), { status: 409 })
+  await assert.rejects(link.start('usb', 'part.gcode', allow), { status: 409 })
+
+  // BUSY reports no job and accepts no job command, cancel included.
+  sim.setCondition('BUSY')
+  assert.equal(await state(), 'BUSY')
+  assert.equal((await link.status()).job, undefined)
+  assert.equal((await read('/api/v1/job')).status, 204)
+  for (const action of ['pause', 'resume', 'cancel'] as const)
+    await assert.rejects(link.control(id, action, allow), { status: 409 })
+
+  sim.setCondition(undefined)
+  assert.equal(await state(), 'PRINTING')
+
+  // Cancel is the one job command ATTENTION takes.
+  sim.setCondition('ATTENTION')
+  await link.control(id, 'cancel', allow)
+  sim.settle()
+  assert.equal(await state(), 'STOPPED')
+})
+
+// Buddy wui_api.cpp (wui_start_print) and printer_state.cpp (get_state).
+test('Buddy upload may show a preview while reporting idle with no job', async (t) => {
+  const { sim, link, state } = await printer(t)
+  await link.upload('usb', 'first.gcode', gcode(), allow)
+  assert.equal(sim.uploadedPreview(), 'first.gcode')
+  assert.equal(await state(), 'IDLE')
+  assert.equal((await link.status()).job, undefined)
+
+  await link.upload('usb', 'second.gcode', gcode(), allow)
+  assert.equal(sim.uploadedPreview(), 'first.gcode')
+  await link.start('usb', 'second.gcode', allow)
+  assert.equal(sim.uploadedPreview(), undefined)
+  assert.equal(await state(), 'PRINTING')
+})
+
+// marlin_client.cpp (is_print_started) and marlin_server.cpp (print preview).
+test('Buddy acknowledges a start that stops at a preview question', async (t) => {
+  const { sim, link, state, jobId } = await printer(t)
+  await link.upload('usb', 'part.gcode', gcode(), allow)
+  sim.askBeforeNextStart()
+  await link.start('usb', 'part.gcode', allow)
+  // The 204 is not a running print.
+  assert.equal(await state(), 'ATTENTION')
+  const id = await jobId()
+  await assert.rejects(link.control(id, 'pause', allow), { status: 409 })
+  await link.control(id, 'cancel', allow)
+  sim.settle()
+  assert.equal(await state(), 'IDLE')
+  assert.equal((await link.status()).job, undefined)
+})
+
+// lib/WUI/nhttp/gcode_upload.cpp and status_renderer.cpp.
+test('Buddy refuses an upload while another transfer is active', async (t) => {
+  const { sim, link, state, read } = await printer(t)
+  sim.setTransfer(true)
+  assert.deepEqual((await read('/api/v1/status')).body.transfer, {
+    id: 1,
+    time_transferring: 3,
+    progress: 40,
+    transferred: 4,
+  })
+  await assert.rejects(link.upload('usb', 'part.gcode', gcode(), allow), {
+    status: 409,
+  })
+  assert.equal(sim.storedFile('usb/part.gcode'), undefined)
+  assert.equal(await state(), 'IDLE')
+  sim.setTransfer(false)
+  assert.equal((await read('/api/v1/status')).body.transfer, undefined)
+  await link.upload('usb', 'part.gcode', gcode(), allow)
+  assert.equal(sim.storedFile('usb/part.gcode')?.byteLength, 4)
+})
+
 test('a lost acknowledgement stays uncertain and is not retried', async (t) => {
   const { sim, link, state, jobId } = await printer(t)
   await link.upload('usb', 'part.gcode', gcode(), allow)
@@ -381,6 +469,7 @@ test(
     const controller = new AbortController()
     const queue = new TelemetryQueue(join(directory, 'queue'), Date.now())
     const latest = new Map<string, { state: string; model: string }>()
+    const messages = new Map<string, string | undefined>()
     const unavailable = new Set<string>()
     const run = collectIntoQueue({
       config,
@@ -392,6 +481,7 @@ test(
           state: observed.state,
           model: observed.identity?.model ?? '',
         })
+        messages.set(printerKey, observed.statusMessage)
       },
       onRawUnavailable({ printerKey }) {
         unavailable.add(printerKey)
@@ -428,6 +518,21 @@ test(
         await value.link.control(id, 'pause', allow)
       }
       await allReport('paused')
+      // BUSY and ATTENTION have no normalized state: the wire word travels.
+      for (const word of ['ATTENTION', 'BUSY'] as const) {
+        for (const value of accepted) value.sim.setCondition(word)
+        await until(() =>
+          accepted.every(
+            ({ binding }) =>
+              latest.get(binding.printerKey)?.state === 'unknown' &&
+              messages.get(binding.printerKey) === word,
+          ),
+        )
+      }
+      for (const value of accepted) value.sim.setCondition(undefined)
+      await allReport('paused')
+      for (const value of accepted)
+        assert.equal(messages.get(value.binding.printerKey), undefined)
       for (const value of accepted) value.sim.finishPrint()
       await allReport('idle')
       const refused = ['mismatch', 'pi'].map(keyFor)

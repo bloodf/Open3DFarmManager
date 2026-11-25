@@ -33,6 +33,13 @@ export function createPrusaLinkCollection(input: {
         const result = await status()
         if (signal.aborted) return
         const state = result.printer.state
+        // No normalized state fits these two, so they stay `unknown` and the
+        // wire word travels with them. Buddy's ATTENTION covers both a stopped
+        // and a still moving print, so it is not mapped to `paused`.
+        // prusa3d/Prusa-Firmware-Buddy @
+        // b1043d68be188ad27ea72a14e160140e30e589f0,
+        // src/state/printer_state.cpp (get_state, get_print_state, to_str)
+        const needsWord = state === 'BUSY' || state === 'ATTENTION'
         const mono = performance.now()
         input.onObservation({
           printerKey: binding.printerKey,
@@ -52,11 +59,13 @@ export function createPrusaLinkCollection(input: {
                       ? 'error'
                       : 'unknown',
             statusReason: 'prusa-link-unqualified',
+            ...(needsWord ? { statusMessage: state } : {}),
             identity: { vendor: 'Prusa', model: binding.expect.printerType },
             observedAt: Date.now(),
           },
           receivedAtMonoMs: mono,
           fieldObservedAtMonoMs: {
+            // The diagnostic word belongs to the same observation as state.
             prusaLink: { state: mono, identity: mono, statusReason: mono },
           },
         })

@@ -6,7 +6,11 @@ import { createHash, randomUUID } from 'node:crypto'
 import type { IntegrationPrincipal } from '../utils/integration-auth.ts'
 import { uuidPattern } from '../utils/integration-auth.ts'
 import { ingest, type RangeSource } from '../utils/library/ingest.ts'
-import type { StorageMode } from '../utils/library/quota.ts'
+import {
+  checkQuota,
+  defaultQuotaBytes,
+  type StorageMode,
+} from '../utils/library/quota.ts'
 
 export type { StorageMode }
 
@@ -41,7 +45,23 @@ export interface ResolvedLibraryVersion {
   displayName: string
   resinProfile?: string
   storageMode: StorageMode
+  /** Connector mode: the Connector that holds the uploaded file. */
+  agentId?: string
   plateCount: number
+}
+/** One file at one storage location. */
+export interface LibraryFile {
+  farmId: string
+  sha256: string
+  sizeBytes: number
+  mode: StorageMode
+  agentId: string | null
+}
+export type LibraryPlacement = 'ready' | 'quota-exceeded'
+export class LibraryQuotaExceeded extends Error {
+  constructor() {
+    super('Library quota exceeded')
+  }
 }
 export interface LibraryAudit {
   farmId: string
@@ -109,6 +129,11 @@ export interface IntegrationLibraryStore {
     mode: StorageMode,
     target: { farmId: string; agentId: string | null },
   ): Promise<void>
+  /** Whether the library quota has room to keep this file there. */
+  fits(file: LibraryFile): Promise<boolean>
+  /** Makes a version's file available on the Connector that will print it. */
+  placeOn(versionId: string, agentId: string): Promise<LibraryPlacement>
+  /** Throws `LibraryQuotaExceeded` when the file no longer fits. */
   addVersion(version: NewLibraryVersion): Promise<LibraryItemView>
   insertAudit(entry: LibraryAudit, now: number): Promise<void>
 }
@@ -133,6 +158,11 @@ const fail = (problem: LibraryProblem): LibraryResult<never> => ({
   ok: false,
   problem,
 })
+const quotaExceeded: LibraryResult<never> = {
+  ok: false,
+  problem: 'payload-too-large',
+  reason: 'quota-exceeded',
+}
 
 function farmWide(
   principal: IntegrationPrincipal,
@@ -364,12 +394,6 @@ export class IntegrationLibraryService {
           : await ingest(kind, sourceOf(input.bytes))
       if (!parsed.ok) return fail('validation-failed')
       const sha256 = createHash('sha256').update(input.bytes).digest('hex')
-      await this.store.retain(sha256, input.bytes, mode, {
-        farmId: input.farmId,
-        agentId,
-      })
-
-      const now = this.now()
       const existing = (
         await this.store.list(input.farmId, null, MAX_PAGE)
       ).find(
@@ -382,6 +406,28 @@ export class IntegrationLibraryService {
             resinArtifactFormatFor(item.latest.originalName)?.extension ===
               resin.extension),
       )
+      // A repeated upload restores the file where its version looks for it.
+      const holder =
+        existing && mode === 'connector'
+          ? ((await this.store.version(existing.latest.id))?.agentId ?? agentId)
+          : agentId
+      if (
+        !existing &&
+        !(await this.store.fits({
+          farmId: input.farmId,
+          sha256,
+          sizeBytes: input.bytes.length,
+          mode,
+          agentId,
+        }))
+      )
+        return quotaExceeded
+      await this.store.retain(sha256, input.bytes, mode, {
+        farmId: input.farmId,
+        agentId: holder,
+      })
+
+      const now = this.now()
       const saved =
         existing ??
         (await this.store.addVersion({
@@ -428,9 +474,14 @@ export class IntegrationLibraryService {
           deduplicated: existing !== undefined,
         },
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof LibraryQuotaExceeded) return quotaExceeded
       return fail('service-unavailable')
     }
+  }
+
+  placeOn(versionId: string, agentId: string) {
+    return this.store.placeOn(versionId, agentId)
   }
 
   async version(versionId: string): Promise<ResolvedLibraryVersion | null> {
@@ -490,6 +541,7 @@ export class MemoryLibraryStore implements IntegrationLibraryStore {
   readonly modes = new Map<string, StorageMode>()
   readonly agents = new Map<string, string>()
   readonly bytes = new Map<string, Uint8Array>()
+  quotaBytes = defaultQuotaBytes()
   private readonly rows: MemoryRow[] = []
 
   async getMode(farmId: string) {
@@ -562,8 +614,31 @@ export class MemoryLibraryStore implements IntegrationLibraryStore {
         ? {}
         : { resinProfile: row.resinProfile }),
       storageMode: row.storageLocation,
+      ...(row.agentId === null ? {} : { agentId: row.agentId }),
       plateCount: row.plateCount,
     }
+  }
+  async fits(file: LibraryFile) {
+    const here = this.rows.filter(
+      (row) =>
+        row.farmId === file.farmId &&
+        row.storageLocation === file.mode &&
+        row.agentId === file.agentId,
+    )
+    if (here.some((row) => row.sha256 === file.sha256)) return true
+    const used = new Map(here.map((row) => [row.sha256, row.sizeBytes]))
+    return checkQuota(
+      file.mode,
+      {
+        usedBytes: [...used.values()].reduce((sum, size) => sum + size, 0),
+        quotaBytes: this.quotaBytes,
+      },
+      file.sizeBytes,
+    ).ok
+  }
+  /** Connector mode keeps no bytes here, so there is nothing to copy. */
+  async placeOn(): Promise<LibraryPlacement> {
+    return 'ready'
   }
   async retain(sha256: string, bytes: Uint8Array, mode: StorageMode) {
     if (mode === 'server') this.bytes.set(sha256, bytes)

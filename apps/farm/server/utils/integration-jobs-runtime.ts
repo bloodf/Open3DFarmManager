@@ -135,6 +135,7 @@ export async function integrationJobsRuntime() {
       'in-service',
     library: {
       version: (id) => library.version(id),
+      placeOn: (id, agentId) => library.placeOn(id, agentId),
       recordReplay: (entry) => library.recordReplay(entry),
     },
     ...(delivery

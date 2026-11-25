@@ -7,6 +7,7 @@ import {
 } from '../../../../packages/farm-protocol/src/api-envelope.ts'
 import {
   libraryJobFileUrl,
+  type LibraryPlacement,
   type ResolvedLibraryVersion,
   type StorageMode,
 } from './integration-library.ts'
@@ -309,6 +310,8 @@ export type IntegrationJobsOptions = Readonly<{
   /** Resolves a library version for `libraryVersionId` replays. */
   library?: {
     version(id: string): Promise<ResolvedLibraryVersion | null>
+    /** Copies a Connector-mode file to the target printer's Connector. */
+    placeOn?(versionId: string, agentId: string): Promise<LibraryPlacement>
     recordReplay(entry: {
       farmId: string
       appId: string
@@ -506,6 +509,24 @@ export class IntegrationJobsService {
     // Never store a job that cannot be delivered.
     if (!grant.requiresApproval && !this.o.envelopes)
       return { ok: false, problem: 'service-unavailable' }
+    // The target printer's Connector must hold the file before any command.
+    if (libraryRequest && file.storageMode === 'connector') {
+      let placed: LibraryPlacement | undefined
+      try {
+        placed = await this.o.library?.placeOn?.(
+          libraryRequest.libraryVersionId,
+          target.agentId,
+        )
+      } catch {
+        return { ok: false, problem: 'service-unavailable' }
+      }
+      if (placed === 'quota-exceeded')
+        return {
+          ok: false,
+          problem: 'validation-failed',
+          reason: { pointer: '/libraryVersionId', detail: 'quota-exceeded' },
+        }
+    }
 
     const outcome = await this.o.store.create(
       {

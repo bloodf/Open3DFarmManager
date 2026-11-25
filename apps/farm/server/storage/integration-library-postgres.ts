@@ -1,14 +1,23 @@
 import { Readable } from 'node:stream'
 import type { Sql } from 'postgres'
-import type {
-  IntegrationLibraryStore,
-  LibraryAudit,
-  LibraryItemView,
-  LibraryVersionView,
-  NewLibraryVersion,
-  ResolvedLibraryVersion,
+import {
+  LibraryQuotaExceeded,
+  type IntegrationLibraryStore,
+  type LibraryAudit,
+  type LibraryItemView,
+  type LibraryVersionView,
+  type NewLibraryVersion,
+  type LibraryFile,
+  type ResolvedLibraryVersion,
 } from '../services/integration-library.ts'
-import type { StorageMode } from '../utils/library/quota.ts'
+import {
+  checkQuota,
+  defaultQuotaBytes,
+  quotaBasis,
+  type StorageMode,
+} from '../utils/library/quota.ts'
+import { lockLibraryBlob } from '../utils/library/retention.ts'
+import { LIBRARY_RELAY_MAX_READ } from '../../../../packages/farm-protocol/src/library-relay.ts'
 
 const versionColumns = (sql: Sql) =>
   sql`v.id::text AS "id", v.item_id::text AS "itemId", v.version_number AS "versionNumber", v.sha256, v.size_bytes::float8 AS "sizeBytes", v.storage_location AS "storageLocation", v.original_name AS "originalName", v.kind, v.metadata->>'resinProfile' AS "resinProfile", v.plate_count AS "plateCount", v.created_at::float8 AS "createdAt"`
@@ -20,6 +29,36 @@ interface VersionRow extends LibraryVersionView {
 
 function asMode(value: string): StorageMode {
   return value === 'server' ? 'server' : 'connector'
+}
+
+/**
+ * The same quota the farm library applies. Bytes already kept at that location
+ * never count again; a purged record does, because its file comes back.
+ */
+async function fitsQuota(sql: Sql, file: LibraryFile) {
+  const kept = await sql`
+    SELECT 1 FROM farm.library_blobs
+    WHERE farm_id = ${file.farmId}::uuid AND sha256 = ${file.sha256} AND storage_location = ${file.mode}
+      AND agent_id IS NOT DISTINCT FROM ${file.agentId}::uuid AND purged_at IS NULL`
+  if (kept.length > 0) return true
+  const settings = await sql<{ quotaBytes: number }[]>`
+    SELECT quota_bytes::float8 AS "quotaBytes" FROM farm.library_settings WHERE farm_id = ${file.farmId}::uuid`
+  const basis = await quotaBasis(
+    sql,
+    file.farmId,
+    file.mode,
+    file.agentId ?? undefined,
+    settings[0]?.quotaBytes ?? defaultQuotaBytes(),
+  )
+  return !basis || checkQuota(file.mode, basis, file.sizeBytes).ok
+}
+
+/** Records a stored file, or revives the record retention marked purged. */
+function keepBlob(sql: Sql, file: LibraryFile, createdAt: number) {
+  return sql`
+    INSERT INTO farm.library_blobs (farm_id, sha256, size_bytes, storage_location, agent_id, created_at)
+    VALUES (${file.farmId}::uuid, ${file.sha256}, ${file.sizeBytes}, ${file.mode}, ${file.agentId}, ${createdAt})
+    ON CONFLICT (farm_id, sha256, storage_location, location_agent_id) DO UPDATE SET purged_at = NULL`
 }
 
 /**
@@ -41,7 +80,7 @@ export class PostgresIntegrationLibrary implements IntegrationLibraryStore {
   async setMode(farmId: string, mode: StorageMode, now: number) {
     await this.sql`
       INSERT INTO farm.library_settings (farm_id, storage_mode, quota_bytes, retention_days, updated_by, updated_at)
-      VALUES (${farmId}::uuid, ${mode}, 21474836480, 30, 'integration', ${now})
+      VALUES (${farmId}::uuid, ${mode}, ${defaultQuotaBytes()}, 30, 'integration', ${now})
       ON CONFLICT (farm_id) DO UPDATE SET storage_mode = EXCLUDED.storage_mode, updated_by = EXCLUDED.updated_by, updated_at = EXCLUDED.updated_at`
   }
 
@@ -127,11 +166,12 @@ export class PostgresIntegrationLibrary implements IntegrationLibraryStore {
         storageLocation: string
         plateCount: number
         resinProfile: string | null
+        agentId: string | null
       }[]
     >`
       SELECT v.id::text AS "id", v.farm_id::text AS "farmId", v.sha256, v.size_bytes::float8 AS "sizeBytes",
         v.original_name AS "originalName", v.storage_location AS "storageLocation", v.plate_count AS "plateCount",
-        v.metadata->>'resinProfile' AS "resinProfile"
+        v.metadata->>'resinProfile' AS "resinProfile", v.agent_id::text AS "agentId"
       FROM farm.library_versions v
       JOIN farm.library_blobs b ON b.farm_id = v.farm_id AND b.sha256 = v.sha256
         AND b.storage_location = v.storage_location AND b.location_agent_id = v.location_agent_id
@@ -146,8 +186,78 @@ export class PostgresIntegrationLibrary implements IntegrationLibraryStore {
       displayName: row.originalName,
       ...(row.resinProfile === null ? {} : { resinProfile: row.resinProfile }),
       storageMode: asMode(row.storageLocation),
+      ...(row.agentId === null ? {} : { agentId: row.agentId }),
       plateCount: row.plateCount,
     }
+  }
+
+  fits(file: LibraryFile) {
+    return fitsQuota(this.sql, file)
+  }
+
+  /**
+   * Copies a Connector-mode file to the Connector of the printer that will
+   * print it, relayed from the Connector that holds the version. The server
+   * keeps no bytes.
+   */
+  async placeOn(versionId: string, agentId: string) {
+    const rows = await this.sql<
+      {
+        farmId: string
+        sha256: string
+        sizeBytes: number
+        sourceAgentId: string | null
+      }[]
+    >`
+      SELECT farm_id::text AS "farmId", sha256, size_bytes::float8 AS "sizeBytes", agent_id::text AS "sourceAgentId"
+      FROM farm.library_versions WHERE id = ${versionId}::uuid AND deleted_at IS NULL`
+    const row = rows[0]
+    if (!row?.sourceAgentId || row.sourceAgentId === agentId) return 'ready'
+    const { farmId, sha256, sizeBytes, sourceAgentId } = row
+    const copy: LibraryFile = {
+      farmId,
+      sha256,
+      sizeBytes,
+      mode: 'connector',
+      agentId,
+    }
+    const there = await this.sql`
+      SELECT 1 FROM farm.library_blobs
+      WHERE farm_id = ${farmId}::uuid AND sha256 = ${sha256} AND storage_location = 'connector'
+        AND agent_id = ${agentId}::uuid AND purged_at IS NULL`
+    if (there.length > 0) return 'ready'
+    if (!(await fitsQuota(this.sql, copy))) return 'quota-exceeded'
+
+    const { libraryRuntime } = await import('../utils/library/runtime.ts')
+    const { relay } = await libraryRuntime()
+    if (!relay) throw new Error('Library storage unavailable')
+    async function* source() {
+      for (let offset = 0; offset < sizeBytes;) {
+        const part = await relay!.read({
+          farmId,
+          agentId: sourceAgentId,
+          sha256,
+          offset,
+          length: Math.min(LIBRARY_RELAY_MAX_READ, sizeBytes - offset),
+        })
+        if (part.length === 0) throw new Error('Library file is truncated')
+        offset += part.length
+        yield part
+      }
+    }
+    const stored = await relay.put({
+      farmId,
+      agentId,
+      body: source(),
+      maxBytes: sizeBytes,
+    })
+    if (stored.sha256 !== sha256 || stored.size !== sizeBytes)
+      throw new Error('Library storage unavailable')
+    await this.sql.begin(async (tx) => {
+      await lockLibraryBlob(tx as unknown as Sql, sha256)
+      await keepBlob(tx as unknown as Sql, copy, Date.now())
+    })
+    return 'ready'
   }
 
   async retain(
@@ -175,14 +285,24 @@ export class PostgresIntegrationLibrary implements IntegrationLibraryStore {
   }
 
   async addVersion(version: NewLibraryVersion) {
+    const file: LibraryFile = {
+      farmId: version.farmId,
+      sha256: version.sha256,
+      sizeBytes: version.sizeBytes,
+      mode: version.storageLocation,
+      agentId: version.agentId,
+    }
     await this.sql.begin(async (tx) => {
+      // The same locks as the farm library and retention: quota stays exact and
+      // a purge cannot run between reviving a record and adding its version.
+      await tx`SELECT pg_advisory_xact_lock(hashtextextended(${'library:' + version.farmId}, 0))`
+      await lockLibraryBlob(tx as unknown as Sql, version.sha256)
+      if (!(await fitsQuota(tx as unknown as Sql, file)))
+        throw new LibraryQuotaExceeded()
       await tx`
         INSERT INTO farm.library_items (id, farm_id, title, tags, created_by, created_at)
         VALUES (${version.itemId}::uuid, ${version.farmId}::uuid, ${version.title}, '{}', 'integration', ${version.createdAt})`
-      await tx`
-        INSERT INTO farm.library_blobs (farm_id, sha256, size_bytes, storage_location, agent_id, created_at)
-        VALUES (${version.farmId}::uuid, ${version.sha256}, ${version.sizeBytes}, ${version.storageLocation}, ${version.agentId}, ${version.createdAt})
-        ON CONFLICT DO NOTHING`
+      await keepBlob(tx as unknown as Sql, file, version.createdAt)
       // The existing kind constraint only permits G-code and 3MF. The
       // immutable profile in version metadata identifies the resin artifact.
       const storedKind = version.kind === 'resin' ? '3mf' : version.kind

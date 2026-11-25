@@ -42,7 +42,7 @@
     "test:rtc-memory": "node scripts/test-rtc-memory.ts"
   },
   "devDependencies": {
-    "@axe-core/playwright": "4.14.0",
+    "@axe-core/playwright": "4.14.1",
     "@playwright/test": "1.65.1",
     "@redocly/openapi-core": "2.82.0",
     "@types/node": "24.19.2",

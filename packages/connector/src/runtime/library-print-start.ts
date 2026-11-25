@@ -409,9 +409,13 @@ export function withLibraryPrint<D extends PreparedPauseDriver>(
     ...driver,
     controls(binding: PrinterBinding): readonly ExtendedControlAction[] {
       const base = controls(binding)
+      const target = config.targetFor(binding)
+      // Not for SDCP: the library holds no CTB/GOO, SDCP telemetry reports no
+      // nozzle profile, and a transferring printer reports no startable state.
       return base.includes('start_print') &&
         !base.includes('start_library_print') &&
-        config.targetFor(binding)
+        target &&
+        target.backend !== 'sdcp'
         ? Object.freeze([...base, 'start_library_print' as const])
         : base
     },

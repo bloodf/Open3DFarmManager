@@ -14,6 +14,7 @@ import {
   readBambuPrinterBinding,
   readAnycubicPrinterBinding,
   readCrealityPrinterBinding,
+  readSdcpPrinterBinding,
 } from '../control/printer-binding.ts'
 import { createKobraLinkFilesTarget } from '../kobralink/runtime.ts'
 import type { KobraLinkFetch } from '../kobralink/client.ts'
@@ -22,7 +23,8 @@ import type { FileUploadOptions, FileUploadTarget } from './file-upload.ts'
 
 type Targets = Readonly<{
   upload: FileUploadTarget
-  list: FileListTarget
+  /** Absent when the backend has no file listing wired. */
+  list?: FileListTarget
 }>
 
 /**
@@ -158,6 +160,13 @@ export function createFileTargets(input: {
           upload: { backend: 'anycubic' },
           list: { backend: 'anycubic' },
         }
+    }
+    if (collection.version === 6) {
+      // Only a binding opted in to control has an upload target.
+      const handle = input.config.bindingFor(input.assignmentId)
+      const local = handle && readSdcpPrinterBinding(handle)
+      if (handle && local?.printerKey === controlledKey)
+        return { upload: { backend: 'sdcp', binding: handle } }
     }
     return undefined
   }

@@ -19,6 +19,9 @@ import { openFixedCrealityControl } from '../creality/control-driver.ts'
 import { CREALITY_ACTIONS, CREALITY_CFS_ACTIONS } from '../creality/commands.ts'
 import { readCrealityPrinterBinding } from '../control/printer-binding.ts'
 import { openFixedBambuControl } from '../bambu/control-driver.ts'
+import { openFixedSdcpControl } from '../sdcp/control-driver.ts'
+import { SDCP_CONTROL_ACTIONS } from '../sdcp/models.ts'
+import { readSdcpPrinterBinding } from '../control/printer-binding.ts'
 import { bambuControls } from '../bambu/control-support.ts'
 import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
 import {
@@ -144,6 +147,7 @@ export function createPauseDriverRouter(config: {
           )
         : offered
     }
+    if (readSdcpPrinterBinding(binding)) return SDCP_CONTROL_ACTIONS
     const anycubic = readAnycubicPrinterBinding(binding)
     if (anycubic) return anycubicControls(anycubic.modelId)
     const bambu = readBambuPrinterBinding(binding)
@@ -191,6 +195,7 @@ export function createPauseDriverRouter(config: {
         !readBambuPrinterBinding(binding) &&
         !readCrealityPrinterBinding(binding) &&
         !readKobraXPrinterBinding(binding) &&
+        !readSdcpPrinterBinding(binding) &&
         !readAnycubicPrinterBinding(binding)
       ) {
         const detect = {
@@ -259,11 +264,13 @@ export function createPauseDriverRouter(config: {
               ? openFixedKobraXControl
               : readAnycubicPrinterBinding(binding)
                 ? openFixedAnycubicControl
-                : readCrealityPrinterBinding(binding)
-                  ? openFixedCrealityControl
-                  : readBambuPrinterBinding(binding)
-                    ? openFixedBambuControl
-                    : openFixedMoonrakerPause
+                : readSdcpPrinterBinding(binding)
+                  ? openFixedSdcpControl
+                  : readCrealityPrinterBinding(binding)
+                    ? openFixedCrealityControl
+                    : readBambuPrinterBinding(binding)
+                      ? openFixedBambuControl
+                      : openFixedMoonrakerPause
         )({
           binding,
           fetch: config.kobraLinkFetch,

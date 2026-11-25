@@ -15,6 +15,7 @@ import {
   provisionReadonlyPrinter,
   provisionKobraLinkPrinter,
   provisionKobraXPrinter,
+  provisionSdcpPrinter,
   type PrinterBinding,
 } from '../control/printer-binding.ts'
 import { readVersionedRuntimeConfig } from './version.ts'
@@ -219,7 +220,21 @@ export function readAgentRuntimeConfig(
                 value.backend !== 'sdcp'
               )
                 throw Error('SDCP assignment mismatch')
-              return provisionReadonlyPrinter(value)
+              const readonly = provisionReadonlyPrinter(value)
+              const assignment = readRuntimePrinterBinding(readonly)!
+              // Print control is a local opt-in per assignment.
+              if (
+                !pause?.control?.assignmentIds.includes(
+                  assignment.assignment_id,
+                )
+              )
+                return readonly
+              const { assignment_id, farm_id, agent_id, printer_key } =
+                assignment
+              return provisionSdcpPrinter(
+                { assignment_id, farm_id, agent_id, printer_key },
+                sdcp,
+              )
             })()
           : bambu
             ? provisionBambuPrinter(value, bambu)

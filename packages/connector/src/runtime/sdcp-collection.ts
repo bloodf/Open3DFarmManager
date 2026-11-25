@@ -2,6 +2,9 @@ import { boundPrinterString } from '@open3dfarmmanager/farm-protocol'
 import type { SdcpBinding } from '../config/sdcp.ts'
 import { discoverSdcp } from '../discovery/sdcp.ts'
 import { connectSdcp } from '../sdcp/index.ts'
+import { resolveSdcpTarget } from '../sdcp/identity.ts'
+import { sdcpProfile } from '../sdcp/models.ts'
+import { monitorSdcp } from '../sdcp/monitor.ts'
 import type { RawPrinterObservation } from './farm-snapshot-provider.ts'
 import type { z } from 'zod'
 
@@ -36,7 +39,8 @@ export function createSdcpCollection(input: {
   let epoch = 1
   async function run() {
     while (!input.signal.aborted) {
-      let adapter: ReturnType<typeof connectSdcp> | undefined
+      let adapter:
+        Pick<ReturnType<typeof connectSdcp>, 'snapshot' | 'close'> | undefined
       let unavailable = false
       const withdraw = (reason: string) => {
         if (!unavailable && !input.signal.aborted) {
@@ -45,26 +49,40 @@ export function createSdcpCollection(input: {
         }
       }
       try {
-        const [identity] = await discoverSdcp({
-          target: input.binding.host,
-          ...(input.endpoints?.discoveryPort
-            ? { port: input.endpoints.discoveryPort }
-            : {}),
-          timeoutMs: input.endpoints?.timeoutMs ?? 1000,
-        })
-        if (
-          !identity ||
-          identity.mainboardId !== input.binding.mainboardId ||
-          identity.model.toLowerCase().replace(/^elegoo\s+/, '') !==
-            input.binding.model.toLowerCase().replace(/^elegoo\s+/, '')
-        )
-          throw Error('SDCP identity mismatch or unavailable')
-        adapter = connectSdcp(identity, {
-          ...(input.endpoints?.websocketPort
-            ? { port: input.endpoints.websocketPort }
-            : {}),
-          staleAfterMs: input.endpoints?.staleAfterMs ?? 30000,
-        })
+        let identity: { model: string; firmwareVersion: string }
+        const port = input.endpoints?.websocketPort
+          ? { port: input.endpoints.websocketPort }
+          : {}
+        const staleAfterMs = input.endpoints?.staleAfterMs ?? 30000
+        if (sdcpProfile(input.binding.model)?.family === 'fdm') {
+          // The Centauri Carbon needs its own discovery and status shapes.
+          const target = await resolveSdcpTarget(input.binding, {
+            ...(input.endpoints?.discoveryPort
+              ? { port: input.endpoints.discoveryPort }
+              : {}),
+            timeoutMs: input.endpoints?.timeoutMs ?? 1000,
+            signal: input.signal,
+          })
+          identity = target
+          adapter = monitorSdcp(target, { ...port, staleAfterMs })
+        } else {
+          const [found] = await discoverSdcp({
+            target: input.binding.host,
+            ...(input.endpoints?.discoveryPort
+              ? { port: input.endpoints.discoveryPort }
+              : {}),
+            timeoutMs: input.endpoints?.timeoutMs ?? 1000,
+          })
+          if (
+            !found ||
+            found.mainboardId !== input.binding.mainboardId ||
+            found.model.toLowerCase().replace(/^elegoo\s+/, '') !==
+              input.binding.model.toLowerCase().replace(/^elegoo\s+/, '')
+          )
+            throw Error('SDCP identity mismatch or unavailable')
+          identity = found
+          adapter = connectSdcp(found, { ...port, staleAfterMs })
+        }
         let last = 0
         const started = Date.now()
         while (!input.signal.aborted) {

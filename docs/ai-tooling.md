@@ -48,4 +48,4 @@ No local token or cost savings have been measured. Limit graph output rather tha
 
 ## TypeScript compatibility
 
-The root typecheck uses the TypeScript 7 native compiler through `typescript7`. The farm workspace pins TypeScript 6.0.3 for `vue-tsc`, which requires the JavaScript compiler API. The root `vue-tsc` version intentionally differs from the farm version so npm installs the farm checker next to its compatible TypeScript; keep these versions distinct until the Vue checker supports TypeScript 7. The route authorization test uses the `typescript-ast` alias for the TypeScript 7 snapshot and AST APIs.
+The root typecheck uses the TypeScript 7 native compiler through `typescript7`. The root and farm workspace pin TypeScript 6.0.3 for `vue-tsc`, which requires the JavaScript compiler API. Both use the same `vue-tsc` version so npm hoists the checker alongside its compatible TypeScript until it supports TypeScript 7. The route authorization test uses the `typescript-ast` alias for the TypeScript 7 snapshot and AST APIs.

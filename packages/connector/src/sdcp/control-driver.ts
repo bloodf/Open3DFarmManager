@@ -11,6 +11,7 @@ import WebSocket from 'ws'
 import { resinArtifactFormatFor } from '../../../shared/src/print-file/resin-artifacts.ts'
 import {
   controlTargetState,
+  PowerArguments,
   type ExtendedControlAction,
 } from '../../../farm-protocol/src/control-actions.ts'
 import {
@@ -23,7 +24,11 @@ import type {
   PauseDriver,
 } from '../control/pause-dispatcher.ts'
 import { DriverRefusalError } from '../control/driver-refusal.ts'
-import { buildSdcpCommand, sdcpRequest } from './commands.ts'
+import {
+  buildSdcpCommand,
+  buildSdcpVideoCommand,
+  sdcpRequest,
+} from './commands.ts'
 import { resolveSdcpTarget, type SdcpTarget } from './identity.ts'
 import {
   SDCP_CONTROL_ACTIONS,
@@ -34,7 +39,17 @@ import {
   type SdcpAction,
   type SdcpQualification,
 } from './models.ts'
-import { decodeSdcpAck, decodeSdcpStatus, type SdcpReport } from './report.ts'
+import {
+  decodeSdcpAck,
+  decodeSdcpResponse,
+  decodeSdcpStatus,
+  type SdcpReport,
+} from './report.ts'
+import {
+  SDCP_CAMERA_DEVICE,
+  sdcpVideoDestination,
+  type SdcpVideo,
+} from './video.ts'
 
 export class SdcpControlTimeout extends Error {
   readonly code = 'SDCP_CONTROL_TIMEOUT'
@@ -53,6 +68,8 @@ export function openFixedSdcpControl(input: {
   pollMs?: number
   /** Local composition only; the shipped list is empty. */
   qualifiedStarts?: readonly SdcpQualification[] | undefined
+  /** Camera stream state; absent means no video command. */
+  video?: SdcpVideo | undefined
 }) {
   const local = readSdcpPrinterBinding(input.binding)
   const mapping = readPrinterBinding(input.binding)
@@ -70,7 +87,8 @@ export function openFixedSdcpControl(input: {
   let attempted = false
   let prepared = false
   let stopped = false
-  let action: SdcpAction | undefined
+  let action: SdcpAction | 'power' | undefined
+  let videoReply: Record<string, unknown> | undefined
   let args: Record<string, unknown> = {}
   let requestId = ''
   let ack: number | undefined
@@ -125,7 +143,15 @@ export function openFixedSdcpControl(input: {
   function onMessage(data: WebSocket.RawData, binary: boolean) {
     if (stopped || binary) return
     const raw = data.toString()
-    if (requestId) {
+    if (requestId && action === 'power') {
+      // The video answer carries the stream address, not only an Ack.
+      const reply = decodeSdcpResponse(raw, local!.mainboardId, requestId, 386)
+      if (reply) {
+        videoReply = reply
+        notify?.()
+        return
+      }
+    } else if (requestId) {
       const code = decodeSdcpAck(raw, local!.mainboardId, requestId)
       if (code !== undefined) {
         ack = code
@@ -212,6 +238,47 @@ export function openFixedSdcpControl(input: {
       check()
     })
   }
+  /** The signed `power` command of the camera stream (Cmd 386). Writes nothing. */
+  function prepareVideo(values: Record<string, unknown>) {
+    const parsed = PowerArguments.safeParse(values)
+    if (!parsed.success || parsed.data.device !== SDCP_CAMERA_DEVICE)
+      throw new DriverRefusalError('invalid-command', 'Invalid SDCP device')
+    const camera = { mainboardId: local!.mainboardId, model: local!.model }
+    if (!input.video?.qualified(camera, target!.firmwareVersion))
+      throw new DriverRefusalError(
+        'unsupported-action',
+        `SDCP video stream is not qualified for ${local!.model} firmware ${target!.firmwareVersion}`,
+        {
+          userMessage: `A câmera da impressora ${local!.model} com firmware ${target!.firmwareVersion} ainda não foi qualificada.`,
+        },
+      )
+    const on = parsed.data.on
+    return {
+      fixed: 'power' as const,
+      on,
+      ...sdcpRequest(
+        target!,
+        profile!,
+        buildSdcpVideoCommand(local!.model, on),
+      ),
+    }
+  }
+  /**
+   * Records what the answer says. A refusal or an unusable address is an
+   * unknown outcome; nothing further is sent.
+   */
+  function recordVideo(on: boolean, reply: Record<string, unknown>) {
+    const board = local!.mainboardId
+    if (reply.Ack === 0 && !on) return input.video!.off(board)
+    if (reply.Ack === 0)
+      return input.video!.on(
+        board,
+        sdcpVideoDestination(reply.VideoUrl, local!.host),
+      )
+    // Ack 1 (stream limit) means one is open; the others open none.
+    if (on && reply.Ack !== 1) input.video!.off(board)
+    throw new Error(`SDCP video command refused with Ack ${reply.Ack}`)
+  }
   /** Every check and wait that precedes the write guard. Writes no command. */
   async function prewrite(
     next: ExtendedControlAction,
@@ -225,12 +292,20 @@ export function openFixedSdcpControl(input: {
       request.signal.aborted
     )
       throw new DriverRefusalError('state', 'SDCP control unavailable')
-    if (!(SDCP_CONTROL_ACTIONS as readonly string[]).includes(next))
+    if (
+      next !== 'power' &&
+      !(SDCP_CONTROL_ACTIONS as readonly string[]).includes(next)
+    )
       throw new DriverRefusalError(
         'unsupported-action',
         'SDCP control action unavailable',
       )
     attempted = true
+    if (next === 'power') {
+      const video = prepareVideo(values)
+      current()
+      return video
+    }
     const fixed = next as SdcpAction
     // The firmware is the one the printer just reported for this session.
     if (
@@ -273,7 +348,7 @@ export function openFixedSdcpControl(input: {
       )
     }
     current()
-    return { fixed, ...sdcpRequest(target!, profile!, command) }
+    return { fixed, on: false, ...sdcpRequest(target!, profile!, command) }
   }
   async function send(
     next: ExtendedControlAction,
@@ -284,6 +359,7 @@ export function openFixedSdcpControl(input: {
     if (attempted) throw failure()
     const {
       fixed,
+      on,
       requestId: id,
       frame,
     } = await prewrite(next, values, request).catch((error: unknown) => {
@@ -308,7 +384,14 @@ export function openFixedSdcpControl(input: {
     requestId = id
     sentSequence = sequence
     sentMono = input.clock.monotonicNow()
+    // Until the answer says otherwise, a stream may be open.
+    if (fixed === 'power') input.video!.mayBeOn(local!.mainboardId)
     socket.send(JSON.stringify(frame))
+    if (fixed === 'power') {
+      await wait(() => videoReply !== undefined)
+      recordVideo(on, videoReply!)
+      return { acknowledged: true }
+    }
     await wait(() => ack !== undefined)
     if (ack !== 0) throw new Error(`SDCP command refused with Ack ${ack}`)
     refresh()
@@ -324,6 +407,8 @@ export function openFixedSdcpControl(input: {
         request.binding !== input.binding ||
         request.signal.aborted ||
         !action ||
+        // The printer reports no stream state: a video command never confirms.
+        action === 'power' ||
         (request.action !== undefined && request.action !== action) ||
         !latest ||
         latest.sequence <= request.after.sequence ||

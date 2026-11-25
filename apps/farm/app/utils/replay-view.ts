@@ -69,8 +69,13 @@ export const GROUP_LABELS: Record<ReplayLevel, string> = {
   blocked: 'Bloqueadas ou indisponíveis',
 }
 
+export const effectiveSlotColour = (m: ReplayMaterial) =>
+  m.spoolmanColorHex ?? m.colorHex
+
 const colour = (hex: string | undefined) =>
-  hex && /^[0-9A-F]{8}$/i.test(hex) ? `#${hex.slice(0, 6)}` : undefined
+  hex && /^(?:[0-9A-F]{6}|[0-9A-F]{8})$/i.test(hex)
+    ? `#${hex.slice(0, 6)}`
+    : undefined
 
 /** Why a printer cannot be picked right now; undefined when it can. */
 export function disabledReason(
@@ -113,7 +118,9 @@ export function groupPrinters(
       },
       printer.materials.map((m) => ({
         ...(m.materialType ? { type: m.materialType } : {}),
-        ...(colour(m.colorHex) ? { colour: colour(m.colorHex)! } : {}),
+        ...(colour(effectiveSlotColour(m))
+          ? { colour: colour(effectiveSlotColour(m))! }
+          : {}),
       })),
     )
     const reasons = verdict.reasons
@@ -167,7 +174,8 @@ export function suggestMapping(
     const sameType = (m: ReplayMaterial) =>
       m.materialType?.toLowerCase() === type
     let index = fits(
-      (m) => sameType(m) && colour(m.colorHex)?.toLowerCase() === want,
+      (m) =>
+        sameType(m) && colour(effectiveSlotColour(m))?.toLowerCase() === want,
     )
     if (index < 0) index = fits(sameType)
     if (index < 0) return -1

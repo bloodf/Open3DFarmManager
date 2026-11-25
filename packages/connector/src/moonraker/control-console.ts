@@ -1,3 +1,4 @@
+import { DriverRefusalError } from '../control/driver-refusal.ts'
 import { z } from 'zod'
 import { GcodeLine } from '../../../farm-protocol/src/control-actions.ts'
 import { klipperCommandName } from './klipper-command.ts'
@@ -19,8 +20,8 @@ export type ConsoleRefusalCode =
   | 'unhomed'
   | 'limit'
 /**
- * The dispatcher reads `refusal` and reports a not-sent result with that
- * reason: a refusal wrote nothing, so it must never read as an unknown outcome.
+ * The dispatcher reports a not-sent result with this reason: a refusal wrote
+ * nothing, so it must never read as an unknown outcome.
  */
 const DISPATCH_REASON: Readonly<
   Record<ConsoleRefusalCode, 'state' | 'unsupported-action' | 'invalid-command'>
@@ -45,14 +46,12 @@ const REFUSAL_MESSAGE: Record<ConsoleRefusalCode, string> = {
   limit: 'Comando excede os limites de segurança.',
 }
 
-export class ConsoleRefusal extends Error {
+export class ConsoleRefusal extends DriverRefusalError {
   readonly code: ConsoleRefusalCode
-  readonly refusal: 'state' | 'unsupported-action' | 'invalid-command'
   constructor(code: ConsoleRefusalCode) {
-    super(REFUSAL_MESSAGE[code])
+    super(DISPATCH_REASON[code], REFUSAL_MESSAGE[code])
     this.name = 'ConsoleRefusal'
     this.code = code
-    this.refusal = DISPATCH_REASON[code]
   }
 }
 

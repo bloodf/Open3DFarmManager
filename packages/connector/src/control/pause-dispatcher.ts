@@ -1,3 +1,4 @@
+import { DriverRefusalError } from './driver-refusal.ts'
 import { toolTemperatureRefusal } from './control-driver.ts'
 import { ToolHeaters } from '../../../farm-protocol/src/state.ts'
 import { authorityConfirmation } from '../auth/offline-authority.ts'
@@ -1052,17 +1053,14 @@ export function createPauseDispatcher(config: {
           )
           if (carried.success) resultCode = carried.data
           // A typed refusal means the driver wrote nothing and says why.
-          const refusal = (error as { refusal?: unknown } | null)?.refusal
           if (
             !terminal &&
             !permitted &&
             !guardCalled &&
             receipt &&
-            (refusal === 'state' ||
-              refusal === 'unsupported-action' ||
-              refusal === 'invalid-command')
+            error instanceof DriverRefusalError
           )
-            finalize('not-sent', refusal, 'guard-denied')
+            finalize('not-sent', error.refusal, 'guard-denied')
           else if (!terminal)
             finalize(
               permitted || contractBroken || (driverCalled && !guardCalled)

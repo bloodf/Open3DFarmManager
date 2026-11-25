@@ -1,3 +1,4 @@
+import { DriverRefusalError } from '../control/driver-refusal.ts'
 import { toolTemperatureRefusal } from '../control/control-driver.ts'
 import type { ToolHeaters } from '../../../farm-protocol/src/state.ts'
 import { createHash } from 'node:crypto'
@@ -900,19 +901,16 @@ export function createApiCommandRunner(config: {
     } catch (error) {
       // Like the browser dispatcher, trust only the driver's typed local
       // refusals before the write guard. They certify that nothing was sent.
-      const refusal = (error as { refusal?: unknown } | null)?.refusal
       if (
         attempted &&
         !permitted &&
         !guardCalled &&
-        (refusal === 'state' ||
-          refusal === 'unsupported-action' ||
-          refusal === 'invalid-command')
+        error instanceof DriverRefusalError
       ) {
         attempted = false
         lastRefusal = [
-          refusal === 'state' ? 'wrong-state' : 'unsupported',
-          refusal,
+          error.refusal === 'state' ? 'wrong-state' : 'unsupported',
+          error.refusal,
         ]
       }
       if (

@@ -1,3 +1,4 @@
+import { DriverRefusalError } from '../control/driver-refusal.ts'
 import { z } from 'zod'
 import { QueueOpArguments } from '../../../farm-protocol/src/control-actions.ts'
 
@@ -22,12 +23,10 @@ export type QueueRefusalReason =
  * Thrown before any write. The dispatcher reads `refusal` and reports a
  * not-sent result with that reason instead of an unknown outcome.
  */
-export class QueueRefused extends Error {
-  readonly refusal: QueueRefusalReason
+export class QueueRefused extends DriverRefusalError {
   constructor(refusal: QueueRefusalReason) {
-    super(`Queue operation refused: ${refusal}`)
+    super(refusal, `Queue operation refused: ${refusal}`)
     this.name = 'QueueRefused'
-    this.refusal = refusal
   }
 }
 

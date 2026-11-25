@@ -1,3 +1,4 @@
+import { DriverRefusalError } from '../control/driver-refusal.ts'
 import { createHash } from 'node:crypto'
 
 export const CONFIG_EDITOR_MAX_BYTES = 1024 * 1024
@@ -22,12 +23,12 @@ type ConfigStorage = {
   restart(signal: AbortSignal): Promise<void>
 }
 
-export class ConfigWriteRefused extends Error {
+export class ConfigWriteRefused extends DriverRefusalError {
   readonly reason:
     'invalid' | 'state' | 'base-mismatch' | 'busy' | 'unauthorized'
 
   constructor(reason: ConfigWriteRefused['reason']) {
-    super(reason)
+    super(reason === 'state' ? 'state' : 'invalid-command', reason)
     this.reason = reason
   }
 }

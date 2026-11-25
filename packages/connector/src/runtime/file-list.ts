@@ -25,7 +25,7 @@ import { listBambuFiles, type BambuListOptions } from '../bambu/files.ts'
 import { listAnycubicFiles } from '../anycubic/files.ts'
 import type { PrinterBinding } from '../control/printer-binding.ts'
 import { createBambuSdCard } from '../bambu/printer-detail.ts'
-import { listCrealityFiles } from '../creality/files.ts'
+import { CrealityFileListError, listCrealityFiles } from '../creality/files.ts'
 
 export type FileListTarget =
   | { backend: 'creality'; binding?: PrinterBinding }
@@ -48,6 +48,8 @@ export type FileListTarget =
   | ({ backend: 'bambu' } & Omit<BambuListOptions, 'signal'>)
 export type FileListOptions = Readonly<{
   targetFor(printerKey: string): FileListTarget | undefined
+  /** The earliest cause of a failed listing. The wire reason stays coarse. */
+  onFailure?(printerKey: string, reason: string, requestSent: boolean): void
 }>
 
 export function createFileList(
@@ -295,6 +297,14 @@ export function createFileList(
               : { ok: false, reason: 'unauthorized' },
           )
         } catch (error) {
+          // Creality failures stay `offline` on the wire: `unsupported` would
+          // let the browser start a typed file name after a failed listing.
+          if (error instanceof CrealityFileListError)
+            input.onFailure?.(
+              request.printer_key,
+              error.reason,
+              error.requestSent,
+            )
           send({
             ok: false,
             reason: !authorized()

@@ -66,6 +66,8 @@ export type PauseControlDiagnostic =
     }
   | { kind: 'pause-terminal'; reason: string }
   | { kind: 'pause-close-stalled'; waitedMs: number }
+  /** Why the printer's file list failed; fixed values, never free text. */
+  | { kind: 'file-list-failed'; reason: string; requestSent: boolean }
 
 type ClientOptions = NonNullable<
   ConstructorParameters<typeof PauseConnectorSignallingClient>[1]
@@ -594,6 +596,8 @@ async function runAssignmentControl(
       config,
       assignmentId,
       dataDirectory: input.dataDirectory,
+      onListFailure: (_printerKey, reason, requestSent) =>
+        diagnostic({ kind: 'file-list-failed', reason, requestSent }),
     }),
     getAdmittedHandle: (transportId) => relay.admittedHandle(transportId),
   }

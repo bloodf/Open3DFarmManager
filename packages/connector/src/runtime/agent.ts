@@ -640,6 +640,11 @@ async function runConnectorAgentOnce(
     let pauseBudget = 256
     const pauseDiagnostic = (value: AgentDiagnostic) => {
       if (pauseBudget-- <= 0) return
+      if (value.kind === 'file-list-failed')
+        logger.warn('file-list-failed', {
+          reason: value.reason,
+          requestSent: value.requestSent,
+        })
       try {
         input.onDiagnostic(value)
       } catch {

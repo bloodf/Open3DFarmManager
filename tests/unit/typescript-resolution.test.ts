@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module'
 import { expect, test } from 'vitest'
 
-// The farm workspace isolates the JavaScript compiler API required by vue-tsc
+// The shared TypeScript 6 dependency supplies the JavaScript API to vue-tsc
 // and Volar. TypeScript 7 drives the root `tsc --noEmit` via `typescript7`.
 const rootRequire = createRequire(
   new URL('../../package.json', import.meta.url),
@@ -11,7 +11,7 @@ const farmRequire = createRequire(
 )
 
 test('root keeps TypeScript 7 for tsc, separate from the legacy compiler entry', () => {
-  expect(rootRequire('typescript/package.json').version).toBe('7.0.2')
+  expect(rootRequire('typescript/package.json').version).toBe('6.0.3')
   expect(rootRequire('typescript7/package.json').version).toBe('7.0.2')
   expect(() => rootRequire.resolve('typescript7/lib/tsc')).toThrow(
     expect.objectContaining({ code: 'ERR_PACKAGE_PATH_NOT_EXPORTED' }),

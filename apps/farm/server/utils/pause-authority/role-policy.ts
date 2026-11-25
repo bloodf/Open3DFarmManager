@@ -33,6 +33,7 @@ export function actionsForControlRole(
         'queue_op',
         'start_library_print',
         'confirm_collection',
+        'clear_hold',
       ].includes(action),
   ),
 ): ExtendedControlAction[] {

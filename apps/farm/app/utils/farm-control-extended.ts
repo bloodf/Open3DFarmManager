@@ -15,6 +15,7 @@ export const extendedActions = [
   'set_speed',
   'firmware_restart',
   'emergency_stop',
+  'clear_hold',
 ] as const
 export type FarmExtendedAction = (typeof extendedActions)[number]
 const labels: Partial<Record<ExtendedControlAction, string>> = {
@@ -46,6 +47,7 @@ const labels: Partial<Record<ExtendedControlAction, string>> = {
   queue_op: 'Gerenciar fila de impressão',
   gcode: 'Enviar G-code',
   confirm_collection: 'Confirmar placa livre',
+  clear_hold: 'Liberar comando sem confirmação',
 }
 export function extendedLabel(action: ExtendedControlAction): string {
   return labels[action] ?? action
@@ -69,8 +71,12 @@ export function unsupportedExtended(
     'load_filament',
     'unload_filament',
   ]
+  // `clear_hold` is only advertised while a command is stuck: never missing.
   return known.filter(
-    (action) => action !== 'set_tool_temperature' && !actions.includes(action),
+    (action) =>
+      action !== 'set_tool_temperature' &&
+      action !== 'clear_hold' &&
+      !actions.includes(action),
   )
 }
 export function buildExtendedArgs(
@@ -116,7 +122,9 @@ export function buildExtendedArgs(
 export function requiresExtendedConfirmation(
   action: FarmExtendedAction,
 ): boolean {
-  return ['home', 'firmware_restart', 'emergency_stop'].includes(action)
+  return ['home', 'firmware_restart', 'emergency_stop', 'clear_hold'].includes(
+    action,
+  )
 }
 
 export function speedModeOptions(modes: readonly SpeedMode[] | undefined) {

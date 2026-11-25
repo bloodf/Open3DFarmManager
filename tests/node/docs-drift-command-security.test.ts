@@ -163,6 +163,7 @@ const SAMPLE_ARGS: Record<ExtendedControlAction, Record<string, unknown>> = {
   bed_mesh: { op: 'clear' },
   gcode: { line: 'M105' },
   confirm_collection: { attempt: '0' },
+  clear_hold: {},
 }
 
 type Claim = (action: ExtendedControlAction) => string

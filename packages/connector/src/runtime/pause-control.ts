@@ -30,6 +30,7 @@ import { join } from 'node:path'
 import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
 import {
   closeCommandJournal,
+  hasUncertainHold,
   openCommandJournal,
 } from '../control/command-journal.ts'
 import {
@@ -465,9 +466,20 @@ async function runAssignmentControl(
       return binding ? router.macros?.(binding) : undefined
     })
     if (input.onControls) {
-      const readControls = (id: string) => {
+      const readControls = (id: string): readonly ExtendedControlAction[] => {
         const binding = config.bindingFor(id)
-        return binding ? browserDriver.controls(binding) : []
+        if (!binding) return []
+        const base = browserDriver.controls(binding)
+        const mapping = readPrinterBinding(binding)
+        // Offered only while there is something to clear.
+        return mapping &&
+          hasUncertainHold(journal, {
+            assignmentId: mapping.assignment_id,
+            farmId: mapping.farm_id,
+            printerKey: mapping.printer_key,
+          })
+          ? [...base, 'clear_hold']
+          : base
       }
       input.onControls(readControls)
       try {

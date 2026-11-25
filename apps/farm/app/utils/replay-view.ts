@@ -40,6 +40,10 @@ export type ReplayPrinter = {
   connectorOnline: boolean
   /** A live, authenticated session to the Connector exists. */
   live: boolean
+  /** The session is up but the printer's live data is too old to command. */
+  stale?: boolean
+  /** The Connector holds new starts until the plate is confirmed clear. */
+  held?: boolean
   state?: string
   materials: readonly ReplayMaterial[]
 }
@@ -82,6 +86,10 @@ export function disabledReason(
     return connectorMode
       ? 'O Connector que guarda o arquivo está offline. Ligue-o para imprimir de novo.'
       : 'O Connector desta impressora está offline.'
+  if (!printer.live && printer.stale)
+    return 'Os dados ao vivo desta impressora estão desatualizados. Aguarde a atualização.'
+  if (!printer.live && printer.held)
+    return RESULT_CODE_HINTS['awaiting-collection']
   if (!printer.live)
     return 'Não há conexão direta segura com o Connector. Nenhum comando pode ser enviado.'
   if (printer.state && !['idle', 'cancelled'].includes(printer.state))
@@ -204,6 +212,10 @@ export const REFUSAL_TEXT: Record<string, string> = {
   'stale-selection': 'A seleção mudou. Confira o arquivo e a impressora.',
   'library-unavailable': 'Não foi possível verificar a versão na biblioteca.',
   'webrtc-unavailable': 'A conexão ao vivo com o Connector está indisponível.',
+  'availability-stale':
+    'A disponibilidade ao vivo desta impressora está desatualizada e não permite iniciar a impressão agora.',
+  'session-handshake-failed':
+    'Não foi possível estabelecer a sessão segura com o Connector (falha na negociação da conexão).',
   incompatible: 'O arquivo é incompatível com esta impressora.',
   'download-failed':
     'O Connector não conseguiu baixar o arquivo da biblioteca do servidor.',

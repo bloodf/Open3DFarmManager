@@ -43,6 +43,8 @@ const bedClear = ref(false)
 const sending = ref(false)
 /** A settled attempt locks the form: an uncertain command is never resent. */
 const result = ref<ReplayResult | null>(null)
+const reconnecting = ref(false)
+const connectionNotice = ref('')
 
 const selected = computed(() =>
   props.printers.find((printer) => printer.key === selectedKey.value),
@@ -72,6 +74,7 @@ const outcomeLockKey = () => props.itemId ?? props.source.sha256
 
 function reset() {
   result.value = replayOutcomeLocks.get(outcomeLockKey())
+  connectionNotice.value = ''
   bedClear.value = false
   selectedKey.value = defaultPrinter(groups.value, props.preferredPrinter)
   plate.value = Math.min(
@@ -125,6 +128,7 @@ async function confirm() {
   const printer = selected.value
   if (!printer || problem.value || sending.value || result.value) return
   sending.value = true
+  connectionNotice.value = ''
   const { sha256, versionId } = props.source
   const itemId = props.itemId
   const lockKey = outcomeLockKey()
@@ -159,6 +163,27 @@ async function confirm() {
   }
   replayOutcomeLocks.record(lockKey, settled)
   if (outcomeLockKey() === lockKey) result.value = settled
+}
+
+/** After a failed handshake only the connection is tried again, never the print. */
+async function retryConnection() {
+  const printer = selected.value
+  const failed = result.value
+  if (!printer || !failed || !props.send.reconnect || reconnecting.value) return
+  reconnecting.value = true
+  connectionNotice.value = ''
+  const connected = await props.send.reconnect(printer.key).catch(() => false)
+  reconnecting.value = false
+  // The dialog was closed or reused while the connection was being tried.
+  if (!open.value || result.value !== failed) return
+  if (!connected) {
+    connectionNotice.value = 'A conexão com o Connector continua falhando.'
+    return
+  }
+  result.value = null
+  bedClear.value = false
+  connectionNotice.value =
+    'Conexão restabelecida. Nada foi enviado: confira a mesa e confirme novamente.'
 }
 
 function confirmPrinterChecked() {
@@ -283,6 +308,13 @@ function confirmPrinterChecked() {
         <li v-for="reason in reasons" :key="reason">{{ reason }}</li>
       </ul>
     </div>
+    <div v-if="result?.code === 'session-handshake-failed' && send.reconnect">
+      <Button :disabled="reconnecting" @click="retryConnection"
+        >Tentar conectar novamente</Button
+      >
+    </div>
+    <p v-if="reconnecting" role="status">Conectando ao Connector…</p>
+    <p v-else-if="connectionNotice" role="status">{{ connectionNotice }}</p>
     <div v-if="result?.outcome === 'outcome-unknown'">
       <p>
         Verifique a impressora. Se a impressão não começou, confirme abaixo para

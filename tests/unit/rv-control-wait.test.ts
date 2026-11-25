@@ -441,3 +441,56 @@ describe('#870 result wait from real collector state', () => {
     expect((await kobraXState('99999')).identity).toBeUndefined()
   })
 })
+
+const ROLE_FILTERED: ExtendedControlAction[] = [
+  'pause',
+  'start_print',
+  'gcode',
+  'run_macro',
+  'config_write',
+  'power',
+  'bed_mesh',
+  'service',
+]
+
+describe('#873 re-admission', () => {
+  test.each(['operator', 'admin', 'owner'] as const)(
+    'advertised actions the %s role never gets do not re-admit',
+    async (role) => {
+      const granted = ROLE_FILTERED.filter((action) =>
+        controlRoleAllowed(role, action),
+      )
+      const f = await fixture({ grants: [granted], role })
+      await f.admit(0)
+      expect(f.control.controlsChanged(ROLE_FILTERED, true)).toBe(false)
+      expect(f.states.at(-1)?.kind).toBe('ready')
+      expect(f.transports).toHaveLength(1)
+    },
+  )
+
+  test('a newly advertised allowed action is admitted once the Connector listens again', async () => {
+    const f = await fixture({
+      grants: [['pause'], ['pause', 'start_print']],
+      serve: connectorDouble(),
+    })
+    await f.admit(0)
+    expect(f.control.controlsChanged(ROLE_FILTERED, true)).toBe(true)
+    await f.admit(1)
+    expect(f.states.filter((state) => state.kind === 'failed')).toEqual([])
+    expect(f.control.admittedActions).toEqual(['pause', 'start_print'])
+    expect(f.transports).toHaveLength(2)
+    expect(f.commands).toHaveLength(0)
+  }, 15_000)
+
+  test('closing during the re-listen wait opens no new session', async () => {
+    const f = await fixture({ grants: [['pause']] })
+    await f.admit(0)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    expect(f.control.controlsChanged(['pause', 'start_print'], true)).toBe(true)
+    f.control.close()
+    await f.control.dispose()
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(f.transports).toHaveLength(1)
+    expect(f.states.at(-1)).toEqual({ kind: 'failed', reason: 'closed' })
+  })
+})

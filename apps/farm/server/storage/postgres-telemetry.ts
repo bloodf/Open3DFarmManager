@@ -16,6 +16,23 @@ export function durableTelemetryEvent(event: TelemetryEvent) {
   return payload
 }
 
+/**
+ * The Connector adds progress 0 to an idle printer only for a server that
+ * requires it, so a resend after a server upgrade or rollback can differ from
+ * the stored copy in just that. Both forms are one observation: this returns
+ * the other form, or undefined when the event has only one.
+ */
+export function equivalentTelemetryResend(event: TelemetryEvent) {
+  if (event.kind !== 'printer-state' || event.state.state !== 'idle') return
+  const { progress, ...state } = event.state
+  if (progress !== undefined && progress !== 0) return
+  const { ageAtSendMs: _age, ...payload } = event
+  return {
+    ...payload,
+    state: progress === undefined ? { ...state, progress: 0 } : state,
+  }
+}
+
 class EventConflict extends Error {}
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
@@ -51,13 +68,14 @@ export class PostgresTelemetryStore implements TelemetryEventStore {
         const inserted = new Set<string>()
         for (const event of sorted) {
           const payload = durableTelemetryEvent(event)
+          const resend = equivalentTelemetryResend(event) ?? payload
           const result =
             await tx`INSERT INTO farm.telemetry_events (farm_id, agent_id, event_id, payload)
             VALUES (${farmId}::uuid, ${agentId}::uuid, ${event.eventId}::uuid, ${tx.json(payload)}::jsonb)
             ON CONFLICT (farm_id, agent_id, event_id) DO NOTHING RETURNING event_id`
           if (result.length) inserted.add(event.eventId)
           const rows =
-            await tx`SELECT payload = ${tx.json(payload)}::jsonb AS matches
+            await tx`SELECT payload IN (${tx.json(payload)}::jsonb, ${tx.json(resend)}::jsonb) AS matches
             FROM farm.telemetry_events
             WHERE farm_id = ${farmId}::uuid AND agent_id = ${agentId}::uuid AND event_id = ${event.eventId}::uuid
             FOR SHARE`

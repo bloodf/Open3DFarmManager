@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import CameraDisplay from '../../components/CameraDisplay.vue'
+import PageHeader from '../../components/ui/PageHeader.vue'
 import { useFarmView } from '../../composables/useFarmView.ts'
 
 // The viewer is an integration link destination. Its ticket arrives in the fragment.
@@ -50,9 +51,64 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section>
-    <h1>Câmera da impressora</h1>
-    <CameraDisplay v-if="target" :stream="stream" />
-    <p v-else role="status">{{ status }}</p>
-  </section>
+  <main id="conteudo" class="camera-page ops-screen">
+    <div class="ops-heading">
+      <p class="ops-wordmark" translate="no">Open3DFarmManager</p>
+      <PageHeader title="Câmera da impressora" />
+    </div>
+    <div v-if="target" class="ops-panel">
+      <CameraDisplay :stream="stream" />
+    </div>
+    <p v-else class="ops-panel" role="status">{{ status }}</p>
+  </main>
 </template>
+
+<style scoped>
+.camera-page {
+  max-width: 64rem;
+}
+/* A single status line uses the whole panel width. */
+.camera-page .ops-panel {
+  max-width: none;
+}
+.camera-page :deep(.camera) {
+  gap: var(--ops-space-3);
+  margin: 0;
+}
+.camera-page :deep(.camera-frame) {
+  max-height: min(36rem, 70vh);
+  border-color: var(--ops-border);
+  border-radius: var(--ops-radius-md);
+}
+.camera-page :deep(.camera-status) {
+  color: var(--ops-muted);
+}
+.camera-page :deep(.camera[data-view='live'] .camera-status) {
+  color: var(--ops-text);
+  font-weight: 600;
+}
+/* Decorative marker beside the text that already names the state. */
+.camera-page :deep(.camera[data-view='live'] .camera-status::before) {
+  content: '';
+  display: inline-block;
+  inline-size: var(--ops-space-2);
+  block-size: var(--ops-space-2);
+  margin-inline-end: var(--ops-space-2);
+  border-radius: 50%;
+  background: var(--ops-printing);
+}
+.camera-page :deep(.camera[data-view='error'] .camera-status) {
+  color: var(--ops-fault);
+}
+.camera-page :deep(.camera-toggle) {
+  color: var(--ops-text);
+  background: var(--ops-panel);
+  border-color: var(--ops-muted);
+  border-radius: var(--ops-radius-md);
+  font-weight: 600;
+  touch-action: manipulation;
+}
+.camera-page :deep(.camera-toggle:hover) {
+  background: var(--ops-raised);
+}
+</style>

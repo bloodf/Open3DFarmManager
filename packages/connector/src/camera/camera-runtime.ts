@@ -21,6 +21,8 @@ import type { CameraRuntimeConfig } from '../config/camera.ts'
 import type { ConnectorIdentity } from '../identity/store.ts'
 import type { AssignmentRef } from '../webrtc/readonly-session.ts'
 import { createMoonrakerSnapshotSource } from '../moonraker/snapshot.ts'
+import { createSdcpCameraOpener } from '../sdcp/camera.ts'
+import { createSdcpVideo, type SdcpVideo } from '../sdcp/video.ts'
 import { ConnectorCameraMedia } from './camera-media.ts'
 
 type ConfiguredBambuCamera = Extract<
@@ -96,6 +98,8 @@ export type RtspCameraRuntimeStatus = Readonly<{
 
 export function getRtspCameraStatus(
   config: CameraRuntimeConfig,
+  /** Absent means the shipped (empty) video qualification. */
+  sdcpVideo: SdcpVideo = createSdcpVideo(),
 ): RtspCameraRuntimeStatus {
   const helper = getRtspHelperStatusSync(config.helper)
   const cameras: RtspCameraEntryStatus[] = config.cameras.map((camera) => {
@@ -128,6 +132,19 @@ export function getRtspCameraStatus(
           : 'Bambu camera unavailable',
       })
     }
+    if (
+      'kind' in camera.source &&
+      camera.source.kind === 'sdcp-rtsp' &&
+      !sdcpVideo.offered(camera.source)
+    )
+      return Object.freeze({
+        cameraId: camera.cameraId,
+        assignmentId: camera.assignmentId,
+        kind: 'rtsp' as const,
+        available: false,
+        status: 'unavailable' as const,
+        message: 'SDCP video stream is not qualified for this model',
+      })
     return Object.freeze({
       cameraId: camera.cameraId,
       assignmentId: camera.assignmentId,
@@ -162,6 +179,8 @@ export async function createCameraMediaFactory(input: {
   agentId: string
   farmId: string
   assignmentRefs: readonly AssignmentRef[]
+  /** SDCP stream state; the signed control path fills it. */
+  sdcpVideo?: SdcpVideo
   /** Trusted local configuration; never supplied by a browser. */
   creality?: {
     ffmpeg: HelperExecutable
@@ -187,6 +206,8 @@ export async function createCameraMediaFactory(input: {
       source: BambuCameraSource
     }[]
   }
+  /** One printer-controlled source per viewing of a Photon resin camera. */
+  photonResin?: (assignmentId: string) => AnycubicCameraSource
 }) {
   const { Video, RtpPacketizationConfig, H264RtpPacketizer } =
     await import('node-datachannel')
@@ -249,6 +270,29 @@ export async function createCameraMediaFactory(input: {
       return [['camera-' + index, Object.freeze(source)] as const]
     }),
   )
+  const photonResin = new Map(
+    config.cameras.flatMap((camera, index) => {
+      const open = input.photonResin
+      if (
+        !open ||
+        !('kind' in camera.source) ||
+        camera.source.kind !== 'anycubic-photon-resin'
+      )
+        return []
+      const { assignmentId } = camera
+      return [['camera-' + index, () => open(assignmentId)] as const]
+    }),
+  )
+  const sdcpSources = new Map(
+    config.cameras.flatMap((camera, index) => {
+      const source = camera.source
+      if (!('kind' in source) || source.kind !== 'sdcp-rtsp') return []
+      return [['camera-' + index, Object.freeze({ ...source })] as const]
+    }),
+  )
+  // Shared by every peer: one viewer per printer at a time.
+  const sdcpVideo = input.sdcpVideo ?? createSdcpVideo()
+  const openSdcpCamera = createSdcpCameraOpener({ video: sdcpVideo })
   const snapshots = new Map(
     config.cameras.flatMap((camera, index) => {
       if (
@@ -273,7 +317,10 @@ export async function createCameraMediaFactory(input: {
     }),
   )
   const cameras = config.cameras.flatMap((camera, index) =>
-    'kind' in camera.source && camera.source.kind === 'bambu-lan'
+    'kind' in camera.source &&
+    (camera.source.kind === 'bambu-lan' ||
+      // An unqualified SDCP camera is not offered at all.
+      (camera.source.kind === 'sdcp-rtsp' && !sdcpVideo.offered(camera.source)))
       ? []
       : [
           {
@@ -368,7 +415,11 @@ export async function createCameraMediaFactory(input: {
       native: { Video, RtpPacketizationConfig, H264RtpPacketizer },
       expectedAgentId: agentId,
       assignmentRefs: input.assignmentRefs,
-      cameras,
+      // An SDCP stream that is off is not offered to this peer.
+      cameras: cameras.filter(({ sourceHandle }) => {
+        const sdcp = sdcpSources.get(sourceHandle)
+        return !sdcp || !!sdcpVideo.destination(sdcp.mainboardId)
+      }),
       signProof: (statement) =>
         identity.signCameraPurposeProof({
           statement,
@@ -399,7 +450,9 @@ export async function createCameraMediaFactory(input: {
           })
         }
         const anycubicSource =
-          anycubic.get(handle) ?? configuredAnycubic.get(handle)
+          photonResin.get(handle)?.() ??
+          anycubic.get(handle) ??
+          configuredAnycubic.get(handle)
         if (anycubicSource && (anycubicFfmpeg ?? helper)) {
           if (
             !isCurrent() ||
@@ -489,6 +542,15 @@ export async function createCameraMediaFactory(input: {
             ]),
           })
         }
+        const sdcpSource = sdcpSources.get(handle)
+        if (sdcpSource)
+          return openSdcpCamera({
+            source: sdcpSource,
+            executable: helper,
+            signal,
+            expiresAtMonoMs,
+            isCurrent,
+          })
         return openHelperSource({
           executable: helper,
           sourceHandle: handle,
@@ -513,6 +575,6 @@ export async function createCameraMediaFactory(input: {
     })
   return Object.assign(factory, {
     assignmentIds: [...new Set(cameras.map(({ scope }) => scope.printerId))],
-    getCameraStatus: () => getRtspCameraStatus(config),
+    getCameraStatus: () => getRtspCameraStatus(config, sdcpVideo),
   })
 }

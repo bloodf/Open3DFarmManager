@@ -3,12 +3,13 @@ import { journeyEnabled, startJourneyHarness } from './harness.ts'
 import type { startFormlabsJourneyFixture } from './formlabs-fixture.ts'
 
 if (journeyEnabled()) {
-  test('journey: Formlabs status, connection loss, recovery and unsupported controls', async ({
+  test('journey: Formlabs status, remaining time, model binding, connection loss, recovery and unsupported controls', async ({
     browser,
   }) => {
     const journey = await startJourneyHarness({
       browser,
       simulator: 'formlabs',
+      openFarmInspector: true,
     })
     try {
       const fixture = journey.vendor?.raw as Awaited<
@@ -33,8 +34,13 @@ if (journeyEnabled()) {
         ).toHaveCount(0)
       }
 
-      await test.step('PreForm returns Printing', async () => {
+      const remaining = row.getByLabel('Trabalho atual').getByRole('definition')
+
+      await test.step('PreForm returns Printing with the remaining time', async () => {
         await expectLiveStatus('Printing')
+        await expect(row.getByText('Tempo restante estimado')).toBeVisible()
+        // 5 400 000 ms in the spec-derived fixture: 1 h 30 min.
+        await expect(remaining.filter({ hasText: /1\D+30/ })).toBeVisible()
       })
       await test.step('PreForm returns 503 and the live reading is withdrawn', async () => {
         const responses = fixture.simulator.deviceResponseStatuses
@@ -59,6 +65,21 @@ if (journeyEnabled()) {
       await test.step('PreForm recovers and returns Idle', async () => {
         fixture.recover()
         await expectLiveStatus('Idle')
+        await expect(row.getByText('Tempo restante estimado')).toHaveCount(0)
+      })
+      await test.step('PreForm reports another model and the reading is withheld', async () => {
+        fixture.reportModel('Form 4L')
+        await expect(
+          row.getByText(
+            'Conexão direta indisponível. Exibindo a última observação.',
+            { exact: true },
+          ),
+        ).toBeVisible({ timeout: 30_000 })
+        await expect(
+          row
+            .getByRole('definition')
+            .filter({ hasText: 'PreForm informou: Idle' }),
+        ).toBeVisible()
       })
       expect(new Set(fixture.simulator.requests)).toEqual(
         new Set(['GET /devices/']),

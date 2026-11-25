@@ -283,14 +283,18 @@ export class PostgresIntegrationLibrary implements IntegrationLibraryStore {
         yield part
       }
     }
-    const stored = await relay.put({
-      farmId,
-      agentId,
-      body: source(),
-      maxBytes: sizeBytes,
-    })
-    if (stored.sha256 !== sha256 || stored.size !== sizeBytes)
-      throw new Error('Library storage unavailable')
+    const write = async () => {
+      const stored = await relay.put({
+        farmId,
+        agentId,
+        body: source(),
+        maxBytes: sizeBytes,
+      })
+      if (stored.sha256 !== sha256 || stored.size !== sizeBytes)
+        throw new Error('Library storage unavailable')
+      return stored
+    }
+    const stored = await write()
     // Checked again under the farm lock: files recorded while these bytes moved
     // are not in the report yet, so concurrent copies are added to it here. The
     // earlier report is used because a newer one may already count this file.
@@ -307,6 +311,9 @@ export class PostgresIntegrationLibrary implements IntegrationLibraryStore {
           await relay.discard({ farmId, agentId, sha256 }).catch(() => {})
         return 'quota-exceeded' as const
       }
+      // Another copy of this file refused for quota, or a failed farm upload,
+      // may have removed it since `put`. Neither can while these locks are held.
+      if (!(await this.holds(copy))) await write()
       await keepBlob(tx as unknown as Sql, copy, Date.now())
       return 'ready' as const
     })

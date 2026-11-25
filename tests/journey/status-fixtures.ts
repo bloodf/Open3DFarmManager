@@ -4,6 +4,7 @@ import { startQidiSimulator } from '../../packages/sim-tools/src/qidi-simulator.
 import { startFlashforgeSimulator } from '../../packages/sim-tools/src/flashforge-simulator.ts'
 import { startPhrozenSimulator } from '../../packages/sim-tools/src/phrozen-simulator.ts'
 import qidiData from '../fixtures/qidi/moonraker.json' with { type: 'json' }
+import { qidiVariant } from '../fixtures/qidi/variants.ts'
 import flashforgeData from '../fixtures/flashforge/detail.json' with { type: 'json' }
 import phrozenData from '../fixtures/phrozen/synthetic-revo-14k-v153.json' with { type: 'json' }
 
@@ -12,9 +13,12 @@ export type StatusVendor = 'qidi' | 'flashforge' | 'phrozen'
 export async function startStatusFixture(
   name: StatusVendor,
   directory: string,
+  /** Qidi only: the provisioned model and its fixture objects. */
+  model = 'Q1 Pro',
 ) {
   if (name === 'qidi') {
     const data = structuredClone(qidiData)
+    Object.assign(data.state.result.status, qidiVariant(model).objects)
     const simulator = await startQidiSimulator({
       ...data,
       snapshot: new Uint8Array(),
@@ -31,11 +35,7 @@ export async function startStatusFixture(
         family: name,
         origin: simulator.origin,
         simulated: true,
-        expect: {
-          model: 'Q1 Pro',
-          firmware: '4.4.24',
-          moonrakerVersion: 'v0.8.0',
-        },
+        expect: { model, moonrakerVersion: 'v0.8.0' },
         auth: { kind: 'api-key', credentialFile },
       },
       requests: simulator.requests,

@@ -30,6 +30,7 @@ import { join } from 'node:path'
 import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
 import {
   closeCommandJournal,
+  hasUncertainHold,
   openCommandJournal,
 } from '../control/command-journal.ts'
 import {
@@ -151,6 +152,8 @@ type PauseControlInput = {
   dataDirectory: string
   signal: AbortSignal
   onDiagnostic(value: PauseControlDiagnostic): void
+  /** SDCP camera stream state shared with the camera and detail paths. */
+  sdcpVideo?: import('../sdcp/video.ts').SdcpVideo
   /** Read-only capabilities from the same router used by the relay. */
   onMacroParams?: (
     read: (assignmentId: string) => MacroParamMap | undefined,
@@ -187,6 +190,14 @@ type PauseControlInput = {
   resinCapabilities?: Parameters<
     typeof receiveApiCommand
   >[0]['resinCapabilities']
+  /** Open Photon resin sessions, shared with the status collection. */
+  photonResinSessions?: Parameters<
+    typeof createPauseDriverRouter
+  >[0]['photonResinSessions']
+  /** Test seam; production composition never sets it. */
+  photonResinQualifiedWrites?: Parameters<
+    typeof createPauseDriverRouter
+  >[0]['photonResinQualifiedWrites']
   /** True while local storage is degraded: commands are refused with `storage`. */
   storageDegraded?: () => boolean
   /** Latest Kobra X accessory evidence from its status collection. */
@@ -389,6 +400,8 @@ async function runAssignmentControl(
       limits: config.collection.limits,
       clock,
       phrozenQualifiedWrites: input.phrozenQualifiedWrites,
+      photonResinSessions: input.photonResinSessions,
+      photonResinQualifiedWrites: input.photonResinQualifiedWrites,
       kobraXControlEvidence(binding) {
         const mapping =
           binding === printerBinding ? readPrinterBinding(binding) : null
@@ -396,6 +409,7 @@ async function runAssignmentControl(
           ? input.kobraXControlEvidenceFor?.(mapping.printer_key)
           : undefined
       },
+      sdcpVideo: input.sdcpVideo,
       gcodeConsole: (binding) =>
         binding === printerBinding &&
         pause.control?.consoleAssignmentIds?.includes(assignmentId) === true,
@@ -471,9 +485,20 @@ async function runAssignmentControl(
       return binding ? router.macros?.(binding) : undefined
     })
     if (input.onControls) {
-      const readControls = (id: string) => {
+      const readControls = (id: string): readonly ExtendedControlAction[] => {
         const binding = config.bindingFor(id)
-        return binding ? browserDriver.controls(binding) : []
+        if (!binding) return []
+        const base = browserDriver.controls(binding)
+        const mapping = readPrinterBinding(binding)
+        // Offered only while there is something to clear.
+        return mapping &&
+          hasUncertainHold(journal, {
+            assignmentId: mapping.assignment_id,
+            farmId: mapping.farm_id,
+            printerKey: mapping.printer_key,
+          })
+          ? [...base, 'clear_hold']
+          : base
       }
       input.onControls(readControls)
       try {

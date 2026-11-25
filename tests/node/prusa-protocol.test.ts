@@ -89,6 +89,22 @@ test('PrusaLink status, snapshot and guarded operations use the documented wire 
   ])
 })
 
+// Prusa-Link-Web @ a67f306bc878009be0e27864a01a1837e5c4cf06,
+// spec/openapi.yaml: synthetic version reply from the OpenAPI example.
+test('PrusaLink discovery still accepts the API 1.0.0 example', async (t) => {
+  const version = { api: '1.0.0', printer: '1.3.1' }
+  const sim = await startPrusaSimulator((req, res) => {
+    if (req.url === '/api/version') res.end(JSON.stringify(version))
+    else if (req.url === '/api/v1/info') res.end(JSON.stringify(fixture.info))
+    else res.writeHead(404).end()
+  })
+  t.after(sim.close)
+  assert.deepEqual(
+    (await createPrusaLink(sim.endpoint, 'fixture-key').discover()).version,
+    version,
+  )
+})
+
 test('denial, disconnect, timeout and malformed replies stay failures', async (t) => {
   const writes: string[] = []
   const sim = await startPrusaSimulator((req, res) => {

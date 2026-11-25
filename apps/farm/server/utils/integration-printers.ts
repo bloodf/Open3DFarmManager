@@ -146,7 +146,10 @@ function toPrinter(row: IntegrationPrinterRow) {
     id: row.id,
     farmId: row.farmId,
     printerKey: row.printerKey,
-    controls: parsed.success ? (parsed.data.controls ?? []) : [],
+    // `clear_hold` is a browser-only operator action, never an API action.
+    controls: parsed.success
+      ? (parsed.data.controls ?? []).filter((action) => action !== 'clear_hold')
+      : [],
     sandbox: row.sandbox,
   } as Record<string, unknown>
   if (parsed.success) {

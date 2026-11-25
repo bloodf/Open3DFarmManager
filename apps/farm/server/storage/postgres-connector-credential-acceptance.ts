@@ -74,7 +74,9 @@ export type TelemetryCommitDecision =
       expiresAt: number
     }
   | Extract<CredentialAcceptanceDecision, { ok: false }>
-  | { ok: false; reason: 'forbidden-printer' | 'conflict' }
+  | { ok: false; reason: 'forbidden-printer' }
+  /** `conflictingEventIds` are stored with other content; none were committed. */
+  | { ok: false; reason: 'conflict'; conflictingEventIds: string[] }
 type ProofOperation = { kind: 'generic' } | TelemetryOperation
 type InternalDecision =
   | {
@@ -139,7 +141,13 @@ function matchesCredential(
     claims.expiresAt === credential.expires_at
   )
 }
-class TelemetryConflict extends Error {}
+class TelemetryConflict extends Error {
+  readonly eventIds: string[]
+  constructor(eventIds: string[]) {
+    super('Telemetry event conflict')
+    this.eventIds = eventIds
+  }
+}
 class ForbiddenPrinter extends Error {}
 interface Slot {
   jti: string
@@ -669,12 +677,12 @@ export class PostgresConnectorCredentialAcceptance {
                   { event_id: string }[]
                 >`INSERT INTO farm.telemetry_events (farm_id,agent_id,event_id,payload) SELECT ${request.farmId}::uuid,${request.agentId}::uuid,(e->>'id')::uuid,e->'payload' FROM jsonb_array_elements(${batch}::jsonb) WITH ORDINALITY AS t(e,n) ORDER BY n ON CONFLICT (farm_id,agent_id,event_id) DO NOTHING RETURNING event_id::text`
                 const stored =
-                  await save`SELECT s.payload IN (e->'payload', e->'resend') AS matches FROM jsonb_array_elements(${batch}::jsonb) WITH ORDINALITY AS t(e,n) JOIN farm.telemetry_events s ON s.farm_id=${request.farmId}::uuid AND s.agent_id=${request.agentId}::uuid AND s.event_id=(e->>'id')::uuid ORDER BY n FOR SHARE OF s`
-                if (
-                  stored.length !== sorted.length ||
-                  stored.some((row) => row.matches !== true)
-                )
-                  throw new TelemetryConflict()
+                  await save`SELECT s.event_id::text, s.payload IN (e->'payload', e->'resend') AS matches FROM jsonb_array_elements(${batch}::jsonb) WITH ORDINALITY AS t(e,n) JOIN farm.telemetry_events s ON s.farm_id=${request.farmId}::uuid AND s.agent_id=${request.agentId}::uuid AND s.event_id=(e->>'id')::uuid ORDER BY n FOR SHARE OF s`
+                const conflicting = stored
+                  .filter((row) => row.matches !== true)
+                  .map((row) => String(row.event_id))
+                if (stored.length !== sorted.length || conflicting.length)
+                  throw new TelemetryConflict(conflicting)
                 const insertedIds = new Set(
                   inserted.map(({ event_id }) => event_id),
                 )
@@ -754,6 +762,7 @@ export class PostgresConnectorCredentialAcceptance {
                 return {
                   ok: false,
                   reason: 'conflict',
+                  conflictingEventIds: error.eventIds,
                 } satisfies TelemetryCommitDecision
               if (error instanceof ForbiddenPrinter)
                 return {

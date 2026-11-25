@@ -2,6 +2,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { z } from 'zod'
 import { parseQidiBinding, readQidiAuth } from '../qidi/config.ts'
 import { createQidiAdapter } from '../qidi/index.ts'
+import { qidiReadings } from '../qidi/readings.ts'
 import type { RawPrinterObservation } from './farm-snapshot-provider.ts'
 import {
   READ_ONLY_POLL_BUDGET_MS,
@@ -64,6 +65,7 @@ export function createQidiCollection(input: {
     const auth = readQidiAuth(binding)
     return createQidiAdapter({
       origin: binding.origin,
+      ...(binding.expect.model ? { model: binding.expect.model } : {}),
       ...(auth ? { auth } : {}),
       timeoutMs: Math.min(timeoutMs, READ_ONLY_POLL_BUDGET_MS),
     })
@@ -86,8 +88,11 @@ export function createQidiCollection(input: {
           info.klippyState !== 'ready'
         )
           throw Error('Qidi probe did not match the configured ready source')
-        const status = State.parse(await adapter.readState(cycle))
+        const state = await adapter.readState(cycle)
+        const status = State.parse(state)
         if (signal.aborted) return
+        const { model } = binding.expect
+        const readings = model ? qidiReadings(model, state) : {}
         const mono = performance.now()
         input.onObservation({
           printerKey: binding.printerKey,
@@ -102,6 +107,7 @@ export function createQidiCollection(input: {
             statusReason: binding.simulated
               ? 'qidi-simulated'
               : 'qidi-unqualified',
+            ...readings,
             observedAt: Date.now(),
           },
           receivedAtMonoMs: mono,
@@ -111,6 +117,9 @@ export function createQidiCollection(input: {
               progress: mono,
               identity: mono,
               statusReason: mono,
+              // Only these optional fields carry their own stamp.
+              ...(readings.fans ? { fans: mono } : {}),
+              ...(readings.materials ? { materials: mono } : {}),
             },
           },
         })

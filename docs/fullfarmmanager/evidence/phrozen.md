@@ -68,7 +68,7 @@ What a signed-in user can reach. Every write is gated on `PHROZEN_QUALIFIED_WRIT
 Refused at runtime, with the reason:
 
 - **Start (128).** A resin file starts only as a validated library version, and `resin-artifacts.ts` has no Phrozen format or printer profile. The adapter's start has no runtime caller.
-- **Video (386).** Enabling the stream writes to the printer. The signed command protocol has no camera action, and a camera session admission is not a signed command, so no Phrozen camera source was added. The adapter's video calls have no runtime caller.
+- **Video (386).** Enabling the stream writes to the printer, so it needs a signed command, and a camera session admission is not one. Elegoo switches its SDCP stream with the signed `power` action and an `sdcp-rtsp` camera source, both tied to an SDCP binding. No Phrozen equivalent is wired and no camera source was added. The adapter's video calls have no runtime caller.
 - **Task usage (321).** There is nowhere to put it: the server accepts only `manual` resin entries and `PrinterState` has no resin volume field. `openPhrozenResinAccounting` has no runtime caller.
 
 The web file page accepts only `.gcode` and `.3mf`, so no browser user can pick a Phrozen file to send yet. The transfer path is exercised by `tests/journey/phrozen.spec.ts` without a browser.
@@ -119,5 +119,5 @@ Limits:
 2. Confirm that status carries `TaskId`. The older status fixture has none. Without it, start ends `uncertain`, and pause, resume and stop are refused.
 3. Confirm the `CurrentLayerTalVolume` meaning, its value for stopped runs, and when it is written.
 4. Confirm that V153 video is LAN RTSP and not only Phrozen GO app streaming.
-5. Runtime wiring stops at status, pause, resume, stop and file transfer (see Runtime wiring). Start needs a Phrozen entry in the resin artifact contract with a validator; video needs a signed camera action; usage needs gap 6. The web file page does not accept resin files, there is no runtime file list, and an uncertain hold is cleared only by restarting the Connector.
+5. Runtime wiring stops at status, pause, resume, stop and file transfer (see Runtime wiring). Start needs a Phrozen entry in the resin artifact contract with a validator; video needs a signed stream switch wired for Phrozen; usage needs gap 6. The web file page does not accept resin files, there is no runtime file list, and an uncertain hold is cleared only by restarting the Connector.
 6. No production ledger sink exists. The server accepts only `manual` entries (`resin-ledger/request.ts` and `resin-ledger-postgres.ts`), and no Connector-to-server resin transport exists. `PhrozenResinLedger` is the port to implement. An atomic server-side debit keyed by run key, with its own consumption kind, would remove the read-then-append gap and the provenance ambiguity.

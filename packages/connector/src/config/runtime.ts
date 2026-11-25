@@ -12,11 +12,13 @@ import {
   createPrinterBindingRegistry,
   readRuntimePrinterBinding,
   readPrinterBinding,
+  readSdcpPrinterBinding,
   provisionReadonlyPrinter,
   provisionKobraLinkPrinter,
   provisionKobraXPrinter,
   provisionSdcpPrinter,
   provisionPhrozenPrinter,
+  provisionPhotonResinPrinter,
   type PrinterBinding,
 } from '../control/printer-binding.ts'
 import {
@@ -31,6 +33,7 @@ import { RuntimeSignalling } from './signalling.ts'
 import { parseCameraRuntimeConfig } from './camera.ts'
 import { parseRtcRuntimeConfig } from './rtc.ts'
 import { readKobraXOnboardedConfig } from './kobra-x.ts'
+import { sdcpModelKey } from '../sdcp/models.ts'
 
 const LibraryRuntime = z.strictObject({
   /** Absolute directory of the Connector library store. */
@@ -208,23 +211,34 @@ export function readAgentRuntimeConfig(
           )
             throw Error('Read-only driver assignment mismatch')
           const readonly = provisionReadonlyPrinter(value)
-          if (driver.family !== 'phrozen') return readonly
-          const { assignment_id, farm_id, agent_id, printer_key } =
-            readRuntimePrinterBinding(readonly)!
-          // Printer writes need a local opt-in and a qualified pair. An
-          // opted-in unqualified pair stays read-only and fails below.
-          if (
-            !pause?.control?.assignmentIds.includes(assignment_id) ||
-            !phrozenWriteQualified(
-              driver.expect.model,
-              driver.expect.firmware,
-              options.phrozenQualifiedWrites,
+          if (driver.family === 'phrozen') {
+            const { assignment_id, farm_id, agent_id, printer_key } =
+              readRuntimePrinterBinding(readonly)!
+            // Printer writes need a local opt-in and a qualified pair. An
+            // opted-in unqualified pair stays read-only and fails below.
+            if (
+              !pause?.control?.assignmentIds.includes(assignment_id) ||
+              !phrozenWriteQualified(
+                driver.expect.model,
+                driver.expect.firmware,
+                options.phrozenQualifiedWrites,
+              )
             )
-          )
+              return readonly
+            return provisionPhrozenPrinter(
+              { assignment_id, farm_id, agent_id, printer_key },
+              driver,
+            )
+          }
+          if (driver.family !== 'anycubic-resin') return readonly
+          const assignment = readRuntimePrinterBinding(readonly)!
+          // Resin job stop is a local opt-in per assignment.
+          if (!pause?.control?.assignmentIds.includes(assignment.assignment_id))
             return readonly
-          return provisionPhrozenPrinter(
+          const { assignment_id, farm_id, agent_id, printer_key } = assignment
+          return provisionPhotonResinPrinter(
             { assignment_id, farm_id, agent_id, printer_key },
-            driver,
+            { printerKey: driver.printerKey, model: driver.expect.model },
           )
         })()
       : formlabs
@@ -451,6 +465,36 @@ export function readAgentRuntimeConfig(
             )
             .map((assignment) => assignment.assignment_id),
         )
+  // The printer-controlled camera is the stream of that resin printer only.
+  for (const entry of camera?.cameras ?? []) {
+    const source = entry.source
+    if (!('kind' in source) || source.kind !== 'anycubic-photon-resin') continue
+    const key = assignments.find(
+      (assignment) => assignment.assignment_id === entry.assignmentId,
+    )?.printer_key
+    const driver =
+      collection.version === 8
+        ? collection.drivers.find((p) => p.printerKey === key)
+        : undefined
+    if (
+      driver?.family !== 'anycubic-resin' ||
+      new URL(driver.origin).hostname !== source.address ||
+      (driver.cameraPort ?? 18088) !== source.port
+    )
+      throw new Error('Anycubic resin camera does not match its printer')
+  }
+  for (const { assignmentId, source } of camera?.cameras ?? []) {
+    if (!('kind' in source) || source.kind !== 'sdcp-rtsp') continue
+    const binding = provisioned.get(assignmentId)
+    const sdcp = binding && readSdcpPrinterBinding(binding)
+    if (
+      !sdcp ||
+      source.address !== sdcp.host ||
+      source.mainboardId !== sdcp.mainboardId ||
+      sdcpModelKey(source.model) !== sdcpModelKey(sdcp.model)
+    )
+      throw new Error('SDCP camera assignment mismatch')
+  }
   // Strict: an invalid address fails startup before any task starts.
   const rtc = parseRtcRuntimeConfig(input.rtc)
   return {

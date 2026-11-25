@@ -4,6 +4,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { PRUSA_LINK_MODELS } from '../../packages/connector/src/prusa/models.ts'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -163,6 +164,7 @@ const SAMPLE_ARGS: Record<ExtendedControlAction, Record<string, unknown>> = {
   bed_mesh: { op: 'clear' },
   gcode: { line: 'M105' },
   confirm_collection: { attempt: '0' },
+  clear_hold: {},
 }
 
 type Claim = (action: ExtendedControlAction) => string
@@ -298,16 +300,29 @@ test('every journey path named in DRIVER-EVIDENCE.md exists', () => {
 test('journey operations are not overclaimed', () => {
   // These specs only watch status through a connection loss. phrozen.spec.ts
   // also drives a test-only qualified pair and has its own exact wording.
-  const statusOnly = [
-    'flashforge',
-    'formlabs',
-    'prusa-link',
-    'qidi',
-    'sdcp',
-  ].map((name) => `${name}.spec.ts`)
+  const statusOnly = ['flashforge', 'formlabs', 'qidi', 'sdcp'].map(
+    (name) => `${name}.spec.ts`,
+  )
   for (const row of table(evidence, 'Brand', 'Model')) {
     const [brand, model, adapter, , , spec, run, operations] = row
     const label = `${brand} ${model}`
+    if (brand === 'Prusa') {
+      const entry = PRUSA_LINK_MODELS.find((value) => value.model === model)
+      assert.ok(entry, label)
+      const bindable = entry.binding.status === 'bindable'
+      assert.deepEqual(
+        [spec, run, operations],
+        bindable
+          ? [
+              'prusa-link.spec.ts',
+              'yes',
+              'read-only status, attention, busy, connection loss and recovery',
+            ]
+          : ['—', 'no', 'binding refused'],
+        label,
+      )
+      continue
+    }
     if (adapter === 'none') assert.equal(spec, 'not found', label)
     if (spec === 'not found') {
       assert.equal(run, 'no', label)

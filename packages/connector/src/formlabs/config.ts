@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { isLocalFormlabsHost } from './index.ts'
+import { FORMLABS_BOUND_MODELS, isLocalFormlabsHost } from './index.ts'
 import {
   LocalCollectorConfigSchema,
   parseLocalCollectorConfig,
@@ -11,6 +11,11 @@ export const FormlabsBinding = z.strictObject({
   host: z.string().refine(isLocalFormlabsHost),
   port: z.number().int().min(1).max(65535),
   deviceId: z.string().min(1).max(128),
+  /**
+   * The catalog model the owner bound to this device. A host report of any
+   * other `product_name` withholds the reading.
+   */
+  model: z.enum(FORMLABS_BOUND_MODELS),
 })
 const Config = LocalCollectorConfigSchema.options[0]
   .omit({ bambu: true })

@@ -101,6 +101,9 @@ export type RawPrinterObservation = Omit<
       | Readonly<{
           anycubic: Readonly<Partial<Record<keyof PrinterState, number>>>
         }>
+      | Readonly<{
+          anycubicResin: Readonly<Partial<Record<keyof PrinterState, number>>>
+        }>
   }
 
 function fieldTimes(timing: RawPrinterObservation['fieldObservedAtMonoMs']) {
@@ -108,6 +111,7 @@ function fieldTimes(timing: RawPrinterObservation['fieldObservedAtMonoMs']) {
   if ('flashforge' in timing) return timing.flashforge
   if ('phrozen' in timing) return timing.phrozen
   if ('prusaLink' in timing) return timing.prusaLink
+  if ('anycubicResin' in timing) return timing.anycubicResin
   if ('formlabs' in timing) return timing.formlabs
   return 'sdcp' in timing
     ? timing.sdcp

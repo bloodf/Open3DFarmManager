@@ -39,6 +39,7 @@ export type LibraryStore = Pick<
   | 'getVersionBySha256'
   | 'listVersions'
   | 'softDeleteVersion'
+  | 'discardUnused'
 >
 
 /**
@@ -399,8 +400,19 @@ async function upload(
       deduplicated: added.deduplicated,
     }
   } finally {
+    // Another upload or copy of the same bytes may have recorded them by now.
+    // When that cannot be checked the file stays for the retention sweep.
     if (stored.created && !keep)
-      await discard().catch(() => log.error('library cleanup failed'))
+      await runtime.store
+        .discardUnused(
+          {
+            farmId: authority.farmId,
+            sha256: stored.sha256,
+            ...(mode === 'connector' ? { agentId: q.agentId! } : {}),
+          },
+          discard,
+        )
+        .catch(() => log.error('library cleanup failed'))
   }
 }
 

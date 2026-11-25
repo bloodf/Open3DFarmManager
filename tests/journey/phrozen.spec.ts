@@ -1,6 +1,7 @@
 import { readFile, rm, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
 import { openFarmInspector } from '../helpers/farm-inspector.ts'
 import { DriverRefusalError } from '../../packages/connector/src/control/driver-refusal.ts'
@@ -127,9 +128,8 @@ if (journeyEnabled()) {
       signedControl: true,
       // The server issues authority from the controls telemetry advertises.
       history: true,
-      connectorEntry: new URL(
-        '../helpers/phrozen-qualified-connector.ts',
-        import.meta.url,
+      connectorEntry: fileURLToPath(
+        new URL('../helpers/phrozen-qualified-connector.ts', import.meta.url),
       ),
     })
     try {

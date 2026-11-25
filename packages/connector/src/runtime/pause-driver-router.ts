@@ -1,4 +1,16 @@
 import { DriverRefusalError } from '../control/driver-refusal.ts'
+import type { PhotonResinSessions } from '../anycubic-resin/collection.ts'
+import {
+  openFixedPhotonResinControl,
+  photonResinRefusalError,
+} from '../anycubic-resin/control-driver.ts'
+import {
+  photonResinWriteQualified,
+  type PhotonResinQualification,
+} from '../anycubic-resin/qualification.ts'
+import { photonResinStatus } from '../anycubic-resin/status.ts'
+import { readPhotonResinPrinterBinding } from '../control/printer-binding.ts'
+import { RESIN_LIBRARY_START_MESSAGE } from '../sdcp/models.ts'
 import { advertisedMoonrakerMacros } from '../control/macro-support.ts'
 import { openFixedKobraLinkControl } from '../kobralink/control-driver.ts'
 import { KOBRALINK_CONTROLS } from '../kobralink/extended-control.ts'
@@ -30,6 +42,7 @@ import {
   sdcpStartUnavailableMessage,
   type SdcpQualification,
 } from '../sdcp/models.ts'
+import type { SdcpVideo } from '../sdcp/video.ts'
 import {
   readSdcpPrinterBinding,
   readPhrozenPrinterBinding,
@@ -135,6 +148,12 @@ export function createPauseDriverRouter(config: {
    * simulator tests; production composition never sets it.
    */
   phrozenQualifiedWrites?: readonly PhrozenQualification[] | undefined
+  /** Open Photon resin sessions; the collection owns them. */
+  photonResinSessions?: PhotonResinSessions | undefined
+  /** Replaces the shipped resin write list, which is empty. Tests only. */
+  photonResinQualifiedWrites?: readonly PhotonResinQualification[] | undefined
+  /** SDCP camera stream state and qualification; absent means no video. */
+  sdcpVideo?: SdcpVideo | undefined
   observe(
     binding: PrinterBinding,
     observation: ControlObservation | null,
@@ -181,14 +200,34 @@ export function createPauseDriverRouter(config: {
           )
         : offered
     }
+    const resin = readPhotonResinPrinterBinding(binding)
+    if (resin) {
+      // Stop only: qualified, and only while a current report names the job.
+      const session = config.photonResinSessions?.get(resin.printerKey)
+      return session &&
+        photonResinWriteQualified(
+          'print-stop',
+          resin.model,
+          config.photonResinQualifiedWrites,
+        ) &&
+        photonResinStatus(session.state(), Date.now()).stoppableJob
+        ? ['cancel']
+        : []
+    }
     const sdcp = readSdcpPrinterBinding(binding)
     if (sdcp) {
       // Start is offered only for a qualified pair; unknown firmware is not one.
       const firmware = sdcpFirmware.get(binding)
-      return firmware !== undefined &&
+      const lifecycle =
+        firmware !== undefined &&
         sdcpStartQualified(sdcp.model, firmware, sdcpQualified)
-        ? SDCP_CONTROL_ACTIONS
-        : SDCP_CONTROL_ACTIONS.filter((action) => action !== 'start_print')
+          ? SDCP_CONTROL_ACTIONS
+          : SDCP_CONTROL_ACTIONS.filter((action) => action !== 'start_print')
+      // `power` switches the camera stream, only for a qualified pair.
+      return firmware !== undefined &&
+        config.sdcpVideo?.qualified(sdcp, firmware)
+        ? [...lifecycle, 'power']
+        : lifecycle
     }
     const phrozen = readPhrozenPrinterBinding(binding)
     if (phrozen)
@@ -231,6 +270,8 @@ export function createPauseDriverRouter(config: {
           phrozen.expect.model,
           phrozen.expect.firmware,
         )
+      if (readPhotonResinPrinterBinding(binding))
+        return RESIN_LIBRARY_START_MESSAGE
       const sdcp = readSdcpPrinterBinding(binding)
       if (sdcp && !controls(binding).includes('start_print'))
         return sdcpStartUnavailableMessage(
@@ -260,9 +301,10 @@ export function createPauseDriverRouter(config: {
       // Firmware is only worth asking for when the model has a qualified pair.
       if (
         sdcp &&
-        sdcpQualified.some(
+        (sdcpQualified.some(
           (pair) => sdcpModelKey(pair.model) === sdcpModelKey(sdcp.model),
-        )
+        ) ||
+          config.sdcpVideo?.offered(sdcp))
       ) {
         sdcpFirmware.delete(binding)
         try {
@@ -283,6 +325,7 @@ export function createPauseDriverRouter(config: {
         !readKobraXPrinterBinding(binding) &&
         !readSdcpPrinterBinding(binding) &&
         !readPhrozenPrinterBinding(binding) &&
+        !readPhotonResinPrinterBinding(binding) &&
         !readAnycubicPrinterBinding(binding)
       ) {
         const detect = {
@@ -353,13 +396,15 @@ export function createPauseDriverRouter(config: {
                 ? openFixedAnycubicControl
                 : readPhrozenPrinterBinding(binding)
                   ? openFixedPhrozenControl
-                  : readSdcpPrinterBinding(binding)
-                    ? openFixedSdcpControl
-                    : readCrealityPrinterBinding(binding)
-                      ? openFixedCrealityControl
-                      : readBambuPrinterBinding(binding)
-                        ? openFixedBambuControl
-                        : openFixedMoonrakerPause
+                  : readPhotonResinPrinterBinding(binding)
+                    ? openFixedPhotonResinControl
+                    : readSdcpPrinterBinding(binding)
+                      ? openFixedSdcpControl
+                      : readCrealityPrinterBinding(binding)
+                        ? openFixedCrealityControl
+                        : readBambuPrinterBinding(binding)
+                          ? openFixedBambuControl
+                          : openFixedMoonrakerPause
         )({
           binding,
           fetch: config.kobraLinkFetch,
@@ -370,6 +415,9 @@ export function createPauseDriverRouter(config: {
           objects: moonrakerObjects.get(binding),
           qualifiedStarts: config.sdcpQualifiedStarts,
           qualifiedWrites: config.phrozenQualifiedWrites,
+          photonResinSessions: config.photonResinSessions,
+          photonResinQualifiedWrites: config.photonResinQualifiedWrites,
+          video: config.sdcpVideo,
           gcodeConsole: config.gcodeConsole?.(binding) === true,
           clock: config.clock,
           observeRun,
@@ -416,13 +464,25 @@ export function createPauseDriverRouter(config: {
       if (
         !advertised ||
         !controlWithinLimits(action, args, config.controlLimits)
-      )
+      ) {
+        const resin =
+          !advertised && readPhotonResinPrinterBinding(input.binding)
         return Promise.reject(
-          new DriverRefusalError(
-            advertised ? 'invalid-command' : 'unsupported-action',
-            'Control action unavailable',
-          ),
+          resin
+            ? photonResinRefusalError(
+                action,
+                photonResinWriteQualified(
+                  'print-stop',
+                  resin.model,
+                  config.photonResinQualifiedWrites,
+                ),
+              )
+            : new DriverRefusalError(
+                advertised ? 'invalid-command' : 'unsupported-action',
+                'Control action unavailable',
+              ),
         )
+      }
       return attempt.driver.driver.execute!(action, args, input)
     },
     pauseOnce(input: Parameters<PreparedPauseDriver['pauseOnce']>[0]) {

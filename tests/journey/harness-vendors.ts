@@ -27,8 +27,14 @@ import { startBambuSimulator } from '../../packages/sim-tools/src/bambu-simulato
 import { createCrealitySimulator } from '../../packages/sim-tools/src/creality-simulator.ts'
 import { startFormlabsJourneyFixture } from './formlabs-fixture.ts'
 import { startSdcpFixture } from './sdcp-fixture.ts'
+import {
+  SDCP_JOURNEY_BOARD,
+  SDCP_JOURNEY_MODEL,
+  startSdcpControlFixture,
+} from './sdcp-control-fixture.ts'
 import { startPrusaLinkJourneyFixture } from './prusa-link-fixture.ts'
 import { startStatusFixture } from './status-fixtures.ts'
+import { startAnycubicResinFixture } from './anycubic-resin-fixture.ts'
 import { createJourneyCameraEncoder, realFfmpeg } from './camera-encoder.ts'
 import { startBambuCameraFixture } from './bambu-camera-fixture.ts'
 import { startKobraBridgeSimulator } from './harness-kobralink-bridge.ts'
@@ -44,6 +50,7 @@ export type VendorName =
   | 'qidi'
   | 'flashforge'
   | 'phrozen'
+  | 'anycubic-resin'
 
 /** What a spec can do to the running simulated print. */
 export type VendorControls = Readonly<{
@@ -61,7 +68,7 @@ export type VendorOptions = Readonly<{
   printerKey: string
   /** Optional unique device suffix when sharing a Connector with siblings. */
   deviceId?: string
-  /** Bambu only: opt the binding in to control commands (default false). */
+  /** Bambu: opt in to commands. SDCP: use the control simulator. */
   control?: boolean
   bambuCamera?: BambuCameraScenario
   /** PrusaLink only: the catalog model to simulate (default Prusa MK4). */
@@ -145,6 +152,8 @@ export const VENDOR_DESCRIPTIONS: Readonly<Record<VendorName, string>> = {
   qidi: 'Loopback Qidi status simulator',
   flashforge: 'Loopback Flashforge status simulator',
   phrozen: 'Loopback Phrozen status simulator',
+  'anycubic-resin':
+    'Loopback synthetic Photon P1 Max (packages/sim-tools), pinned TLS broker and FLV camera, printing at 25 %',
   formlabs: 'Loopback Formlabs PreForm status simulator',
   sdcp: 'Loopback SDCP status simulator',
   bambu:
@@ -333,7 +342,11 @@ export async function startVendorSimulator(
     let runtime: VendorSimulator['runtime']
 
     if (name === 'qidi' || name === 'flashforge' || name === 'phrozen') {
-      const fixture = await startStatusFixture(name, directory)
+      const fixture = await startStatusFixture(
+        name,
+        directory,
+        options.printerModel,
+      )
       undo.push(fixture.close)
       raw = fixture
       const unsupported = () => {
@@ -354,6 +367,32 @@ export async function startVendorSimulator(
           limits: { staleAfterMs: 5000 },
         },
         assignment: { ...localAssignment(scope), backend: name },
+      })
+    } else if (name === 'anycubic-resin') {
+      const fixture = await startAnycubicResinFixture()
+      undo.push(fixture.close)
+      raw = fixture
+      const unsupported = () => {
+        throw new Error('The resin journey drives its simulator directly')
+      }
+      controls = {
+        setProgress: unsupported,
+        finishPrint: unsupported,
+        failPrint: unsupported,
+      }
+      runtime = async (scope) => ({
+        version: 8,
+        collection: {
+          version: 8,
+          allowedOrigins: [fixture.origin],
+          printers: [],
+          drivers: [{ ...fixture.binding, printerKey: scope.printerKey }],
+          limits: { staleAfterMs: 5000 },
+        },
+        assignment: { ...localAssignment(scope), backend: name },
+        camera: fixture.camera,
+        // Leaves the shared credential proof slot free for both inboxes.
+        telemetryIdleMs: 5000,
       })
     } else if (name === 'prusa-link') {
       const fixture = await startPrusaLinkJourneyFixture(options.printerModel)
@@ -419,12 +458,71 @@ export async function startVendorSimulator(
                 host: '127.0.0.1',
                 port: fixture.simulator.port,
                 deviceId: fixture.deviceId,
+                model: fixture.model,
               },
             ],
           },
           limits: { staleAfterMs: 5000 },
         },
         assignment: { ...localAssignment(scope), backend: 'formlabs' },
+      })
+    } else if (name === 'sdcp' && options.control) {
+      const sim = await startSdcpControlFixture(directory)
+      undo.push(() => sim.close())
+      raw = sim
+      controls = {
+        setProgress: sim.setProgress,
+        finishPrint: () => {
+          throw new Error('The SDCP control journey does not finish prints')
+        },
+        failPrint: () => {
+          throw new Error('The SDCP control journey does not fail prints')
+        },
+      }
+      camera = {
+        host: sim.host,
+        port: sim.port,
+        helper: sim.helper.path,
+        requests: () => sim.commands().filter(({ cmd }) => cmd === 386).length,
+      }
+      cameraSection = (assignmentId) => ({
+        helper: sim.helper,
+        maxSessions: 1,
+        cameras: [
+          {
+            cameraId: 'journey-sdcp-camera',
+            assignmentId,
+            source: {
+              kind: 'sdcp-rtsp',
+              address: sim.host,
+              mainboardId: SDCP_JOURNEY_BOARD,
+              model: SDCP_JOURNEY_MODEL,
+            },
+          },
+        ],
+      })
+      runtime = async (scope) => ({
+        version: 6,
+        collection: {
+          version: 6,
+          allowedOrigins: [],
+          printers: [],
+          sdcp: {
+            printers: [
+              {
+                printerKey: scope.printerKey,
+                host: sim.host,
+                mainboardId: SDCP_JOURNEY_BOARD,
+                model: SDCP_JOURNEY_MODEL,
+              },
+            ],
+          },
+          limits: { staleAfterMs: 5000 },
+        },
+        assignment: { ...localAssignment(scope), backend: 'sdcp' },
+        // Leaves the credential proof slot free for the control inbox.
+        telemetryIdleMs: 3000,
+        camera: cameraSection!,
       })
     } else if (name === 'sdcp') {
       const sim = await startSdcpFixture()

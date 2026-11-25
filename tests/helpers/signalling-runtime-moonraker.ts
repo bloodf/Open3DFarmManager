@@ -127,14 +127,11 @@ export async function createRuntimeMoonrakerFixture() {
         agentId: string
         printerKey: string
       }[]
+      /** Test-only Connector entry replacing the packaged `cli.js`. */
+      entry?: string
       /** Locally declared Moonraker model for the journey printer. */
       model?: string
       camera?: Record<string, unknown>
-      /**
-       * Simulator tests only: a test entry run in place of the packaged CLI,
-       * with the same arguments.
-       */
-      connectorEntry?: URL
       /**
        * Journey harness only: another vendor's collection and assignment
        * replace the Moonraker ones (the packaged Connector is unchanged).
@@ -336,7 +333,10 @@ export async function createRuntimeMoonrakerFixture() {
         const child = spawn(
           process.execPath,
           [
-            (input.connectorEntry ?? entry).pathname,
+            // A journey may replace the CLI with its own test composition.
+            input.entry ??
+              process.env.SIGNALLING_HTTPS_CONNECTOR_ENTRY ??
+              entry.pathname,
             'run',
             '--config',
             configPath,

@@ -128,7 +128,13 @@ export function createTelemetryHttpHandler(store: Store, timeoutMs: number) {
                 : 403
         return {
           status,
-          body: { error: 'Não foi possível processar a telemetria.' },
+          body: {
+            error: 'Não foi possível processar a telemetria.',
+            // The Connector drops only these records and resends the rest.
+            ...(decision.reason === 'conflict'
+              ? { conflictingEventIds: decision.conflictingEventIds }
+              : {}),
+          },
         }
       }
       if (

@@ -157,6 +157,10 @@ class FakeLibrary {
           },
         }
       : { ok: false, reason: 'forbidden' }
+  discardUnused: LibraryStore['discardUnused'] = async (file, discard) => {
+    const kept = this.blobs.get(`${file.farmId}:${file.sha256}`)
+    if (!kept || kept.agentId !== (file.agentId ?? null)) await discard()
+  }
   uploadContext: LibraryStore['uploadContext'] = async (input) => {
     this.calls.push('uploadContext')
     const role = this.role(input)

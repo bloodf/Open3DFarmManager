@@ -469,8 +469,14 @@ export async function openPhotonResinBrokerSession({
         return result('uncertain', silent)
       })
     },
-    /** Cancels the named job. The caller names the file it intends to stop. */
-    stopPrint(filename: string): Promise<PhotonResinCommandResult> {
+    /**
+     * Cancels the named job. The caller names the file it intends to stop.
+     * `authorize` runs after every check, on the same stack as the publish.
+     */
+    stopPrint(
+      filename: string,
+      authorize?: () => boolean,
+    ): Promise<PhotonResinCommandResult> {
       return control(async () => {
         if (!(await read('status', 'query')))
           return result('refused', 'The printer sent no fresh status')
@@ -480,6 +486,9 @@ export async function openPhotonResinBrokerSession({
         if (job.filename !== filename)
           return result('refused', 'The printer reports a different job')
         const taskId = job.taskId
+        if (!connected) return result('refused', 'The LAN session is closed')
+        if (authorize && !authorize())
+          return result('refused', 'Command authority was withdrawn')
         const reply = await exchange(
           'print',
           'stop',

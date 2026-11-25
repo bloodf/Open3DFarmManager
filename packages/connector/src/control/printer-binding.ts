@@ -134,6 +134,7 @@ const SdcpAssignment = Assignment.omit({ moonraker_origin: true }).extend({
     'flashforge',
     'phrozen',
     'qidi',
+    'anycubic-resin',
   ]),
 })
 const readonlyBindings = new WeakMap<
@@ -197,7 +198,50 @@ export function readRuntimePrinterBinding(binding: PrinterBinding) {
       backend: 'phrozen' as const,
     }
   }
+  if (mapping && photonResinBindings.has(binding)) {
+    const { assignment_id, farm_id, agent_id, printer_key } = mapping
+    return {
+      assignment_id,
+      farm_id,
+      agent_id,
+      printer_key,
+      backend: 'anycubic-resin' as const,
+    }
+  }
   return mapping ?? readonlyBindings.get(binding) ?? null
+}
+
+const PhotonResinControlBinding = z.strictObject({
+  printerKey: z.string().min(1).max(128),
+  model: z.string().min(1).max(128),
+})
+const photonResinBindings = new WeakMap<
+  PrinterBinding,
+  Readonly<z.infer<typeof PhotonResinControlBinding>>
+>()
+/** Explicit local command opt-in; other resin handles stay read-only. */
+export function provisionPhotonResinPrinter(
+  assignmentInput: unknown,
+  bindingInput: unknown,
+): PrinterBinding {
+  const local = Object.freeze(PhotonResinControlBinding.parse(bindingInput))
+  const scope = Assignment.omit({ moonraker_origin: true }).parse(
+    assignmentInput,
+  )
+  if (scope.printer_key !== local.printerKey)
+    throw new Error('Anycubic resin assignment mismatch')
+  const binding = new BoundPrinter()
+  bindings.set(binding, {
+    assignment: Object.freeze({ ...scope, moonraker_origin: '' }),
+    active: true,
+  })
+  photonResinBindings.set(binding, local)
+  return binding
+}
+export function readPhotonResinPrinterBinding(binding: PrinterBinding) {
+  return readPrinterBinding(binding)
+    ? (photonResinBindings.get(binding) ?? null)
+    : null
 }
 
 const SdcpControlBinding = z.strictObject({

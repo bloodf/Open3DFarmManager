@@ -48,7 +48,12 @@ test('real PrusaLink collection binds identity, withdraws failed reads and recov
           : req.url === '/api/v1/status'
             ? {
                 printer: {
-                  state: mode === 'printing' ? 'PRINTING' : 'NEW_STATE',
+                  state:
+                    mode === 'printing'
+                      ? 'PRINTING'
+                      : mode === 'attention'
+                        ? 'ATTENTION'
+                        : 'NEW_STATE',
                 },
               }
             : undefined
@@ -268,7 +273,7 @@ test('real PrusaLink collection binds identity, withdraws failed reads and recov
       connector_dtls: 'test',
     }
 
-    function snapshot() {
+    function snapshot(field: 'state' | 'statusMessage' = 'state') {
       let state: string | undefined
       const subscription = source.open({
         binding,
@@ -276,7 +281,7 @@ test('real PrusaLink collection binds identity, withdraws failed reads and recov
         signal: controller.signal,
         deadlineMonoMs: performance.now() + 5000,
         onComplete: (value) => {
-          state = value.printers[0]?.state
+          state = value.printers[0]?.[field]
         },
         onUnavailable() {},
       })
@@ -320,8 +325,12 @@ test('real PrusaLink collection binds identity, withdraws failed reads and recov
     mode = 'printing'
     await event(4, { epoch: 3, state: 'printing', identity })
     expect(snapshot()).toBe('printing')
+    mode = 'attention'
+    await event(5, { epoch: 3, state: 'unknown', identity })
+    expect(snapshot()).toBe('unknown')
+    expect(snapshot('statusMessage')).toBe('ATTENTION')
     mode = 'auth'
-    await event(5, { epoch: 3, state: 'withdrawn' })
+    await event(6, { epoch: 3, state: 'withdrawn' })
     expect(snapshot()).toBe(undefined)
     expect(new Set(methods)).toEqual(new Set(['GET']))
   } finally {

@@ -44,6 +44,9 @@ import {
   markWriteStarted,
   finishCommand,
   finishCommandAt,
+  clearUncertainHolds,
+  hasReadyReleasableHold,
+  releaseHoldsOnReady,
   type CommandJournalHandle,
   type CommandClaimHandle,
   type CommandJournalReason,
@@ -296,6 +299,8 @@ export type PauseDispatchResult =
       code?: ControlResultCode
       message?: string
     }
+const STOP_PROBE_WAIT_MS = 250
+
 type Sample = { wall: number; mono: number }
 
 /** A driver's window may only widen the default, and never past the U1 ceiling. */
@@ -361,6 +366,10 @@ export function createPauseDispatcher(config: {
   const observationVersions = new WeakMap<PrinterBinding, object>()
   const observationGenerations = new WeakMap<PrinterBinding, number>()
   const slots = new Set<string>()
+  /** Slots held only by a pre-claim readiness read: emergency stop takes them. */
+  const probes = new Map<string, () => Promise<void>>()
+  // Allow one stop to authenticate while a probe owns its slot.
+  const probingStops = new Set<string>()
   const stopAttempts = new Set<() => void>()
   const pending = new Set<Promise<void>>()
   let resolveSettled: () => void = () => {}
@@ -437,7 +446,7 @@ export function createPauseDispatcher(config: {
       return null
     }
   }
-  return Object.freeze({
+  const dispatcher = Object.freeze({
     /** Trusted local observation publisher only; never accept this input from a command or server. */
     observe(binding: PrinterBinding, input: unknown): boolean {
       observations.delete(binding)
@@ -523,9 +532,19 @@ export function createPauseDispatcher(config: {
       const mapping = candidateMapping
       let observationVersion: object | undefined
       let generationInstalled = false
-      if (slots.size >= 8 || slots.has(mapping.assignment_id))
+      const assignmentId = mapping.assignment_id
+      const probe =
+        command.action === 'emergency_stop'
+          ? probes.get(assignmentId)
+          : undefined
+      if (
+        probingStops.has(assignmentId) ||
+        (!probe && (slots.size >= 8 || slots.has(assignmentId)))
+      )
         return Promise.resolve({ kind: 'rejected', reason: 'busy' })
-      slots.add(mapping.assignment_id) // No wait list. Retained until underlying asynchronous work actually settles.
+      let ownsSlot = !probe
+      if (probe) probingStops.add(assignmentId)
+      else slots.add(assignmentId) // Keep the slot until asynchronous work settles.
       let settleWork: () => void = () => {}
       const work = new Promise<void>((resolve) => {
         settleWork = resolve
@@ -537,7 +556,8 @@ export function createPauseDispatcher(config: {
       })
       const start = sample()
       if (!start) {
-        slots.delete(mapping.assignment_id)
+        if (ownsSlot) slots.delete(assignmentId)
+        else probingStops.delete(assignmentId)
         settleWork()
         return Promise.resolve({ kind: 'rejected', reason: 'expired' })
       }
@@ -551,6 +571,7 @@ export function createPauseDispatcher(config: {
         permitted = false,
         contractBroken = false
       let driverCalled = false
+      let slotFreed: () => void = () => {}
       let connectionGeneration: number | undefined
       let cursor: ObservationCursor | undefined
       let capability: PauseCapabilitySnapshot | undefined
@@ -818,6 +839,86 @@ export function createPauseDispatcher(config: {
             (timerSample?.mono ?? resultDeadline),
         ),
       )
+      /**
+       * One read-only look at the printer before the claim. A ready printer is
+       * the evidence that releases a restart hold; without it the timed release
+       * still applies. Nothing is sent.
+       */
+      async function releaseOnReadyEvidence(): Promise<void> {
+        const hold = {
+          assignmentId: mapping.assignment_id,
+          farmId: mapping.farm_id,
+          printerKey: mapping.printer_key,
+        }
+        if (!hasReadyReleasableHold(journal, hold)) return
+        const preempted = new AbortController()
+        const freed = new Promise<void>((resolve) => {
+          slotFreed = resolve
+        })
+        probes.set(mapping.assignment_id, () => {
+          probes.delete(mapping.assignment_id)
+          preempted.abort()
+          return freed
+        })
+        observations.delete(printerBinding)
+        observationVersions.set(printerBinding, Object.freeze({}))
+        try {
+          const prepared = await driver.prepare({
+            binding: printerBinding,
+            signal: AbortSignal.any([controller.signal, preempted.signal]),
+          })
+          const now = sample()
+          const seen =
+            now && capability
+              ? readObservation(printerBinding, capability, now)
+              : null
+          if (
+            !terminal &&
+            !preempted.signal.aborted &&
+            seen?.ready &&
+            seen.printState !== 'unknown' &&
+            seen.connectionGeneration === prepared.connectionGeneration
+          )
+            releaseHoldsOnReady(journal, hold)
+        } catch {
+          // No evidence: the journal decides with the hold in place.
+        } finally {
+          try {
+            await driver.closeAttempt(printerBinding)
+          } catch {
+            // The slot stays held: the waiting stop is refused as busy.
+            probes.delete(mapping.assignment_id)
+            slotFreed()
+            await new Promise<void>(() => {})
+          }
+          probes.delete(mapping.assignment_id)
+          // Yield to the waiting emergency stop without claiming anything.
+          if (preempted.signal.aborted)
+            finalize('rejected', 'busy', 'guard-denied')
+        }
+      }
+      async function waitForProbe(preempt: () => Promise<void>): Promise<void> {
+        let timeout: ReturnType<typeof setTimeout> | undefined
+        let onAbort: () => void = () => {}
+        try {
+          await Promise.race([
+            new Promise<void>((resolve) => {
+              onAbort = resolve
+              controller.signal.addEventListener('abort', onAbort, {
+                once: true,
+              })
+              timeout = setTimeout(() => {
+                finalize('rejected', 'busy', 'guard-denied')
+                resolve()
+              }, STOP_PROBE_WAIT_MS)
+            }),
+            preempt(),
+          ])
+        } finally {
+          clearTimeout(timeout)
+          controller.signal.removeEventListener('abort', onAbort)
+        }
+      }
       // An unresolved crypto/driver promise keeps its slot even after the bounded result is returned.
       void (async () => {
         try {
@@ -838,12 +939,25 @@ export function createPauseDispatcher(config: {
             finalize('rejected', denial, 'guard-denied')
             return
           }
+          if (probe) {
+            if (probes.get(assignmentId) === probe) await waitForProbe(probe)
+            if (terminal) return
+            denial = live()
+            if (denial || slots.has(assignmentId) || slots.size >= 8) {
+              finalize('rejected', denial ?? 'busy', 'guard-denied')
+              return
+            }
+            slots.add(assignmentId)
+            ownsSlot = true
+          }
+          // `clear_hold` is a Connector journal write, whatever the driver.
           if (
-            (!driver.execute &&
+            command.action !== 'clear_hold' &&
+            ((!driver.execute &&
               !['pause', 'resume', 'cancel'].includes(command.action)) ||
-            !(driver.controls?.(printerBinding) ?? ['pause']).includes(
-              command.action,
-            )
+              !(driver.controls?.(printerBinding) ?? ['pause']).includes(
+                command.action,
+              ))
           ) {
             finalize(
               'rejected',
@@ -864,6 +978,18 @@ export function createPauseDispatcher(config: {
               : boundedResultWindow(
                   driver.resultWindowMs?.(printerBinding, command.action),
                 )
+          if (
+            command.action !== 'emergency_stop' &&
+            command.action !== 'clear_hold'
+          ) {
+            await releaseOnReadyEvidence()
+            if (terminal) return
+            denial = live()
+            if (denial) {
+              finalize('rejected', denial, 'guard-denied')
+              return
+            }
+          }
           let claim: ReturnType<typeof claimCommand>
           try {
             claiming = true
@@ -905,6 +1031,31 @@ export function createPauseDispatcher(config: {
           denial = live()
           if (denial) {
             finalize('not-sent', denial, 'guard-denied')
+            return
+          }
+          // No printer connection, observation or send: the printer may be in
+          // any state, and the operator has checked it.
+          if (command.action === 'clear_hold') {
+            const marked = markWriteStarted(journal, receipt)
+            denial = live()
+            if (denial) {
+              finalize('not-sent', denial, 'guard-denied')
+              return
+            }
+            if (
+              !marked ||
+              !clearUncertainHolds(journal, receipt, capability.role)
+            ) {
+              finalize('not-sent', 'storage', 'storage')
+              return
+            }
+            cleanup()
+            const clearedAt = sample()
+            if (!clearedAt) {
+              finalize('outcome-unknown', 'storage', 'storage')
+              return
+            }
+            finalize('applied', 'applied', 'applied', clearedAt.wall)
             return
           }
           observations.delete(printerBinding)
@@ -1146,7 +1297,9 @@ export function createPauseDispatcher(config: {
                 }
             }
           }
-          slots.delete(mapping.assignment_id)
+          if (ownsSlot) slots.delete(assignmentId)
+          if (probe) probingStops.delete(assignmentId)
+          slotFreed()
           clearTimeout(timer)
           if (terminal) resolveResult(terminal)
         }
@@ -1162,4 +1315,5 @@ export function createPauseDispatcher(config: {
       maybeSettled()
     },
   })
+  return dispatcher
 }

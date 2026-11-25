@@ -44,7 +44,7 @@ import {
 import { farmAppArgs, farmProxyArgs } from './polish-runner-lib/docker.mjs'
 
 const NODE_MAJOR = '22'
-// Node 22.23.5 (Debian bookworm), pinned by digest and never pulled.
+// Node 22 (Debian bookworm; the version is whatever the digest pins), pinned by digest and never pulled.
 const NODE_IMAGE =
   process.env.OPENFARM_NODE22_IMAGE ??
   'node@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee'

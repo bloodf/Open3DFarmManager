@@ -11,6 +11,7 @@ import {
 } from './db/migrations.ts'
 import { ExtendedControlAction } from '../packages/farm-protocol/src/control-actions.ts'
 import { freshAdvertisedActions } from '../apps/farm/server/storage/postgres-pause-authority.ts'
+import { recordLatestStates } from '../apps/farm/server/storage/postgres-printer-latest-state.ts'
 import { OBSERVATION_FRESH_MS } from '../apps/farm/server/utils/integration-telemetry.ts'
 import {
   testPostgresPauseAuthority,
@@ -268,19 +269,52 @@ try {
     })
     const farmId = randomUUID(),
       agentId = randomUUID(),
-      now = Date.now()
-    await admin`INSERT INTO farm.printer_latest_state (farm_id, agent_id, printer_key, observed_at, state) VALUES (${farmId}::uuid, ${agentId}::uuid, 'freshness-fixture', ${now - OBSERVATION_FRESH_MS - 1}, ${admin.json({ controls: ['pause', 'start_print'] })})`
+      now = Date.now(),
+      staleReceipt = now - OBSERVATION_FRESH_MS - 1
+    await admin`INSERT INTO farm.printer_latest_state (farm_id, agent_id, printer_key, observed_at, received_at, state) VALUES (${farmId}::uuid, ${agentId}::uuid, 'freshness-fixture', ${staleReceipt + 20_000}, ${staleReceipt}, ${admin.json({ controls: ['pause', 'start_print'] })})`
     const readControls = () =>
-      admin`SELECT controls, observed_at::float8 AS observed_at FROM farm.pause_authority_advertised_controls WHERE farm_id=${farmId}::uuid AND agent_id=${agentId}::uuid AND printer_key='freshness-fixture'`
+      admin`SELECT controls, observed_at::float8 AS observed_at, received_at::float8 AS received_at FROM farm.pause_authority_advertised_controls WHERE farm_id=${farmId}::uuid AND agent_id=${agentId}::uuid AND printer_key='freshness-fixture'`
     const stale = (await readControls())[0]!
     assert.deepEqual(
-      freshAdvertisedActions(stale.controls, stale.observed_at, now),
+      freshAdvertisedActions(
+        stale.controls,
+        stale.observed_at,
+        stale.received_at,
+        now,
+      ),
       [],
     )
-    await admin`UPDATE farm.printer_latest_state SET observed_at=${now}, state=${admin.json({ controls: ['pause', 'start_print'] })} WHERE farm_id=${farmId}::uuid AND agent_id=${agentId}::uuid AND printer_key='freshness-fixture'`
+    // A pre-migration row may already contain a poisoned timestamp.
+    await admin`UPDATE farm.printer_latest_state SET observed_at=${now + 120_000}, received_at=NULL WHERE farm_id=${farmId}::uuid AND agent_id=${agentId}::uuid AND printer_key='freshness-fixture'`
+    await admin.begin((tx) =>
+      recordLatestStates(
+        tx,
+        { farmId, agentId },
+        [
+          {
+            eventId: randomUUID(),
+            queuedAt: now,
+            kind: 'printer-state',
+            state: {
+              printerKey: 'freshness-fixture',
+              observedAt: now + 20_000,
+              state: 'paused',
+              progress: 0.5,
+              controls: ['pause', 'start_print'],
+            },
+          },
+        ],
+        now,
+      ),
+    )
     const released = (await readControls())[0]!
     assert.deepEqual(
-      freshAdvertisedActions(released.controls, released.observed_at, now),
+      freshAdvertisedActions(
+        released.controls,
+        released.observed_at,
+        released.received_at,
+        now,
+      ),
       ['pause', 'start_print'],
     )
     await admin`DELETE FROM farm.printer_latest_state WHERE farm_id=${farmId}::uuid AND agent_id=${agentId}::uuid AND printer_key='freshness-fixture'`

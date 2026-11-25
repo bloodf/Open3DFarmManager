@@ -38,6 +38,9 @@ export type PhrozenReply = {
   pushed: Record<string, unknown> | undefined
 }
 
+/** A socket a read-only poller keeps between its own status requests. */
+export type PhrozenSession = { socket?: WebSocket | undefined }
+
 /**
  * Resolves with the correlated response. With `push`, a successful Ack also
  * waits for that board-scoped frame. `check` throws on a malformed frame body.
@@ -50,11 +53,25 @@ export function exchange(
     topic: 'status' | 'attributes'
     check(frame: Record<string, unknown>): Record<string, unknown>
   },
+  {
+    session,
+    signal,
+  }: {
+    session?: PhrozenSession | undefined
+    signal?: AbortSignal | undefined
+  } = {},
 ) {
   return new Promise<PhrozenReply>((resolve, reject) => {
     const { board, id, host, port, timeoutMs } = endpoint
     const requestId = randomBytes(8).toString('hex')
-    const socket = new WebSocket(`ws://${host}:${port}/websocket`)
+    signal?.throwIfAborted()
+    const url = `ws://${host}:${port}/websocket`
+    const kept = session?.socket
+    const reused =
+      kept?.readyState === WebSocket.OPEN && kept.url === url ? kept : undefined
+    if (kept && !reused) kept.close()
+    const socket = reused ?? new WebSocket(url)
+    if (session) session.socket = socket
     let settled = false
     let sent = false
     let reply: Omit<PhrozenReply, 'pushed'> | undefined
@@ -64,10 +81,16 @@ export function exchange(
       timeoutMs,
     )
 
-    function close() {
+    const abort = () => fail(new Error('Phrozen request aborted'))
+    signal?.addEventListener('abort', abort, { once: true })
+
+    function close(keep = false) {
       settled = true
       clearTimeout(timer)
+      signal?.removeEventListener('abort', abort)
+      if (keep && session) return
       socket.close()
+      if (session) session.socket = undefined
     }
 
     function fail(error: unknown) {
@@ -76,7 +99,7 @@ export function exchange(
       reject(Object.assign(error as Error, { sent }))
     }
 
-    socket.onopen = () => {
+    const send = () => {
       if (settled) return
       sent = true
       socket.send(
@@ -94,6 +117,7 @@ export function exchange(
         }),
       )
     }
+    socket.onopen = send
     socket.onerror = () => fail(new Error('Phrozen transport error'))
     socket.onclose = () => fail(new Error('Phrozen disconnected'))
     socket.onmessage = ({ data }) => {
@@ -123,12 +147,13 @@ export function exchange(
           reply = { ack: Ack, data: body }
         }
         if (reply && (reply.ack !== 0 || !push || pushed)) {
-          close()
+          close(true)
           resolve({ ...reply, pushed })
         }
       } catch (error) {
         fail(error)
       }
     }
+    if (reused) send()
   })
 }

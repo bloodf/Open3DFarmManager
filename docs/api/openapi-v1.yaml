@@ -3683,6 +3683,7 @@ components:
               client-certificate-missing,
               prusa-link-unqualified,
               firmware-shutdown,
+              printer-fault,
             ]
           description: Specific reason for the observed status, when known.
         progress:

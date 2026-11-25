@@ -89,7 +89,9 @@ printer keys and duplicate endpoint ownership across all configured drivers.
 Use `auth.kind` of `trusted-lan`, `api-key`, or `bearer`. The latter two
 require an absolute `credentialFile` path to private JSON containing
 `origin` and `secret`. The credential origin must match the binding exactly.
-The collector reloads credentials on each poll and follows no redirects.
+The collector keeps the credential until a poll fails, then reloads it, and
+follows no redirects. It polls one second after each cycle settles; a cycle may
+spend at most 3.5 seconds so a reading is replaced before it expires.
 
 The shared runtime must provision and dispatch the binding, register the
 `qidi` field timestamps with the snapshot provider, and route withdrawal to

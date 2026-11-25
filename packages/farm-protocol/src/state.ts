@@ -174,6 +174,7 @@ function printerStateSchema(legacy: boolean) {
           'flashforge-unqualified',
           'phrozen-simulated',
           'phrozen-unqualified',
+          'printer-fault',
           'qidi-simulated',
           'qidi-unqualified',
         ])
@@ -297,6 +298,10 @@ function printerStateSchema(legacy: boolean) {
         (value.state === 'error' &&
           value.statusReason === 'firmware-shutdown') ||
         (value.state === 'unknown' && value.preformStatus !== undefined) ||
+        // A printer-reported fault is news even before any progress is known.
+        ((value.state === 'error' || value.state === 'paused') &&
+          value.statusReason === 'printer-fault' &&
+          value.statusMessage !== undefined) ||
         (value.statusReason === 'prusa-link-unqualified' &&
           value.identity?.vendor === 'Prusa' &&
           !value.controls?.length) ||
@@ -304,6 +309,10 @@ function printerStateSchema(legacy: boolean) {
           ((value.identity?.vendor === 'Phrozen' &&
             (value.statusReason === 'phrozen-simulated' ||
               value.statusReason === 'phrozen-unqualified')) ||
+            (value.identity?.vendor === 'Qidi' &&
+              value.state === 'unknown' &&
+              (value.statusReason === 'qidi-simulated' ||
+                value.statusReason === 'qidi-unqualified')) ||
             (value.identity?.vendor === 'Flashforge' &&
               value.state !== 'printing' &&
               value.state !== 'paused' &&

@@ -24,6 +24,35 @@ import {
   summarizeSpoolman,
   type SpoolSummaryState,
 } from './spool-inventory.ts'
+import { SNAPSHOT_VALIDITY_MS } from './snapshot-window.ts'
+
+const readOnlyVendors = {
+  qidi: 'Qidi',
+  flashforge: 'Flashforge',
+  phrozen: 'Phrozen',
+} as const
+
+/** Status-only vendors expire one printer at a time: they grant no controls. */
+export type RawPrinterUnavailable = RawMoonrakerUnavailable & {
+  readOnly?: Readonly<{
+    family: keyof typeof readOnlyVendors
+    simulated: boolean
+  }>
+}
+
+function readOnlyFamily(
+  timing: RawPrinterObservation['fieldObservedAtMonoMs'],
+) {
+  if ('qidi' in timing) return 'qidi'
+  if ('flashforge' in timing) return 'flashforge'
+  return 'phrozen' in timing ? 'phrozen' : undefined
+}
+
+type SilentPrinter = Readonly<{
+  vendor: string
+  statusReason: PrinterState['statusReason']
+  observedAt: number
+}>
 
 /** A disconnected response observes connection only, never print telemetry. */
 export type RawPrinterObservation = Omit<
@@ -111,6 +140,8 @@ export function createFarmSnapshotSource(input: {
   const nowMono = input.nowMono ?? (() => performance.now())
   const entries = new Map<string, RawPrinterObservation>()
   const epochs = new Map<string, number>()
+  // Read-only vendors whose collector reported them unavailable.
+  const silent = new Map<string, SilentPrinter>()
   const retired = new Map<string, number>()
   // Last finished job per printer. Outlives epochs so a reconnect or the next
   // print never erases it; `rearmed` marks that a new job ran since it was set.
@@ -136,6 +167,7 @@ export function createFarmSnapshotSource(input: {
     if (closed) return
     closed = true
     entries.clear()
+    silent.clear()
     lastJobs.clear()
     rearmed.clear()
     notify()
@@ -147,10 +179,54 @@ export function createFarmSnapshotSource(input: {
   ): { wakeAt: number; value: CompleteFarmSnapshot } | undefined {
     let captured = Infinity,
       until = deadline,
-      wakeAt = deadline
-    const printers = []
+      wakeAt = deadline,
+      readOnlyUntil = 0,
+      otherEvidence = false
+    const printers: PrinterState[] = []
+    const local = (ref: AssignmentRef) => {
+      const linkHealth = input.linkHealthFor?.(ref.printerKey)
+      const origin = input.localWebUiOriginFor?.(ref.assignmentId)
+      return {
+        ...(linkHealth ? { linkHealth } : {}),
+        ...(origin && origin.length <= PRINTER_STRING_MAX_UNITS
+          ? { localWebUiOrigin: origin }
+          : {}),
+      }
+    }
     for (const ref of refs) {
       const entry = entries.get(ref.printerKey)
+      const family = entry && readOnlyFamily(entry.fieldObservedAtMonoMs)
+      const expiresAt = family
+        ? Math.min(
+            ...(Object.values(
+              fieldTimes(entry.fieldObservedAtMonoMs),
+            ) as number[]),
+          ) + SNAPSHOT_VALIDITY_MS
+        : 0
+      const unheard: SilentPrinter | undefined = !entry
+        ? silent.get(ref.printerKey)
+        : family && expiresAt <= now
+          ? {
+              vendor: readOnlyVendors[family],
+              statusReason: entry.printer.statusReason,
+              observedAt: entry.printer.observedAt,
+            }
+          : undefined
+      if (unheard) {
+        // Nothing current is known, so claim nothing but who went silent.
+        printers.push(
+          PrinterState.parse({
+            printerKey: ref.printerKey,
+            state: 'unknown',
+            identity: { vendor: unheard.vendor },
+            statusReason: unheard.statusReason,
+            controls: [],
+            observedAt: unheard.observedAt,
+            ...local(ref),
+          }),
+        )
+        continue
+      }
       if (!entry) return
       const timing = fieldTimes(entry.fieldObservedAtMonoMs)
       const optional =
@@ -177,7 +253,17 @@ export function createFarmSnapshotSource(input: {
         .filter(([key]) => !independent.includes(key))
         .map(([, time]) => time)
       captured = Math.min(captured, ...times)
-      until = Math.min(until, ...times.map((time) => time + 5000))
+      if (family) {
+        // Its expiry republishes the farm instead of ending the snapshot.
+        readOnlyUntil = Math.max(readOnlyUntil, expiresAt)
+        wakeAt = Math.min(wakeAt, expiresAt)
+      } else {
+        otherEvidence = true
+        until = Math.min(
+          until,
+          ...times.map((time) => time + SNAPSHOT_VALIDITY_MS),
+        )
+      }
       const temperature = entry.temperatureObservation
       const tool = temperature?.fields.tool,
         bed = temperature?.fields.bed
@@ -191,12 +277,9 @@ export function createFarmSnapshotSource(input: {
         ? input.macroParamsFor?.(ref.assignmentId)
         : undefined
       const provenance = entry.fieldObservedAtMonoMs
-      const controls =
-        'qidi' in provenance ||
-        'flashforge' in provenance ||
-        'phrozen' in provenance
-          ? []
-          : input.controlsFor?.(ref.assignmentId)
+      const controls = readOnlyFamily(provenance)
+        ? []
+        : input.controlsFor?.(ref.assignmentId)
       const advertisedControls =
         controls !== undefined ? { controls: [...controls] } : {}
       const {
@@ -211,14 +294,7 @@ export function createFarmSnapshotSource(input: {
         ...observedPrinter
       } = entry.printer
       const printer: PrinterState = { ...observedPrinter }
-      const linkHealth = input.linkHealthFor?.(ref.printerKey)
-      if (linkHealth) printer.linkHealth = linkHealth
-      const localWebUiOrigin = input.localWebUiOriginFor?.(ref.assignmentId)
-      if (
-        localWebUiOrigin &&
-        localWebUiOrigin.length <= PRINTER_STRING_MAX_UNITS
-      )
-        printer.localWebUiOrigin = localWebUiOrigin
+      Object.assign(printer, local(ref))
       const lastJob = lastJobs.get(ref.printerKey)
       if (lastJob) printer.lastJob = lastJob
       for (const field of [
@@ -268,6 +344,9 @@ export function createFarmSnapshotSource(input: {
         }),
       )
     }
+    // A farm with no current evidence at all stays unavailable.
+    if (captured === Infinity) return
+    if (!otherEvidence) until = Math.min(until, readOnlyUntil)
     if (until <= now) return
     // Include worst-case sequence width, JSON escaping and UTF8 framing in cap.
     // Fit as many spools as the frame cap allows; the total stays truthful.
@@ -320,7 +399,7 @@ export function createFarmSnapshotSource(input: {
       }),
     }
   }
-  function invalidate(event: RawMoonrakerUnavailable) {
+  function invalidate(event: RawPrinterUnavailable) {
     if (closed || !refs.some((ref) => ref.printerKey === event.printerKey))
       return
     if (!Number.isSafeInteger(event.epoch) || event.epoch < 1) {
@@ -334,6 +413,14 @@ export function createFarmSnapshotSource(input: {
     )
     epochs.set(event.printerKey, event.epoch)
     entries.delete(event.printerKey)
+    if (event.readOnly) {
+      const { family, simulated } = event.readOnly
+      silent.set(event.printerKey, {
+        vendor: readOnlyVendors[family],
+        statusReason: `${family}-${simulated ? 'simulated' : 'unqualified'}`,
+        observedAt: Date.now(),
+      })
+    } else silent.delete(event.printerKey)
     notify()
   }
   function observe(value: RawPrinterObservation) {
@@ -604,6 +691,7 @@ export function createFarmSnapshotSource(input: {
       }),
     )
     epochs.set(value.printerKey, value.epoch)
+    silent.delete(value.printerKey)
     notify()
   }
   /** Spoolman mirror updates re-emit the snapshot; unavailable inventory is omitted. */

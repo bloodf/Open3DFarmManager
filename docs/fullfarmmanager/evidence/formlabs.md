@@ -18,8 +18,8 @@ catalog row stays unqualified.
 
 ## Scope
 
-- `formlabs/index.ts` and `runtime/formlabs-collection.ts` are unchanged. They
-  publish live Form 4 and Form 4L host status through `GET /devices/` (S3).
+- `formlabs/index.ts` and `runtime/formlabs-collection.ts` publish live Form 4
+  and Form 4L host status through `GET /devices/` (S3). They issue no write.
 - `formlabs/operations.ts` is an adapter library over the v1 routes (S1). The
   Connector command pipeline does not call it. No assignment, envelope, journal
   or UI path exposes upload or start, and `command()` still returns
@@ -41,6 +41,23 @@ catalog row stays unqualified.
 
 Upload and start also use `POST /v1/print-setting/list/` with
 `compatible_with`, `POST /v1/scene/open/` and `DELETE /v1/scene/delete/` (S1).
+
+## Live reading
+
+| Reading          | Result                   | Source or reason                                                                                                                                                                                                                                                            |
+| ---------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Model binding    | implemented              | Each binding declares `model` (`Form 4` or `Form 4L`). A host `product_name` that differs, ignoring case, withholds the reading (`model mismatch`). The bound model is published as identity. `product_name` is a shared device field (S3); "Form 4" appears in S1 examples |
+| Host status text | implemented, unchanged   | `status` (S3). S1: human-readable, never match on its value. Shown verbatim                                                                                                                                                                                                 |
+| Firmware         | implemented              | `firmware_version` (S3), published as identity only                                                                                                                                                                                                                         |
+| Remaining time   | implemented              | `estimated_print_time_remaining_ms` in the "Form 4 or Form 4L Printer" shape (S3); S1: "milliseconds remaining in the current print, if any, and 0 otherwise". Only a positive value is published. A malformed value is dropped and the status is kept                      |
+| Printer state    | refused, stays `unknown` | No machine-readable state field (S1, S3). `status` must not be matched. A zero remaining time does not tell idle from paused, error or finished                                                                                                                             |
+| Progress         | refused                  | No percentage, layer or total duration for Form 4 (S1, S3). The farm protocol requires progress for `printing`                                                                                                                                                              |
+| Materials        | refused                  | `tank_material_code` and `cartridge_data` are documented (S3). The farm `materials` slots are filament trays tied to Spoolman spool assignment; resin tanks and cartridges have no representation there                                                                     |
+| Camera           | refused                  | No printer camera route (S1, S3). The screenshot routes render the PreForm scene                                                                                                                                                                                            |
+| Cancel, history  | refused                  | No local cancel route (S1, S3). No local print history route (S1, S3); S4 is a cloud service                                                                                                                                                                                |
+
+No new write path was added. Upload and start remain the adapter-only library
+below; the Connector command pipeline does not call it.
 
 ## Per-model evidence
 
@@ -85,6 +102,20 @@ Upload and start also use `POST /v1/print-setting/list/` with
 - S1 is an alpha version. Which PreForm releases serve both `/devices/` and
   `/v1/device/list/` is unverified.
 
+## Journey
+
+`tests/journey/formlabs.spec.ts` runs against the loopback simulator and a
+spec-derived fixture (`tests/fixtures/formlabs/devices.ts`). It opens the farm
+inspector, checks the host status and an estimated remaining time of 1 h 30
+min, withdrawal on a 503, recovery to Idle with no remaining time, and
+withholding when the host lists another model under the bound ID. The Connector
+sends only `GET /devices/`. No control is offered.
+
+The earlier sign-in failure came from the browser environment: the journey
+needs the bundled browser environment sourced. With it sourced, sign-in passes;
+the spec then failed because the farm wall now lists each printer as an
+inspector tile. The spec opens the inspector.
+
 ## Simulator coverage
 
 `packages/sim-tools/src/formlabs-simulator.ts` keeps a queue and a current print
@@ -95,6 +126,7 @@ simulates open scenes, host error replies, dropped connections before and after
 an effect, and a start that is never reported. Error timing and `.form` contents
 are synthetic.
 
-Tests: `tests/node/formlabs-operations.test.ts`. The earlier `GET /devices/`
-behavior remains covered by `tests/node/formlabs-protocol.test.ts` and the
-Formlabs unit tests.
+Tests: `tests/node/formlabs-operations.test.ts`. The `GET /devices/` behavior
+is covered by `tests/node/formlabs-protocol.test.ts`,
+`tests/unit/formlabs-runtime.test.ts` (model binding, remaining time, malformed
+fields) and the journey above.

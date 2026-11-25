@@ -11,6 +11,13 @@ export {
   type PhotonResinModelSupport,
 } from './models.ts'
 export {
+  PHOTON_RESIN_QUALIFIED_WRITES,
+  PHOTON_RESIN_UNREPORTED_FIRMWARE,
+  photonResinWriteQualified,
+  type PhotonResinQualification,
+  type PhotonResinWrite,
+} from './qualification.ts'
+export {
   photonResinRefusals,
   type PhotonResinCapability,
   type PhotonResinCommandResult,

@@ -25,6 +25,10 @@ export async function startPrusaLinkJourneyFixture(model = 'Prusa MK4') {
     serial,
     printerType,
     requests: simulator.requests,
+    /** The printer asks for someone at its screen, then gets busy. */
+    askForAttention: () => simulator.setCondition('ATTENTION'),
+    getBusy: () => simulator.setCondition('BUSY'),
+    resumePrinting: () => simulator.setCondition(undefined),
     loseConnection: () => simulator.setOnline(false),
     /** The print finished while the printer was unreachable. */
     recover: () => {

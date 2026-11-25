@@ -17,6 +17,7 @@ import {
   provisionKobraLinkPrinter,
   provisionKobraXPrinter,
   provisionSdcpPrinter,
+  provisionPhotonResinPrinter,
   type PrinterBinding,
 } from '../control/printer-binding.ts'
 import { readVersionedRuntimeConfig } from './version.ts'
@@ -200,7 +201,17 @@ export function readAgentRuntimeConfig(
             value.backend !== driver.family
           )
             throw Error('Read-only driver assignment mismatch')
-          return provisionReadonlyPrinter(value)
+          const readonly = provisionReadonlyPrinter(value)
+          if (driver.family !== 'anycubic-resin') return readonly
+          const assignment = readRuntimePrinterBinding(readonly)!
+          // Resin job stop is a local opt-in per assignment.
+          if (!pause?.control?.assignmentIds.includes(assignment.assignment_id))
+            return readonly
+          const { assignment_id, farm_id, agent_id, printer_key } = assignment
+          return provisionPhotonResinPrinter(
+            { assignment_id, farm_id, agent_id, printer_key },
+            { printerKey: driver.printerKey, model: driver.expect.model },
+          )
         })()
       : formlabs
         ? (() => {
@@ -426,6 +437,24 @@ export function readAgentRuntimeConfig(
             )
             .map((assignment) => assignment.assignment_id),
         )
+  // The printer-controlled camera is the stream of that resin printer only.
+  for (const entry of camera?.cameras ?? []) {
+    const source = entry.source
+    if (!('kind' in source) || source.kind !== 'anycubic-photon-resin') continue
+    const key = assignments.find(
+      (assignment) => assignment.assignment_id === entry.assignmentId,
+    )?.printer_key
+    const driver =
+      collection.version === 8
+        ? collection.drivers.find((p) => p.printerKey === key)
+        : undefined
+    if (
+      driver?.family !== 'anycubic-resin' ||
+      new URL(driver.origin).hostname !== source.address ||
+      (driver.cameraPort ?? 18088) !== source.port
+    )
+      throw new Error('Anycubic resin camera does not match its printer')
+  }
   for (const { assignmentId, source } of camera?.cameras ?? []) {
     if (!('kind' in source) || source.kind !== 'sdcp-rtsp') continue
     const binding = provisioned.get(assignmentId)

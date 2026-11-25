@@ -127,6 +127,8 @@ export async function createRuntimeMoonrakerFixture() {
         agentId: string
         printerKey: string
       }[]
+      /** Test-only Connector entry replacing the packaged `cli.js`. */
+      entry?: string
       /** Locally declared Moonraker model for the journey printer. */
       model?: string
       camera?: Record<string, unknown>
@@ -332,7 +334,9 @@ export async function createRuntimeMoonrakerFixture() {
           process.execPath,
           [
             // A journey may replace the CLI with its own test composition.
-            process.env.SIGNALLING_HTTPS_CONNECTOR_ENTRY ?? entry.pathname,
+            input.entry ??
+              process.env.SIGNALLING_HTTPS_CONNECTOR_ENTRY ??
+              entry.pathname,
             'run',
             '--config',
             configPath,

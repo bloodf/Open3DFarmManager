@@ -85,6 +85,18 @@ const holdsPrinterWhenUnconfirmed = new Set([
   'firmware_restart',
 ])
 const actionlessCommands = new Set(['confirm_collection'])
+/**
+ * Accepted claims per printer in one minute. Every action shares this allowance
+ * except `exclude_object`, which has its own of the same size.
+ */
+const RATE_LIMIT = 10
+/** Stricter caps applied on top of the shared allowance. */
+const ACTION_RATE_LIMITS: Readonly<Record<string, number>> = Object.freeze({
+  bed_mesh: 1,
+  power: 2,
+  config_write: 2,
+  service: 1,
+})
 const time = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
 const printerKey = z
   .string()
@@ -814,17 +826,18 @@ function claimRow(
             now - 60000,
           )?.n
         if (typeof recent !== 'number') throw new Error('Invalid rate count')
-        if (command.action !== 'emergency_stop' && recent >= 10)
+        if (command.action !== 'emergency_stop' && recent >= RATE_LIMIT)
           return { ok: false, reason: 'rate-limited' }
-        // Bed mesh is its own class: one accepted dispatch per printer a minute.
-        if (command.action === 'bed_mesh') {
-          const meshes = state.database
+        if (Object.hasOwn(ACTION_RATE_LIMITS, command.action)) {
+          const claims = state.database
             .prepare(
-              "SELECT count(*) AS n FROM pause_commands p JOIN control_command_actions a ON a.cmd_id=p.cmd_id WHERE p.farm_id=? AND p.printer_key=? AND a.action='bed_mesh' AND p.claimed_at>?",
+              'SELECT count(*) AS n FROM pause_commands p JOIN control_command_actions a ON a.cmd_id=p.cmd_id WHERE p.farm_id=? AND p.printer_key=? AND a.action=? AND p.claimed_at>?',
             )
-            .get(command.farm_id, printerKey, now - 60000)?.n
-          if (typeof meshes !== 'number') throw new Error('Invalid mesh count')
-          if (meshes >= 1) return { ok: false, reason: 'rate-limited' }
+            .get(command.farm_id, printerKey, command.action, now - 60000)?.n
+          if (typeof claims !== 'number')
+            throw new Error('Invalid action rate count')
+          if (claims >= ACTION_RATE_LIMITS[command.action]!)
+            return { ok: false, reason: 'rate-limited' }
         }
         state.database
           .prepare(

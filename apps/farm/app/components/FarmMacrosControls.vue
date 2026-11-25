@@ -3,13 +3,18 @@ import { computed, ref } from 'vue'
 import type { FarmKeyState, FarmRow } from '../utils/farm-view.ts'
 import { controlActionAvailability, type Clock } from '../utils/farm-control.ts'
 import { filamentTrays, macroActions, macroArgs } from '../utils/farm-macros.ts'
+import FarmSpool from './spool-art/FarmSpool.vue'
+import { farmSlotViews, type SlotBinding } from '../utils/slot-spools.ts'
 import type { ExtendedControlAction } from '../../../../packages/farm-protocol/src/control-actions.ts'
+import type { ActiveSpool } from '../../../../packages/farm-protocol/src/status.ts'
 const props = defineProps<{
   row: FarmRow
   keys: FarmKeyState
   controlEnabled: boolean
   commandInFlight: boolean
   now: Clock
+  bindings?: Readonly<Record<string, SlotBinding | undefined>>
+  activeSpools?: readonly ActiveSpool[]
 }>()
 const emit = defineEmits<{
   (
@@ -20,8 +25,22 @@ const emit = defineEmits<{
   ): void
 }>()
 const actions = computed(() => macroActions(props.row.observation?.state))
-const trays = computed(() => filamentTrays(props.row.observation?.state))
+const trays = computed(() =>
+  filamentTrays(
+    props.row.observation?.historical
+      ? undefined
+      : props.row.observation?.state,
+  ),
+)
 const tray = ref('')
+const selected = computed(() =>
+  trays.value.find((item) => String(item.id) === tray.value),
+)
+const selectedSpool = computed(() => {
+  const material = selected.value?.material
+  if (!material || props.row.observation?.historical) return undefined
+  return farmSlotViews([material], props.bindings, props.activeSpools)?.[0]
+})
 function available(action: ExtendedControlAction) {
   return (
     !props.commandInFlight &&
@@ -40,9 +59,13 @@ function run(name: string, event: Event) {
 }
 function load(event: Event) {
   if (!available('load_filament')) return
-  const selected = trays.value.find((item) => String(item.id) === tray.value)
-  if (tray.value && !selected) return
-  emit('action', 'load_filament', selected ? { tray: selected.id } : {}, event)
+  if (tray.value && !selected.value) return
+  emit(
+    'action',
+    'load_filament',
+    selected.value ? { tray: selected.value.id } : {},
+    event,
+  )
 }
 </script>
 <template>
@@ -70,6 +93,17 @@ function load(event: Event) {
           </option>
         </select>
       </label>
+      <FarmSpool
+        announce-level
+        v-if="selectedSpool"
+        :color="selectedSpool.color"
+        :fraction="
+          selectedSpool.level.kind === 'known'
+            ? selectedSpool.level.fraction
+            : null
+        "
+        :size="32"
+      />
       <button
         type="button"
         :disabled="!available('load_filament')"

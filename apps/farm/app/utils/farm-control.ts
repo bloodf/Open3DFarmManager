@@ -52,7 +52,7 @@ const TICK_LAG_MS = 5000
  * it is judged against. Such an observation is fresh, not stale: measure it
  * from its own receipt. A larger gap is a clock fault and stays untouched.
  */
-function clockNotBefore(
+export function clockNotBefore(
   observation: NonNullable<FarmRow['observation']>,
   now: Clock,
 ): Clock {

@@ -4,6 +4,7 @@ import {
   type TelemetryEvent,
 } from '@open3dfarmmanager/farm-protocol'
 import { recordObservedAlerts } from '../utils/integration-alerts.ts'
+import { MAX_FUTURE_OBSERVATION_MS } from './telemetry-clock-skew.ts'
 
 /** Callers on schemas that may predate migration 0033 probe before writing. */
 export async function latestStateTableExists(
@@ -17,6 +18,7 @@ export async function recordLatestStates(
   tx: TransactionSql,
   scope: { farmId: string; agentId: string },
   events: readonly TelemetryEvent[],
+  receivedAt = Date.now(),
 ): Promise<void> {
   const states = events
     .filter((event) => event.kind === 'printer-state')
@@ -28,14 +30,18 @@ export async function recordLatestStates(
     )
   let canRecordAlerts: boolean | undefined
   for (const state of states) {
+    if (state.observedAt > receivedAt + MAX_FUTURE_OBSERVATION_MS) continue
     const updated =
-      await tx`INSERT INTO farm.printer_latest_state (farm_id, agent_id, printer_key, observed_at, state)
-      VALUES (${scope.farmId}::uuid, ${scope.agentId}::uuid, ${state.printerKey}, ${state.observedAt}, ${tx.json(state)}::jsonb)
-      ON CONFLICT (farm_id, agent_id, printer_key) DO UPDATE SET observed_at = EXCLUDED.observed_at, state = CASE
+      await tx`INSERT INTO farm.printer_latest_state (farm_id, agent_id, printer_key, observed_at, state, received_at)
+      VALUES (${scope.farmId}::uuid, ${scope.agentId}::uuid, ${state.printerKey}, ${state.observedAt}, ${tx.json(state)}::jsonb, ${receivedAt})
+      ON CONFLICT (farm_id, agent_id, printer_key) DO UPDATE SET observed_at = EXCLUDED.observed_at,
+      received_at = EXCLUDED.received_at, state = CASE
   WHEN EXCLUDED.state ? 'machine' OR NOT (printer_latest_state.state ? 'machine') THEN EXCLUDED.state
   ELSE EXCLUDED.state || jsonb_build_object('machine', printer_latest_state.state->'machine')
 END
       WHERE farm.printer_latest_state.observed_at < EXCLUDED.observed_at
+        OR (printer_latest_state.received_at IS NULL
+          AND printer_latest_state.observed_at > EXCLUDED.received_at + ${MAX_FUTURE_OBSERVATION_MS}::bigint)
       RETURNING printer_key`
     if (!updated.length) continue
     if (canRecordAlerts === undefined) {

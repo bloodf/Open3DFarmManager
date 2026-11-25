@@ -3,11 +3,15 @@ import { useFarmControls } from '../components/farm/useFarmControls.ts'
 import { useFarmView } from './useFarmView.ts'
 import {
   liveReplayIndex,
-  sendLibraryReplay,
   type LiveReplayInfo,
   type ReplaySend,
 } from '../utils/replay-live.ts'
+import {
+  checkReplayConnection,
+  replayWithFreshAvailability,
+} from '../utils/replay-availability.ts'
 import type { LibraryVersion } from '../utils/library-view.ts'
+import { activeSlotSpools } from '../utils/slot-spools.ts'
 
 /**
  * The live, signed session replay needs: which printers can be picked right
@@ -33,6 +37,13 @@ export function useReplayLive(farmId: Ref<string>) {
           current.keys,
           controls.pauseEnabled.value,
           view.now.value,
+          (row) =>
+            activeSlotSpools({
+              farmId: farmId.value,
+              row,
+              inventory: current.spools,
+              now: view.now.value,
+            }),
         )
       : new Map()
   })
@@ -51,8 +62,6 @@ export function useReplayLive(farmId: Ref<string>) {
       return versionId
         ? { outcome: 'not-sent', code: 'stale-selection' }
         : { outcome: 'not-sent' }
-    if (!liveFor(printerKey)?.live)
-      return { outcome: 'not-sent', code: 'webrtc-unavailable' }
     if (versionId) {
       try {
         const { version } = await $fetch<{ version: LibraryVersion }>(
@@ -78,10 +87,9 @@ export function useReplayLive(farmId: Ref<string>) {
     }
     const { assignment } = row
     const abort = new AbortController()
-    const result = await sendLibraryReplay(
-      (onState) => controls.connectFiles(row, abort.signal, onState),
-      args,
-      () =>
+    return replayWithFreshAvailability({
+      isLive: () => !!liveFor(printerKey)?.live,
+      current: () =>
         selectionCurrent() &&
         farmId.value === scope.farmId &&
         view.ready.value?.scope?.farmId === scope.farmId &&
@@ -94,10 +102,18 @@ export function useReplayLive(farmId: Ref<string>) {
             current.status === 'active' &&
             current.connectorStatus === 'approved',
         ),
+      connect: (onState) => controls.connectFiles(row, abort.signal, onState),
+      args,
+    })
+  }
+  send.reconnect = async (printerKey) => {
+    const row = view.ready.value?.rows.find(
+      (item) => item.assignment.printerKey === printerKey,
     )
-    return result.outcome === 'not-sent' && !result.code
-      ? { ...result, code: 'webrtc-unavailable' }
-      : result
+    if (!row || view.ready.value?.scope?.farmId !== farmId.value) return false
+    return checkReplayConnection((onState) =>
+      controls.connectFiles(row, new AbortController().signal, onState),
+    )
   }
   return { liveFor, send }
 }

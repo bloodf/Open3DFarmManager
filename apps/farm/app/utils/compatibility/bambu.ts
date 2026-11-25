@@ -106,7 +106,7 @@ const withAreas = (
 })
 const baseControlAreas = withAreas(bambuControlAreaEvidence)
 const rtspsCameraLimitation =
-  'A captura de câmera por RTSPS está indisponível no OpenFarm.'
+  'Câmera: o Connector reproduz RTSPS (porta 322) por uma ponte TLS em loopback que exige `caFile` (um `pinSha256` sozinho não basta), verifica o IP literal do certificado antes de enviar a credencial e recusa redirecionamentos, UDP e métodos que não leem. Só o X1C foi exercitado, contra um simulador em loopback; este modelo, o certificado real, a autenticação RTSP e a taxa de quadros da impressora não foram verificados em hardware, e a câmera permanece desconhecida.'
 export const bambuDetailUnsupported =
   'Não suportado no painel Bambu: editor de configuração, malha da mesa, serviços, energia, fila de impressão, atualizações além das versões de firmware, macros, exclusão de objetos e histórico. O protocolo LAN documentado não os expõe; fonte em docs/protocols/bambu-detail.md.'
 export const bambuDetailHardwareNote =

@@ -21,7 +21,14 @@ export interface AnycubicSimulatorState {
 export interface AnycubicSimulatorOptions {
   serial?: string | undefined
   port?: number | undefined
-  lanFiles?: { firmware: string } | undefined
+  /** `listReply` and `uploadCode` model refusals; see the `file/report` below. */
+  lanFiles?:
+    | {
+        firmware: string
+        listReply?: { state: string; code: number } | undefined
+        uploadCode?: number | undefined
+      }
+    | undefined
   initialState?: 'RUNNING' | 'PAUSE' | 'IDLE' | undefined
   credentials?: { username: string; password: string } | undefined
   confirmCommands?: boolean | undefined
@@ -254,22 +261,35 @@ export async function startAnycubicSimulator({
           topicName === slicerTopic + '/file' &&
           raw.type === 'file' &&
           raw.action === 'listLocal' &&
+          raw.data?.page_num === 1 &&
+          raw.data?.page_size === 200 &&
           raw.data?.path === '/'
         ) {
+          // Reference-derived, never captured:
+          // bloodf/kobracontrol@c414db4f36d4c96f2b232c368ad6cfe56e3d0408
+          // docs/protocol.md "Files on the printer" (request fields,
+          // millisecond timestamps, the built-in `test_model` directory).
           broker.control.publish(reportTopic.replace('/info/', '/file/'), {
             type: 'file',
             action: 'listLocal',
             msgid: raw.msgid,
-            state: 'done',
-            code: 200,
+            ...(lanFiles.listReply ?? { state: 'done', code: 200 }),
             data: {
               list_mode: 0,
-              records: [...files].map(([filename, bytes]) => ({
-                filename,
-                size: bytes.length,
-                timestamp: Date.now(),
-                is_dir: false,
-              })),
+              records: [
+                {
+                  filename: 'test_model',
+                  size: 0,
+                  timestamp: Date.now(),
+                  is_dir: true,
+                },
+                ...[...files].map(([filename, bytes]) => ({
+                  filename,
+                  size: bytes.length,
+                  timestamp: Date.now(),
+                  is_dir: false,
+                })),
+              ],
             },
           })
           return
@@ -481,8 +501,9 @@ export async function startAnycubicSimulator({
           }).formData()
           const name = form.get('filename')
           const gcode = form.get('gcode')
+          // Part order and answer: kobracontrol@c414db4f src/kobracontrol/kobra.py `_upload`.
           if (
-            [...form.keys()].length !== 2 ||
+            [...form.keys()].join() !== 'filename,gcode' ||
             typeof name !== 'string' ||
             !/^[a-zA-Z0-9 _.-]+\.gcode\.3mf$/i.test(name) ||
             !(gcode instanceof File) ||
@@ -492,10 +513,19 @@ export async function startAnycubicSimulator({
             request.headers['x-file-length'] !== String(gcode.size)
           )
             throw Error('Invalid synthetic multipart upload')
-          uploads++
-          files.set(name, Buffer.from(await gcode.arrayBuffer()))
+          const code = lanFiles.uploadCode ?? 200
+          if (code === 200) {
+            uploads++
+            files.set(name, Buffer.from(await gcode.arrayBuffer()))
+          }
           response.writeHead(200, { 'Content-Type': 'application/json' })
-          response.end(JSON.stringify({ code: 200, data: { gcode: name } }))
+          response.end(
+            JSON.stringify(
+              code === 200
+                ? { code, data: { gcode: name }, message: 'success' }
+                : { code, message: 'synthetic refusal' },
+            ),
+          )
         })().catch(() => response.writeHead(400).end())
       })
     : undefined

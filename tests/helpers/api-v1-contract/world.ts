@@ -491,6 +491,10 @@ export class World {
   inbox: InboxResult = { kind: 'files', data: [], nextOffset: null }
   inboxCalls: { farmId: string; agentId: string; query: unknown }[] = []
   readonly pool: unknown
+  physicalSpoolRead?: (
+    query: TemplateStringsArray,
+    ...values: unknown[]
+  ) => unknown
 
   constructor() {
     this.auth = new IntegrationAuth(
@@ -767,6 +771,13 @@ export class World {
     const fn = async (strings: TemplateStringsArray, ...v: unknown[]) => {
       if (this.faults.has('pool')) throw new Error('pool down')
       const text = strings.join('?')
+      if (
+        this.physicalSpoolRead &&
+        (text.trim() === '' ||
+          text.includes('SELECT g.id FROM farm.integration_apps') ||
+          text.includes('farm.read_physical_spool_observations'))
+      )
+        return this.physicalSpoolRead(strings, ...v)
       if (
         text.startsWith('\n      SELECT p.id FROM farm.printer_assignments p')
       )

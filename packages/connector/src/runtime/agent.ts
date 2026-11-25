@@ -1,3 +1,4 @@
+import { moonrakerOrigins } from '../config/moonraker.ts'
 import { MAX_HEARTBEAT_HEALTH_BYTES } from '@open3dfarmmanager/farm-protocol'
 import { join, resolve } from 'node:path'
 import {
@@ -301,6 +302,10 @@ async function runConnectorAgentOnce(
   let controlsFor:
     ((assignmentId: string) => readonly ExtendedControlAction[]) | undefined
   let refreshControls: (() => void) | undefined
+  const kobraXControlEvidence = new Map<
+    string,
+    import('../kobra-x/control-support.ts').KobraXControlEvidence
+  >()
   const printerSpeedModes = new Map<
     string,
     NonNullable<
@@ -379,7 +384,7 @@ async function runConnectorAgentOnce(
         moonrakerPrinters.map((printer) => {
           const selected = validateMoonrakerInput({
             assignment: printer,
-            allowedOrigins: config.collection.allowedOrigins,
+            allowedOrigins: moonrakerOrigins(config.collection),
             limits: config.collection.limits,
           })
           return [
@@ -640,6 +645,11 @@ async function runConnectorAgentOnce(
     let pauseBudget = 256
     const pauseDiagnostic = (value: AgentDiagnostic) => {
       if (pauseBudget-- <= 0) return
+      if (value.kind === 'file-list-failed')
+        logger.warn('file-list-failed', {
+          reason: value.reason,
+          requestSent: value.requestSent,
+        })
       try {
         input.onDiagnostic(value)
       } catch {
@@ -964,6 +974,8 @@ async function runConnectorAgentOnce(
           speedModesFor(printerKey) {
             return printerSpeedModes.get(printerKey)
           },
+          kobraXControlEvidenceFor: (printerKey) =>
+            kobraXControlEvidence.get(printerKey),
           libraryPrint(assignmentId) {
             const key = refs.find(
               (ref) => ref.assignmentId === assignmentId,
@@ -1116,7 +1128,18 @@ async function runConnectorAgentOnce(
     tasks.push(
       collectIntoQueue({
         config: config.collection,
-        ...(config.kobraX ? { kobraX: { bindings: config.kobraX } } : {}),
+        ...(config.kobraX
+          ? {
+              kobraX: {
+                bindings: config.kobraX,
+                onControlEvidence(printerKey, evidence) {
+                  if (evidence) kobraXControlEvidence.set(printerKey, evidence)
+                  else kobraXControlEvidence.delete(printerKey)
+                  refreshControls?.()
+                },
+              },
+            }
+          : {}),
         apiJobs,
         onPrinterState(printer) {
           if (printer.speedModes === undefined)

@@ -3,16 +3,16 @@
 //
 // Every service (the in-process synthetic Bambu MQTT broker and the test runner) runs inside
 // disposable containers. Nothing runs on the host except `git` and `docker`. The run is offline:
-//   * no image is pulled or built (`--pull never`); the runner image must already exist locally;
-//   * locked dependencies come from `npm ci --offline` against a local, read-only npm cache volume;
-//   * every container (install and test) has no network (loopback only), so only local mocks can
-//     answer: no registry, no printer, no paid API.
-// A missing image, cache volume, Node/openssl mismatch or uncached package fails the run clearly.
+//   * no image is pulled (`--pull never`); the runner image must already exist locally. The only
+//     image built is the dependency image, once per lockfile (scripts/docker-base-image.mjs);
+//   * locked dependencies are copied from that image; nothing is installed per run;
+//   * every `--rm` container (seed and test) has no network (loopback only), so only local mocks
+//     can answer: no registry, no printer, no paid API.
+// A missing image or a Node/openssl mismatch fails the run clearly.
 //
 // Prerequisites (shared with scripts/check-all-docker.mjs; override via env):
 //   OPENFARM_GATE_NODE_IMAGE        default openfarm-e2e-node22.23.5:latest (Node + openssl;
 //                                   its Node version must equal the connector Dockerfile's pin)
-//   OPENFARM_GATE_NPM_CACHE_VOLUME  default openfarm-e2e-npm-cache (populated npm _cacache)
 //
 // Usage:
 //   node tests/node/run-bambu-gate.mjs [--ref <git-ref>]... [--repeat N] [--cpus X]
@@ -22,23 +22,24 @@
 //   --test-from overlays only the test file from another ref onto every --ref, e.g. to run the
 //   fixed test against the unfixed baseline and show it reproduces the failure there.
 //
-// Resource ownership: every container/volume this run creates carries the label `openfarm.bambu-gate=<runId>` and
-// a `<runId>-` name prefix, and every host directory lives under one mkdtemp root. All of them are
-// removed on exit, on failure and on SIGINT/SIGTERM, then the leftovers are verified (exit 2 if any).
-import { spawn, spawnSync } from 'node:child_process'
-import { createHash, randomBytes } from 'node:crypto'
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs'
-import { tmpdir } from 'node:os'
+// Resource ownership: every container this run creates carries the label `openfarm.bambu-gate=<runId>`
+// and a `<runId>-` name prefix, and every host directory lives under one run directory in
+// ${XDG_CACHE_HOME:-~/.cache}/openfarm-docker/. All of them are removed on exit, on failure and on
+// SIGINT/SIGTERM (after any in-flight create), then the leftovers are verified (exit 2 if any).
+import { spawnSync } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import {
+  ensureBaseImage,
+  seedNodeModules,
+} from '../../scripts/docker-base-image.mjs'
+import {
+  createLifecycle,
+  createRunDir,
+  removeRunDir,
+} from '../../scripts/docker-run-lib.mjs'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const LABEL = 'openfarm.bambu-gate'
@@ -94,17 +95,11 @@ function run(command, args, { input, cwd } = {}) {
   }
 }
 
-function stream(command, args) {
-  return new Promise((resolveRun) => {
-    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] })
-    let output = ''
-    child.stdout.on('data', (chunk) => (output += chunk))
-    child.stderr.on('data', (chunk) => (output += chunk))
-    child.on('error', (error) =>
-      resolveRun({ status: 1, output: `${output}${error}` }),
-    )
-    child.on('close', (status) => resolveRun({ status: status ?? 1, output }))
-  })
+const lifecycle = createLifecycle()
+
+async function container(args) {
+  const result = await lifecycle.run(args)
+  return { status: result.status, output: result.stdout + result.stderr }
 }
 
 const state = { root: undefined, cleaned: false }
@@ -127,40 +122,22 @@ function leftovers() {
   return { containers, volumes, images, directory }
 }
 
-function cleanup() {
+async function cleanup() {
   if (state.cleaned) return leftovers()
   state.cleaned = true
+  await lifecycle.cleanup()
   const filter = ['--filter', `label=${LABEL}=${runId}`]
   const containers = run('docker', ['ps', '-aq', ...filter])
     .stdout.trim()
     .split('\n')
     .filter(Boolean)
   if (containers.length) run('docker', ['rm', '-f', '-v', ...containers])
-  const volumes = run('docker', ['volume', 'ls', '-q', ...filter])
-    .stdout.trim()
-    .split('\n')
-    .filter(Boolean)
-  if (volumes.length) run('docker', ['volume', 'rm', '-f', ...volumes])
-  const images = run('docker', ['images', '-q', ...filter])
-    .stdout.trim()
-    .split('\n')
-    .filter(Boolean)
-  if (images.length) run('docker', ['rmi', '-f', ...new Set(images)])
-  if (state.root) rmSync(state.root, { recursive: true, force: true })
   return leftovers()
 }
-
-for (const signal of ['SIGINT', 'SIGTERM'])
-  process.on(signal, () => {
-    cleanup()
-    process.exit(130)
-  })
 
 const config = {
   image:
     process.env.OPENFARM_GATE_NODE_IMAGE || 'openfarm-e2e-node22.23.5:latest',
-  npmCacheVolume:
-    process.env.OPENFARM_GATE_NPM_CACHE_VOLUME || 'openfarm-e2e-npm-cache',
 }
 
 function nodeImage() {
@@ -183,7 +160,7 @@ function pinnedNodeVersion() {
 }
 
 const OFFLINE_HINT =
-  'The Bambu gate runs offline and never pulls, builds or downloads. Provide it locally ' +
+  'The Bambu gate runs offline and never pulls. Provide it locally ' +
   '(see the header of tests/node/run-bambu-gate.mjs / scripts/check-all-docker.mjs).'
 
 function resolveRef(ref) {
@@ -216,7 +193,6 @@ function exportRef(ref, directory) {
     maxBuffer: 1024 * 1024 * 1024,
   })
   if (extract.status !== 0) throw new Error(`tar extract failed for ${ref}`)
-  mkdirSync(join(directory, 'node_modules'))
   return sha
 }
 
@@ -252,22 +228,8 @@ async function checkPrerequisites() {
     throw new Error(
       `Runner image ${config.image} is not available locally. ${OFFLINE_HINT}`,
     )
-  if (run('docker', ['volume', 'inspect', config.npmCacheVolume]).status !== 0)
-    throw new Error(
-      `npm cache volume ${config.npmCacheVolume} does not exist. ${OFFLINE_HINT}`,
-    )
   const expected = pinnedNodeVersion()
-  const probe = await stream('docker', [
-    'run',
-    '--rm',
-    ...common('probe'),
-    '-v',
-    `${config.npmCacheVolume}:/npm-cache:ro`,
-    config.image,
-    'sh',
-    '-c',
-    'node -p process.versions.node && command -v openssl >/dev/null && echo openssl-ok && test -d /npm-cache/_cacache && echo cache-ok',
-  ])
+  const probe = await container(bambuProbeArgs(config.image))
   const lines = probe.output.trim().split('\n')
   if (lines[0] !== expected)
     throw new Error(
@@ -277,57 +239,80 @@ async function checkPrerequisites() {
     throw new Error(
       `Runner image ${config.image} has no openssl. ${OFFLINE_HINT}`,
     )
-  if (!lines.includes('cache-ok'))
-    throw new Error(
-      `npm cache volume ${config.npmCacheVolume} has no _cacache. ${OFFLINE_HINT}`,
-    )
   return expected
 }
 
-async function installDependencies(image, directory, key) {
-  const volume = `${runId}-nm-${key}`
-  const created = run('docker', [
-    'volume',
-    'create',
-    '--label',
-    `${LABEL}=${runId}`,
-    volume,
-  ])
-  if (created.status !== 0) throw new Error(created.stderr)
-  // No network: every locked package must already be in the read-only npm cache volume.
-  const result = await stream('docker', [
+export function bambuProbeArgs(image) {
+  return [
     'run',
     '--rm',
-    ...common(`install-${key}`),
+    ...common('probe'),
+    image,
+    'sh',
+    '-c',
+    'node -p process.versions.node && command -v openssl >/dev/null && echo openssl-ok',
+  ]
+}
+
+export function bambuSeedArgs({ image, directory, label }) {
+  return [
+    'run',
+    '--rm',
+    ...common(label),
     '-v',
     `${directory}:/work`,
-    '-v',
-    `${volume}:/work/node_modules`,
-    '-v',
-    `${config.npmCacheVolume}:/npm-cache:ro`,
-    '-w',
-    '/work',
-    ...[
-      'npm_config_offline=true',
-      'npm_config_cache=/npm-cache',
-      'npm_config_logs_dir=/tmp/npm-logs',
-      'npm_config_update_notifier=false',
-      'npm_config_audit=false',
-      'npm_config_fund=false',
-      'HOME=/tmp',
-    ].flatMap((entry) => ['-e', entry]),
     '--tmpfs',
     '/tmp:rw,size=1g',
     image,
     'sh',
     '-ec',
-    'npm ci --offline --ignore-scripts --no-audit --no-fund; npm rebuild --offline node-datachannel >/dev/null 2>&1 || true; chown -R 1000:1000 /work/node_modules',
-  ])
+    seedNodeModules('/work'),
+  ]
+}
+
+export function bambuTestArgs({ image, directory, label, cpus, testArgs }) {
+  return [
+    'run',
+    '--rm',
+    ...common(label),
+    '--read-only',
+    '--tmpfs',
+    '/tmp:rw,size=256m',
+    '--cap-drop',
+    'ALL',
+    '--security-opt',
+    'no-new-privileges',
+    '--pids-limit',
+    '512',
+    '--memory',
+    '2g',
+    ...(cpus ? ['--cpus', cpus] : []),
+    '--user',
+    '1000:1000',
+    '-e',
+    'HOME=/tmp',
+    '-e',
+    'NODE_ENV=test',
+    '-v',
+    `${directory}:/work:ro`,
+    '-w',
+    '/work',
+    image,
+    ...testArgs,
+  ]
+}
+
+// Each ref gets the dependency image of its own lockfile, copied into its tree.
+async function seedDependencies(directory, key) {
+  const image = ensureBaseImage({
+    projectDir: directory,
+    nodeImage: config.image,
+  })
+  const result = await container(
+    bambuSeedArgs({ image, directory, label: `seed-${key}` }),
+  )
   if (result.status !== 0)
-    throw new Error(
-      `npm ci --offline failed (a locked package is missing from ${config.npmCacheVolume}?). ${OFFLINE_HINT}\n${result.output.slice(-4000)}`,
-    )
-  return volume
+    throw new Error(`dependency seed failed\n${result.output.slice(-4000)}`)
 }
 
 function failureExcerpt(output) {
@@ -346,7 +331,7 @@ function failureExcerpt(output) {
   return [...new Set(keep)].slice(0, 24).join('\n')
 }
 
-async function runTest(image, directory, volume, options, label) {
+async function runTest(image, directory, options, label) {
   const testArgs = [
     'node',
     '--test',
@@ -358,37 +343,15 @@ async function runTest(image, directory, volume, options, label) {
     options.file,
   ]
   const started = Date.now()
-  const result = await stream('docker', [
-    'run',
-    '--rm',
-    ...common(label),
-    '--read-only',
-    '--tmpfs',
-    '/tmp:rw,size=256m',
-    '--cap-drop',
-    'ALL',
-    '--security-opt',
-    'no-new-privileges',
-    '--pids-limit',
-    '512',
-    '--memory',
-    '2g',
-    ...(options.cpus ? ['--cpus', options.cpus] : []),
-    '--user',
-    '1000:1000',
-    '-e',
-    'HOME=/tmp',
-    '-e',
-    'NODE_ENV=test',
-    '-v',
-    `${directory}:/work:ro`,
-    '-v',
-    `${volume}:/work/node_modules:ro`,
-    '-w',
-    '/work',
-    image,
-    ...testArgs,
-  ])
+  const result = await container(
+    bambuTestArgs({
+      image,
+      directory,
+      label,
+      cpus: options.cpus,
+      testArgs,
+    }),
+  )
   const count = (name) =>
     Number(new RegExp(`^# ${name} (\\d+)`, 'm').exec(result.output)?.[1] ?? NaN)
   const caseLines = result.output.match(/^\s*(?:ok|not ok) \d+ - .+$/gm) ?? []
@@ -436,27 +399,22 @@ async function main() {
     throw new Error('Docker daemon unavailable')
   const nodeVersion = await checkPrerequisites()
   const image = config.image
-  state.root = mkdtempSync(join(tmpdir(), `${runId}-`))
+  state.root = createRunDir(runId)
   console.log(
-    `run ${runId}  offline  node ${nodeVersion}  runner ${image}  npm-cache ${config.npmCacheVolume}  file ${options.file}` +
+    `run ${runId}  offline  node ${nodeVersion}  runner ${image}  file ${options.file}` +
       (options.testFrom ? `  test-from ${options.testFrom}` : ''),
   )
-  const volumes = new Map()
   const summary = []
   for (const ref of options.refs) {
     const directory = join(state.root, `src-${summary.length}`)
     const sha = exportRef(ref, directory)
     if (options.testFrom) overlayTest(options.testFrom, options.file, directory)
-    const key = dependencyKey(directory)
-    if (!volumes.has(key))
-      volumes.set(key, await installDependencies(image, directory, key))
-    const volume = volumes.get(key)
+    await seedDependencies(directory, summary.length)
     const results = []
     for (let n = 1; n <= options.repeat; n++) {
       const result = await runTest(
         image,
         directory,
-        volume,
         options,
         `test-${summary.length}-${n}`,
       )
@@ -482,24 +440,33 @@ async function main() {
   return failed ? 1 : 0
 }
 
-let code = 1
-try {
-  code = await main()
-} catch (error) {
-  console.error(String(error instanceof Error ? error.message : error))
-} finally {
-  const left = cleanup()
-  const clean =
-    left.containers.length +
-      left.volumes.length +
-      left.images.length +
-      left.directory.length ===
-    0
-  console.log(
-    `cleanup: containers=${left.containers.length} volumes=${left.volumes.length} ` +
-      `images=${left.images.length} ` +
-      `hostDirs=${left.directory.length} (${clean ? 'clean' : 'LEFTOVERS'})`,
-  )
-  if (!clean) code = 2
+if (
+  process.argv[1] &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
+  lifecycle.finalizer(async () => {
+    if (state.root) await removeRunDir(state.root, { image: config.image })
+  })
+  lifecycle.installSignals()
+  let code = 1
+  try {
+    code = await main()
+  } catch (error) {
+    console.error(String(error instanceof Error ? error.message : error))
+  } finally {
+    const left = await cleanup()
+    const clean =
+      left.containers.length +
+        left.volumes.length +
+        left.images.length +
+        left.directory.length ===
+      0
+    console.log(
+      `cleanup: containers=${left.containers.length} volumes=${left.volumes.length} ` +
+        `images=${left.images.length} ` +
+        `hostDirs=${left.directory.length} (${clean ? 'clean' : 'LEFTOVERS'})`,
+    )
+    if (!clean) code = 2
+  }
+  process.exit(code)
 }
-process.exit(code)

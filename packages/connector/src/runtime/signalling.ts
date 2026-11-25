@@ -17,6 +17,10 @@ function wait(ms: number, signal: AbortSignal): Promise<void> {
   })
 }
 
+// The 30 s inbox lease starts at upgrade (farm server signalling-runtime.ts).
+// Allow up to one second for the admission exchange before measuring uptime.
+const HEALTHY_ADMISSION_MS = 29_000
+
 /** One fresh session at a time. Admission is not termination or lease renewal. */
 export async function runSignallingLifecycle(input: {
   signal: AbortSignal
@@ -24,7 +28,7 @@ export async function runSignallingLifecycle(input: {
   retryMinMs: number
   retryMaxMs: number
   /**
-   * Reset retry pressure after 30 seconds of admitted uptime, or when a
+   * Reset retry pressure after a healthy admitted interval, or when a
    * single-use session reports it served the peer it was opened for.
    */
   now?: () => number
@@ -60,7 +64,7 @@ export async function runSignallingLifecycle(input: {
       if (
         !ended &&
         admittedAt !== undefined &&
-        (served || monotonic() - admittedAt >= 30_000)
+        (served || monotonic() - admittedAt >= HEALTHY_ADMISSION_MS)
       )
         backoff = input.retryMinMs
       ended = true

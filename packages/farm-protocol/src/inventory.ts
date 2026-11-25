@@ -14,6 +14,7 @@ export const SpoolSummary = z.strictObject({
     .nullable(),
   // Grams. Negative values are preserved, never clamped into availability.
   remainingGrams: z.number().int().min(-1_000_000).max(1_000_000).nullable(),
+  remainingPercent: z.number().min(0).max(100).optional(),
   location: z.string().max(32).nullable(),
   archived: z.boolean(),
 })

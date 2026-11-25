@@ -1,19 +1,28 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import type { ActiveSpool } from '../../../../../packages/farm-protocol/src/status.ts'
+import type { PrinterState } from '../../../../../packages/farm-protocol/src/state.ts'
 import {
-  safeReadStored,
-  safeWriteStored,
-  sameSlots,
-} from '../../utils/spool-form-state.ts'
+  activeSpoolStorageKey,
+  readActiveSpoolAssignments,
+  farmSlotLabel,
+  farmSlotViews,
+  type SlotBinding,
+} from '../../utils/slot-spools.ts'
+import FarmSpool from '../spool-art/FarmSpool.vue'
+import { safeWriteStored, sameSlots } from '../../utils/spool-form-state.ts'
 
 const props = defineProps<{
+  activeSpools?: readonly ActiveSpool[]
   farmId: string
+  bindings?: Readonly<Record<string, SlotBinding | undefined>>
   printerKey: string
   slots: readonly string[]
   busy?: boolean
   moonrakerManaged?: boolean
+  /** Live materials of the printer, to draw each slot's spool. Never last-known ones. */
+  materials?: PrinterState['materials']
 }>()
-
 const emit = defineEmits<{
   change: [payload: Readonly<Record<string, number>>]
 }>()
@@ -21,43 +30,15 @@ const emit = defineEmits<{
 const draft = ref<Record<string, string>>({})
 const assignments = ref<Record<string, number>>({})
 
-function storageKey() {
-  return `openfarm.active-spool.${props.farmId}.${props.printerKey}`
-}
-
 function readStored(): Record<string, number> {
-  try {
-    const raw = safeReadStored(
-      typeof localStorage === 'undefined' ? null : localStorage,
-      storageKey(),
-    )
-    if (!raw) return {}
-    const parsed = JSON.parse(raw) as unknown
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed))
-      return {}
-    const next: Record<string, number> = {}
-    for (const [slot, value] of Object.entries(parsed)) {
-      if (
-        typeof slot === 'string' &&
-        slot.length > 0 &&
-        slot.length <= 32 &&
-        typeof value === 'number' &&
-        Number.isSafeInteger(value) &&
-        value > 0
-      )
-        next[slot] = value
-    }
-    return next
-  } catch {
-    return {}
-  }
+  return readActiveSpoolAssignments(props.farmId, props.printerKey)
 }
 
 function writeStored(value: Record<string, number>) {
   try {
     safeWriteStored(
       typeof localStorage === 'undefined' ? null : localStorage,
-      storageKey(),
+      activeSpoolStorageKey(props.farmId, props.printerKey),
       JSON.stringify(value),
     )
   } catch {
@@ -96,6 +77,20 @@ watch(
   },
 )
 
+const spools = computed(
+  () =>
+    new Map(
+      (
+        farmSlotViews(props.materials, props.bindings, props.activeSpools) ?? []
+      ).map((v) => [v.key, v]),
+    ),
+)
+
+function fractionOf(slot: string): number | null {
+  const level = spools.value.get(slot)?.level
+  return level?.kind === 'known' ? level.fraction : null
+}
+
 const disabled = computed(
   () => props.busy === true || props.moonrakerManaged === true,
 )
@@ -130,8 +125,21 @@ function save(slot: string) {
     </p>
     <ul>
       <li v-for="slot in slots" :key="slot">
+        <FarmSpool
+          announce-level
+          v-if="spools.get(slot)"
+          :color="spools.get(slot)?.color"
+          :fraction="fractionOf(slot)"
+          :size="32"
+        />
         <label :for="`spool-slot-${printerKey}-${slot}`">
-          {{ slot }}
+          {{ farmSlotLabel(slot) }}
+          <template v-if="spools.get(slot)">
+            · {{ spools.get(slot)?.material }}
+            <template v-if="!spools.get(slot)?.color">
+              · Cor não informada
+            </template>
+          </template>
         </label>
         <input
           :id="`spool-slot-${printerKey}-${slot}`"

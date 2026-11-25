@@ -305,8 +305,9 @@ Observed on firmware 2.0.2.8 (S1):
   a result in the last 30 s, since its report may still arrive. A report that fits and came from
   another client cannot be told apart, so this mode is opt-in. A report settled this way is never
   evidence that the command took effect: the outcome stays uncorrelated, and a control is confirmed
-  only by fresh state read back after the write. Light and idle fan commands have no read-back
-  query, so on such a printer they end unconfirmed. Readiness still needs the printer to echo the
+  only by fresh state read back after the write. No correlated read-back for light or fan effects
+  is established by S1 or the OrcaSlicer reference, so those controls are not offered on
+  printer-assigned printers. Readiness still needs the printer to echo the
   IDs of the state queries: firmware that replaces those too gets no command written at all.
 - Control readiness is stricter than outcomes. A printer state counts as current only when the
   reply echoes the `msgid` of the latest `info` query. A busy `info` reply is current only after the

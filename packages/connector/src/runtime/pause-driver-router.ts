@@ -131,10 +131,19 @@ export function createPauseDriverRouter(config: {
       return creality.cfsFeed
         ? [...CREALITY_ACTIONS, ...CREALITY_CFS_ACTIONS]
         : CREALITY_ACTIONS
-    if (readKobraXPrinterBinding(binding))
-      return config.kobraXControlEvidence
+    const kobraX = readKobraXPrinterBinding(binding)
+    if (kobraX) {
+      const offered = config.kobraXControlEvidence
         ? kobraXControls(config.kobraXControlEvidence(binding))
         : KOBRA_X_SIGNED_ACTIONS
+      // Printer-assigned command reports cannot prove these effects, and no
+      // correlated accessory read-back is established for this firmware.
+      return kobraX.reportIdentity === 'printer-assigned'
+        ? offered.filter(
+            (action) => action !== 'set_fan' && action !== 'set_light',
+          )
+        : offered
+    }
     const anycubic = readAnycubicPrinterBinding(binding)
     if (anycubic) return anycubicControls(anycubic.modelId)
     const bambu = readBambuPrinterBinding(binding)

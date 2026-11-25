@@ -11,6 +11,7 @@
  * shape can kill the Carbon's firmware process, and the running print with it.
  */
 import { randomBytes } from 'node:crypto'
+import { DriverRefusalError } from '../control/driver-refusal.ts'
 import { sdcpProfile, type SdcpAction, type SdcpProfile } from './models.ts'
 import type { SdcpTarget } from './identity.ts'
 
@@ -26,7 +27,7 @@ export function sdcpFileName(model: string, name: unknown): string {
     name.startsWith('.') ||
     !profile.extensions.some((end) => name.toLowerCase().endsWith(end))
   )
-    throw new Error('Invalid SDCP file name')
+    throw new DriverRefusalError('invalid-command', 'Invalid SDCP file name')
   return name
 }
 
@@ -36,10 +37,14 @@ export function buildSdcpCommand(
   args: Record<string, unknown> = {},
 ): { Cmd: number; Data: Record<string, unknown> } {
   const profile = sdcpProfile(model)
-  if (!profile) throw new Error('Unsupported SDCP model')
+  if (!profile)
+    throw new DriverRefusalError('unsupported-action', 'Unsupported SDCP model')
   const allowed = action === 'start_print' ? ['file'] : []
   if (Object.keys(args).some((key) => !allowed.includes(key)))
-    throw new Error(`Unexpected SDCP argument for ${action}`)
+    throw new DriverRefusalError(
+      'invalid-command',
+      `Unexpected SDCP argument for ${action}`,
+    )
   switch (action) {
     case 'status':
       return { Cmd: 0, Data: {} }
@@ -70,7 +75,10 @@ export function buildSdcpCommand(
       }
     }
     default:
-      throw new Error(`Unsupported SDCP action '${String(action)}'`)
+      throw new DriverRefusalError(
+        'unsupported-action',
+        `Unsupported SDCP action '${String(action)}'`,
+      )
   }
 }
 

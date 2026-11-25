@@ -63,3 +63,30 @@ export const SDCP_CONTROL_ACTIONS = Object.freeze([
   'start_print',
 ] as const)
 export type SdcpAction = (typeof SDCP_CONTROL_ACTIONS)[number]
+
+/** One exact model and firmware pair. */
+export type SdcpQualification = Readonly<{
+  model: string
+  firmwareVersion: string
+}>
+
+/**
+ * Pairs whose start (Cmd 128) passed a supervised run on hardware. Cmd 128 is
+ * reported to crash first-generation Centauri Carbon and resin firmware, so
+ * every other pair is neither offered nor sent a start. Add a pair only with
+ * that run recorded in docs/fullfarmmanager/evidence/elegoo.md.
+ */
+export const SDCP_QUALIFIED_STARTS: readonly SdcpQualification[] =
+  Object.freeze([])
+
+export function sdcpStartQualified(
+  model: string,
+  firmwareVersion: string,
+  qualified: readonly SdcpQualification[] = SDCP_QUALIFIED_STARTS,
+): boolean {
+  return qualified.some(
+    (pair) =>
+      sdcpModelKey(pair.model) === sdcpModelKey(model) &&
+      pair.firmwareVersion === firmwareVersion,
+  )
+}

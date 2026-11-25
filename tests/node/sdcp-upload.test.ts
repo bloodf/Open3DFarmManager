@@ -76,7 +76,9 @@ for (const [model, name] of [
   ['Mars 5 Ultra', 'a part.goo'],
   ['Centauri Carbon', 'part.gcode'],
 ] as const) {
-  test(`${model} stores a chunked upload and starts the stored file`, async (t) => {
+  // Resin files start only as a validated library version, never by name.
+  const starts = model === 'Centauri Carbon'
+  test(`${model} stores a chunked upload and ${starts ? 'starts' : 'refuses a bare start of'} the stored file`, async (t) => {
     const { sim, machine, binding, bytes, upload } = await world(t, model)
     await upload(name)
     assert.equal(sha(machine.files.get(name)!), sha(bytes))
@@ -99,10 +101,12 @@ for (const [model, name] of [
       clock: { monotonicNow: () => performance.now() },
       publish: (observation) => observation && seen.push(observation),
       signal: new AbortController().signal,
+      // The shipped list is empty; this qualifies the simulator.
+      qualifiedStarts: [{ model, firmwareVersion: 'V1.0.0' }],
     })
     t.after(() => control.close())
     await control.prepare()
-    await control.driver.execute!(
+    const start = control.driver.execute!(
       'start_print',
       { file: name },
       {
@@ -111,6 +115,12 @@ for (const [model, name] of [
         beforeSend: () => true,
       },
     )
+    if (!starts) {
+      await assert.rejects(start, /resin-artifact-requires-library-version/)
+      assert.equal(machine.phase, 'idle')
+      return
+    }
+    await start
     assert.equal(seen.at(-1)?.printState, 'printing')
     assert.equal(machine.filename, name)
   })

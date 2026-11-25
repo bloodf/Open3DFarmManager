@@ -296,14 +296,18 @@ Observed on firmware 2.0.2.8 (S1):
 - Source S1 observed firmware 2.0.2.8 answering with a printer-chosen `msgid`. No hardware report in
   this repository shows either behavior for a command, so exact matching stays the default and
   fails closed: the request ends as `received` or `unanswered`. For firmware that replaces or omits
-  report ids, the connection may be opened with `reportIdentity: 'printer-assigned'`. A report then
+  report ids, a printer qualified for it may carry `"reportIdentity": "printer-assigned"` in its
+  row of `kobra-x-bindings.json`. Onboarding never writes it, and the signed control driver passes
+  it only for that printer. A report then
   also settles a request when the printer acknowledged that request's `msgid`, the `type` and
   `action` match, the report's `msgid` is empty or none this connection issued, no other request
   (acknowledged or not) waits on the same `type` and `action`, and no request on them ended without
   a result in the last 30 s, since its report may still arrive. A report that fits and came from
   another client cannot be told apart, so this mode is opt-in. A report settled this way is never
   evidence that the command took effect: the outcome stays uncorrelated, and a control is confirmed
-  only by fresh state read back after the write.
+  only by fresh state read back after the write. Light and idle fan commands have no read-back
+  query, so on such a printer they end unconfirmed. Readiness still needs the printer to echo the
+  IDs of the state queries: firmware that replaces those too gets no command written at all.
 - Control readiness is stricter than outcomes. A printer state counts as current only when the
   reply echoes the `msgid` of the latest `info` query. A busy `info` reply is current only after the
   latest `print` query was answered with a successful reply that names a job phase (`printing`,
@@ -347,7 +351,9 @@ Advertised controls follow evidence from the printer's own reports: the ACE
 light (`set_light`) once the chamber light is reported, and the fan (`set_fan`)
 once the part fan speed is reported. Until evidence exists, or once the printer is
 unreachable, only `pause`, `resume`, `cancel`, `set_temperature` and
-`start_print` are offered. The status collection publishes the evidence and the
+`start_print` are offered. After 30 s without a report the evidence is withdrawn until a newer
+report arrives. A full `info/report` (one that names `state`) without the light or the fan speed
+withdraws that one on the same connection. The status collection publishes the evidence and the
 advertisement is refreshed when it changes.
 
 ## Status and reports

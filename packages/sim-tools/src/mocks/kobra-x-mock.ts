@@ -188,6 +188,20 @@ export interface KobraXMockOptions {
    * absent one is left out of every report, as hardware without it would.
    */
   accessories?: Partial<KobraXAccessories> | undefined
+  /**
+   * Synthetic, reference-derived (not captured): answer Connector requests with
+   * a printer-made report `msgid` while the ack keeps the request's own, as
+   * described in bloodf/kobracontrol@c414db4f36d4c96f2b232c368ad6cfe56e3d0408
+   * docs/protocol.md, "Requests and replies". `commands` still echoes the IDs
+   * of state queries (`query`, `getInfo`); `all` echoes none. Default: echo.
+   */
+  printerChosenReportIds?: 'commands' | 'all' | undefined
+  /**
+   * Synthetic, not captured: the reports selected by `printerChosenReportIds`
+   * carry no `msgid` at all. No cited source observed this; it exercises the
+   * missing-ID branch of `printer-assigned` (kobra-x/requests.ts).
+   */
+  omitReplacedReportIds?: boolean | undefined
   printDurationMs?: number | undefined
   preparationPhases?: readonly KobraXJobPhase[] | undefined
   preparationStepMs?: number | undefined
@@ -876,6 +890,8 @@ export async function startKobraXMock(
   // Latest unanswered Connector request per type/action. A scripted report for
   // that type/action stands in for the printer's own answer and carries its ID.
   const openRequestIds = new Map<string, string>()
+  /** Request IDs this printer answers with an ID of its own. */
+  const replacedIds = new Set<string>()
   function nextMsgId() {
     reportSeq += 1
     return `printer-msg-${reportSeq}`
@@ -953,10 +969,18 @@ export async function startKobraXMock(
       clientKind?: KobraXClientKind
     } = {},
   ) {
+    const echoed = reportOptions.msgid ?? replyMsgid
+    const replaced = echoed !== undefined && replacedIds.has(echoed)
     const body = {
       type,
       action,
-      msgid: reportOptions.msgid ?? replyMsgid ?? nextMsgId(),
+      // `undefined` drops the key from the serialized report.
+      msgid:
+        replaced && options.omitReplacedReportIds
+          ? undefined
+          : echoed === undefined || replaced
+            ? nextMsgId()
+            : echoed,
       timestamp: Date.now(),
       state: reportOptions.state ?? 'done',
       code: reportOptions.code ?? 200,
@@ -1159,6 +1183,13 @@ export async function startKobraXMock(
 
       // 1. Immediate ACK on <deviceId>/response
       publishAck(msgid, clientKind)
+
+      const mode = options.printerChosenReportIds
+      if (
+        mode === 'all' ||
+        (mode === 'commands' && action !== 'query' && action !== 'getInfo')
+      )
+        replacedIds.add(msgid)
 
       // 2. Dispatch per message type
       replyMsgid = connectorRequestId.test(msgid) ? msgid : undefined

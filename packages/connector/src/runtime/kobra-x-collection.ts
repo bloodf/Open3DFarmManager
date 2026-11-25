@@ -138,20 +138,20 @@ export function createKobraXCollection(input: {
       while (!signal.aborted) {
         const printer = adapter.snapshot()
         const now = performance.now()
-        publishEvidence(
+        const offered = () =>
           printer.state === 'offline' || !adapter.facts
             ? undefined
-            : readKobraXControlEvidence(adapter.facts(), printer),
-        )
+            : readKobraXControlEvidence(adapter.facts(), printer)
         if (printer.state !== 'offline' && printer.observedAt !== lastReport) {
           lastReport = printer.observedAt
           lastSeen = now
-          withdrawn = false
           const parsed = PrinterState.safeParse({
             ...printer,
             printerKey: binding.printerKey,
           })
           if (parsed.success) {
+            withdrawn = false
+            publishEvidence(offered())
             const stamped = Object.fromEntries(
               Object.keys(parsed.data).map((key) => [key, now]),
             )
@@ -177,7 +177,11 @@ export function createKobraXCollection(input: {
         } else if (!withdrawn && now - lastSeen >= STALE_MS) {
           withdrawn = true
           invalidate()
+        } else if (!withdrawn) {
+          publishEvidence(offered())
         }
+        // Withdrawn evidence is never published again from the same reports:
+        // only a newer report (above) brings it back.
         if (now - lastSeen >= REBUILD_MS) return 'retry'
         await wait(input.pollMs ?? POLL_MS, signal)
       }

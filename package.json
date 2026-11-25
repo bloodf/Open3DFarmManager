@@ -51,7 +51,7 @@
     "esbuild": "0.28.2",
     "node-datachannel": "0.33.6",
     "nuxt": "4.6.4",
-    "openid-client": "6.9.0",
+    "openid-client": "6.9.1",
     "playwright-core": "1.65.1",
     "prettier": "3.10.1",
     "typescript": "7.0.2",

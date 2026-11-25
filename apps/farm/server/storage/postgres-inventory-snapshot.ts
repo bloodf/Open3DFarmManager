@@ -120,7 +120,11 @@ export async function prefetchSpoolMembership(
           : []
       }),
     )
-    if (pending.length === 4) break
+    if (pending.length === 4) {
+      const results = (await Promise.all(pending)).flat()
+      if (results.length) return results
+      pending.length = 0
+    }
   }
   const results = await Promise.all(pending)
   return results.flat()

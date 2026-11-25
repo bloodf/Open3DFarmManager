@@ -166,7 +166,11 @@ export function projectHistory(
   let position = since
   for (const interval of intervals) {
     if (interval.from > position)
-      timeline.push({ from: position, until: interval.from, state: 'gap' })
+      timeline.push({
+        from: position,
+        until: Math.min(until, interval.from),
+        state: 'gap',
+      })
     const from = Math.max(position, interval.from)
     if (interval.until > from) timeline.push({ ...interval, from })
     position = Math.max(position, interval.until)

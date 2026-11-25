@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, useId } from 'vue'
 import type { FarmKeyState, FarmRow } from '../utils/farm-view.ts'
 import { controlActionAvailability, type Clock } from '../utils/farm-control.ts'
 import { filamentTrays, macroActions, macroArgs } from '../utils/farm-macros.ts'
@@ -36,6 +36,9 @@ const tray = ref('')
 const selected = computed(() =>
   trays.value.find((item) => String(item.id) === tray.value),
 )
+/** A chosen tray that left the live observation. Never replaced by automatic. */
+const trayMissing = computed(() => tray.value !== '' && !selected.value)
+const trayMissingId = useId()
 const selectedSpool = computed(() => {
   const material = selected.value?.material
   if (!material || props.row.observation?.historical) return undefined
@@ -58,8 +61,7 @@ function run(name: string, event: Event) {
   if (args && available('run_macro')) emit('action', 'run_macro', args, event)
 }
 function load(event: Event) {
-  if (!available('load_filament')) return
-  if (tray.value && !selected.value) return
+  if (!available('load_filament') || trayMissing.value) return
   emit(
     'action',
     'load_filament',
@@ -84,10 +86,18 @@ function load(event: Event) {
       Executar {{ name }}
     </button>
     <template v-if="actions.load">
-      <label v-if="trays.length"
+      <label v-if="trays.length || trayMissing"
         >Bandeja AMS
-        <select v-model="tray" :disabled="!available('load_filament')">
+        <select
+          v-model="tray"
+          :disabled="!available('load_filament')"
+          :aria-invalid="trayMissing ? 'true' : undefined"
+          :aria-describedby="trayMissing ? trayMissingId : undefined"
+        >
           <option value="">Seleção automática</option>
+          <option v-if="trayMissing" :value="tray" disabled>
+            Bandeja indisponível
+          </option>
           <option v-for="item in trays" :key="item.id" :value="String(item.id)">
             {{ item.label }}
           </option>
@@ -104,9 +114,14 @@ function load(event: Event) {
         "
         :size="32"
       />
+      <p v-if="trayMissing" :id="trayMissingId" role="alert">
+        A bandeja selecionada não está mais disponível. Escolha outra bandeja ou
+        a seleção automática para carregar.
+      </p>
       <button
         type="button"
-        :disabled="!available('load_filament')"
+        :disabled="!available('load_filament') || trayMissing"
+        :aria-describedby="trayMissing ? trayMissingId : undefined"
         @click="load"
       >
         Carregar filamento

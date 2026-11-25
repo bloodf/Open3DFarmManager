@@ -94,6 +94,7 @@ const selectedKobraInputs = computed(() =>
 const selectedKobraInput = computed(() => selectedKobraInputs.value[0])
 const selectedLoadInputId = ref('')
 const loadInputError = ref('')
+const loadInputSelect = ref<HTMLSelectElement | null>(null)
 const selectedLoadInput = computed(() =>
   availableKobraInputs.value.find(
     (input) => String(input.id) === selectedLoadInputId.value,
@@ -103,6 +104,7 @@ function loadFilament(event: Event) {
   const args = filamentLoadArgs(selectedLoadInput.value)
   if (!args) {
     loadInputError.value = 'Selecione uma entrada de filamento para carregar.'
+    void nextTick(() => loadInputSelect.value?.focus())
     return
   }
   loadInputError.value = ''
@@ -1203,40 +1205,6 @@ watch(
               />
             </template>
           </template>
-          <Button
-            v-if="state?.controls?.includes('load_filament')"
-            type="button"
-            :disabled="
-              !availability('load_filament').available || commandInFlight
-            "
-            @click="(event: Event) => loadFilament(event)"
-          >
-            Carregar filamento
-          </Button>
-          <label for="detail-load-filament-input">Entrada para carregar</label>
-          <select
-            id="detail-load-filament-input"
-            v-model="selectedLoadInputId"
-            :aria-describedby="
-              loadInputError ? 'detail-load-filament-error' : undefined
-            "
-            @change="loadInputError = ''"
-          >
-            <option value="">Selecione uma entrada</option>
-            <option
-              v-for="input in availableKobraInputs"
-              :key="input.id"
-              :value="String(input.id)"
-            >
-              {{ input.label }}
-            </option>
-          </select>
-          <span
-            v-if="loadInputError"
-            id="detail-load-filament-error"
-            role="alert"
-            >{{ loadInputError }}</span
-          >
           <span
             >Selecione um arquivo .3mf ou .gcode já armazenado na
             impressora.</span
@@ -1257,6 +1225,53 @@ watch(
           Iniciar impressão
         </Button>
       </form>
+      <fieldset
+        v-if="
+          vendorFrame.vendor === 'kobra-x' &&
+          state?.controls?.includes('load_filament')
+        "
+        class="print-form load-filament-group"
+      >
+        <legend>Carregamento de filamento</legend>
+        <label for="detail-load-filament-input">Entrada para carregar</label>
+        <select
+          id="detail-load-filament-input"
+          ref="loadInputSelect"
+          v-model="selectedLoadInputId"
+          :aria-invalid="loadInputError ? 'true' : undefined"
+          :aria-describedby="
+            loadInputError ? 'detail-load-filament-error' : undefined
+          "
+          @change="loadInputError = ''"
+        >
+          <option value="">Selecione uma entrada</option>
+          <option
+            v-for="input in availableKobraInputs"
+            :key="input.id"
+            :value="String(input.id)"
+          >
+            {{ input.label }}
+          </option>
+        </select>
+        <span
+          v-if="loadInputError"
+          id="detail-load-filament-error"
+          role="alert"
+          >{{ loadInputError }}</span
+        >
+        <span v-if="!availableKobraInputs.length"
+          >Nenhuma entrada de filamento disponível na observação atual.</span
+        >
+        <Button
+          type="button"
+          :disabled="
+            !availability('load_filament').available || commandInFlight
+          "
+          @click="(event: Event) => loadFilament(event)"
+        >
+          Carregar filamento
+        </Button>
+      </fieldset>
       <template v-if="vendorFrame.detail.fans?.length">
         <h2>Ventoinhas</h2>
         <div v-for="fan in vendorFrame.detail.fans" :key="fan.name">

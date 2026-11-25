@@ -487,7 +487,15 @@ export const ControlArguments = z.discriminatedUnion('action', [
   }),
   z.strictObject({
     action: z.literal('load_filament'),
-    args: z.strictObject({ tray: z.number().int().min(0).max(15).optional() }),
+    args: z.strictObject({
+      // Global tray index: 0-15, or an AMS HT unit id (128-135).
+      tray: z
+        .union([
+          z.number().int().min(0).max(15),
+          z.number().int().min(128).max(135),
+        ])
+        .optional(),
+    }),
   }),
   z.strictObject({
     action: z.enum([

@@ -59,7 +59,11 @@ const DEFAULT_SPOOL_SLOTS = [
 ]
 
 function activeSpoolSlots(row: FarmRow): string[] {
-  if (row.observation?.historical) return [...DEFAULT_SPOOL_SLOTS]
+  if (
+    row.observation?.historical ||
+    (row.observation && observationAge(row.observation, liveNow()).stale)
+  )
+    return [...DEFAULT_SPOOL_SLOTS]
   const fromMaterials = (row.observation?.state.materials ?? []).map(
     (material) => material.slot,
   )
@@ -183,7 +187,10 @@ function dateLabel(time: number) {
           </div>
         </dl>
         <FarmMaterials
-          v-if="!row.observation.historical"
+          v-if="
+            !row.observation.historical &&
+            !observationAge(row.observation, liveNow()).stale
+          "
           :materials="row.observation.state.materials"
           :bindings="bindings"
           :active-spools="activeSpools"
@@ -216,12 +223,18 @@ function dateLabel(time: number) {
           :moonraker-managed="moonrakerManagesSpool(row)"
           @change="emit('spoolAssignments', $event)"
           :materials="
-            row.observation.historical
+            row.observation.historical ||
+            observationAge(row.observation, liveNow()).stale
               ? undefined
               : row.observation.state.materials
           "
           :bindings="bindings"
-          :active-spools="row.observation.historical ? undefined : activeSpools"
+          :active-spools="
+            row.observation.historical ||
+            observationAge(row.observation, liveNow()).stale
+              ? undefined
+              : activeSpools
+          "
         />
         <FarmEnvironment
           :fans="row.observation.state.fans"

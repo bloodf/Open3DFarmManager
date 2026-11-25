@@ -82,12 +82,14 @@ const finish = computed(() => {
 // Last-known materials are never drawn: a reel with an old colour and level
 // would pass for the filament that is loaded now.
 const slots = computed(() =>
-  props.observation?.historical
+  props.observation?.historical || age.value?.stale
     ? undefined
     : farmSlotViews(state.value?.materials, props.bindings, props.activeSpools),
 )
 const staleMaterials = computed(
-  () => !!props.observation?.historical && !!state.value?.materials?.length,
+  () =>
+    !!(props.observation?.historical || age.value?.stale) &&
+    !!state.value?.materials?.length,
 )
 
 function temperature(value: number | undefined) {

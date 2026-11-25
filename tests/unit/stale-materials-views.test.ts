@@ -79,7 +79,9 @@ import { renderToString } from 'vue/server-renderer'
 import FarmPrinterCard from '${join(root, 'app/components/farm/FarmPrinterCard.vue')}'
 import PrinterWallCard from '${join(root, 'app/components/farm/PrinterWallCard.vue')}'
 import PrinterWallTable from '${join(root, 'app/components/farm/PrinterWallTable.vue')}'
-const rows = ${JSON.stringify([row(true, '001'), row(false, '002')])}
+const rows = ${JSON.stringify([row(true, '001'), row(false, '002'), row(false, '003')])}
+rows[2].observation.received = { wall: -999999, mono: -999999 }
+rows[2].observation.state.observedAt = -999999
 const now = { wall: 1000, mono: 1000 }
 export async function render() {
   return renderToString(createSSRApp({ render: () => h('main', [
@@ -122,6 +124,8 @@ it('hides historical material data in all three views and keeps live data', asyn
   expect(view('farm-1')).toContain('PLA-TESTE')
   expect(view('wall-0')).not.toContain('PLA-TESTE')
   expect(view('wall-1')).toContain('PLA-TESTE')
+  expect(view('farm-2')).not.toContain('PLA-TESTE')
+  expect(view('wall-2')).not.toContain('PLA-TESTE')
   const table = view('table')
   expect(table).toContain('Materiais')
   const rowCells = (printer: string) => {
@@ -136,4 +140,5 @@ it('hides historical material data in all three views and keeps live data', asyn
   }
   expect(rowCells('Printer-001')[8]).toBe('Indisponível')
   expect(rowCells('Printer-002')[8]).toBe('PLA-TESTE')
+  expect(rowCells('Printer-003')[8]).toBe('Indisponível')
 })

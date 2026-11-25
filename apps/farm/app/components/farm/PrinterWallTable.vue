@@ -79,14 +79,15 @@ const sortedRows = computed(() => {
       const state = row.observation?.state
       // Last-known materials are never drawn: stale colour and level would
       // pass for the filament that is loaded now.
-      const spools = row.observation?.historical
-        ? undefined
-        : farmSlotViews(
-            state?.materials,
-            props.bindingsFor?.(row),
-            props.activeSpoolsFor?.(row),
-          )
       const age = row.observation && observationAge(row.observation, now)
+      const spools =
+        row.observation?.historical || age?.stale
+          ? undefined
+          : farmSlotViews(
+              state?.materials,
+              props.bindingsFor?.(row),
+              props.activeSpoolsFor?.(row),
+            )
       const printerAlarms = formatPrinterAlarmLabel(state?.alarms)
       const alerts = [
         row.connection !== 'authenticated' && 'Sem conexão direta',
@@ -103,7 +104,7 @@ const sortedRows = computed(() => {
         state?.toolTemperatureCelsius,
         state?.bedTemperatureCelsius,
         state?.filename,
-        row.observation?.historical
+        row.observation?.historical || age?.stale
           ? undefined
           : state?.materials
               ?.map((material) => material.materialType || material.slot)

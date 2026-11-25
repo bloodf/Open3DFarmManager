@@ -14,7 +14,15 @@ export interface ConfigurationSocketPort {
   close(): void
 }
 type State =
-  | { kind: 'browser.begin' }
+  | {
+      kind: 'browser.begin'
+      retry?: {
+        attempts: number
+        farmId: string
+        agentId: string
+        keyId: string
+      }
+    }
   | { kind: 'connector.begin'; attempts: number }
   | { kind: 'connector.proof'; handle: ConfigurationSignallingHandle }
   | { kind: 'connector.ready'; handle: ConfigurationSignallingHandle }
@@ -77,18 +85,43 @@ export function createConfigurationSocketSession(input: {
       case 'browser.begin': {
         if (frame.t !== 'config.begin' || !input.sessionRecordId)
           throw new Error('Expected config.begin')
+        const scope = {
+          farmId: frame.farm_id,
+          agentId: frame.agent_id,
+          keyId: frame.key_id,
+        }
+        const retry = current.retry
+        if (
+          retry &&
+          (retry.farmId !== scope.farmId ||
+            retry.agentId !== scope.agentId ||
+            retry.keyId !== scope.keyId)
+        )
+          throw new Error('Configuration retry scope mismatch')
         const opened = await coordinator.open(
           {
             sessionRecordId: input.sessionRecordId,
-            farmId: frame.farm_id,
-            agentId: frame.agent_id,
-            keyId: frame.key_id,
+            ...scope,
           },
           endpoint,
+          retry !== undefined,
         )
         if (!opened || state !== current) {
-          if (opened) coordinator.closeHandle(opened.handle)
+          if (opened?.kind === 'ready') coordinator.closeHandle(opened.handle)
           throw new Error('Configuration signalling denied')
+        }
+        if (opened.kind === 'retry') {
+          const attempts = (retry?.attempts ?? 0) + 1
+          if (attempts > 2) throw new Error('Connector renewal timed out')
+          state = { kind: 'browser.begin', retry: { ...scope, attempts } }
+          port.send(
+            encodeConfigurationSignallingServerFrame({
+              v: 1,
+              t: 'config.retry',
+              retry_after_ms: opened.retryAfterMs,
+            }),
+          )
+          return
         }
         cancelAdmission()
         state = { kind: 'browser.relay', handle: opened.handle }

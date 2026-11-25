@@ -292,6 +292,74 @@ test('refusal expired: envelope past its expiry', async (t) => {
   await expectRefusal(f, wire, 'expired')
 })
 
+test('API U1 home audits a late acknowledgement once without extending write authority', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const f = await fixture()
+  t.after(f.cleanup)
+  f.state.observation = { ready: true, printState: 'idle' }
+  const args = { axes: ['x', 'y', 'z'] }
+  let audited = false
+  const runner = createApiCommandRunner({
+    ...f.runnerConfig,
+    driver: {
+      ...f.runnerConfig.driver,
+      allowsExtendedResult: () => true,
+      async execute(action, commandArgs, input) {
+        const result = await f.runnerConfig.driver.execute(
+          action,
+          commandArgs,
+          input,
+        )
+        assert.equal(result.acknowledged, true)
+        f.advance(5200)
+        t.mock.timers.tick(5200)
+        return result
+      },
+    },
+    async confirmEffect(command, { signal }) {
+      assert.deepEqual(command, { action: 'home', args })
+      assert.equal(signal.aborted, false)
+      audited = true
+      return true
+    },
+  })
+  const wire = await f.envelope(
+    { action: 'home', args },
+    { expires_at: f.now() + 5000 },
+  )
+  assert.deepEqual(await runner.run(wire), { kind: 'completed' })
+  assert.equal(audited, true)
+  const cmdId = JSON.parse(wire).envelope.cmd_id
+  assert.equal(readCommandOutcome(f.journal, cmdId)?.status, 'applied')
+  assert.deepEqual(await runner.run(wire), {
+    kind: 'refused',
+    code: 'expired',
+    detail: 'envelope expired',
+  })
+  assert.deepEqual(f.sent, [{ action: 'home', args }])
+})
+
+test('API U1 home cannot write after the original five-second bound', async (t) => {
+  const f = await fixture()
+  t.after(f.cleanup)
+  f.state.observation = { ready: true, printState: 'idle' }
+  const runner = createApiCommandRunner({
+    ...f.runnerConfig,
+    driver: {
+      ...f.runnerConfig.driver,
+      allowsExtendedResult: () => true,
+      execute(action, args, input) {
+        f.advance(5200)
+        return f.runnerConfig.driver.execute(action, args, input)
+      },
+    },
+  })
+  const wire = await f.envelope({ action: 'home', args: { axes: ['x', 'y'] } })
+  assert.equal((await runner.run(wire)).kind, 'refused')
+  assert.equal(f.reports.at(-1)?.refusal_code, 'expired')
+  assert.deepEqual(f.sent, [])
+})
+
 test('refusal unsupported: action the printer driver does not offer', async (t) => {
   const f = await fixture()
   t.after(f.cleanup)

@@ -2,6 +2,7 @@ import { boundPrinterString } from '@open3dfarmmanager/farm-protocol'
 import type { KobraXPrinterState } from './gate.ts'
 import type { PrinterState } from '../../../farm-protocol/src/state.ts'
 import { record } from './discovery.ts'
+import { anycubicAlert, isAnycubicFaultCode } from '../anycubic/alerts.ts'
 
 const preparing = new Set([
   'checking',
@@ -17,6 +18,11 @@ const preparing = new Set([
   'frequency_sweeping',
   'hotbed_cooling_off',
   'nozzle_cooling_off',
+  // Also in `PRE_PRINT` of bloodf/kobracontrol@c414db4f36d4c96f2b232c368ad6cfe56e3d0408
+  // src/kobracontrol/kobra.py. Status only: control phases stay in `facts.ts`.
+  'preheating',
+  'init',
+  'extfilbox_filament_feeding',
 ])
 
 function nonnegative(value: unknown) {
@@ -53,6 +59,9 @@ export function createKobraXStatus(printerKey: string, address: string) {
       }
       if (data.state === 'busy' && next.state !== 'paused')
         next.state = 'printing'
+      // A pause reason ends with the pause; an end fault with the next job.
+      if (next.state !== 'error' && next.state !== 'paused')
+        delete next.statusMessage
       if (
         typeof data.version === 'string' &&
         data.version.length <= 64 &&
@@ -75,6 +84,21 @@ export function createKobraXStatus(printerKey: string, address: string) {
           // Ignore malformed camera URLs.
         }
       }
+    }
+    // A full `info/report` (it names `state`) lists what the printer carries,
+    // so an accessory missing from it is no longer evidence. Other reports are
+    // partial and clear nothing. `fan_speed_pct` is an optional `info` field in
+    // bloodf/OrcaSlicer@d0a76d08d3493352c6c575ee242e2d71356e400e
+    // src/slic3r/Utils/KobraX.cpp (`on_info`); `light/report` is read in
+    // `State::apply` there. No cited source documents the `info.lights` array:
+    // its absence withdraws the light, which fails closed.
+    const fullInfo =
+      type === 'info' &&
+      (message.action === 'report' || message.action === 'query') &&
+      (data.state === 'free' || data.state === 'busy')
+    if (fullInfo) {
+      delete next.fans
+      delete next.light
     }
     if (type !== 'multiColorBox') {
       if (type === 'info' || type === 'print' || type === 'fan') {
@@ -120,19 +144,33 @@ export function createKobraXStatus(printerKey: string, address: string) {
         if (elapsed !== undefined) next.printDuration = elapsed
         ended = false
         delete next.lastJob
+        if (phase === 'printing') delete next.statusMessage
+        else if (isAnycubicFaultCode(message.code))
+          next.statusMessage = anycubicAlert(
+            'paused',
+            message.code,
+            message.msg,
+          ).message
+        else if (status.state !== 'paused') delete next.statusMessage
       } else if (typeof phase === 'string' && preparing.has(phase)) {
         next.state = 'printing'
         ended = false
         delete next.lastJob
+        delete next.statusMessage
       } else if (phase === 'finished' || phase === 'stoped') {
         const outcome =
           phase === 'finished'
             ? 'completed'
-            : message.code === undefined ||
-                message.code === 0 ||
-                message.code === 200
-              ? 'cancelled'
-              : 'failed'
+            : isAnycubicFaultCode(message.code)
+              ? 'failed'
+              : 'cancelled'
+        if (outcome === 'failed')
+          next.statusMessage = anycubicAlert(
+            'ended',
+            message.code,
+            message.msg,
+          ).message
+        else delete next.statusMessage
         next.state = outcome === 'failed' ? 'error' : 'idle'
         if (outcome === 'completed') next.progress = 1
         if (!ended)
@@ -168,7 +206,7 @@ export function createKobraXStatus(printerKey: string, address: string) {
                     .toUpperCase()
                 : undefined
             return {
-              slot: `${boxIndex + 1}-${slotIndex + 1}`,
+              slot: `${Number.isInteger(box.id) ? box.id : boxIndex}:${Number.isInteger(slot.index) ? slot.index : slotIndex}`,
               active: (slot.index ?? slotIndex) === box.loaded_slot,
               ...(typeof slot.type === 'string'
                 ? { materialType: boundPrinterString(slot.type, 64) }
@@ -191,6 +229,7 @@ export function createKobraXStatus(printerKey: string, address: string) {
     cameraUrl: () => cameraUrl,
     disconnect() {
       status = { ...status, state: 'offline', observedAt: Date.now() }
+      delete status.statusMessage
       cameraUrl = undefined
     },
   }

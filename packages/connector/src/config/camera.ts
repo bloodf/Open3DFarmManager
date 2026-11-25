@@ -92,6 +92,14 @@ const CameraRuntime = z.strictObject({
           }),
           BambuSource,
           MjpegSource('creality-mjpeg'),
+          // Creality `webrtc_local` signalling; the path is fixed. Encrypted
+          // signalling on the advertised videoPort is not implemented.
+          z.strictObject({
+            kind: z.literal('creality-webrtc'),
+            address: z.ipv4().refine(localAddress),
+            port: z.number().int().min(1).max(65535),
+            path: z.literal('/call/webrtc_local').default('/call/webrtc_local'),
+          }),
           MjpegSource('anycubic-rinkhals'),
           Source.extend({
             kind: z.literal('kobra-x-flv'),

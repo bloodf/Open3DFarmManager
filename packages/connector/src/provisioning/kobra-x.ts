@@ -4,6 +4,7 @@ import { z } from 'zod'
 import type { KobraXNativeConfigurationTarget } from '../../../farm-protocol/src/configuration-target.ts'
 import type { ConfigurationErrorCode } from '../../../farm-protocol/src/configuration-frames.ts'
 import { configurationOpaqueId } from '../../../farm-protocol/src/configuration-common.ts'
+import { captureAnycubicPeerPin } from '../anycubic/tls-trust.ts'
 import {
   EMPTY_KOBRA_X_BINDINGS,
   KOBRA_X_BINDINGS_MAX_BYTES,
@@ -22,6 +23,7 @@ import {
   writeKobraClientCertFile,
 } from '../config/kobra-x-cert.ts'
 import { readPrivateJsonFile } from '../config/local.ts'
+import { isLocalAddress } from '../kobra-x/discovery.ts'
 import { connectKobraX } from '../kobra-x/index.ts'
 import type { CommitPlan } from './journal.ts'
 import {
@@ -60,10 +62,10 @@ export type KobraXProbeResult =
   | { ok: false; code: ConfigurationErrorCode }
 
 /**
- * Connection confirmation. It reads `/info`, recovers the MQTT credentials in
- * memory, logs in over mutual TLS, subscribes, and pins the server leaf. It
- * publishes only the adapter's own read queries. Tests drive it against the
- * loopback mock through the optional endpoint overrides.
+ * Connection confirmation. Capture the peer key before opening the MQTT
+ * session, then reconnect with that pin and confirm identity over mutual TLS.
+ * The adapter publishes only read queries. Tests use the optional loopback
+ * endpoint overrides.
  */
 export interface KobraXProbeInput {
   host: string
@@ -130,47 +132,40 @@ export const probeKobraXLan: KobraXProbe = async (input) => {
   const loaded = readKobraClientCertMaterial(input.certFile)
   if (!loaded.ok) return { ok: false, code: certErrorCode(loaded.reason) }
   if (input.signal.aborted) return { ok: false, code: 'bridge-unavailable' }
+  const address = input.address ?? input.host
+  if (!isLocalAddress(address)) return { ok: false, code: 'not-available' }
+  const mqttPort = input.mqttPort ?? 9883
+  const clientIdentity = {
+    cert: loaded.cert.certificatePem,
+    key: loaded.cert.keyPem,
+  }
   let adapter: Awaited<ReturnType<typeof connectKobraX>> | undefined
   try {
-    adapter = await Promise.race([
-      connectKobraX({
-        address: input.address ?? input.host,
-        printerKey: 'probe',
-        clientIdentity: {
-          cert: loaded.cert.certificatePem,
-          key: loaded.cert.keyPem,
-        },
-        ...(input.httpPort ? { httpPort: input.httpPort } : {}),
-        ...(input.mqttPort ? { mqttPort: input.mqttPort } : {}),
-        // A confirmation that retries would outlive its own timeout.
-        reconnectMs: PROBE_TIMEOUT_MS,
-        onError() {},
-      }),
-      new Promise<never>((_, reject) => {
-        const timer = setTimeout(
-          () => reject(new Error('Kobra X probe timed out')),
-          PROBE_TIMEOUT_MS,
-        )
-        input.signal.addEventListener(
-          'abort',
-          () => {
-            clearTimeout(timer)
-            reject(new Error('Kobra X probe aborted'))
-          },
-          { once: true },
-        )
-      }),
-    ])
-    const pinSha256 = adapter.fingerprint()
+    const pinSha256 = await captureAnycubicPeerPin(
+      { host: address, port: mqttPort, ...clientIdentity },
+      input.signal,
+    )
+    input.signal.throwIfAborted()
+    adapter = await connectKobraX({
+      address,
+      printerKey: 'probe',
+      clientIdentity,
+      pinSha256,
+      ...(input.httpPort ? { httpPort: input.httpPort } : {}),
+      mqttPort,
+      // A confirmation that retries would outlive its own timeout.
+      reconnectMs: PROBE_TIMEOUT_MS,
+      onError() {},
+    })
     const { deviceId, modelId, name } = adapter.identity
-    if (!pinSha256 || !/^[a-f0-9]{64}$/.test(pinSha256))
-      return { ok: false, code: 'bridge-unavailable' }
+    const firmware = await observedFirmware(adapter, input.signal)
+    input.signal.throwIfAborted()
     return {
       ok: true,
       modelId,
       deviceId,
       model: OBSERVED_TEXT.test(name) ? name : null,
-      firmware: await observedFirmware(adapter, input.signal),
+      firmware,
       pinSha256,
     }
   } catch (error) {

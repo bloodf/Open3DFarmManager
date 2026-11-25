@@ -1,5 +1,6 @@
 import {
   ExtendedControlAction,
+  U1_CONTROL_RESULT_TIMEOUT_MS,
   type ControlResultCode,
 } from '../../../../../packages/farm-protocol/src/control-actions.ts'
 import { canonicalize } from '../../../../../packages/farm-protocol/src/canonical.ts'
@@ -69,6 +70,8 @@ export type PauseCommandTransport = Readonly<{
 export type PauseCommandClientOptions = Readonly<{
   /** Existing enrolled nonextractable P-256 private key of this browser. */
   privateKey: CryptoKey
+  /** Driver family inferred from the Connector's live printer observation. */
+  driverFamily?: PauseResultDriverFamily
   issuer: PauseCommandIssuer
   transport?: PauseCommandTransport
   /** Wall clock of the browser. Injectable for tests only. */
@@ -135,6 +138,33 @@ const inert = () => false
 const ADMISSION_MS = PAUSE_POLICY_HARD_MAXIMUMS.admissionMs
 const COMMAND_MS = PAUSE_POLICY_HARD_MAXIMUMS.commandMs
 const SESSION_MS = PAUSE_POLICY_HARD_MAXIMUMS.capabilityMs
+
+export type PauseResultDriverFamily =
+  'moonraker' | 'u1' | 'kobra-x' | 'bambu' | 'unknown'
+
+/** Result waits are selected by the Connector-reported printer family. */
+export function pauseCommandResultWaitMs(
+  driverFamily: PauseResultDriverFamily,
+): number {
+  return driverFamily === 'u1' || driverFamily === 'kobra-x'
+    ? COMMAND_MS + U1_CONTROL_RESULT_TIMEOUT_MS
+    : COMMAND_MS
+}
+
+export function pauseResultDriverFamilyFromIdentity(
+  identity?: Readonly<{
+    vendor?: string | undefined
+    model?: string | undefined
+  }>,
+): PauseResultDriverFamily {
+  const value =
+    `${identity?.vendor ?? ''} ${identity?.model ?? ''}`.toLowerCase()
+  if (/snapmaker\s*u1|\bu1\b/.test(value)) return 'u1'
+  if (/kobra\s*x/.test(value)) return 'kobra-x'
+  if (/bambu/.test(value)) return 'bambu'
+  if (/klipper|moonraker/.test(value)) return 'moonraker'
+  return 'unknown'
+}
 
 type SendState = 'sent' | 'refused' | 'faulted'
 
@@ -275,7 +305,7 @@ export function createPauseCommandClient(
       resolveAdmissionGate?.()
     }, ADMISSION_MS)
   }
-  function armResult(): void {
+  function armResult(waitMs: number): void {
     clearTimer(resultTimer)
     resultTimer = undefined
     resultTimer = setTimeout(() => {
@@ -283,7 +313,7 @@ export function createPauseCommandClient(
       // The command is on the wire and no result arrived. The client cannot
       // know whether the printer paused.
       settleCommand('outcome-unknown')
-    }, COMMAND_MS)
+    }, waitMs)
   }
   function scopeMatches(
     issued: Readonly<{
@@ -435,7 +465,7 @@ export function createPauseCommandClient(
       // never reported as a clean rejection: the frame may have left the
       // transport before the failure.
       commandSent = true
-      armResult()
+      armResult(pauseCommandResultWaitMs(options.driverFamily ?? 'unknown'))
       if (
         attemptSend(() => sendCommand({ t: 'control.command', wire })) !==
         'sent'

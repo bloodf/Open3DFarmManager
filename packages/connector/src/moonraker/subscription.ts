@@ -17,9 +17,11 @@ import {
   isSnapmakerU1StatusObject,
   mapSnapmakerU1Tools,
 } from './u1-tools.ts'
+import { snapmakerU1ToolHeaters } from './u1-marker.ts'
 import {
   MoonrakerClientError,
   openMoonrakerClient,
+  readMoonrakerObjects,
   readMoonrakerReady,
   validateMoonrakerInput,
   type MoonrakerFailureReason,
@@ -58,7 +60,12 @@ export type RawMoonrakerUnavailable = Readonly<{
 }>
 
 export type MoonrakerEvent =
-  | { kind: 'snapshot'; printer: PrinterState; sourceEventtime: number }
+  | {
+      kind: 'snapshot'
+      printer: PrinterState
+      sourceEventtime: number
+      collectionReleaseAtMonoMs?: number
+    }
   | {
       kind: 'unavailable'
       printerKey: string
@@ -66,6 +73,9 @@ export type MoonrakerEvent =
     }
 
 const webhookState = z.enum(['ready', 'startup', 'shutdown', 'error'])
+// Two slow polls fit inside the farm status provider's five-second freshness
+// window, even though each observation is dated at request start.
+const U1_COMPLETE_QUERY_TIMEOUT_MS = 2000
 /**
  * A chamber reading this far from the last recorded one is a meaningful
  * change and earns its own durable telemetry record.
@@ -185,11 +195,13 @@ export function createMoonrakerSubscription(input: {
    */
   hasPendingDispatch?: () => boolean
   linkHealth?: MoonrakerLinkHealth
+  /** Monotonic time of the latest release still awaiting durable telemetry. */
+  pendingCollectionRelease?: () => number | undefined
   onEvent: (event: MoonrakerEvent) => void
   onRawObservation?: (observation: RawMoonrakerObservation) => void
   onRawUnavailable?: (event: RawMoonrakerUnavailable) => void
   signal: AbortSignal
-}): { done: Promise<void> } {
+}): { done: Promise<void>; requestCompleteRefresh: () => void } {
   const { printerKey, origin, limits } = validateMoonrakerInput(input)
   const snapmakerU1 = isSnapmakerU1Model(input.assignment.model)
   const controller = new AbortController()
@@ -235,6 +247,7 @@ export function createMoonrakerSubscription(input: {
   // status that Moonraker retains.
   let lastJob: PrinterState['lastJob']
   let hasObservedStatus = false
+  let activeClient: ReturnType<typeof openMoonrakerClient> | undefined
   async function run() {
     let backoff = limits.reconnectMinMs
     emit({ kind: 'unavailable', printerKey, reason: 'connecting' })
@@ -293,6 +306,7 @@ export function createMoonrakerSubscription(input: {
         value: z.infer<typeof Snapshot>,
         temperatureObservation?: RawMoonrakerObservation['temperatureObservation'],
         durationSourceTime?: number,
+        collectionReleaseAtMonoMs?: number,
       ) {
         if (signal.aborted) return
         const firstObservation = !hasObservedStatus
@@ -327,6 +341,9 @@ export function createMoonrakerSubscription(input: {
           },
         )
         const materials = u1Materials()
+        const toolHeaters = snapmakerU1
+          ? snapmakerU1ToolHeaters(Object.keys(toolStatus))
+          : []
         // The raw chamber reading is live evidence: it is always published,
         // whatever the durable record rate allows.
         const chamberReading = chamberTemperatureReading(value.status)
@@ -340,6 +357,7 @@ export function createMoonrakerSubscription(input: {
                 printer: Object.freeze({
                   ...parsed.printer,
                   ...(materials ? { materials } : {}),
+                  ...(toolHeaters.length ? { toolHeaters } : {}),
                   ...(chamberReading === undefined
                     ? {}
                     : { chamberTemperatureCelsius: chamberReading }),
@@ -465,7 +483,7 @@ export function createMoonrakerSubscription(input: {
             now - lastChamberAtMonoMs >= CHAMBER_TEMPERATURE_MIN_INTERVAL_MS
           changed = significant || due
         }
-        if (!changed) return
+        if (!changed && collectionReleaseAtMonoMs === undefined) return
         fingerprint = nextFingerprint
         if (durableChamber !== undefined) {
           lastChamberReading = durableChamber
@@ -480,21 +498,41 @@ export function createMoonrakerSubscription(input: {
           kind: 'snapshot',
           ...parsed,
           printer: lastJob ? { ...printer, lastJob } : printer,
+          ...(collectionReleaseAtMonoMs === undefined
+            ? {}
+            : { collectionReleaseAtMonoMs }),
         })
       }
       try {
-        await readMoonrakerReady({ origin, limits, signal })
+        const clientInput = { origin, limits, signal }
+        await readMoonrakerReady(clientInput)
+        if (signal.aborted) break
+        // U1 discovery follows the Moonraker agent's HTTP inventory and WS
+        // subscription. Explicit field lists keep both transports bounded.
+        const httpStatus = snapmakerU1
+          ? {
+              objects: await readMoonrakerObjects(clientInput),
+              queryTimeoutMs: U1_COMPLETE_QUERY_TIMEOUT_MS,
+            }
+          : undefined
         if (signal.aborted) break
         client = openMoonrakerClient({
-          origin,
-          limits,
+          ...clientInput,
           ...(input.linkHealth
             ? { onRequestSuccess: input.linkHealth.success }
             : {}),
-          signal,
-          ...(input.discoverObjects ? { discoverObjects: true } : {}),
           ...(input.jobFields ? { jobFields: true } : {}),
-          ...(snapmakerU1 ? { extraObjects: SNAPMAKER_U1_STATUS_OBJECTS } : {}),
+          ...(httpStatus
+            ? {
+                httpStatus,
+                extraObjects: {
+                  ...SNAPMAKER_U1_STATUS_OBJECTS,
+                  heater_bed: ['temperature', 'target'],
+                },
+              }
+            : input.discoverObjects
+              ? { discoverObjects: true }
+              : {}),
           ...(input.onRawObservation
             ? {
                 onInvalidated: invalidate,
@@ -561,10 +599,16 @@ export function createMoonrakerSubscription(input: {
                     printState: stamp,
                     progress: stamp,
                   }
+                  const release = input.pendingCollectionRelease?.()
                   publish(
                     value,
                     { fields, observedAtMonoMs: stamp },
                     value.eventtime,
+                    release !== undefined &&
+                      stamp > release &&
+                      !observation.hasNewerBufferedStatus
+                      ? release
+                      : undefined,
                   )
                 },
               }
@@ -646,6 +690,7 @@ export function createMoonrakerSubscription(input: {
             )
           },
         })
+        activeClient = client
         const raw = await client.snapshot
         const initial = Snapshot.parse(raw)
         observeTools((raw as { status?: unknown }).status)
@@ -667,6 +712,7 @@ export function createMoonrakerSubscription(input: {
           emit({ kind: 'unavailable', printerKey, reason })
         }
       } finally {
+        activeClient = undefined
         try {
           invalidate()
         } finally {
@@ -685,5 +731,8 @@ export function createMoonrakerSubscription(input: {
     }
     if (callbackFailure) throw callbackFailure.error
   }
-  return { done: run() }
+  return {
+    done: run(),
+    requestCompleteRefresh: () => activeClient?.requestCompleteRefresh(),
+  }
 }

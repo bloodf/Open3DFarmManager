@@ -12,11 +12,8 @@ import {
   type MoonrakerLimits,
 } from '../config/moonraker.ts'
 import { supportedMoonrakerActions } from './commands.ts'
-import {
-  SNAPMAKER_U1_MARKER,
-  isDeclaredSnapmakerU1,
-  snapmakerU1CommandSupport,
-} from './u1-tools.ts'
+import { isDeclaredSnapmakerU1 } from './u1-tools.ts'
+import { SNAPMAKER_U1_MARKER, snapmakerU1Controls } from './u1-marker.ts'
 import { POWER_MARKER, readPowerDevices } from './control-power.ts'
 import { queueMarkers } from './control-job-queue.ts'
 import { readMacroParams, type MacroParamMap } from './control-macros.ts'
@@ -38,12 +35,10 @@ export function moonrakerControls(
   objects: readonly string[] | undefined,
 ): readonly ExtendedControlAction[] {
   if (!objects) return MOONRAKER_CONTROLS
-  // A declared Snapmaker U1 advertises only its qualified command set.
+  // Declared U1 consoles are added by the router after the local opt-in check.
   if (objects.includes(SNAPMAKER_U1_MARKER))
     return Object.freeze(
-      ExtendedControlAction.options.filter((action) =>
-        snapmakerU1CommandSupport(objects).supported.includes(action),
-      ),
+      snapmakerU1Controls(objects).filter((action) => action !== 'gcode'),
     )
   // The command builder treats "no objects" as "unknown, assume present".
   // A detected printer must not inherit that guess, so name a neutral object.
@@ -137,7 +132,9 @@ export function detectMoonrakerObjects(
   const printerKey = readPrinterBinding(input.binding)?.printer_key
   return readOnlyOnce(input, { method: 'printer.objects.list' }, (result) =>
     Object.freeze([
-      ...MoonrakerObjectList.parse(result).objects,
+      ...MoonrakerObjectList.parse(result).objects.filter(
+        (object) => object !== SNAPMAKER_U1_MARKER,
+      ),
       ...(printerKey !== undefined && isDeclaredSnapmakerU1(printerKey)
         ? [SNAPMAKER_U1_MARKER]
         : []),

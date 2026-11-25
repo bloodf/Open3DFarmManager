@@ -468,6 +468,7 @@ export async function startVendorSimulator(
         const fixture = await startBambuCameraFixture({
           directory,
           accessCode: BAMBU_ACCESS_CODE,
+          rtsps: options.bambuCamera === 'rtsps',
         })
         undo.push(fixture.close)
         camera = { ...fixture, helper: ffmpeg }
@@ -544,6 +545,8 @@ export async function startVendorSimulator(
           // Stock frame field names, the ones the Connector decodes.
           printFileName: 'journey.gcode',
           TotalLayer: 100,
+          speedMode: 0,
+          curFeedratePct: 100,
         },
         // A started print lasts long enough for the page to show it running.
         // The status heartbeat keeps the observation current, as stock

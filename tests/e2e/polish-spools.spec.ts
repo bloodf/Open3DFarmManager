@@ -22,6 +22,7 @@ import { mockShellApi } from '../helpers/shell-api.ts'
 const farm = '00000000-0000-4000-8000-0000000000f1'
 const agentA = '00000000-0000-4000-8000-0000000000a1'
 const agentB = '00000000-0000-4000-8000-0000000000a2'
+const serviceId = '00000000-0000-4000-8000-0000000000b1'
 const longOrigin = `http://spoolman-da-sala-de-impressao-${'x'.repeat(40)}.lan:7912`
 
 const viewports = [
@@ -55,6 +56,7 @@ const settings = [
   {
     agentId: agentA,
     origin: longOrigin,
+    serviceId,
     status: 'reachable',
     configured: true,
     checkedAt: Date.UTC(2026, 10, 20, 13, 30),
@@ -215,8 +217,12 @@ test('page has one main, one h1 and headings in order', async ({ page }) => {
   expect(levels[0]).toBe(1)
   for (const [index, level] of levels.entries())
     if (index > 0) expect(level - levels[index - 1]!).toBeLessThanOrEqual(1)
-  await expect(page.getByRole('columnheader')).toHaveCount(4)
+  await expect(page.getByRole('columnheader')).toHaveCount(5)
+  await expect(
+    page.getByRole('columnheader', { name: 'UUID do serviço' }),
+  ).toBeVisible()
   await expect(page.getByRole('cell', { name: longOrigin })).toBeVisible()
+  await expect(page.getByRole('cell', { name: serviceId })).toBeVisible()
   await expect(page.getByText('Não autorizado (não aplicado)')).toBeVisible()
 })
 
@@ -230,6 +236,7 @@ test('form fields are labelled and touch sized; secrets are password fields', as
     'Usuário (opcional)',
     'Senha (opcional)',
     'Token (alternativa a usuário e senha)',
+    'UUID do serviço (opcional)',
   ]) {
     const field = form.getByLabel(label)
     await expect(field).toBeVisible()
@@ -239,6 +246,11 @@ test('form fields are labelled and touch sized; secrets are password fields', as
     'type',
     'password',
   )
+  await expect(form.getByLabel('UUID do serviço (opcional)')).toHaveAttribute(
+    'aria-describedby',
+    'spoolman-service-id-help',
+  )
+  expect(await violations(page)).toEqual([])
   await expect(form.getByLabel('Token (alternativa')).toHaveAttribute(
     'type',
     'password',
@@ -246,6 +258,23 @@ test('form fields are labelled and touch sized; secrets are password fields', as
   const submit = form.getByRole('button', { name: 'Testar conexão e salvar' })
   await expect(submit).toBeEnabled()
   expect((await submit.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+})
+
+test('service UUID accepts a valid value and announces invalid values in Portuguese', async ({
+  page,
+}) => {
+  await open(page, 'empty', viewports[1], 'light')
+  const serviceField = page.getByLabel('UUID do serviço (opcional)')
+  await expect(serviceField).toBeVisible()
+  await serviceField.fill('00000000-0000-4000-8000-0000000000b1')
+  await expect(serviceField).toHaveValue('00000000-0000-4000-8000-0000000000b1')
+  await serviceField.fill('uuid-invalido')
+  await serviceField.blur()
+  const error = page.getByRole('alert')
+  await expect(error).toBeVisible()
+  await expect(error).toContainText(
+    'Informe um UUID válido para o serviço Spoolman.',
+  )
 })
 
 test('submitting without an approved browser key clears secrets and focuses the reason', async ({
@@ -339,7 +368,7 @@ test('keyboard reaches every form control in order with a visible focus ring', a
   await open(page, 'empty', viewports[1], 'light')
   await page.getByLabel('Endereço do Spoolman').focus()
   const seen: string[] = []
-  for (let step = 0; step < 5; step++) {
+  for (let step = 0; step < 6; step++) {
     const focus = await page.evaluate(() => {
       const element = document.activeElement as HTMLElement
       const style = getComputedStyle(element)
@@ -354,6 +383,7 @@ test('keyboard reaches every form control in order with a visible focus ring', a
   }
   expect(seen).toEqual([
     'spoolman-origin',
+    'spoolman-service-id',
     'spoolman-username',
     'spoolman-password',
     'spoolman-token',

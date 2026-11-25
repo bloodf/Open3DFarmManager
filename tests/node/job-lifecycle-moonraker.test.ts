@@ -8,13 +8,23 @@ import type {
 } from '../../packages/connector/src/webrtc/farm-status-sender.ts'
 import { serveWsTestServer } from '../unit/ws-serve.ts'
 import { createMoonrakerSubscription } from '../../packages/connector/src/moonraker/subscription.ts'
+import { controlActionAvailability } from '../../apps/farm/app/utils/farm-control.ts'
+import { liveReplayInfo } from '../../apps/farm/app/utils/replay-live.ts'
+import type {
+  FarmRow,
+  FarmKeyState,
+} from '../../apps/farm/app/utils/farm-view.ts'
+
+// Fixture follows Snapmaker/u1-klipper print_stats.py at
+// 93cb12faebf6e74c51bbc5f0be66e95124af14c8 and the status subscription in
+// OrcaSlicer MoonrakerPrinterAgent.cpp at f92a7c065c5718b8ef1baac1cd704df2911238f4.
 
 type WireState =
   'standby' | 'printing' | 'paused' | 'error' | 'complete' | 'cancelled'
 
 const cases = [
   { wire: 'complete', outcome: 'completed', state: 'idle' },
-  { wire: 'cancelled', outcome: 'cancelled', state: 'idle' },
+  { wire: 'cancelled', outcome: 'cancelled', state: 'unknown' },
   { wire: 'error', outcome: 'failed', state: 'error' },
 ] as const
 
@@ -158,6 +168,93 @@ for (const { wire, outcome, state } of cases) {
       const finished = latest()?.lastJob
       assert.equal(finished?.outcome, outcome)
       assert.equal(Number.isSafeInteger(finished?.endedAt), true)
+
+      if (wire === 'cancelled') {
+        const now = { wall: Date.now(), mono: performance.now() }
+        const keys: FarmKeyState = {
+          kind: 'available',
+          choices: [{ keyId: 'k', thumbprint: 't' }],
+          selected: 'k',
+        }
+        const row = {
+          assignment: {
+            ...refs[0],
+            status: 'active',
+            connectorStatus: 'approved',
+          },
+          connection: 'authenticated',
+          localOrigin: null,
+          observation: {
+            state: {
+              ...latest()!,
+              controls: [
+                'confirm_collection',
+                'start_print',
+                'set_tool_temperature',
+              ],
+            },
+            received: now,
+            sourceClockComparable: true,
+            historical: false,
+          },
+        } as FarmRow
+        assert.equal(
+          controlActionAvailability('confirm_collection', row, keys, true, now)
+            .available,
+          true,
+        )
+        assert.equal(
+          controlActionAvailability(
+            'set_tool_temperature',
+            row,
+            keys,
+            true,
+            now,
+          ).available,
+          false,
+        )
+        assert.equal(liveReplayInfo(row, keys, true, now).state, 'cancelled')
+        assert.equal(liveReplayInfo(row, keys, true, now).live, true)
+        // Historical cancellation without current evidence remains read-only.
+        const unknown = {
+          ...row,
+          observation: {
+            ...row.observation!,
+            state: { ...row.observation!.state, statusMessage: undefined },
+          },
+        }
+        assert.equal(
+          controlActionAvailability(
+            'confirm_collection',
+            unknown,
+            keys,
+            true,
+            now,
+          ).available,
+          false,
+        )
+        assert.equal(
+          controlActionAvailability(
+            'set_tool_temperature',
+            unknown,
+            keys,
+            true,
+            now,
+          ).available,
+          false,
+        )
+        assert.equal(liveReplayInfo(unknown, keys, true, now).live, false)
+        assert.equal(
+          controlActionAvailability(
+            'confirm_collection',
+            { ...row, connection: 'closed' },
+            keys,
+            true,
+            now,
+          ).available,
+          false,
+        )
+      }
 
       // The same terminal state re-observed keeps the first end time.
       await sleep(5)

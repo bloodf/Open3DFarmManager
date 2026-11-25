@@ -1,10 +1,26 @@
 import { randomUUID } from 'node:crypto'
-import { connect, createSecureContext } from 'node:tls'
+import { createSecureContext } from 'node:tls'
 import { MqttClient } from 'mqtt'
+import {
+  anycubicTlsTrustError,
+  connectAnycubicTls,
+  normalizeAnycubicPin,
+} from '../anycubic/tls-trust.ts'
 import { readKobraXInfo, recoverKobraXCredentials } from './discovery.ts'
 import { createKobraXControl } from './control.ts'
-import { createKobraXFacts } from './facts.ts'
-import { createKobraXRequests, parseKobraXReport } from './requests.ts'
+import { createKobraXFacts, type KobraXFacts } from './facts.ts'
+import {
+  createKobraXRequests,
+  parseKobraXReport,
+  reportRefusal,
+  type KobraXReport,
+  type KobraXReportIdentity,
+} from './requests.ts'
+import {
+  createKobraXQueryEvidence,
+  kobraXQueries as queries,
+  type KobraXQuery,
+} from './state-evidence.ts'
 import { createKobraXStatus } from './status.ts'
 import { createKobraXUsage, type KobraXJobUsage } from './usage.ts'
 
@@ -21,13 +37,24 @@ export async function connectKobraX(options: {
   httpPort?: number
   mqttPort?: number
   reconnectMs?: number
+  signal?: AbortSignal
+  expectedIdentity?: { deviceId: string; modelId: string }
   onError?: (error: Error) => void
+  onDisconnect?: () => void
+  onReport?: (
+    report: KobraXReport,
+    snapshot: ReturnType<ReturnType<typeof createKobraXStatus>['snapshot']>,
+    facts: KobraXFacts,
+    source: 'query' | 'request' | 'other',
+  ) => void
   /** Called once per finished job with the filament used per ACE slot. */
   onJobUsage?: (usage: KobraXJobUsage) => void
   /** How long a result is awaited after a command. */
   resultTimeoutMs?: number
   motionResultTimeoutMs?: number
   usageSettleMs?: number
+  /** `printer-assigned` only for firmware that replaces report msgids. */
+  reportIdentity?: KobraXReportIdentity
 }) {
   const { address, clientIdentity } = options
   if (!clientIdentity?.cert || !clientIdentity.key)
@@ -36,17 +63,24 @@ export async function connectKobraX(options: {
   try {
     secureContext = createSecureContext({
       ...clientIdentity,
-      minVersion: 'TLSv1.2',
+      // The client certificate is held back until the printer passes its
+      // pin check, which needs TLS 1.3 (see `connectAnycubicTls`).
+      minVersion: 'TLSv1.3',
     })
   } catch {
     throw new Error('Kobra X client certificate or key is invalid')
   }
-  let pin = options.pinSha256?.toLowerCase()
-  if (pin !== undefined && !/^[a-f0-9]{64}$/.test(pin))
-    throw new Error('Invalid Kobra X certificate fingerprint')
-  const info = await readKobraXInfo(address, options.httpPort)
+  const pin = normalizeAnycubicPin(options.pinSha256)
+  const info = await readKobraXInfo(address, options.httpPort, options.signal)
   const { modeId, deviceId, username, password } =
-    await recoverKobraXCredentials(info, options.httpPort)
+    await recoverKobraXCredentials(info, options.httpPort, options.signal)
+  if (
+    options.expectedIdentity &&
+    (deviceId !== options.expectedIdentity.deviceId ||
+      modeId !== options.expectedIdentity.modelId)
+  )
+    throw new Error('Kobra X printer identity changed')
+  options.signal?.throwIfAborted()
   const state = createKobraXStatus(options.printerKey, address)
   const facts = createKobraXFacts()
   const usage = createKobraXUsage({
@@ -60,39 +94,18 @@ export async function connectKobraX(options: {
   // Reports arrive on `printer/public` with no `slicer/` segment. Queries stay
   // on `path`.
   const reports = `anycubic/anycubicCloud/v1/printer/public/${modeId}/${deviceId}/`
-  const queries = {
-    info: 'query',
-    status: 'query',
-    print: 'query',
-    tempature: 'query',
-    multiColorBox: 'getInfo',
-  }
-  let fingerprint: string | undefined
-  let connectionError: Error | undefined
+  const queryEvidence = createKobraXQueryEvidence()
+  let tlsEstablished = false
   const client = new MqttClient(
     () => {
-      connectionError = undefined
-      fingerprint = undefined
-      const socket = connect({
-        host: address,
-        port: options.mqttPort ?? 9883,
-        secureContext,
-        rejectUnauthorized: false,
-      })
-      socket.cork()
+      tlsEstablished = false
+      const socket = connectAnycubicTls(
+        { host: address, port: options.mqttPort ?? 9883, secureContext },
+        pin,
+        { holdClientIdentity: true },
+      )
       socket.once('secureConnect', () => {
-        fingerprint = socket
-          .getPeerCertificate()
-          .fingerprint256?.replaceAll(':', '')
-          .toLowerCase()
-        if (!fingerprint || (pin && fingerprint !== pin)) {
-          connectionError = new Error(
-            'Kobra X printer certificate fingerprint mismatch',
-          )
-          socket.destroy(connectionError)
-          return
-        }
-        socket.uncork()
+        tlsEstablished = !socket.destroyed
       })
       return socket
     },
@@ -121,6 +134,9 @@ export async function connectKobraX(options: {
     },
     ...(options.resultTimeoutMs !== undefined
       ? { resultTimeoutMs: options.resultTimeoutMs }
+      : {}),
+    ...(options.reportIdentity
+      ? { reportIdentity: options.reportIdentity }
       : {}),
   })
   const control = createKobraXControl({
@@ -151,6 +167,27 @@ export async function connectKobraX(options: {
       state.disconnect()
     })
   }
+  function query(type: KobraXQuery) {
+    if (!client.connected) return
+    // The Orca LAN client sends timestamped, null-data requests for info,
+    // print, and multiColorBox. Keep the supplemental query frames as-is.
+    const envelope =
+      type === 'status' || type === 'tempature'
+        ? { data: {} }
+        : { timestamp: Date.now(), data: null }
+    const msgid = randomUUID()
+    queryEvidence.issue(type, msgid)
+    client.publish(
+      `${path}/${modeId}/${deviceId}/${type}`,
+      JSON.stringify({
+        type,
+        action: queries[type],
+        msgid,
+        ...envelope,
+      }),
+    )
+  }
+  let abort = () => {}
   const started = new Promise<void>((resolve, reject) => {
     const timer = setTimeout(
       () => reject(new Error('Kobra X MQTT connection timed out')),
@@ -161,9 +198,15 @@ export async function connectKobraX(options: {
       if (ready) options.onError?.(error)
       else reject(error)
     }
+    abort = () => failed(new Error('Kobra X connection aborted'))
+    options.signal?.addEventListener('abort', abort, { once: true })
     client.on('error', (error: Error & { code?: string | number }) => {
-      if (connectionError) return
-      else if (typeof error.code === 'number')
+      const trustError = anycubicTlsTrustError(error)
+      if (trustError) {
+        tlsEstablished = false
+        failed(trustError)
+        if (ready) void close()
+      } else if (typeof error.code === 'number')
         failed(new Error('Kobra X MQTT credentials were refused'))
       else if (/alert.*(?:certificate|unknown ca)/i.test(error.message))
         failed(new Error('Kobra X printer rejected the client certificate'))
@@ -172,10 +215,9 @@ export async function connectKobraX(options: {
     client.on('close', () => {
       state.disconnect()
       facts.reset()
-      if (connectionError) {
-        failed(connectionError)
-        if (ready) void close()
-      } else if (!ready && !accepted && fingerprint) {
+      queryEvidence.reset()
+      options.onDisconnect?.()
+      if (!ready && !accepted && tlsEstablished) {
         failed(
           new Error(
             'Kobra X printer closed TLS before MQTT login. Check the client certificate.',
@@ -186,7 +228,6 @@ export async function connectKobraX(options: {
     })
     client.on('connect', () => {
       accepted = true
-      pin ??= fingerprint
       // The public tree carries `<type>/report` and the per-request
       // `response` acknowledgements ("received" only).
       client.subscribe(`${reports}#`, (error, grants) => {
@@ -194,25 +235,24 @@ export async function connectKobraX(options: {
           failed(new Error('Kobra X status subscription failed'))
           return
         }
-        for (const [type, action] of Object.entries(queries)) {
-          client.publish(
-            `${path}/${modeId}/${deviceId}/${type}`,
-            JSON.stringify({
-              type,
-              action,
-              msgid: randomUUID(),
-              data: {},
-            }),
-          )
-        }
+        for (const type of [
+          'info',
+          'status',
+          'print',
+          'tempature',
+          'multiColorBox',
+        ] as const)
+          query(type)
         clearTimeout(timer)
         ready = true
         resolve()
       })
     })
   })
-  client.on('message', (topic, payload) => {
-    if (!topic.startsWith(reports) || payload.length > 65536) return
+  client.on('message', (topic, payload, packet) => {
+    // A broker replay at subscribe time does not establish current state.
+    if (packet.retain || !topic.startsWith(reports) || payload.length > 65536)
+      return
     const [type, suffix, extra] = topic.slice(reports.length).split('/')
     if (type === 'response' && suffix === undefined) {
       try {
@@ -225,28 +265,73 @@ export async function connectKobraX(options: {
     if (!type || suffix !== 'report' || extra !== undefined) return
     try {
       const message = JSON.parse(payload.toString())
-      if (Object.hasOwn(queries, type) || type === 'fan' || type === 'light')
-        state.report(type, message)
       const report = parseKobraXReport(type, message)
       if (!report) return
-      facts.report(report)
-      usage.report(report)
-      requests.handleReport(report)
+      const queryMatch = queryEvidence.classify(report)
+      const source =
+        queryMatch === 'current'
+          ? 'query'
+          : requests.isPending(report)
+            ? 'request'
+            : 'other'
+      // Keep passive telemetry for firmware that generates its own IDs.
+      // Delayed replies to our queries cannot update control evidence.
+      if (queryMatch !== 'stale') {
+        if (
+          (reportRefusal(report) === null ||
+            // A printer-ended or printer-paused job carries a fault code.
+            (type === 'print' &&
+              (report.state === 'stoped' || report.state === 'paused'))) &&
+          (Object.hasOwn(queries, type) || type === 'fan' || type === 'light')
+        )
+          state.report(type, message)
+        facts.report(report)
+        usage.report(report)
+        // The observer is the caller's code. A failure in it must never keep
+        // this report from settling the request that is waiting for it: that
+        // request's command is already on the wire.
+        try {
+          options.onReport?.(report, state.snapshot(), facts.get(), source)
+        } catch (error) {
+          try {
+            options.onError?.(
+              error instanceof Error
+                ? error
+                : new Error('Kobra X report observer failed'),
+            )
+          } catch {
+            // A failing error handler is no more allowed to block settlement.
+          }
+        }
+      }
+      // A reply carrying the ID of one of our own state queries belongs to
+      // that query and never settles a command.
+      if (queryMatch === 'other') requests.handleReport(report)
     } catch {
       // Invalid telemetry is ignored.
     }
   })
   try {
+    options.signal?.throwIfAborted()
     client.connect()
     await started
   } catch (error) {
     await close()
     throw error
+  } finally {
+    options.signal?.removeEventListener('abort', abort)
   }
   return {
     snapshot: state.snapshot,
     control,
     facts: facts.get,
+    refreshControlState(effectType?: string) {
+      queryEvidence.resetPending()
+      query('info')
+      query('print')
+      if (effectType === 'tempature' || effectType === 'multiColorBox')
+        query(effectType)
+    },
     /** Unscoped telemetry hint. It confers no capture ownership and is never
      * used by the Connector's passive camera source. */
     cameraUrl: state.cameraUrl,

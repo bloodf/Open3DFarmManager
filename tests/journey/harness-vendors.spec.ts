@@ -55,6 +55,7 @@ if (journeyEnabled())
         harness = await startJourneyHarness({
           browser,
           simulator: vendor,
+          openFarmInspector: true,
           // Bambu control is opt-in; the read-only journey leaves it off
           // except for the one binding that proves the option is accepted.
           ...(vendor === 'bambu' ? { control: true } : {}),

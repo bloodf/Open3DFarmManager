@@ -60,6 +60,7 @@ export async function qualifyAnycubic(
   try {
     const observedFields = new Set<string>()
     const sample: Record<string, unknown> = {}
+    let trustFailure: string | undefined
 
     const processPayload = (payload: Buffer) => {
       try {
@@ -165,6 +166,10 @@ export async function qualifyAnycubic(
             }
           },
           onConnection() {},
+          onTrustError(error) {
+            trustFailure = error.message
+            finish()
+          },
         })
       } catch {}
 
@@ -181,6 +186,7 @@ export async function qualifyAnycubic(
       observed: observedFields.size > 0,
       fields: [...observedFields],
       sample: Object.keys(sample).length ? sample : undefined,
+      ...(trustFailure !== undefined ? { reason: trustFailure } : {}),
     }
 
     return { identity, telemetry, camera, files }

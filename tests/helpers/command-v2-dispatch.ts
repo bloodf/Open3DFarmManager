@@ -1,6 +1,7 @@
 // Shipped v2 command path for tests: capability admission, signature
 // verification (verifyCommandV2) and the durable command journal, wired through
-// the real pause dispatcher. The driver is a fake; nothing reaches a printer.
+// the real pause dispatcher. The default driver is a fake. Tests can supply a
+// loopback simulator and the real driver.
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -12,11 +13,14 @@ import {
 } from '../../packages/connector/src/control/command-journal.ts'
 import {
   createPauseDispatcher,
+  type ControlObservation,
   type PauseDispatchResult,
+  type PreparedPauseDriver,
 } from '../../packages/connector/src/control/pause-dispatcher.ts'
 import {
   createPrinterBindingRegistry,
   readPrinterBinding,
+  type PrinterBinding,
 } from '../../packages/connector/src/control/printer-binding.ts'
 import {
   encodeCommandV2,
@@ -170,10 +174,27 @@ export type V2DispatchOptions = {
   /** Wall and monotonic start time. */
   now?: number
   capability?: Partial<PauseCapabilityV1>
+  /** Override the wire to model a different issuer version. */
+  capabilityWire?: (
+    claims: PauseCapabilityV1,
+    key: CryptoKey,
+  ) => Promise<string>
   journalCapacity?: number
   storageDegraded?: () => boolean
   /** Extra actions the fake driver supports (through `execute`). */
   controls?: ExtendedControlAction[]
+  loopback?: {
+    origin: string
+    driver(input: {
+      clock: { monotonicNow(): number }
+      observe(
+        binding: PrinterBinding,
+        observation: ControlObservation | null,
+      ): boolean
+    }): PreparedPauseDriver & {
+      detect(binding: PrinterBinding): Promise<unknown>
+    }
+  }
 }
 
 /** Opens the shipped dispatcher with an admitted capability for `authority`. */
@@ -186,23 +207,30 @@ export async function openV2Dispatch(
     options.directory ?? mkdtempSync(join(tmpdir(), 'open3d-command-v2-'))
   let wall = options.now ?? 1000
   let mono = wall
+  const start = performance.now()
+  const elapsed = () => (options.loopback ? performance.now() - start : 0)
+  const clock = {
+    wallNow: () => wall + Math.floor(elapsed()),
+    monotonicNow: () => mono + elapsed(),
+  }
   let journalWall: number | undefined
   let writes = 0
   let driverEntries = 0
   const journal = openCommandJournal({
     directory,
-    clock: () => journalWall ?? wall,
+    clock: () => journalWall ?? clock.wallNow(),
     ...(options.journalCapacity ? { capacity: options.journalCapacity } : {}),
   })
+  const origin = options.loopback?.origin ?? 'http://localhost:7125'
   const bindings = createPrinterBindingRegistry({
-    allowedOrigins: ['http://127.0.0.1:7125'],
+    allowedOrigins: [origin],
   })
   const printerBinding = bindings.provision({
     assignment_id: authority.ids.assignment_id,
     farm_id: authority.ids.farm_id,
     agent_id: authority.ids.agent_id,
     printer_key: authority.printerKey,
-    moonraker_origin: 'http://127.0.0.1:7125',
+    moonraker_origin: origin,
   })
   let sequence = 1
   const observation = () => ({
@@ -252,6 +280,10 @@ export async function openV2Dispatch(
       }
     },
   }
+  const loopbackDriver = options.loopback?.driver({
+    clock,
+    observe: (binding, next) => dispatcher.observe(binding, next),
+  })
   const dispatcher = createPauseDispatcher({
     authority: {
       issuers: [
@@ -262,15 +294,15 @@ export async function openV2Dispatch(
         },
       ],
     },
-    clock: { wallNow: () => wall, monotonicNow: () => mono },
+    clock,
     journal,
-    driver,
+    driver: loopbackDriver ?? driver,
     resultTimeoutMs: 1000,
     ...(options.storageDegraded
       ? { storageDegraded: options.storageDegraded }
       : {}),
   })
-  dispatcher.observe(printerBinding, observation())
+  if (!loopbackDriver) dispatcher.observe(printerBinding, observation())
   const abandon = () => {
     dispatcher.close()
     closeCommandJournal(journal)
@@ -278,6 +310,7 @@ export async function openV2Dispatch(
   }
   let admitted: Awaited<ReturnType<typeof dispatcher.admit>>
   try {
+    await loopbackDriver?.detect(printerBinding)
     const peer = dispatcher.createPeer(1)
     const admission = dispatcher.beginAdmission({
       binding: authority.binding,
@@ -286,6 +319,7 @@ export async function openV2Dispatch(
     })
     const bindingHash = await controlBindingHash(authority.binding)
     const nonce = admission.challenge.admissionNonce
+    const issuedAt = clock.wallNow()
     const capability: PauseCapabilityV1 = {
       v: 1,
       purpose: 'pause-authority',
@@ -294,7 +328,7 @@ export async function openV2Dispatch(
       issuer: 'farm:issuer',
       audience: authority.binding.audience,
       origin: authority.binding.origin,
-      issued_at: wall,
+      issued_at: issuedAt,
       expires_at: 30000,
       account_id: authority.ids.account_id,
       role: 'operator',
@@ -328,8 +362,8 @@ export async function openV2Dispatch(
       audience: authority.binding.audience,
       control_binding_sha256: bindingHash,
       admission_nonce: nonce,
-      issued_at: wall,
-      expires_at: wall + 8000,
+      issued_at: issuedAt,
+      expires_at: issuedAt + 8000,
     }
     admitted = await dispatcher.admit(admission.token, {
       capabilityWire: encodePauseCapability(
@@ -352,6 +386,12 @@ export async function openV2Dispatch(
           authority.binding,
           'connector',
           authority.connector.privateKey,
+        ),
+      }),
+      ...(options.capabilityWire && {
+        capabilityWire: await options.capabilityWire(
+          capability,
+          authority.issuer.privateKey,
         ),
       }),
     })
@@ -390,7 +430,7 @@ export async function openV2Dispatch(
       }
     },
     writes: () => writes,
-    now: () => wall,
+    now: clock.wallNow,
     driverEntries: () => driverEntries,
     advance(ms: number) {
       wall += ms

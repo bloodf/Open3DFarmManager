@@ -41,10 +41,12 @@ describe('catálogo Anycubic', () => {
         const expected =
           item.model === 'Kobra X'
             ? // Telemetry is hardware-proven from a real Kobra X; files, pause,
-              // resume and cancel stay simulated; the rest unknown.
+              // materials, resume and cancel stay simulated; the rest unknown.
               capability === 'telemetry'
               ? 'hardware'
-              : ['files', 'pause', 'resume', 'cancel'].includes(capability)
+              : ['files', 'materials', 'pause', 'resume', 'cancel'].includes(
+                    capability,
+                  )
                 ? 'simulated'
                 : 'unknown'
             : 'unknown'

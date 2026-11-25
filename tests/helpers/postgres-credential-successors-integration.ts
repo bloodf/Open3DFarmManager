@@ -14,6 +14,7 @@ import {
   readRevocationCredentialRecords,
 } from '../../apps/farm/server/storage/postgres-connector-credential-record.ts'
 import { validatePauseAuthorityRole } from '../../apps/farm/server/utils/pause-authority/role-policy.ts'
+import { pauseAuthorityAdvertisedControlsMigrations } from './postgres-pause-authority-catalog.ts'
 
 /** Only the runner's fresh, dedicated container may supply this database. */
 export async function testPostgresCredentialSuccessors(
@@ -365,6 +366,7 @@ export async function testPostgresCredentialSuccessors(
       await admin`SELECT bool_or(has_column_privilege(${role.rolname},'farm.connector_credential_successors',attname,'SELECT,INSERT,UPDATE,REFERENCES')) AS allowed FROM pg_attribute WHERE attrelid='farm.connector_credential_successors'::regclass AND attnum>0 AND NOT attisdropped`
     assert.equal(columns[0]?.allowed, false, role.rolname)
   }
+  const controlsMigrations = await pauseAuthorityAdvertisedControlsMigrations()
   const login = 'successor_fixture_' + randomUUID().replaceAll('-', '')
   await admin`CREATE ROLE ${admin(login)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS IN ROLE farm_pause_authority`
   const rolePassword = randomUUID().replaceAll('-', '')
@@ -385,7 +387,13 @@ export async function testPostgresCredentialSuccessors(
       transaction_timeout: 10000,
     },
   })
+  let controlsInstalled = false
   try {
+    await admin.begin(async (tx) => {
+      for (const migration of controlsMigrations)
+        await tx.unsafe(migration.up).simple()
+    })
+    controlsInstalled = true
     await validatePauseAuthorityRole(pauseSql)
     await admin`GRANT SELECT ON farm.connector_credential_successors TO farm_pause_authority`
     try {
@@ -397,6 +405,12 @@ export async function testPostgresCredentialSuccessors(
   } finally {
     await pauseSql.end({ timeout: 3 })
     await admin`DROP ROLE ${admin(login)}`
+    if (controlsInstalled) {
+      await admin.begin(async (tx) => {
+        for (const migration of controlsMigrations.toReversed())
+          await tx.unsafe(migration.down).simple()
+      })
+    }
   }
   checks.push('effective-table-column-privileges-and-pause-role-allowlist')
   const history = [

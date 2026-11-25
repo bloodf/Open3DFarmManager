@@ -1,4 +1,7 @@
-import type { ControlAreaCapabilities } from './control-areas.ts'
+import type {
+  ControlAreaCapabilities,
+  ControlAreaEvidenceMap,
+} from './control-areas.ts'
 
 export const anycubicControlAreas = {
   temperatures: 'documented',
@@ -22,8 +25,25 @@ export const anycubicControlAreas = {
   updates: 'unsupported',
 } as const satisfies ControlAreaCapabilities
 
+export const kobraXControlAreaEvidence = {
+  temperatures: {
+    file: 'tests/node/pause-dispatch-driver-integration.test.ts',
+    test: 'native Kobra X accepts signed controls through the pinned runtime driver',
+  },
+  fans: {
+    file: 'tests/node/pause-dispatch-driver-integration.test.ts',
+    test: 'native Kobra X accepts signed controls through the pinned runtime driver',
+  },
+  leds: {
+    file: 'tests/node/pause-dispatch-driver-integration.test.ts',
+    test: 'native Kobra X accepts signed controls through the pinned runtime driver',
+  },
+} as const satisfies ControlAreaEvidenceMap
 export const kobraXControlAreas: ControlAreaCapabilities = {
   ...anycubicControlAreas,
+  temperatures: 'simulated',
+  fans: 'simulated',
+  leds: 'simulated',
   webcams: 'unsupported',
 }
 

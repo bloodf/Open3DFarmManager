@@ -39,6 +39,24 @@ if (journeyEnabled())
       await expect(
         spool.getByRole('cell', { name: 'Estante da jornada', exact: true }),
       ).toBeVisible()
+      const search = page.getByRole('search', { name: 'Buscar bobinas' })
+      await search.getByLabel('Material').selectOption('PLA')
+      await search.getByLabel('Cor').fill('azul')
+      await search.getByLabel('Local', { exact: true }).fill('jornada')
+      await expect(spool).toBeVisible()
+      await search.getByLabel('Cor').fill('vermelho')
+      await expect(page.getByText('Nenhuma bobina encontrada')).toBeVisible()
+      await search.getByRole('button', { name: 'Limpar filtros' }).click()
+      await expect(spool).toBeVisible()
+      let scans = 0
+      page.on('request', (request) => {
+        if (
+          request.method() === 'POST' &&
+          new URL(request.url()).pathname ===
+            `/api/spool-finder/${journey!.farmId}/scan`
+        )
+          scans++
+      })
       const form = page.getByRole('form', {
         name: 'Registrar local por etiqueta',
       })
@@ -56,6 +74,7 @@ if (journeyEnabled())
       await expect(
         spool.getByRole('cell', { name: 'Estante A', exact: true }),
       ).toBeVisible()
+      expect(scans).toBe(1)
     } finally {
       try {
         await Promise.all([journey?.close(), spoolman.close()])

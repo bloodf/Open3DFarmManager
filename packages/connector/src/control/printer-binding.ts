@@ -1,5 +1,6 @@
 import { KobraLinkRuntimeBinding } from '../kobralink/configuration.ts'
 import { AnycubicBinding } from '../config/anycubic.ts'
+import { KobraXBinding } from '../config/kobra-x.ts'
 import { CrealityBinding } from '../config/creality.ts'
 import { parseBambuBinding, type BambuBinding } from '../bambu/configuration.ts'
 import { z } from 'zod'
@@ -138,6 +139,16 @@ export function provisionReadonlyPrinter(input: unknown): PrinterBinding {
 }
 export function readRuntimePrinterBinding(binding: PrinterBinding) {
   const mapping = readPrinterBinding(binding)
+  if (mapping && readKobraXPrinterBinding(binding)) {
+    const { assignment_id, farm_id, agent_id, printer_key } = mapping
+    return {
+      assignment_id,
+      farm_id,
+      agent_id,
+      printer_key,
+      backend: 'kobra-x' as const,
+    }
+  }
   const local = mapping ? kobraLinkBindings.get(binding) : undefined
   if (mapping && local) {
     const { assignment_id, farm_id, agent_id, printer_key } = mapping
@@ -245,6 +256,33 @@ export function provisionAnycubicPrinter(
 export function readAnycubicPrinterBinding(binding: PrinterBinding) {
   return readPrinterBinding(binding)
     ? (anycubicBindings.get(binding) ?? null)
+    : null
+}
+
+const kobraXBindings = new WeakMap<PrinterBinding, Readonly<KobraXBinding>>()
+
+export function provisionKobraXPrinter(
+  assignmentInput: unknown,
+  bindingInput: unknown,
+): PrinterBinding {
+  const local = Object.freeze(KobraXBinding.parse(bindingInput))
+  const scope = Assignment.omit({ moonraker_origin: true }).parse(
+    assignmentInput,
+  )
+  if (scope.printer_key !== local.printerKey || local.modelId !== '20030')
+    throw new Error('Kobra X assignment mismatch')
+  const binding = new BoundPrinter()
+  bindings.set(binding, {
+    assignment: Object.freeze({ ...scope, moonraker_origin: '' }),
+    active: true,
+  })
+  kobraXBindings.set(binding, local)
+  return binding
+}
+
+export function readKobraXPrinterBinding(binding: PrinterBinding) {
+  return readPrinterBinding(binding)
+    ? (kobraXBindings.get(binding) ?? null)
     : null
 }
 

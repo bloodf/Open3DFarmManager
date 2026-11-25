@@ -1,7 +1,4 @@
-import {
-  temperatureJournalAction,
-  toolTemperatureRefusal,
-} from './control-driver.ts'
+import { toolTemperatureRefusal } from './control-driver.ts'
 import { ToolHeaters } from '../../../farm-protocol/src/state.ts'
 import { authorityConfirmation } from '../auth/offline-authority.ts'
 import {
@@ -17,6 +14,8 @@ import {
   ControlResultCode,
   ToolIndex,
   ToolTemperatureArgs,
+  U1_CONTROL_RESULT_TIMEOUT_MS,
+  isU1PhysicalControl,
   type ControlAction,
   type ExtendedControlAction,
   type SpeedMode,
@@ -93,6 +92,16 @@ const Observation = z.strictObject({
         observedMono: mono,
       }),
       z.strictObject({
+        kind: z.literal('motion'),
+        action: z.enum(['home', 'jog']),
+        observedMono: mono,
+      }),
+      z.strictObject({
+        kind: z.literal('gcode'),
+        line: z.string(),
+        observedMono: mono,
+      }),
+      z.strictObject({
         kind: z.literal('fan'),
         fan: z.enum(['part', 'aux', 'chamber']),
         percent: z.number().finite().min(0).max(100),
@@ -106,6 +115,16 @@ const Observation = z.strictObject({
       z.strictObject({
         kind: z.literal('light'),
         on: z.boolean(),
+        observedMono: mono,
+      }),
+      z.strictObject({
+        kind: z.literal('filament'),
+        tray: z.number().int().min(0).max(15).nullable(),
+        observedMono: mono,
+      }),
+      z.strictObject({
+        kind: z.literal('speed'),
+        level: z.enum(['silent', 'standard', 'sport', 'ludicrous']),
         observedMono: mono,
       }),
     ])
@@ -154,6 +173,15 @@ export function controlEffectMatches(
         effect.heater === args.heater &&
         effect.target_c === args.target_c
       )
+    case 'home':
+    case 'jog':
+      return effect.kind === 'motion' && effect.action === action
+    case 'gcode':
+      return (
+        effect.kind === 'gcode' &&
+        typeof args.line === 'string' &&
+        effect.line === args.line.trim()
+      )
     case 'set_fan':
       return (
         effect.kind === 'fan' &&
@@ -165,6 +193,12 @@ export function controlEffectMatches(
       return effect.kind === 'excluded-object' && effect.name === args.name
     case 'set_light':
       return effect.kind === 'light' && effect.on === args.on
+    case 'load_filament':
+      return effect.kind === 'filament' && effect.tray === args.tray
+    case 'unload_filament':
+      return effect.kind === 'filament' && effect.tray === null
+    case 'set_speed':
+      return effect.kind === 'speed' && effect.level === args.level
     default:
       return false
   }
@@ -195,6 +229,16 @@ export interface PauseDriver {
   macros?(binding: PrinterBinding): readonly string[] | undefined
   macroParams?(binding: PrinterBinding): MacroParamMap | undefined
   controls?(binding: PrinterBinding): readonly ExtendedControlAction[]
+  allowsExtendedResult?(binding: PrinterBinding): boolean
+  /**
+   * Bounded time the driver's own steps may take after the write, when that
+   * exceeds the default result deadline. Counted from the write, so waits
+   * before it never make a sent command uncertain. Never retried either way.
+   */
+  resultWindowMs?(
+    binding: PrinterBinding,
+    action: ExtendedControlAction,
+  ): number | undefined
   speedModes?(binding: PrinterBinding): readonly SpeedMode[] | undefined
   pauseOnce(input: {
     args?: Record<string, unknown>
@@ -249,6 +293,16 @@ export type PauseDispatchResult =
     }
 type Sample = { wall: number; mono: number }
 
+/** A driver's window may only widen the default, and never past the U1 ceiling. */
+function boundedResultWindow(ms: number | undefined): number | undefined {
+  return ms !== undefined &&
+    Number.isFinite(ms) &&
+    ms > 5000 &&
+    ms <= U1_CONTROL_RESULT_TIMEOUT_MS
+    ? Math.ceil(ms)
+    : undefined
+}
+
 /** Internal library only. No runtime, printer driver, issuer, control transport or human confirmation is supplied. */
 export function createPauseDispatcher(config: {
   authority: Omit<Parameters<typeof createPauseCapabilityVerifier>[0], 'clock'>
@@ -278,6 +332,10 @@ export function createPauseDispatcher(config: {
   const driver = Object.freeze({
     execute: config.driver.execute?.bind(config.driver),
     controls: config.driver.controls?.bind(config.driver),
+    allowsExtendedResult: config.driver.allowsExtendedResult?.bind(
+      config.driver,
+    ),
+    resultWindowMs: config.driver.resultWindowMs?.bind(config.driver),
     speedModes: config.driver.speedModes?.bind(config.driver),
     macros: config.driver.macros?.bind(config.driver),
     macroParams: config.driver.macroParams?.bind(config.driver),
@@ -491,7 +549,8 @@ export function createPauseDispatcher(config: {
       const commandDeadline =
         start.mono +
         Math.min(verifier.policy.commandMs, command.expires_at - start.wall)
-      const resultDeadline = start.mono + resultTimeoutMs
+      let resultDeadline = start.mono + resultTimeoutMs
+      let extendedResultMs: number | undefined
       let timer: ReturnType<typeof setTimeout> | undefined
       let resolveResult: (result: PauseDispatchResult) => void = () => {}
       const result = new Promise<PauseDispatchResult>((resolve) => {
@@ -728,6 +787,12 @@ export function createPauseDispatcher(config: {
           sequence: finalObservation.sequence,
           sentMono: now.mono,
         })
+        // Extend only the result wait, after every signed write check passed.
+        if (extendedResultMs !== undefined) {
+          resultDeadline = now.mono + extendedResultMs
+          clearTimeout(timer)
+          timer = setTimeout(() => interrupted('deadline'), extendedResultMs)
+        }
         permitted = true
         return true // The driver must send immediately on this stack, with no intervening await.
       }
@@ -772,16 +837,18 @@ export function createPauseDispatcher(config: {
             finalize('rejected', 'unsupported-action', 'guard-denied')
             return
           }
+          extendedResultMs =
+            isU1PhysicalControl(command.action, command.args) &&
+            driver.allowsExtendedResult?.(printerBinding) === true
+              ? U1_CONTROL_RESULT_TIMEOUT_MS
+              : boundedResultWindow(
+                  driver.resultWindowMs?.(printerBinding, command.action),
+                )
           let claim: ReturnType<typeof claimCommand>
           try {
             claiming = true
             claim = claimCommand(journal, {
-              command: toolArgs
-                ? {
-                    ...command,
-                    ...temperatureJournalAction(toolArgs.target_c),
-                  }
-                : command,
+              command,
               printerKey: mapping.printer_key,
               wireSha256: createHash('sha256')
                 .update(encodeCommandV2(command))

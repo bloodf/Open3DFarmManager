@@ -1,10 +1,12 @@
 // Live side of replay: what the signed session knows about each printer and
 // signed `start_library_print` sessions used by replay.
 import type { LibraryPrintArgs } from '../../../../packages/farm-protocol/src/control-actions.ts'
+import { controlObservationState } from '../../../../packages/farm-protocol/src/control-actions.ts'
 import { controlActionAvailability, type Clock } from './farm-control.ts'
 import type { FarmKeyState, FarmRow } from './farm-view.ts'
 import type { ReplayPrinter, ReplayResult } from './replay-view.ts'
 import type { FarmPauseControlState } from './webrtc/farm-pause-control.ts'
+import type { ActiveSpool } from '../../../../packages/farm-protocol/src/status.ts'
 
 /** The part of a printer the live session decides. */
 export type LiveReplayInfo = Pick<
@@ -19,23 +21,35 @@ export function liveReplayInfo(
   keys: FarmKeyState,
   controlEnabled: boolean,
   now: Clock,
+  activeSpools: readonly ActiveSpool[] = [],
 ): LiveReplayInfo {
   const state = row.observation?.state
   const vendor = state?.identity?.vendor
   const online = state?.state !== 'offline'
+  const spoolBySlot = new Map(activeSpools.map((spool) => [spool.slot, spool]))
   return {
     connectorOnline: online,
     live:
       online &&
       controlActionAvailability('start_print', row, keys, controlEnabled, now)
         .available,
-    ...(state ? { state: state.state } : {}),
+    ...(state ? { state: controlObservationState(state) } : {}),
     ...(vendor ? { backend: vendor } : {}),
-    materials: (state?.materials ?? []).map((m) => ({
-      slot: m.slot,
-      ...(m.materialType ? { materialType: m.materialType } : {}),
-      ...(m.colorHex ? { colorHex: m.colorHex } : {}),
-    })),
+    materials: (state?.materials ?? []).map((m) => {
+      const spool = spoolBySlot.get(m.slot)
+      return {
+        slot: m.slot,
+        ...(m.materialType ? { materialType: m.materialType } : {}),
+        ...(m.colorHex ? { colorHex: m.colorHex } : {}),
+        ...(m.remainingPercent !== undefined
+          ? { remainingPercent: m.remainingPercent }
+          : {}),
+        ...(spool?.remainingPercent !== undefined
+          ? { spoolmanRemainingPercent: spool.remainingPercent }
+          : {}),
+        ...(spool?.colorHex ? { spoolmanColorHex: spool.colorHex } : {}),
+      }
+    }),
   }
 }
 
@@ -45,13 +59,14 @@ export function liveReplayIndex(
   keys: FarmKeyState,
   controlEnabled: boolean,
   now: Clock,
+  activeSpoolsFor?: (row: FarmRow) => readonly ActiveSpool[],
 ): ReadonlyMap<string, LiveReplayInfo> {
   const index = new Map<string, LiveReplayInfo>()
   for (const row of rows)
     if (!index.has(row.assignment.printerKey))
       index.set(
         row.assignment.printerKey,
-        liveReplayInfo(row, keys, controlEnabled, now),
+        liveReplayInfo(row, keys, controlEnabled, now, activeSpoolsFor?.(row)),
       )
   return index
 }

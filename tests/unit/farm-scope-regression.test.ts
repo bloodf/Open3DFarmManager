@@ -99,7 +99,7 @@ const spoolRoutes: Routes = {
 }
 
 declare const window: Window & {
-  __pageRoute: { query: { farm?: string } }
+  __pageRoute: { query: { farm?: string; q?: string } }
   __heldReply: { waiting: boolean; release: () => void }
   __receivedReplies: string[]
   __disconnectFarmFeed: () => void
@@ -173,6 +173,41 @@ it('keeps the selected farm catalog when the previous catalog arrives late', asy
       'Selecione um filamento',
       'Catálogo B (PLA)',
     ])
+  } finally {
+    await opened.close()
+  }
+})
+
+it('updates the spool search and reloads when the route query changes', async () => {
+  const requestedQueries: (string | null)[] = []
+  const routes: Routes = {
+    ...spoolRoutes,
+    [`GET ${library(A)}/spools`]: ({ url }) => {
+      requestedQueries.push(url.searchParams.get('q'))
+      return {
+        body: {
+          items: [spool('A')],
+          total: 1,
+          canWrite: true,
+          canImport: true,
+        },
+      }
+    },
+  }
+  const opened = await harness.open('bobinas/index', routes, {
+    route: { query: { farm: A, q: 'Lote-314' } },
+  })
+  try {
+    const { page } = opened
+    const search = page.getByRole('searchbox', { name: 'Buscar' })
+    await pw(search).toHaveValue('Lote-314')
+    await pw.poll(() => requestedQueries).toContain('Lote-314')
+
+    await page.evaluate(() => {
+      window.__pageRoute.query.q = '#42'
+    })
+    await pw(search).toHaveValue('#42')
+    await pw.poll(() => requestedQueries).toContain('#42')
   } finally {
     await opened.close()
   }

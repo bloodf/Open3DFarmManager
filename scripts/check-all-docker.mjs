@@ -4,11 +4,13 @@
 // service process (PostgreSQL clusters, simulators, Nuxt build, test servers)
 // stays in Docker. The run is offline and deterministic:
 //
-//   * no image is pulled or built; the images below must already exist locally;
+//   * no image is pulled; the images below must already exist locally. The only
+//     image ever built is the dependency image, once per lockfile (see
+//     docker-base-image.mjs), before the container is created;
 //   * the container has no network (loopback only), no published ports, no
 //     Docker socket, no privileges and a read-only root filesystem;
-//   * dependencies come from `npm ci --offline` against a local npm cache
-//     volume; nothing is downloaded;
+//   * dependencies are copied from that image; nothing is installed or
+//     downloaded inside the container;
 //   * the source is a copy of the working tree (tracked + untracked, not
 //     ignored), so the host tree gets no generated output and concurrent edits
 //     are never touched.
@@ -23,22 +25,29 @@
 // OPENFARM_CHROME_PATH (see check-all-docker-browser.mjs); nothing is skipped.
 // python3 is the Node image's, run through a wrapper that adds the image
 // libraries the Debian userland lacks (libexpat.so.1 for pyexpat), and /tmp is
-// an anonymous, task-owned Docker volume on the Docker host disk so the release
-// rehearsal sees its required > 10 GiB (see check-all-docker-runtime.mjs).
+// a bind mount of the run directory on the host disk so the release rehearsal
+// sees its required > 10 GiB (see check-all-docker-runtime.mjs).
 //
-// Resource ownership and cleanup: a run owns exactly one container
+// Resource ownership and cleanup: a run owns exactly one `--rm` container
 // (`openfarm-check-all-<id>`, label org.open3dfarmmanager.check-all-docker=<id>)
-// and that container's anonymous /tmp volume. Images and the npm cache volume
-// are only mounted read-only. Cleanup verifies the label, runs
-// `docker rm -f -v <container id>` (which deletes the anonymous volume too) and
-// confirms neither the container nor the volume remains; the ledger under the
-// host tmpdir records the volume name and the outcome.
+// and one run directory under ${XDG_CACHE_HOME:-~/.cache}/openfarm-docker/.
+// Images are only mounted read-only, and the PostgreSQL image's declared volume
+// is masked by a tmpfs. Cleanup waits for an in-flight create, verifies the
+// label, removes the container, confirms it is gone and deletes the run
+// directory; the ledger under the host tmpdir records the outcome.
 //
 //   node scripts/check-all-docker.mjs              # run the full gate
 //   node scripts/check-all-docker.mjs --self-test  # fast, starts no service
 import { spawn, spawnSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { createWriteStream, lstatSync, mkdtempSync, statfsSync } from 'node:fs'
+import {
+  chmodSync,
+  createWriteStream,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  statfsSync,
+} from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -58,6 +67,14 @@ import {
   runtimePlanChecks,
   scratchMount,
 } from './check-all-docker-runtime.mjs'
+import {
+  DEPS_DIR,
+  browserNodeImage,
+  ensureBaseImage,
+  projectImageTag,
+  seedNodeModules,
+} from './docker-base-image.mjs'
+import { removeRunDir, runRoot } from './docker-run-lib.mjs'
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const MIN_DOCKER_MAJOR = 28 // `--mount type=image` with image-subpath
@@ -65,23 +82,24 @@ const MIN_FREE_BYTES = 10 * 1024 ** 3
 const LABEL_KEY = 'org.open3dfarmmanager.check-all-docker'
 const GATE_COMMAND = ['npm', 'run', 'check:all']
 const SERVICE_UID = '999:999' // `postgres` user of the PostgreSQL image; initdb refuses root
+// The PostgreSQL image declares this volume; unmasked, every run allocates one.
+const PG_VOLUME_MASK = '/var/lib/postgresql/data:rw,size=1m'
 
 /**
  * Prerequisites, all of which must already exist locally. Override with the
- * OPENFARM_GATE_* variables; defaults name the images/cache this repository's
- * Docker tasks already hold.
+ * OPENFARM_GATE_* variables; defaults name the images this repository's Docker
+ * tasks already hold. `baseImage` is derived from the lockfile and Node image.
  */
 export function resolveConfig(env = process.env) {
+  const nodeImage = env.OPENFARM_GATE_NODE_IMAGE || browserNodeImage(ROOT)
   return {
     docker: env.OPENFARM_GATE_DOCKER || 'docker',
-    nodeImage:
-      env.OPENFARM_GATE_NODE_IMAGE || 'openfarm-e2e-node22.23.5:latest',
+    nodeImage,
+    baseImage: projectImageTag(ROOT, nodeImage),
     // PostgreSQL 17.12 (Debian trixie, arm64), untagged: referenced by image ID.
     pgImage:
       env.OPENFARM_GATE_PG_IMAGE ||
       'sha256:0d938e975177bef9f1f61f3f9dbcf2e0aa0a139568f66d3415ed8892eb97f6ac',
-    npmCacheVolume:
-      env.OPENFARM_GATE_NPM_CACHE_VOLUME || 'openfarm-e2e-npm-cache',
     cpus: env.OPENFARM_GATE_CPUS || '6',
     memory: env.OPENFARM_GATE_MEMORY || '10g',
     workSize: env.OPENFARM_GATE_WORK_SIZE || '6g',
@@ -89,7 +107,11 @@ export function resolveConfig(env = process.env) {
 }
 
 export function resourceNames(id) {
-  return { id, container: `openfarm-check-all-${id}` }
+  return {
+    id,
+    container: `openfarm-check-all-${id}`,
+    runDir: join(runRoot(), `check-all-${id}`),
+  }
 }
 
 const CONTAINER_ENV = {
@@ -107,7 +129,7 @@ const CONTAINER_ENV = {
   NUXT_TELEMETRY_DISABLED: '1',
   OPENFARM_CHROME_PATH: CHROME_WRAPPER,
   npm_config_offline: 'true',
-  npm_config_cache: '/npm-cache',
+  npm_config_cache: '/tmp/npm-cache',
   npm_config_logs_dir: '/tmp/npm-logs',
   npm_config_update_notifier: 'false',
   npm_config_audit: 'false',
@@ -118,6 +140,7 @@ const CONTAINER_ENV = {
 export function createArgs(cfg, names) {
   return [
     'create',
+    '--rm',
     ...['--pull', 'never', '--name', names.container],
     ...['--label', `${LABEL_KEY}=${names.id}`],
     ...['--network', 'none', '--init'],
@@ -129,8 +152,9 @@ export function createArgs(cfg, names) {
       '--tmpfs',
       `/work:rw,exec,uid=999,gid=999,mode=0755,size=${cfg.workSize}`,
     ],
-    ...['--mount', scratchMount()],
+    ...['--mount', scratchMount(names.runDir)],
     ...['--tmpfs', '/usr/lib/postgresql:ro,size=1m'],
+    ...['--tmpfs', PG_VOLUME_MASK],
     ...[
       '--mount',
       `type=image,source=${cfg.nodeImage},destination=/usr/local,image-subpath=usr/local,readonly`,
@@ -146,7 +170,7 @@ export function createArgs(cfg, names) {
     ...['--mount', browserMount(cfg.nodeImage)],
     ...[
       '--mount',
-      `type=volume,source=${cfg.npmCacheVolume},destination=/npm-cache,readonly`,
+      `type=image,source=${cfg.baseImage},destination=${DEPS_DIR},image-subpath=${DEPS_DIR.slice(1)},readonly`,
     ],
     ...['--entrypoint', 'sleep', cfg.pgImage, 'infinity'],
   ]
@@ -202,8 +226,8 @@ export function execPlan(names) {
       ),
     },
     {
-      label: 'install locked dependencies offline',
-      args: [...execBase(names), 'npm', 'ci', '--offline'],
+      label: 'seed locked dependencies',
+      args: sh(`set -e\n${seedNodeModules('/work')}`),
     },
     {
       label: 'npm run check:all',
@@ -231,7 +255,7 @@ export function findPlanProblems(calls) {
     /^--pull=(?!never$)/,
     /^--cap-add/,
     /^(--pid|--ipc|--userns|--device)(=|$)/,
-    /^type=bind/,
+    /^(-v|--volume|--volumes-from)(=|$)/,
   ]
   for (const call of calls) {
     if (forbiddenSubcommands.test(call[0]))
@@ -265,18 +289,31 @@ export function findPlanProblems(calls) {
     flagValue('--user') === SERVICE_UID,
     'create must not run as root',
   )
+  requireThat(create.includes('--rm'), 'create must use --rm')
+  requireThat(
+    create.some(
+      (arg, i) => create[i - 1] === '--tmpfs' && arg === PG_VOLUME_MASK,
+    ),
+    'the PostgreSQL image volume must be masked with a tmpfs',
+  )
   const mounts = create.filter((arg, i) => create[i - 1] === '--mount')
+  const runDir = resourceNames(
+    String(flagValue('--name')).replace('openfarm-check-all-', ''),
+  ).runDir
   const scratch = mounts.filter((m) =>
     m.split(',').includes(`destination=${SCRATCH_DIR}`),
   )
   requireThat(
-    scratch.length === 1 && scratch[0] === scratchMount(),
-    'scratch /tmp must be exactly one anonymous (task-owned) volume',
+    scratch.length === 1 && scratch[0] === scratchMount(runDir),
+    'scratch /tmp must be exactly one bind of the run directory',
   )
   const shared = mounts.filter((m) => !scratch.includes(m))
   requireThat(
-    shared.length === 5 && shared.every((m) => m.endsWith(',readonly')),
-    'image and cache mounts must all be read-only',
+    shared.length === 5 &&
+      shared.every(
+        (m) => m.startsWith('type=image,') && m.endsWith(',readonly'),
+      ),
+    'image mounts must all be read-only',
   )
   const path = CONTAINER_ENV.PATH.split(':')
   requireThat(
@@ -295,8 +332,10 @@ export function findPlanProblems(calls) {
     'gate must run the unmodified `npm run check:all`',
   )
   requireThat(
-    calls.some((call) => call.join(' ').includes('npm ci --offline')),
-    'dependency install must be `npm ci --offline`',
+    mounts.some((m) => m.includes(`destination=${DEPS_DIR},`)) &&
+      calls.some((call) => call.at(-1)?.includes(seedNodeModules('/work'))) &&
+      !calls.some((call) => /\bnpm (ci|install|i)\b/.test(call.join(' '))),
+    'dependencies must come from the base image, never from an install',
   )
   requireThat(
     mounts.some((m) =>
@@ -320,6 +359,9 @@ export function dockerRunner(bin) {
   return (args, { stdin, onOutput } = {}) =>
     new Promise((done) => {
       const child = spawn(bin, args, {
+        // Its own process group: Ctrl-C must not kill a create that is about
+        // to report the container it made.
+        detached: args[0] === 'create',
         stdio: [stdin ? 'pipe' : 'ignore', 'pipe', 'pipe'],
       })
       let stdout = ''
@@ -353,8 +395,8 @@ export function dockerRunner(bin) {
 export class PrerequisiteError extends Error {}
 
 /**
- * Fail-closed prerequisite checks: only reads (`version`, `image inspect`,
- * `volume inspect`). Nothing is started, pulled or created.
+ * Fail-closed prerequisite checks: only reads (`version`, `image inspect`).
+ * Nothing is started, pulled or created.
  */
 export async function checkPrerequisites(docker, cfg) {
   const version = await docker(['version', '--format', '{{.Server.Version}}'])
@@ -402,17 +444,6 @@ export async function checkPrerequisites(docker, cfg) {
       `Image platforms must match and be linux; got Node ${node.platform}, PostgreSQL ${pg.platform}.`,
     )
 
-  const cache = await docker([
-    'volume',
-    'inspect',
-    '--format',
-    '{{.Name}}',
-    cfg.npmCacheVolume,
-  ])
-  if (cache.code !== 0)
-    throw new PrerequisiteError(
-      `npm cache volume "${cfg.npmCacheVolume}" does not exist. It must hold the locked dependencies for ${node.platform}; set OPENFARM_GATE_NPM_CACHE_VOLUME to another local volume.`,
-    )
   return { dockerServer: version.stdout, node, pg, platform: node.platform }
 }
 
@@ -457,7 +488,79 @@ function workspaceArchive(root = ROOT) {
   return { stream: tar.stdout, count: files.length }
 }
 
+/**
+ * Owns the single runner container. `cleanup` first waits for an in-flight
+ * create to return, so an interrupted run never orphans the container. It is
+ * memoized: the signal handler and the finally block share one removal.
+ */
+export function containerSession({
+  docker,
+  names,
+  say = () => {},
+  record = async () => {},
+}) {
+  let creating
+  let closing = false
+  let cleaning
+  const create = (args) => {
+    if (closing) throw new Error('Interrupted: the container is not created')
+    return (creating = docker(args))
+  }
+  const removeContainer = async () => {
+    closing = true
+    const made = await creating?.catch(() => undefined)
+    if (made?.code !== 0) return false
+    const owner = await docker([
+      'inspect',
+      '--format',
+      `{{index .Config.Labels "${LABEL_KEY}"}} {{.Id}} {{range .Mounts}}{{if eq .Type "volume"}}{{.Name}} {{end}}{{end}}`,
+      names.container,
+    ])
+    const [label, containerId, ...volumes] = owner.stdout.trim().split(' ')
+    let failed = false
+    if (owner.code === 0 && label === names.id) {
+      const removed = await docker(['rm', '-f', '-v', containerId])
+      // `--rm` may already be removing it; `wait` covers that window.
+      if (removed.code !== 0) await docker(['wait', containerId])
+      const left = await docker(['ps', '-aq', '--filter', `id=${containerId}`])
+      failed = left.code !== 0 || left.stdout !== '' || volumes.length > 0
+      say(
+        failed
+          ? `cleanup FAILED for container ${containerId} (volumes: ${volumes.join(' ') || 'none'})`
+          : `removed container ${containerId}`,
+      )
+    } else if (owner.code === 0) {
+      failed = true
+      say(`refusing to remove ${names.container}: ownership label mismatch`)
+    }
+    await record('cleanup.json', {
+      container: names.container,
+      runDir: names.runDir,
+      volumes,
+      failed,
+    })
+    return failed
+  }
+  return { create, cleanup: () => (cleaning ??= removeContainer()) }
+}
+
 const stamp = () => new Date().toISOString()
+
+/** Reuse or build the dependency image; unavailable dependencies fail closed. */
+export function ensureDependencyImage(cfg, docker) {
+  try {
+    return ensureBaseImage({
+      projectDir: ROOT,
+      nodeImage: cfg.nodeImage,
+      bin: cfg.docker,
+      docker,
+    })
+  } catch (error) {
+    throw new PrerequisiteError(
+      `dependency image ${cfg.baseImage} is not available: ${error.message}`,
+    )
+  }
+}
 
 async function runGate(cfg, log) {
   const id = `${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`
@@ -469,6 +572,7 @@ async function runGate(cfg, log) {
   const docker = dockerRunner(cfg.docker)
   const prerequisites = await checkPrerequisites(docker, cfg)
   const free = checkHostSpace()
+  ensureDependencyImage(cfg)
 
   const ledger = mkdtempSync(join(tmpdir(), 'openfarm-check-all-docker-'))
   await mkdir(ledger, { recursive: true })
@@ -493,64 +597,42 @@ async function runGate(cfg, log) {
   await record('task.json', baseline)
   say(`ledger: ${ledger}`)
   say(
-    `images: node=${prerequisites.node.id} postgres=${prerequisites.pg.id}; npm cache volume: ${cfg.npmCacheVolume} (read-only)`,
+    `images: node=${prerequisites.node.id} postgres=${prerequisites.pg.id}; dependencies: ${cfg.baseImage} (read-only)`,
   )
 
-  let created = false
   let exitCode = 1
   let cleanupFailed = false
-  let cleanupRun
-  let scratchVolume = ''
-  // Memoized: the signal handler and the finally block share one removal.
-  const cleanup = () => (cleanupRun ??= removeContainer())
-  const removeContainer = async () => {
-    if (!created) return
-    created = false
-    const owner = await docker([
-      'inspect',
-      '--format',
-      `{{index .Config.Labels "${LABEL_KEY}"}} {{.Id}} {{range .Mounts}}{{if eq .Destination "${SCRATCH_DIR}"}}{{.Name}}{{end}}{{end}}`,
-      names.container,
-    ])
-    const [label, containerId, volume = ''] = owner.stdout.split(' ')
-    scratchVolume = volume
-    if (owner.code === 0 && label === names.id) {
-      // -v deletes the anonymous scratch volume together with the container.
-      const removed = await docker(['rm', '-f', '-v', containerId])
-      const left = await docker(['ps', '-aq', '--filter', `id=${containerId}`])
-      const volumes = await docker(['volume', 'ls', '-q'])
-      const volumeLeft =
-        volume === '' ||
-        volumes.code !== 0 ||
-        volumes.stdout.split('\n').includes(volume)
-      cleanupFailed = removed.code !== 0 || left.stdout !== '' || volumeLeft
-      say(
-        cleanupFailed
-          ? `cleanup FAILED for container ${containerId} / scratch volume ${volume || '(unknown)'}`
-          : `removed container ${containerId} and scratch volume ${volume}`,
-      )
-    } else if (owner.code === 0) {
-      cleanupFailed = true
-      say(`refusing to remove ${names.container}: ownership label mismatch`)
-    }
-    await record('cleanup.json', {
-      container: names.container,
-      scratchVolume,
-      failed: cleanupFailed,
-    })
-  }
+  const session = containerSession({ docker, names, say, record })
+  let finishing
+  const cleanup = () =>
+    (finishing ??= (async () => {
+      cleanupFailed = await session.cleanup()
+      try {
+        await removeRunDir(names.runDir, {
+          image: cfg.pgImage,
+          bin: cfg.docker,
+        })
+      } catch (error) {
+        cleanupFailed = true
+        say(`could not remove ${names.runDir}: ${error.message}`)
+      }
+    })())
   const stop = (signal) => async () => {
     say(`${signal} received; cleaning up`)
     await cleanup()
     process.exit(signal === 'SIGINT' ? 130 : 143)
   }
-  process.once('SIGINT', stop('SIGINT'))
-  process.once('SIGTERM', stop('SIGTERM'))
+  process.on('SIGINT', stop('SIGINT'))
+  process.on('SIGTERM', stop('SIGTERM'))
 
   try {
-    const made = await docker(createArgs(cfg, names))
+    // mkdtemp-like privacy for the parent; the scratch folder must be writable
+    // by the unprivileged service user inside the container.
+    mkdirSync(names.runDir, { recursive: true, mode: 0o700 })
+    mkdirSync(join(names.runDir, 'tmp'))
+    chmodSync(join(names.runDir, 'tmp'), 0o1777)
+    const made = await session.create(createArgs(cfg, names))
     if (made.code !== 0) throw new Error(`docker create failed: ${made.stderr}`)
-    created = true
     const started = await docker(['start', names.container])
     if (started.code !== 0)
       throw new Error(`docker start failed: ${started.stderr}`)
@@ -601,13 +683,11 @@ function fakeDocker(overrides = {}) {
   const replies = {
     version: { code: 0, stdout: '29.8.2', stderr: '' },
     image: { code: 0, stdout: 'sha256:abc linux/arm64', stderr: '' },
-    volume: { code: 0, stdout: 'cache', stderr: '' },
     ...overrides,
   }
   const run = async (args) => {
     calls.push(args)
-    const key = args[0] === 'image' || args[0] === 'volume' ? args[0] : args[0]
-    const reply = replies[key]
+    const reply = replies[args[0]]
     return typeof reply === 'function' ? reply(args) : reply
   }
   run.calls = calls
@@ -650,28 +730,39 @@ export async function selfTest(log = console.log) {
       create[create.indexOf('--network') + 1] === 'none',
   )
   check(
-    'create publishes no ports and bind-mounts no host path',
+    'create publishes no ports and bind-mounts only the run directory',
     !create.includes('-p') &&
-      !create.some((a) => /^type=bind|docker\.sock/.test(a)),
+      !create.some((a) => /docker\.sock/.test(a)) &&
+      create
+        .filter((a) => /^type=bind/.test(a))
+        .every((a) => a === scratchMount(names.runDir)),
+  )
+  check(
+    'create is --rm and masks the PostgreSQL image volume',
+    create.includes('--rm') && create.includes(PG_VOLUME_MASK),
   )
   check(
     'gate step is exactly `npm run check:all`',
     calls.at(-1).slice(-3).join(' ') === 'npm run check:all',
   )
   check(
-    'dependency install is `npm ci --offline`',
-    calls.some((c) => c.join(' ').includes('npm ci --offline')),
+    'no step installs dependencies',
+    !calls.some((c) => /\bnpm (ci|install|i)\b/.test(c.join(' '))),
   )
   check(
-    'every image and cache mount is read-only',
+    'every image mount is read-only',
     create
       .filter((_, i) => create[i - 1] === '--mount')
-      .filter((m) => m !== scratchMount())
+      .filter((m) => m !== scratchMount(names.runDir))
       .every((m) => m.endsWith(',readonly')),
   )
   for (const [name, ok] of browserPlanChecks(cfg, calls, execPlan(names)))
     check(name, ok)
-  for (const [name, ok] of runtimePlanChecks(calls, execPlan(names)))
+  for (const [name, ok] of runtimePlanChecks(
+    calls,
+    execPlan(names),
+    names.runDir,
+  ))
     check(name, ok)
   for (const [name, taint] of [
     ['--privileged', [['create', '--privileged']]],
@@ -709,16 +800,15 @@ export async function selfTest(log = console.log) {
   const okDocker = fakeDocker()
   const ok = await checkPrerequisites(okDocker, cfg)
   check(
-    'prerequisites pass with every image and the cache present',
+    'prerequisites pass with every image present',
     ok.platform === 'linux/arm64',
   )
   check(
     'prerequisite check only inspects, never starts or pulls',
     okDocker.calls.every(
       (c) =>
-        ['version', 'image', 'volume'].includes(c[0]) &&
-        (c[0] !== 'image' || c[1] === 'inspect') &&
-        (c[0] !== 'volume' || c[1] === 'inspect'),
+        ['version', 'image'].includes(c[0]) &&
+        (c[0] !== 'image' || c[1] === 'inspect'),
     ),
   )
   await rejects(
@@ -798,16 +888,19 @@ export async function selfTest(log = console.log) {
       ),
     /platforms must match/,
   )
+  const dependencyCalls = []
+  const reused = ensureDependencyImage(cfg, (args) => {
+    dependencyCalls.push(args[0])
+    return { status: 0 }
+  })
+  check(
+    'an existing dependency image is reused, not rebuilt',
+    reused === cfg.baseImage && !dependencyCalls.includes('build'),
+  )
   await rejects(
-    'missing npm cache volume fails closed',
-    () =>
-      checkPrerequisites(
-        fakeDocker({
-          volume: { code: 1, stdout: '', stderr: 'No such volume' },
-        }),
-        cfg,
-      ),
-    /npm cache volume .* does not exist/,
+    'missing dependency source image fails closed',
+    async () => ensureDependencyImage(cfg, () => ({ status: 1 })),
+    /dependency image .* is not present locally/,
   )
 
   const failed = checks.filter((c) => !c.ok)

@@ -10,6 +10,20 @@ import {
 const hash = (value: unknown) =>
   createHash('sha256').update(JSON.stringify(value)).digest('hex')
 
+/** Dependencies for exercising the current issuer in historical-schema fixtures. */
+export async function pauseAuthorityAdvertisedControlsMigrations() {
+  const catalog = await loadMigrationCatalog()
+  return [
+    '0033_printer_latest_state',
+    '0108_pause_authority_advertised_controls',
+    '0114_pause_authority_controls_observed_at',
+  ].map((id) => {
+    const migration = catalog.find((entry) => entry.id === id)
+    assert.ok(migration, `Missing fixture migration ${id}`)
+    return migration
+  })
+}
+
 async function journal(admin: Sql) {
   const catalog = (await loadMigrationCatalog()).slice(0, 18)
   assert.equal(catalog.length, 18)

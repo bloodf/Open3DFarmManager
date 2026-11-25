@@ -73,6 +73,9 @@ it('renders spool screens without overflow and accessibility violations', async 
       },
     ],
   })
+  // Vite-only APIs (for example import.meta.glob) compile to empty values in
+  // this esbuild bundle and blank the page; fail on the warning, not a timeout.
+  expect(bundle.warnings.map((warning) => warning.text)).toEqual([])
   const js = bundle.outputFiles.find((f) => f.path.endsWith('.js'))!
   const css = bundle.outputFiles.find((f) => f.path.endsWith('.css'))!
   const server = await startHttpMock({
@@ -117,11 +120,19 @@ it('renders spool screens without overflow and accessibility violations', async 
           })
           try {
             const page = await context.newPage()
-            await page.addInitScript(
-              (theme) =>
-                document.documentElement.setAttribute('data-theme', theme),
-              theme,
-            )
+            const pageErrors: string[] = []
+            page.on('pageerror', (error) => pageErrors.push(error.message))
+            await page.addInitScript((theme) => {
+              // Init scripts run before <html> exists; apply once it does.
+              const apply = () =>
+                document.documentElement?.setAttribute('data-theme', theme)
+              if (document.documentElement) return apply()
+              new MutationObserver((_, observer) => {
+                if (!document.documentElement) return
+                apply()
+                observer.disconnect()
+              }).observe(document, { childList: true })
+            }, theme)
             await page.goto(`${server.origin}/${screen}`)
             await page
               .getByText(
@@ -130,6 +141,17 @@ it('renders spool screens without overflow and accessibility violations', async 
               )
               .first()
               .waitFor()
+              .catch((error: Error) => {
+                throw new Error(
+                  `${screen} ${size} ${theme}: ${error.message}\npage errors: ${pageErrors.join(' | ') || 'none'}`,
+                )
+              })
+            expect(pageErrors).toEqual([])
+            expect(
+              await page.evaluate(() =>
+                document.documentElement.getAttribute('data-theme'),
+              ),
+            ).toBe(theme)
             expect(
               await page.evaluate(() => document.documentElement.scrollWidth),
             ).toBe(width)

@@ -92,7 +92,7 @@ if (journeyEnabled())
       page: Page,
       open: () => Promise<void>,
       button: string,
-      outcome: string,
+      outcome: string | RegExp,
     ) {
       const dialog = commandDialog(started(), page)
       const status = dialog.getByRole('status')
@@ -166,6 +166,7 @@ if (journeyEnabled())
       page: Page,
       label: string,
       fill: (block: Locator) => Promise<void> = async () => {},
+      outcome: string | RegExp = UNCONFIRMED,
     ) {
       const block = extendedBlock(page, label)
       const control = block.getByRole('button', { name: label, exact: true })
@@ -177,25 +178,12 @@ if (journeyEnabled())
           await control.click()
         },
         'Confirmar comando',
-        UNCONFIRMED,
+        outcome,
       )
     }
 
     /** Reloads the history until the finished job is listed. */
     async function expectHistory(page: Page, outcome: string, file: string) {
-      const journey = started()
-      // The Connector kept the finished job in its durable telemetry queue;
-      // the history is written when that telemetry is delivered. Delivery
-      // and live control displace each other on the server (one proof slot
-      // per Connector credential), so the upload path opens only here.
-      journey.setTelemetryUpload(true)
-      try {
-        await historyEntry(page, outcome, file)
-      } finally {
-        journey.setTelemetryUpload(false)
-      }
-    }
-    async function historyEntry(page: Page, outcome: string, file: string) {
       const journey = started()
       await page.goto(journey.origin + '/historico', {
         waitUntil: 'domcontentloaded',
@@ -226,6 +214,9 @@ if (journeyEnabled())
       test.setTimeout(20 * 60_000)
       harness = await startJourneyHarness({
         browser,
+        // Telemetry upload stays open, as a Connector in service does: the
+        // issuer grants only controls advertised in the last two minutes.
+        history: true,
         simulator: 'creality',
         signedControl: true,
         discovery: true,
@@ -342,6 +333,18 @@ if (journeyEnabled())
       await expect(environment).toContainText('Luz da câmara')
       await expect(environment).toContainText('Ligada')
 
+      // Speed is confirmed by the printer's own report, so it is not unknown.
+      await extended(
+        page,
+        'Definir velocidade',
+        async (block) => {
+          await block.locator('select').selectOption('sport')
+        },
+        /^Comando confirmado pelo Connector\./,
+      )
+      expect(sets()).toContainEqual({ speedMode: 0 })
+      expect(sets()).toContainEqual({ setFeedratePct: 125 })
+
       await expect(
         extendedControls(page).getByRole('button', {
           name: 'Referenciar eixos',
@@ -357,8 +360,8 @@ if (journeyEnabled())
           name: 'Comandos não suportados por esta impressora',
         }),
       ).toBeVisible()
+      // Speed is supported; CFS feed needs the owner opt-in, off here.
       for (const label of [
-        'Definir velocidade',
         'Reiniciar firmware',
         'Parada de emergência',
         'Carregar filamento',

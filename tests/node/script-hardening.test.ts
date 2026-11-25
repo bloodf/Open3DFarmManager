@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { createHmac, createHash } from 'node:crypto'
+import { createHmac } from 'node:crypto'
 import {
   mkdtempSync,
   readFileSync,
@@ -12,7 +12,6 @@ import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import { test } from 'node:test'
 import { verifyWebhook } from '../../examples/integration-client/client.ts'
-import { createKobraXMqttTlsOptions } from '../../scripts/qualify/kobra-x-tls.ts'
 
 test('webhook signatures outside the five minute window are rejected', () => {
   const body = Buffer.from('event')
@@ -24,28 +23,6 @@ test('webhook signatures outside the five minute window are rejected', () => {
   assert.equal(
     verifyWebhook(body, timestamp, `v1=${signature}`, 'secret'),
     false,
-  )
-})
-
-test('Kobra X MQTT TLS honors CA and certificate fingerprint pin', () => {
-  const ca = 'test CA'
-  const pin = 'ab'.repeat(32)
-  const options = createKobraXMqttTlsOptions(ca, pin)
-  assert.equal(options.rejectUnauthorized, true)
-  assert.equal(options.ca, ca)
-  const fingerprint = createHash('sha256').update('certificate').digest('hex')
-  assert.equal(
-    createKobraXMqttTlsOptions(undefined, fingerprint).checkServerIdentity?.(
-      'printer',
-      { raw: Buffer.from('certificate') } as never,
-    ),
-    undefined,
-  )
-  assert.ok(
-    createKobraXMqttTlsOptions(undefined, pin).checkServerIdentity?.(
-      'printer',
-      { raw: Buffer.from('wrong') } as never,
-    ),
   )
 })
 

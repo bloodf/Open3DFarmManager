@@ -50,6 +50,30 @@ function encodedCursor(id: string, snapshotAt: number) {
   return Buffer.from(JSON.stringify({ id, snapshotAt })).toString('base64url')
 }
 
+const PLATE_ATTEMPT_ID = /^(?:0|[1-9][0-9]{0,15})$/
+
+/**
+ * Plate occupancy derived from the controls the Connector last advertised.
+ * `confirm_collection` is offered only while a finished run still holds the
+ * bed, and `lastJob.endedAt` is the attempt id that release must name.
+ */
+export function awaitingCollectionPlate(
+  state:
+    | {
+        controls?: readonly string[] | undefined
+        lastJob?: { endedAt?: number | undefined } | undefined
+      }
+    | undefined,
+): { state: 'awaiting-collection'; attemptId?: string } | undefined {
+  if (!state?.controls?.includes('confirm_collection')) return undefined
+  const attemptId =
+    state.lastJob?.endedAt === undefined ? '' : String(state.lastJob.endedAt)
+  return {
+    state: 'awaiting-collection',
+    ...(PLATE_ATTEMPT_ID.test(attemptId) ? { attemptId } : {}),
+  }
+}
+
 function parsedState(row: IntegrationPrinterRow) {
   return PrinterState.safeParse(row.state)
 }
@@ -205,6 +229,7 @@ export async function getIntegrationPrinterStatus(
     model?: string
     activeSpools?: ReturnType<typeof activeSpoolsFromMaterials>
     observedAt?: number
+    plate?: { state: 'awaiting-collection'; attemptId?: string }
   } = {
     printerId: row.id,
     farmId: row.farmId,
@@ -233,6 +258,8 @@ export async function getIntegrationPrinterStatus(
     if (model !== undefined) status.model = model
     const activeSpools = activeSpoolsFromMaterials(parsed.data.materials)
     if (activeSpools?.length) status.activeSpools = activeSpools
+    const plate = awaitingCollectionPlate(parsed.data)
+    if (plate) status.plate = plate
   }
   if (row.observedAt !== null) status.observedAt = row.observedAt
   return status

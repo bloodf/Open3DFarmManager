@@ -4,10 +4,19 @@ import { KOBRALINK_CONTROLS } from '../kobralink/extended-control.ts'
 import type { KobraLinkFetch } from '../kobralink/client.ts'
 import { readKobraLinkPrinterBinding } from '../control/printer-binding.ts'
 import { openFixedAnycubicControl } from '../anycubic/control-driver.ts'
+import {
+  KOBRA_X_SIGNED_ACTIONS,
+  openFixedKobraXControl,
+} from '../kobra-x/control-driver.ts'
+import {
+  kobraXControls,
+  kobraXResultWindowMs,
+  type KobraXControlEvidence,
+} from '../kobra-x/control-support.ts'
 import { anycubicControls } from '../anycubic/control-support.ts'
 import { readAnycubicPrinterBinding } from '../control/printer-binding.ts'
 import { openFixedCrealityControl } from '../creality/control-driver.ts'
-import { CREALITY_ACTIONS } from '../creality/commands.ts'
+import { CREALITY_ACTIONS, CREALITY_CFS_ACTIONS } from '../creality/commands.ts'
 import { readCrealityPrinterBinding } from '../control/printer-binding.ts'
 import { openFixedBambuControl } from '../bambu/control-driver.ts'
 import { bambuControls } from '../bambu/control-support.ts'
@@ -21,9 +30,15 @@ import {
 import type { MacroParamMap } from '../moonraker/control-macros.ts'
 import { consoleSupported } from '../moonraker/control-console.ts'
 import { openFixedMoonrakerPause } from '../moonraker/pause-driver.ts'
+import { isDeclaredSnapmakerU1 } from '../moonraker/u1-tools.ts'
+import {
+  SNAPMAKER_U1_MARKER,
+  snapmakerU1Controls,
+} from '../moonraker/u1-marker.ts'
 import {
   readPrinterBinding,
   readBambuPrinterBinding,
+  readKobraXPrinterBinding,
   type PrinterBinding,
 } from '../control/printer-binding.ts'
 import type {
@@ -62,6 +77,19 @@ type PrepareInput = Parameters<PreparedPauseDriver['prepare']>[0] & {
 
 export function createPauseDriverRouter(config: {
   kobraLinkFetch?: KobraLinkFetch
+  connectKobraX?: NonNullable<
+    Parameters<typeof openFixedKobraXControl>[0]['connect']
+  >
+  /**
+   * What the Kobra X itself last reported (ACE, light, fan). When supplied, a
+   * Kobra X advertises only the controls that evidence supports, and
+   * `undefined` (nothing reported, or unreachable) leaves the accessory-free
+   * ones. Absent, the router offers the driver's full signed list; production
+   * composition always supplies it.
+   */
+  kobraXControlEvidence?(
+    binding: PrinterBinding,
+  ): KobraXControlEvidence | undefined
   allowedOrigins: readonly string[]
   limits: MoonrakerLimits
   clock: { monotonicNow(): number }
@@ -95,9 +123,27 @@ export function createPauseDriverRouter(config: {
   // KobraLink bindings are read-only handles with no command mapping, so they
   // resolve to no binding here and advertise nothing.
   function controls(binding: PrinterBinding): readonly ExtendedControlAction[] {
-    if (!readPrinterBinding(binding)) return []
+    const mapping = readPrinterBinding(binding)
+    if (!mapping) return []
     if (readKobraLinkPrinterBinding(binding)) return KOBRALINK_CONTROLS
-    if (readCrealityPrinterBinding(binding)) return CREALITY_ACTIONS
+    const creality = readCrealityPrinterBinding(binding)
+    if (creality)
+      return creality.cfsFeed
+        ? [...CREALITY_ACTIONS, ...CREALITY_CFS_ACTIONS]
+        : CREALITY_ACTIONS
+    const kobraX = readKobraXPrinterBinding(binding)
+    if (kobraX) {
+      const offered = config.kobraXControlEvidence
+        ? kobraXControls(config.kobraXControlEvidence(binding))
+        : KOBRA_X_SIGNED_ACTIONS
+      // Printer-assigned command reports cannot prove these effects, and no
+      // correlated accessory read-back is established for this firmware.
+      return kobraX.reportIdentity === 'printer-assigned'
+        ? offered.filter(
+            (action) => action !== 'set_fan' && action !== 'set_light',
+          )
+        : offered
+    }
     const anycubic = readAnycubicPrinterBinding(binding)
     if (anycubic) return anycubicControls(anycubic.modelId)
     const bambu = readBambuPrinterBinding(binding)
@@ -109,6 +155,12 @@ export function createPauseDriverRouter(config: {
           )
         : []
     const objects = moonrakerObjects.get(binding)
+    if (isDeclaredSnapmakerU1(mapping.printer_key))
+      return Object.freeze(
+        snapmakerU1Controls(objects).filter(
+          (action) => action !== 'gcode' || config.gcodeConsole?.(binding),
+        ),
+      )
     const found = moonrakerControls(objects)
     return config.gcodeConsole?.(binding) && consoleSupported(objects)
       ? Object.freeze([...found, 'gcode' as const])
@@ -116,6 +168,19 @@ export function createPauseDriverRouter(config: {
   }
   return Object.freeze({
     controls,
+    allowsExtendedResult(binding: PrinterBinding) {
+      const mapping = readPrinterBinding(binding)
+      return (
+        !!mapping?.moonraker_origin &&
+        isDeclaredSnapmakerU1(mapping.printer_key) &&
+        moonrakerObjects.get(binding)?.includes(SNAPMAKER_U1_MARKER) === true
+      )
+    },
+    resultWindowMs(binding: PrinterBinding, action: ExtendedControlAction) {
+      return readKobraXPrinterBinding(binding)
+        ? kobraXResultWindowMs(action)
+        : undefined
+    },
     macros: (binding: PrinterBinding) =>
       advertisedMoonrakerMacros(moonrakerObjects.get(binding)),
     macroParams: (binding: PrinterBinding) => moonrakerMacroParams.get(binding),
@@ -125,6 +190,7 @@ export function createPauseDriverRouter(config: {
         !readKobraLinkPrinterBinding(binding) &&
         !readBambuPrinterBinding(binding) &&
         !readCrealityPrinterBinding(binding) &&
+        !readKobraXPrinterBinding(binding) &&
         !readAnycubicPrinterBinding(binding)
       ) {
         const detect = {
@@ -189,16 +255,19 @@ export function createPauseDriverRouter(config: {
         fixed = (
           readKobraLinkPrinterBinding(binding)
             ? openFixedKobraLinkControl
-            : readAnycubicPrinterBinding(binding)
-              ? openFixedAnycubicControl
-              : readCrealityPrinterBinding(binding)
-                ? openFixedCrealityControl
-                : readBambuPrinterBinding(binding)
-                  ? openFixedBambuControl
-                  : openFixedMoonrakerPause
+            : readKobraXPrinterBinding(binding)
+              ? openFixedKobraXControl
+              : readAnycubicPrinterBinding(binding)
+                ? openFixedAnycubicControl
+                : readCrealityPrinterBinding(binding)
+                  ? openFixedCrealityControl
+                  : readBambuPrinterBinding(binding)
+                    ? openFixedBambuControl
+                    : openFixedMoonrakerPause
         )({
           binding,
           fetch: config.kobraLinkFetch,
+          ...(config.connectKobraX ? { connect: config.connectKobraX } : {}),
           allowedOrigins: config.allowedOrigins,
           limits: config.limits,
           connectionGeneration: generation,

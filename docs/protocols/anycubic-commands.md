@@ -37,6 +37,16 @@ Actions are the `ExtendedControlAction` values in `packages/farm-protocol/src/co
 - **Read-only sources.** Nothing here was captured on a Kobra 3, S1 or other model. The note after kobra-connect §6 says the Rinkhals/Kobra 3 firmware uses `stop`, and that the Kobra 2 docs reference both `stop` and `cancel`.
 - **Dual license on anycubic_ha_local.** The repository ships an AGPL-3.0 `LICENSE` and an MIT `LICENSE-MIT`. This doc cites both and does not decide which one covers a given file.
 
+### Printer alerts
+
+A `print/report` with state `stoped` and a fault code marks the job as failed.
+No code, `0`, `200` or `10601` ("user initiated") is a cancel. A `paused` report
+with a fault code carries the pause reason. A report with state `failed` is a
+refused request and changes nothing. The printer's code and text appear in the
+printer detail message; no code table is published. The rules follow
+[kobracontrol `kobra.py`](https://github.com/bloodf/kobracontrol/blob/c414db4f36d4c96f2b232c368ad6cfe56e3d0408/src/kobracontrol/kobra.py)
+and are covered by simulation only. The codes there were seen on a Kobra X.
+
 ### Printer detail
 
 The detail view uses the reported print state, temperatures, fan speeds,
@@ -56,13 +66,23 @@ The [Anycubic firmware log](https://wiki.anycubic.com/en/fdm-3d-printer/kobra-3-
 confirms the version and LAN feature. The exact-version gate limits the scope of
 simulator coverage.
 
-For listing, the Connector asks for `listLocal` with `path: "/"` on the slicer
-file topic. It accepts a successful reply on the bound file report topic only
-when its message ID matches. The listing parser expects `data.records` with
+For listing, the Connector asks for `listLocal` with
+`{page_num: 1, page_size: 200, path: "/"}` on the slicer file topic, as in
+[kobracontrol](https://github.com/bloodf/kobracontrol/blob/c414db4f36d4c96f2b232c368ad6cfe56e3d0408/docs/protocol.md#files-on-the-printer)
+(observed there on a Kobra X; its Kobra 3 support is marked experimental). It
+accepts a reply with state `done` or `success` and code `0` or `200` on the
+bound file report topic only when its message ID matches. The same source saw a
+Kobra X answer with a message ID of its own; if a Kobra 3 does that, the listing
+times out. The millisecond `timestamp` becomes seconds in the file list. The
+listing parser expects `data.records` with
 `is_dir`, `filename`, `size` and a millisecond `timestamp`. Those response
 fields are documented from a physically tested Kobra S1 in
 [anycubic-lan §7.3](https://github.com/Nino6689/anycubic-lan/blob/361aadae0cb0784ff11cafcc68226a21659346eb/docs/PROTOCOL.md#73-listing-files-and-starting-a-print).
 The Kobra 3 response is covered by simulation and still needs hardware confirmation.
+
+kobracontrol also records that the Kobra 3 family takes one LAN MQTT client at a
+time. File sessions open their own connection beside the status collector, so
+this needs a check on hardware before listing or upload can be relied on.
 
 For upload, a fresh idle info reply must advertise a signed `/gcode_upload` URL
 on the bound host and port (`18910` by default). The Connector sends one

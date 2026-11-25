@@ -169,6 +169,14 @@ const problems = {
   'payload-too-large': [413, 'Solicitação muito grande.'],
   'unsupported-media-type': [415, 'Formato de solicitação não aceito.'],
   'unsafe-target': [422, 'Destino do webhook não permitido.'],
+  'spool-already-bound': [
+    409,
+    'A bobina do Spoolman já foi vinculada nesta farm.',
+  ],
+  'spool-not-observed': [
+    409,
+    'Nenhum Connector autorizado desta farm observou recentemente esta bobina no serviço Spoolman configurado.',
+  ],
   'spool-location-changed': [
     409,
     'O registro da bobina mudou. Consulte o local atual.',
@@ -246,7 +254,7 @@ const policies: RoutePolicy[] = [
   {
     method: 'POST',
     path: /^\/printers\/[^/]+\/actions$/,
-    scopes: ['control:basic', 'control:extended'],
+    scopes: ['control:basic', 'control:extended', 'plates:confirm'],
   },
   {
     method: 'GET',
@@ -421,6 +429,7 @@ async function readActionScope(request: Request) {
       : 'invalid-request'
   }
   if (typeof action !== 'string') return 'invalid-request'
+  if (action === 'confirm_collection') return 'plates:confirm'
   return ['pause', 'resume', 'cancel'].includes(action)
     ? 'control:basic'
     : 'control:extended'

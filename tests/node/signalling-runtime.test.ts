@@ -989,7 +989,12 @@ test('read queries correlate replies only on their proved Connector inbox and se
     assert.equal(legacy.raw.socket.destroyed, false)
     legacy.native.terminate()
     await flush()
-    const machine = f.peer('connector', ['Open3dfarm-Api-Query', '1'])
+    const machine = f.peer('connector', [
+      'Open3dfarm-Api-Query',
+      '1',
+      'Open3dfarm-Api-Spool-Query',
+      '1',
+    ])
     assert.equal(
       await f.runtime.upgrade(machine.request, 'connector', 'read-only'),
       undefined,
@@ -1034,6 +1039,50 @@ test('read queries correlate replies only on their proved Connector inbox and se
     machine.native.emit('message', rawData, false)
     f.runtime.message(machine, { rawData })
     assert.deepEqual(await pending, result)
+    const lookup = {
+      kind: 'spool-membership',
+      farmId: f.farm,
+      serviceId: randomUUID(),
+      spoolId: 99,
+    } as const
+    assert.deepEqual(
+      await f.runtime.queryAgentInbox(f.farm, f.agent, {
+        ...lookup,
+        farmId: randomUUID(),
+      }),
+      unavailable,
+    )
+    const proof = {
+      kind: lookup.kind,
+      serviceId: lookup.serviceId,
+      spoolId: lookup.spoolId,
+      present: true,
+      observedAt: Date.now(),
+    }
+    for (const response of [{ ...proof, spoolId: 100 }, proof]) {
+      const requested = f.runtime.queryAgentInbox(f.farm, f.agent, lookup)
+      const frame = machine.wires.at(-1)
+      assert.equal(frame?.t, 'connector.api-query')
+      assert.deepEqual(frame, {
+        v: 1,
+        t: 'connector.api-query',
+        request_id: frame.request_id,
+        ...lookup,
+      })
+      const reply = Buffer.from(
+        JSON.stringify({
+          v: 1,
+          t: 'connector.api-query-result',
+          request_id: frame.request_id,
+          wire: JSON.stringify(response),
+        }),
+      )
+      f.runtime.message(machine, { rawData: reply })
+      assert.deepEqual(
+        await requested,
+        response.spoolId === lookup.spoolId ? proof : unavailable,
+      )
+    }
     const abandoned = query()
     f.close()
     assert.deepEqual(await abandoned, unavailable)

@@ -383,6 +383,7 @@ const scenarios = [
   ...environmentControlScenarios(),
 ]
 scenarios.push(...physicalSpoolScenarios())
+scenarios.push(...spoolIdentityScenarios())
 const pairs = ops.flatMap((op) =>
   op.responses.map((response) => ({
     op,
@@ -390,6 +391,47 @@ const pairs = ops.flatMap((op) =>
     key: `${op.key} ${response.status}`,
   })),
 )
+
+function spoolIdentityScenarios(): Scenario[] {
+  const serviceId = '12345678-1234-4234-8234-123456789abc'
+  const binding = { serviceId, serviceSpoolId: 7 }
+  return [
+    { path: '/inventory', expected: { serviceId } },
+    {
+      path: '/inventory/spools',
+      expected: { serviceId, spoolKey: serviceId + ':7' },
+    },
+    {
+      path: '/inventory/spools/search',
+      expected: { ...binding, spoolKey: serviceId + ':7' },
+    },
+    {
+      path: '/inventory/spools/usage',
+      expected: { ...binding, spoolKey: serviceId + ':7' },
+    },
+  ].map(({ path, expected }) => ({
+    op: `GET ${path}`,
+    status: '200',
+    name: 'publishes available Spoolman provenance',
+    async run(world) {
+      const app = world.addApp([{ scopes: ['inventory:read'] }])
+      const inventory = world.inventory[0]!
+      inventory.snapshot = { ...(inventory.snapshot as object), serviceId }
+      world.spoolStock[0] = Object.assign(world.spoolStock[0]!, binding)
+      world.spoolUsage[0] = Object.assign(world.spoolUsage[0]!, binding)
+      const input = {
+        method: 'GET',
+        path: path + (path.endsWith('/usage') ? '?jobId=101' : ''),
+        token: await tokenFor(world, app),
+      }
+      const result = await call(input)
+      const { data } = result.json as { data: object[] }
+      expect(data[0]).toMatchObject(expected)
+      if (data.length > 1) expect(data[1]).not.toHaveProperty('serviceId')
+      return { input, result }
+    },
+  }))
+}
 
 function physicalSpoolScenarios(): Scenario[] {
   const base = '/inventory/spools/physical'
@@ -418,6 +460,7 @@ function physicalSpoolScenarios(): Scenario[] {
     },
   ] as const
 
+  const serviceId = '12345678-1234-4234-8234-123456789abc'
   return routes.flatMap(({ method, path, scope, suffix, success }) => {
     const scenario = (
       status: string,
@@ -431,6 +474,9 @@ function physicalSpoolScenarios(): Scenario[] {
         rateLimited?: boolean
         requiresApproval?: boolean
         keyConflict?: boolean
+        bindingConflict?: boolean
+        missingObservation?: boolean
+        targetedObservation?: boolean
         replay?: boolean
       } = {},
     ): Scenario => ({
@@ -449,9 +495,92 @@ function physicalSpoolScenarios(): Scenario[] {
           { sandbox: true },
         )
         const token = options.noToken ? undefined : await tokenFor(world, app)
+        const spoolId = options.targetedObservation ? 99 : 1
         let failPool = false
         let stored: { request_hash: string; response: unknown } | undefined
         const spool = { id: 7, location: 'Gaveta A', revision: '71:(0,1)' }
+        const observedAt = Date.now()
+        const tx = (query: TemplateStringsArray, ...values: unknown[]) => {
+          const text = query.join('')
+          if (!text.trim() || text === 'FOR SHARE OF a, g') return []
+          if (text.includes('farm.integration_app_grants'))
+            return [{ id: 'grant' }]
+          if (text.includes('pg_advisory_xact_lock')) return []
+          if (text.includes('SELECT request_hash, response'))
+            return stored ? [stored] : []
+          if (
+            text.includes(
+              'INSERT INTO farm.integration_physical_spool_registrations',
+            )
+          ) {
+            stored = {
+              request_hash: values[2] as string,
+              response: values[3],
+            }
+            return []
+          }
+          if (text.includes('FROM farm.spool_filaments'))
+            return values[1] === 1 ? [{ id: 1 }] : []
+          if (text.includes('WHERE response @>')) {
+            expect(values[0]).toEqual({
+              farmId: ids.farmA,
+              spoolman: {
+                serviceId,
+                spoolId,
+              },
+            })
+            return options.bindingConflict ? [{ exists: true }] : []
+          }
+          if (
+            text.includes('farm.lock_physical_spool_observations') ||
+            text.includes('farm.read_physical_spool_observations')
+          ) {
+            expect(values).toEqual([ids.farmA, serviceId])
+            if (options.missingObservation || stored) return []
+            if (options.targetedObservation) {
+              world.inbox = {
+                kind: 'spool-membership',
+                serviceId,
+                spoolId,
+                present: true,
+                observedAt,
+              }
+            }
+            return [
+              {
+                agentId: ids.agentA,
+                receivedAt: observedAt,
+                observedAt,
+                snapshot: {
+                  observedAt,
+                  serviceId,
+                  stale: false,
+                  total: options.targetedObservation ? 9 : 1,
+                  spools: [
+                    {
+                      spoolId: 1,
+                      name: 'PLA',
+                      material: null,
+                      colorHex: null,
+                      remainingGrams: null,
+                      location: null,
+                      archived: false,
+                    },
+                  ],
+                },
+              },
+            ]
+          }
+          if (text.includes('INSERT INTO farm.spools'))
+            return [{ ...spool, id: 8, location: values[3] }]
+          if (text.includes('UPDATE farm.spools'))
+            return [{ ...spool, location: null, revision: '72:(0,2)' }]
+          if (text.includes('FROM farm.spools'))
+            return values[1] === spool.id ? [spool] : []
+          throw new Error('Unexpected physical inventory query')
+        }
+        tx.json = (value: unknown) => value
+        world.physicalSpoolRead = tx
         Object.assign(world.pool as object, {
           begin: (
             work: (
@@ -462,35 +591,6 @@ function physicalSpoolScenarios(): Scenario[] {
             ) => unknown,
           ) => {
             if (failPool) throw new Error('pool down')
-            const tx = (query: TemplateStringsArray, ...values: unknown[]) => {
-              const text = query.join('')
-              if (text.includes('farm.integration_app_grants'))
-                return [{ id: 'grant' }]
-              if (text.includes('pg_advisory_xact_lock')) return []
-              if (text.includes('SELECT request_hash, response'))
-                return stored ? [stored] : []
-              if (
-                text.includes(
-                  'INSERT INTO farm.integration_physical_spool_registrations',
-                )
-              ) {
-                stored = {
-                  request_hash: values[2] as string,
-                  response: values[3],
-                }
-                return []
-              }
-              if (text.includes('FROM farm.spool_filaments'))
-                return values[1] === 1 ? [{ id: 1 }] : []
-              if (text.includes('INSERT INTO farm.spools'))
-                return [{ ...spool, id: 8, location: values[3] }]
-              if (text.includes('UPDATE farm.spools'))
-                return [{ ...spool, location: null, revision: '72:(0,2)' }]
-              if (text.includes('FROM farm.spools'))
-                return values[1] === spool.id ? [spool] : []
-              throw new Error('Unexpected physical inventory query')
-            }
-            tx.json = (value: unknown) => value
             return work(tx)
           },
         })
@@ -539,7 +639,26 @@ function physicalSpoolScenarios(): Scenario[] {
           world.config.integrationAuth.writeLimit = 1
           await call(input)
         }
-        return { input, result: await call(input) }
+        const result = await call(input)
+        if (options.targetedObservation) {
+          expect(world.inboxCalls).toEqual([
+            {
+              farmId: ids.farmA,
+              agentId: ids.agentA,
+              query: {
+                kind: 'spool-membership',
+                farmId: ids.farmA,
+                serviceId,
+                spoolId,
+              },
+            },
+          ])
+        }
+        if (options.missingObservation) {
+          expect(result.json).toMatchObject({ code: 'spool-not-observed' })
+          expect(stored).toBeUndefined()
+        }
+        return { input, result }
       },
     })
 
@@ -585,7 +704,42 @@ function physicalSpoolScenarios(): Scenario[] {
       )
     }
     if (suffix === '') {
+      const bindingInput = {
+        body: {
+          filamentId: 1,
+          location: 'Gaveta A',
+          spoolman: {
+            serviceId,
+            spoolId: 1,
+          },
+        },
+      }
       cases.push(
+        scenario('201', 'registers an explicitly bound spool', {
+          input: bindingInput,
+          replay: true,
+        }),
+        scenario(
+          '201',
+          'registers a spool omitted from its inventory summary',
+          {
+            input: {
+              body: {
+                ...bindingInput.body,
+                spoolman: { serviceId, spoolId: 99 },
+              },
+            },
+            targetedObservation: true,
+          },
+        ),
+        scenario('409', 'external spool has no current trusted observation', {
+          input: bindingInput,
+          missingObservation: true,
+        }),
+        scenario('409', 'external spool already bound', {
+          input: bindingInput,
+          bindingConflict: true,
+        }),
         scenario('400', 'idempotency key required', { input: { headers: {} } }),
         scenario('409', 'idempotency key reused with different body', {
           keyConflict: true,
@@ -1138,6 +1292,25 @@ describe('the validator rejects undocumented fields', () => {
     expect(
       validateValue(page, { data: [], nextCursor: null, total: 3 }),
     ).toEqual(['$.total: undocumented field'])
+  })
+  it('documents tool temperature arguments and rejects invalid values', () => {
+    const request = resolveRef('#/components/schemas/PrinterActionRequest')
+    expect(
+      validateValue(request, {
+        action: 'set_tool_temperature',
+        args: { tool: 1, target_c: 200 },
+      }),
+    ).toEqual([])
+    for (const args of [
+      { tool: 4, target_c: 200 },
+      { tool: 1, target_c: -1 },
+      { tool: 1 },
+      { tool: 1, target_c: 200, extra: true },
+    ]) {
+      expect(
+        validateValue(request, { action: 'set_tool_temperature', args }),
+      ).not.toEqual([])
+    }
   })
   it('rejects an extra field inside the free-form-looking Action arguments', () => {
     const request = resolveRef('#/components/schemas/ActionRequest')
@@ -1883,3 +2056,99 @@ function environmentControlScenarios(): Scenario[] {
   })
   return out
 }
+
+describe('collection hold on the printer action route', () => {
+  it('shows the plate, accepts confirm_collection, and refuses the wrong scope', async () => {
+    const world = freshWorld()
+    const printer = world.authStore.printers.find(
+      (row) => row.id === ids.printerA1,
+    )!
+    printer.state = {
+      printerKey: printer.printerKey,
+      state: 'idle',
+      progress: 0,
+      observedAt: 1_700_000_000_000,
+      controls: ['pause', 'resume', 'cancel', 'confirm_collection'],
+      lastJob: { outcome: 'completed', endedAt: 5000 },
+    }
+    const target = world.actionsStore.targets.get(ids.printerA1)!
+    target.controls = ['pause', 'resume', 'cancel', 'confirm_collection']
+    const token = await tokenFor(
+      world,
+      world.addApp([{ scopes: ['printers:read', 'plates:confirm'] }]),
+    )
+    const basic = await tokenFor(
+      world,
+      world.addApp([{ scopes: ['control:basic'] }]),
+    )
+    const status = await call({
+      method: 'GET',
+      path: `/printers/${ids.printerA1}/status`,
+      token,
+    })
+    expect(status.status).toBe(200)
+    expect(status.json).toMatchObject({
+      state: 'idle',
+      plate: { state: 'awaiting-collection', attemptId: '5000' },
+    })
+    expect(
+      validateValue(
+        resolveRef('#/components/schemas/PrinterStatus'),
+        status.json,
+      ),
+    ).toEqual([])
+    const clear = await call({
+      method: 'GET',
+      path: `/printers/${ids.printerA2}/status`,
+      token,
+    })
+    expect(clear.status).toBe(200)
+    expect(clear.json).not.toHaveProperty('plate')
+
+    const confirm = {
+      method: 'POST',
+      path: `/printers/${ids.printerA1}/actions`,
+      headers: { 'idempotency-key': 'collect-bed' },
+      body: { action: 'confirm_collection', args: { attempt: '5000' } },
+    }
+    const refused = await call({ ...confirm, token: basic })
+    expect(refused.status).toBe(403)
+    expect(refused.json).toMatchObject({ code: 'insufficient-scope' })
+    const pause = await call({
+      method: 'POST',
+      path: `/printers/${ids.printerA1}/actions`,
+      token,
+      headers: { 'idempotency-key': 'not-basic' },
+      body: { action: 'pause', args: {} },
+    })
+    expect(pause.status).toBe(403)
+    expect(pause.json).toMatchObject({ code: 'insufficient-scope' })
+
+    const accepted = await call({ ...confirm, token })
+    expect(accepted.status).toBe(202)
+    expect(accepted.json).toMatchObject({
+      action: 'confirm_collection',
+      args: { attempt: '5000' },
+      status: 'queued',
+    })
+    expect(
+      validateValue(resolveRef('#/components/schemas/Action'), accepted.json),
+    ).toEqual([])
+    const actionId = (accepted.json as { id: string }).id
+    const envelope = world.envelopes.byResource(actionId)!
+    expect(envelope.requiredScope).toBe('plates:confirm')
+    expect(world.envelopes.commands.get(envelope.cmdId)).toMatchObject({
+      kind: 'action',
+      action: {
+        action: 'confirm_collection',
+        args: { attempt: '5000' },
+      },
+    })
+    const replay = await call({ ...confirm, token })
+    expect(replay.status).toBe(202)
+    expect(replay.json).toMatchObject({ id: actionId, status: 'queued' })
+    expect(replay.headers.get('location')).toBe(
+      accepted.headers.get('location'),
+    )
+  })
+})

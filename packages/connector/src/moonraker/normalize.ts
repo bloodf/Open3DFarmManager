@@ -1,5 +1,6 @@
 import {
   boundPrinterString,
+  MOONRAKER_CANCELLED_STATUS,
   PrinterState,
 } from '@open3dfarmmanager/farm-protocol'
 import type { ObservationContext, ValidatedMoonrakerSnapshot } from './parse.ts'
@@ -88,6 +89,9 @@ export function normalizeMoonrakerSnapshot(
       case 'paused':
         state = 'paused'
         break
+      case 'cancelled':
+        state = 'unknown'
+        break
       case 'error':
         state = 'error'
         break
@@ -167,6 +171,9 @@ export function normalizeMoonrakerSnapshot(
     printer: PrinterState.parse({
       ...context,
       state,
+      ...(webhooks.state === 'ready' && print_stats.state === 'cancelled'
+        ? { statusMessage: MOONRAKER_CANCELLED_STATUS }
+        : {}),
       progress: virtual_sdcard.progress,
       ...(filename ? { filename } : {}),
       ...(validNumber(duration) ? { printDuration: duration } : {}),

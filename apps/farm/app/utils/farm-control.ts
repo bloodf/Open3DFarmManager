@@ -4,6 +4,7 @@ import type {
   ExtendedControlAction,
 } from '../../../../packages/farm-protocol/src/control-actions.ts'
 import {
+  controlObservationState,
   controlSourceState,
   controlTargetState,
 } from '../../../../packages/farm-protocol/src/control-actions.ts'
@@ -136,7 +137,7 @@ export function controlActionAvailability(
   }
 
   // Check state compatibility via controlSourceState
-  const currentState = observation.state.state
+  const currentState = controlObservationState(observation.state)
   if (!controlSourceState(action, currentState)) {
     let stateReason = 'O estado da impressora não permite esta ação.'
     switch (action) {
@@ -296,6 +297,26 @@ function actionOutcomeBaseText(
     case 'outcome-unknown':
       return `Não foi possível confirmar se a impressão foi ${actionPast}. Verifique a impressora antes de tentar novamente.`
   }
+}
+
+export function extendedControlStatusText(
+  state: FarmPauseControlState,
+  remainingSeconds: number,
+): string {
+  if (state.kind === 'sending') return 'Enviando o comando…'
+  if (state.kind === 'settled') {
+    const base = {
+      applied: 'Comando confirmado pelo Connector.',
+      rejected: 'Comando recusado.',
+      'not-sent': 'Comando não enviado.',
+      'outcome-unknown':
+        'Resultado desconhecido. Verifique a impressora antes de tentar novamente.',
+    }[state.outcome]
+    const hint =
+      state.outcome === 'applied' ? undefined : resultCodeHint(state.code)
+    return hint ? `${base} ${hint}` : base
+  }
+  return controlStatusText('pause', state, remainingSeconds)
 }
 
 /**

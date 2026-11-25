@@ -370,7 +370,9 @@ async function open(
   page.setDefaultTimeout(capturing ? 3000 : 10_000)
   await setPolishTheme(page, theme)
   await mockApi(page, screen, state)
-  await page.goto(screens[screen].path)
+  const scope =
+    screen === 'bambu-cloud' && state === 'connected' ? `?farm=${farm}` : ''
+  await page.goto(`${screens[screen].path}${scope}`)
   await page
     .getByRole('heading', { level: 1, name: screens[screen].heading })
     .waitFor()
@@ -433,6 +435,8 @@ async function interact(page: Page, screen: Screen, state: State) {
         await page.getByLabel('E-mail da conta Bambu').waitFor()
         break
       case 'connected':
+        // This fixture has two farms, so the page requires an explicit choice.
+        await page.getByLabel('Farm', { exact: true }).selectOption(farm)
         await page.getByRole('button', { name: 'Desconectar' }).waitFor()
         break
       case 'unavailable':

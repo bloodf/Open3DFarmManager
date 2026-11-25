@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { it, expect, vi, type TestContext } from 'vitest'
 import { randomBytes, randomUUID } from 'node:crypto'
+import { DatabaseSync } from 'node:sqlite'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -311,7 +312,7 @@ async function fixture(t: TestContext, options: FixtureOptions = {}) {
     capability: accepted.handle,
     printerBinding,
   }
-  return { dispatcher, input, sent, execute }
+  return { dispatcher, input, sent, execute, directory, cmdId: signed.cmd_id }
 }
 
 for (const state of [
@@ -353,6 +354,23 @@ it('browser delivers and confirms one typed command for an idle advertised tool'
     tool: 1,
     target_c: 200,
   })
+  const db = new DatabaseSync(join(f.directory, 'pause-commands.sqlite'))
+  try {
+    expect(
+      db
+        .prepare('SELECT action FROM control_command_actions WHERE cmd_id=?')
+        .get(f.cmdId),
+    ).toMatchObject({ action: 'set_tool_temperature' })
+    expect(
+      db
+        .prepare(
+          'SELECT tool,target_c FROM control_tool_temperature_args WHERE cmd_id=?',
+        )
+        .get(f.cmdId),
+    ).toMatchObject({ tool: 1, target_c: 200 })
+  } finally {
+    db.close()
+  }
 })
 
 it('browser refuses a heater withdrawn at the send boundary', async (t) => {

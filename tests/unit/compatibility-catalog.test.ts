@@ -92,7 +92,11 @@ describe('áreas de controle do catálogo', () => {
       'printStatus',
       'fileManager',
     ] as const) {
-      expect(kobraX.controlAreas[key]).toBe('documented')
+      expect(kobraX.controlAreas[key]).toBe(
+        ['temperatures', 'fans', 'leds'].includes(key)
+          ? 'simulated'
+          : 'documented',
+      )
       expect(kobra3Lan.controlAreas[key]).toBe('documented')
     }
     expect(kobraX.controlAreas.webcams).toBe('unsupported')
@@ -144,10 +148,26 @@ describe('áreas de controle do catálogo', () => {
   it('preenche a família Klipper onde há teste e mantém o resto desconhecido', () => {
     for (const product of klipperCatalog) {
       expect(product.controlAreas.temperatures).toBe('simulated')
-      expect(product.controlAreas.jobQueue).toBe('simulated')
+      expect(product.controlAreas.jobQueue).toBe(
+        product.id === 'snapmaker-u1' ? 'unknown' : 'simulated',
+      )
       expect(product.controlAreas.extrusion).toBe('unknown')
       expect(product.controlAreas.config).toBe('unknown')
       expect(product.limitations.join(' ')).toMatch(/nunca em hardware/)
     }
+  })
+
+  it('limita a U1 às áreas com comandos comprovados no simulador', () => {
+    const u1 = klipperCatalog.find((product) => product.id === 'snapmaker-u1')!
+    expect(
+      Object.entries(u1.controlAreas).filter(
+        ([, status]) => status !== 'unknown',
+      ),
+    ).toEqual([
+      ['temperatures', 'simulated'],
+      ['motion', 'simulated'],
+      ['console', 'simulated'],
+      ['printStatus', 'simulated'],
+    ])
   })
 })

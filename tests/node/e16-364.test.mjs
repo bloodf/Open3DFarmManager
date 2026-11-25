@@ -63,6 +63,7 @@ test(
       printerKey: 'fixture',
       httpPort: mock.httpPort,
       mqttPort: mock.mqttPort,
+      pinSha256: mock.tls.serverFingerprintSha256,
       reconnectMs: 100,
     }
     await assert.rejects(
@@ -500,6 +501,7 @@ test(
       printerKey: 'fixture',
       httpPort: mock.httpPort,
       mqttPort: mock.mqttPort,
+      pinSha256: mock.tls.serverFingerprintSha256,
       reconnectMs: 100,
     }
     const calls = () => mock.calls()

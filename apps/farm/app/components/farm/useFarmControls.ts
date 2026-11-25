@@ -8,10 +8,11 @@ import {
   watch,
 } from 'vue'
 import { type useFarmView } from '../../composables/useFarmView.ts'
-import { type FarmRow } from '../../utils/farm-view.ts'
+import { observationAge, type FarmRow } from '../../utils/farm-view.ts'
 import { macroArgs } from '../../utils/farm-macros.ts'
 import {
   controlStatusText,
+  extendedControlStatusText,
   liveControlActionAvailability,
 } from '../../utils/farm-control.ts'
 import { livePauseAvailability } from '../../utils/farm-pause.ts'
@@ -26,6 +27,7 @@ import {
   type FarmPauseControlState,
 } from '../../utils/webrtc/farm-pause-control.ts'
 import { createFarmStatusKeyResolver } from '../../utils/webrtc/farm-status-key-resolver.ts'
+import { pauseResultDriverFamilyFromIdentity } from '../../utils/webrtc/pause-command-client.ts'
 
 export function useFarmControls(
   { ready, now }: ReturnType<typeof useFarmView>,
@@ -89,9 +91,7 @@ export function useFarmControls(
       return 'O estado da impressora deixou de estar ao vivo. Nenhum comando foi enviado.'
     }
     if (!['pause', 'resume', 'cancel'].includes(pauseTarget.value.action)) {
-      if (pauseState.value.kind === 'settled')
-        return lastControlResults.value[pauseTarget.value.assignmentId] ?? ''
-      return controlStatusText('pause', pauseState.value, pauseRemaining.value)
+      return extendedControlStatusText(pauseState.value, pauseRemaining.value)
     }
     return controlStatusText(
       pauseTarget.value.action as ControlAction,
@@ -132,6 +132,9 @@ export function useFarmControls(
       keyId,
       agentId: row.assignment.agentId,
       assignmentId: row.assignment.assignmentId,
+      driverFamily: pauseResultDriverFamilyFromIdentity(
+        row.observation?.state.identity,
+      ),
       async resolveKey(signal) {
         const resolved = await pauseResolver({
           scope,
@@ -224,13 +227,7 @@ export function useFarmControls(
         lastControlResults.value[pauseTarget.value.assignmentId] =
           state.kind === 'settled' &&
           !['pause', 'resume', 'cancel'].includes(pauseTarget.value.action)
-            ? {
-                applied: 'Comando confirmado pelo Connector.',
-                rejected: 'Comando recusado.',
-                'not-sent': 'Comando não enviado.',
-                'outcome-unknown':
-                  'Resultado desconhecido. Verifique a impressora antes de tentar novamente.',
-              }[state.outcome]
+            ? extendedControlStatusText(state, 0)
             : controlStatusText(
                 pauseTarget.value.action as ControlAction,
                 state,
@@ -305,6 +302,24 @@ export function useFarmControls(
       pauseControl.close()
     }
   })
+  // A capability issued during a collection hold lacks the start actions.
+  // When fresh telemetry advertises them, the session is admitted again.
+  watch([() => ready.value?.rows, now], () => {
+    const target = pauseTarget.value
+    if (!target || !pauseControl || pauseState.value.kind !== 'ready') return
+    const row = ready.value?.rows.find(
+      (item) => item.assignment.assignmentId === target.assignmentId,
+    )
+    const observation = row?.observation
+    pauseControl.controlsChanged(
+      observation?.state.controls,
+      !!row &&
+        !!observation &&
+        row.connection === 'authenticated' &&
+        !observation.historical &&
+        !observationAge(observation, now.value).stale,
+    )
+  })
   onBeforeUnmount(() => {
     const control = pauseControl
     pauseControl = undefined
@@ -323,6 +338,7 @@ export function useFarmControls(
     availability,
     pauseTarget,
     pauseState,
+    pauseLost,
     lastControlResults,
     pauseRemaining,
     pauseStatus,

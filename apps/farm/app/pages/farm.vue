@@ -9,6 +9,7 @@ import {
   writeFarmWallQuery,
 } from '../utils/farm-filters.ts'
 import SpoolInventory from '../components/SpoolInventory.vue'
+import { useFarmSlotBindings } from '../composables/useFarmSlotBindings.ts'
 import { useFarmView } from '../composables/useFarmView.ts'
 import { useLastKnownStates } from '../composables/useLastKnownStates.ts'
 import { offlineCards } from '../composables/useLastKnownStates-core.ts'
@@ -18,6 +19,7 @@ import FarmScopeSelector from '../components/farm/FarmScopeSelector.vue'
 import PrinterWallFilters from '../components/farm/PrinterWallFilters.vue'
 import FarmDeviceSelector from '../components/farm/FarmDeviceSelector.vue'
 import PrinterWallTable from '../components/farm/PrinterWallTable.vue'
+import FarmMaterials from '../components/FarmMaterials.vue'
 import FarmPrinterCard from '../components/farm/FarmPrinterCard.vue'
 import PrinterWallCard from '../components/farm/PrinterWallCard.vue'
 import PrinterWallSummary from '../components/farm/PrinterWallSummary.vue'
@@ -27,7 +29,10 @@ import {
   useStatusSummary,
 } from '../composables/useStatusSummary.ts'
 import { wallCardProps } from '../utils/farm-wall-card.ts'
+import { activeSlotSpools } from '../utils/slot-spools.ts'
 import FarmCardControls from '../components/farm/FarmCardControls.vue'
+import ExtendedControlStatus from '../components/farm/ExtendedControlStatus.vue'
+import ToolTemperatureConfirmation from '../components/farm/ToolTemperatureConfirmation.vue'
 import CollectionHold from '../components/farm/CollectionHold.vue'
 import PrinterAlerts from '../components/farm/PrinterAlerts.vue'
 import { useFarmControls } from '../components/farm/useFarmControls.ts'
@@ -66,11 +71,36 @@ const {
   cameraFor,
 } = view
 
+const slotBindings = useFarmSlotBindings(
+  () => ready.value?.scope?.farmId,
+  () =>
+    ready.value?.rows.some(
+      ({ observation }) =>
+        !observation?.historical && !!observation?.state.materials?.length,
+    ) ?? false,
+)
+const bindingsFor = (row: FarmRow) =>
+  slotBindings(row.assignment.assignmentId, row.observation?.state.materials)
+
 // A live feed owns the printers it reports. While none is authenticated, the
 // stored last known states are read so the page is not empty.
 const liveFeedConnected = computed(() =>
   (ready.value?.rows ?? []).some((row) => row.connection === 'authenticated'),
 )
+const spoolAssignments = ref<Record<string, Readonly<Record<string, number>>>>(
+  {},
+)
+function spoolsFor(row: FarmRow) {
+  const current = ready.value
+  if (!current?.scope) return []
+  return activeSlotSpools({
+    farmId: current.scope.farmId,
+    row,
+    inventory: current.spools,
+    now: now.value,
+    assignments: spoolAssignments.value[row.assignment.assignmentId],
+  })
+}
 const lastKnown = useLastKnownStates({
   farmId: () => ready.value?.scope?.farmId,
   live: () => liveFeedConnected.value,
@@ -279,6 +309,7 @@ const {
   availability,
   pauseTarget,
   pauseState,
+  pauseLost,
   lastControlResults,
   pauseRemaining,
   pauseStatus,
@@ -455,8 +486,10 @@ function cancelPause(event: Event) {
               v-if="rows.length"
               v-slot="{ rows: wallRows }"
               :rows="renderedRows"
+              :bindings-for="bindingsFor"
               :farm-id="ready.scope.farmId"
               :live-now="liveNow"
+              :active-spools-for="spoolsFor"
             >
               <template
                 v-for="group in groupFarmRows(wallRows, wallQuery.groupBy)"
@@ -508,6 +541,19 @@ function cancelPause(event: Event) {
                         row.observation.state.filename
                       }}</span>
                     </button>
+                    <FarmMaterials
+                      v-if="
+                        row.observation?.state.materials?.length &&
+                        !row.observation.historical
+                      "
+                      :materials="row.observation.state.materials"
+                      :bindings="bindingsFor(row)"
+                      :active-spools="spoolsFor(row)"
+                      hide-heading
+                    />
+                    <p v-else-if="row.observation?.state.materials?.length">
+                      Materiais indisponíveis: os dados estão desatualizados.
+                    </p>
                     <CollectionHold
                       :row="row"
                       :keys="ready.keys"
@@ -569,9 +615,11 @@ function cancelPause(event: Event) {
           v-if="inspectedRow"
           :key="inspectedRow.assignment.assignmentId"
           :row="inspectedRow"
+          :bindings="bindingsFor(inspectedRow)"
           :farm-id="ready.scope.farmId"
           :camera-for="cameraFor"
           :live-now="liveNow"
+          :active-spools="spoolsFor(inspectedRow)"
           :alerts="
             alertsSummary.byAssignment[inspectedRow.assignment.assignmentId] ??
             []
@@ -579,8 +627,11 @@ function cancelPause(event: Event) {
           @setup="setupLink(inspectedRow.assignment.assignmentId)"
           @save="saveLink(inspectedRow.assignment.assignmentId)"
           @cancel="delete drafts[inspectedRow.assignment.assignmentId]"
+          @spool-assignments="
+            spoolAssignments[inspectedRow.assignment.assignmentId] = $event
+          "
         >
-          <template #summary>
+          <template #summary="{ activeSpools }">
             <PrinterWallCard
               v-bind="
                 wallCardProps(
@@ -592,6 +643,7 @@ function cancelPause(event: Event) {
                 )
               "
               :now="liveNow()"
+              :active-spools="activeSpools"
               :heading-level="wallQuery.groupBy ? 4 : 3"
               embedded
             />
@@ -609,6 +661,8 @@ function cancelPause(event: Event) {
           </template>
           <FarmCardControls
             :row="inspectedRow"
+            :active-spools="spoolsFor(inspectedRow)"
+            :bindings="bindingsFor(inspectedRow)"
             :keys="ready.keys"
             :control-enabled="pauseEnabled"
             :command-in-flight="commandInFlight"
@@ -640,7 +694,12 @@ function cancelPause(event: Event) {
               : `${extendedLabel(pauseTarget.action)}${pauseTarget.action === 'run_macro' ? ` ${pauseTarget.args.name}` : ''} — ${pauseTarget.printerKey}`
           }}
         </h2>
-        <p id="pause-dialog-description">
+        <ToolTemperatureConfirmation
+          v-if="pauseTarget.action === 'set_tool_temperature'"
+          :tool="Number(pauseTarget.args.tool)"
+          :target-c="Number(pauseTarget.args.target_c)"
+        />
+        <p v-else id="pause-dialog-description">
           {{
             ['pause', 'resume', 'cancel'].includes(pauseTarget.action)
               ? actionDialogDescription(
@@ -652,7 +711,19 @@ function cancelPause(event: Event) {
                 : 'Confirme o comando para esta impressora. Ele será enviado diretamente ao Connector e não será repetido automaticamente.'
           }}
         </p>
-        <p role="status" aria-live="polite">{{ pauseStatus }}</p>
+        <p
+          v-if="['pause', 'resume', 'cancel'].includes(pauseTarget.action)"
+          role="status"
+          aria-live="polite"
+        >
+          {{ pauseStatus }}
+        </p>
+        <ExtendedControlStatus
+          v-else
+          :state="pauseState"
+          :remaining="pauseRemaining"
+          :lost="pauseLost"
+        />
         <div class="actions">
           <button
             type="button"

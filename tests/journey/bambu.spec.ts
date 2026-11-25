@@ -8,7 +8,10 @@ import {
   type JourneyHarness,
 } from './harness.ts'
 import { BAMBU_ACCESS_CODE } from './harness-vendors.ts'
-import { expectCameraFrames } from './discovery-page.ts'
+import {
+  expectCameraFrames,
+  expectRtspsCameraFrames,
+} from './discovery-page.ts'
 
 type BambuSim = Awaited<ReturnType<typeof startBambuSimulator>>
 const FILE = 'jornada-bambu.gcode'
@@ -240,6 +243,7 @@ if (journeyEnabled())
       harness = await startJourneyHarness({
         browser,
         simulator: 'bambu',
+        openFarmInspector: true,
         control: true,
         signedControl: true,
         history: true,
@@ -334,6 +338,55 @@ if (journeyEnabled())
       simulator().control.setAlarmReport({ hms: [] })
       await expect(alerts).toHaveText('Nenhum alerta informado.')
       await expect(running).toBeVisible()
+      expect(simulator().requests).toHaveLength(commandCount)
+    })
+
+    test('AMS telemetry across reconnect', async () => {
+      test.setTimeout(4 * 60_000)
+      const journey = started()
+      journey.setTelemetryUpload(false)
+      const page = journey.ownerPage
+      await journey.expectLiveTelemetry(page)
+      const printer = journey.farmRow(page)
+
+      const materials = printer.getByRole('region', { name: 'Materiais' })
+      await expect(materials).toContainText('AMS 1, bandeja 1')
+      await expect(materials).toContainText('PLA')
+      await expect(materials).toContainText('#FFFFFFFF')
+      const commandCount = simulator().requests.length
+      const sim = simulator()
+      const ams = sim.extendedState.ams as {
+        ams: { tray: { tray_type: string; tray_color: string }[] }[]
+      }
+
+      // Refuse a few MQTT reconnects so the browser can observe the outage;
+      // the bounded fault then permits the Connector's automatic retry.
+      sim.control.faults.addFault({
+        method: 'CONNECT',
+        filter: (context) => context.packetType === 1,
+        fault: { type: 'refuse' },
+        count: 3,
+      })
+      try {
+        await sim.control.disconnectClients()
+        await expect(materials).toHaveCount(0, { timeout: 15_000 })
+        expect(sim.control.faults.hasFault('refuse')).toBe(true)
+
+        // Change the retained report while reconnects are refused, then let
+        // the next subscription receive a fresh material and color.
+        ams.ams[0]!.tray[0]!.tray_type = 'PETG'
+        ams.ams[0]!.tray[0]!.tray_color = 'FF0080FF'
+        sim.control.faults.clearFaults()
+
+        await expect(materials).toBeVisible({ timeout: 30_000 })
+        await expect(materials).toContainText('PETG')
+        await expect(materials).toContainText('#FF0080FF')
+        await expect(materials).not.toContainText('PLA')
+      } finally {
+        sim.control.faults.clearFaults()
+        ams.ams[0]!.tray[0]!.tray_type = 'PLA'
+        ams.ams[0]!.tray[0]!.tray_color = 'FFFFFFFF'
+      }
       expect(simulator().requests).toHaveLength(commandCount)
     })
 
@@ -534,6 +587,10 @@ if (journeyEnabled()) {
           if (camera === 'jpeg') {
             await expectCameraFrames(journey)
             expect(fixture.activeConnections()).toBeGreaterThan(0)
+          } else if (camera === 'rtsps') {
+            await expectRtspsCameraFrames(journey)
+            expect(fixture.activeConnections()).toBeGreaterThan(0)
+            expect(fixture.requests()).toBeGreaterThan(0)
           } else {
             await expect(region.getByText('Câmera indisponível.')).toBeVisible()
             await expect(
@@ -569,7 +626,23 @@ if (journeyEnabled()) {
                 helperPath: fixture.helper,
                 note: async () => {},
               })
+            if (camera === 'rtsps') {
+              await expect
+                .poll(() =>
+                  journey.ownerPage.evaluate(
+                    () =>
+                      [...document.querySelectorAll('video')].filter(
+                        (video) => video.srcObject !== null,
+                      ).length,
+                  ),
+                )
+                .toBe(0)
+              await expect(
+                region.getByText('Câmera ao vivo.', { exact: true }),
+              ).toHaveCount(0)
+            }
             await expect.poll(fixture.activeConnections).toBe(0)
+            expect((journey.vendor?.raw as BambuSim).requests).toHaveLength(0)
           } finally {
             await recoveryPage.close()
           }

@@ -12,8 +12,13 @@
 //
 // Output (screenshots, axe JSON, reports, manifest.json) goes to a directory
 // outside the repository, printed at start and kept after the run.
+//
+// The containers are `--rm` and mount only a copy of each build kept in a run
+// directory under ${XDG_CACHE_HOME:-~/.cache}/openfarm-docker/, removed after the
+// run and on SIGINT/SIGTERM. Nothing is installed inside a container.
 import { execFileSync, spawnSync } from 'node:child_process'
 import {
+  cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -29,6 +34,14 @@ import { tmpdir } from 'node:os'
 import { join, relative, resolve, sep } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
+import {
+  asCreate,
+  createLifecycle,
+  createRunDir,
+  followLogs,
+  removeRunDir,
+} from '../../scripts/docker-run-lib.mjs'
+import { farmAppArgs, farmProxyArgs } from './polish-runner-lib/docker.mjs'
 
 const NODE_MAJOR = '22'
 // Node 22.23.5 (Debian bookworm), pinned by digest and never pulled.
@@ -50,6 +63,8 @@ mkdirSync(evidence, { recursive: true })
 
 const id = `farm-evidence-${randomUUID().slice(0, 8)}`
 const network = `${id}-network`
+const runDir = createRunDir('farm')
+const lifecycle = createLifecycle()
 const baseSource = join(evidence, 'base-source')
 const playwrightBin = join(root, 'node_modules/.bin/playwright')
 
@@ -68,6 +83,7 @@ const manifest = {
     network,
     containers: [],
     worktree: baseSource,
+    runDir,
     evidenceDir: evidence,
     generatedPaths: [],
   },
@@ -129,49 +145,34 @@ async function serve(label, output) {
   const proxy = `${id}-${label}-proxy`
   manifest.ownedResources.containers.push(container, proxy)
   const created = []
-  const cleanup = () => {
-    for (const name of created.reverse()) {
-      const result = spawnSync('docker', ['rm', '-f', name], {
-        encoding: 'utf8',
-      })
-      manifest.cleanup.push(`docker rm -f ${name}: exit ${result.status}`)
+  const cleanup = async () => {
+    for (const containerId of created.splice(0).reverse()) {
+      const removed = await lifecycle.remove(containerId)
+      manifest.cleanup.push(`docker rm -f ${containerId}: ${removed}`)
     }
   }
+  const create = async (args) => {
+    record('docker', asCreate(args))
+    const containerId = await lifecycle.create(asCreate(args))
+    created.push(containerId)
+    return containerId
+  }
   try {
-    run('docker', [
-      'create',
-      '--pull=never',
-      '--name',
-      container,
-      '--network',
-      network,
-      '-v',
-      `${output}:/app:ro`,
-      '-w',
-      '/app',
-      '-e',
-      'NITRO_HOST=0.0.0.0',
-      '-e',
-      'NITRO_PORT=3000',
-      NODE_IMAGE,
-      'node',
-      'server/index.mjs',
-    ])
-    created.push(container)
-    run('docker', ['start', container])
-    run('docker', [
-      'create',
-      '--pull=never',
-      '--name',
-      proxy,
-      '-p',
-      '127.0.0.1::3000',
-      NODE_IMAGE,
-      'node',
-      '-e',
-      `const net = require('node:net'); net.createServer(s => { const upstream = net.connect(3000, '${container}'); s.pipe(upstream).pipe(s); upstream.on('error', () => s.destroy()); s.on('error', () => upstream.destroy()) }).listen(3000, '0.0.0.0')`,
-    ])
-    created.push(proxy)
+    const mounted = join(runDir, `${label}-output`)
+    cpSync(output, mounted, { recursive: true, verbatimSymlinks: true })
+    const appId = await create(
+      farmAppArgs({
+        name: container,
+        image: NODE_IMAGE,
+        network,
+        output: mounted,
+      }),
+    )
+    run('docker', ['start', appId])
+    const appLogs = followLogs(appId)
+    await create(
+      farmProxyArgs({ name: proxy, image: NODE_IMAGE, upstream: container }),
+    )
     run('docker', ['network', 'connect', network, proxy])
     run('docker', ['start', proxy])
     for (const name of [container, proxy]) {
@@ -189,7 +190,7 @@ async function serve(label, output) {
       if (!port) await sleep(1000)
     }
     if (!port) {
-      run('docker', ['logs', container])
+      console.error(appLogs())
       throw new Error('Docker did not publish the application port')
     }
     const url = `http://127.0.0.1:${port}`
@@ -199,10 +200,10 @@ async function serve(label, output) {
       } catch {}
       await sleep(1000)
     }
-    run('docker', ['logs', container])
+    console.error(appLogs())
     throw new Error('Docker application did not become healthy')
   } catch (error) {
-    cleanup()
+    await cleanup()
     throw error
   }
 }
@@ -280,6 +281,42 @@ let installed = false
 let networkCreated = false
 let worktreeCreated = false
 let failure
+// Registered first, so it runs after every other cleanup step.
+lifecycle.finalizer(() => {
+  manifest.finishedAt = new Date().toISOString()
+  manifest.failure = failure ? String(failure.message ?? failure) : null
+  writeFileSync(
+    join(evidence, 'manifest.json'),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+  )
+  console.log(`Manifest: ${join(evidence, 'manifest.json')}`)
+})
+lifecycle.finalizer(async () => {
+  await removeRunDir(runDir, { image: NODE_IMAGE })
+  manifest.cleanup.push(`removed ${runDir}`)
+})
+lifecycle.finalizer(() => {
+  if (networkCreated) {
+    const result = spawnSync('docker', ['network', 'rm', network], {
+      encoding: 'utf8',
+    })
+    manifest.cleanup.push(`docker network rm ${network}: exit ${result.status}`)
+  }
+  if (worktreeCreated) {
+    for (const name of [...generatedNames, 'node_modules'])
+      removePath(join(baseSource, name))
+    const result = spawnSync('git', ['worktree', 'remove', baseSource], {
+      cwd: root,
+      encoding: 'utf8',
+    })
+    manifest.cleanup.push(
+      `git worktree remove ${baseSource}: exit ${result.status} ${result.stderr.trim()}`,
+    )
+  }
+  for (const name of ownedGenerated) removePath(join(root, name))
+  if (installed) removePath(join(root, 'node_modules'))
+})
+lifecycle.installSignals()
 try {
   requireNode22()
   requireImage()
@@ -301,8 +338,9 @@ try {
     manifest.ownedResources.generatedPaths.push(join(root, 'node_modules'))
     run('npm', ['ci', '--offline', '--ignore-scripts'])
   }
-  run('docker', ['network', 'create', '--internal', network])
+  // Flags are set first: an interrupted create is still cleaned up.
   networkCreated = true
+  run('docker', ['network', 'create', '--internal', network])
 
   // Before: the pre-polish base in a detached worktree. Dependencies are the
   // same as in this checkout, so it reuses node_modules.
@@ -319,7 +357,7 @@ try {
       join(evidence, 'before'),
     )
   } finally {
-    before.cleanup()
+    await before.cleanup()
   }
 
   // After: this checkout. The capture spec records the same states as the
@@ -340,38 +378,13 @@ try {
       join(evidence, 'after-assertions'),
     )
   } finally {
-    after.cleanup()
+    await after.cleanup()
   }
   for (const phase of ['before', 'after', 'after-assertions'])
     checksum(join(evidence, phase))
 } catch (error) {
   failure = error
 } finally {
-  if (networkCreated) {
-    const result = spawnSync('docker', ['network', 'rm', network], {
-      encoding: 'utf8',
-    })
-    manifest.cleanup.push(`docker network rm ${network}: exit ${result.status}`)
-  }
-  if (worktreeCreated) {
-    for (const name of [...generatedNames, 'node_modules'])
-      removePath(join(baseSource, name))
-    const result = spawnSync('git', ['worktree', 'remove', baseSource], {
-      cwd: root,
-      encoding: 'utf8',
-    })
-    manifest.cleanup.push(
-      `git worktree remove ${baseSource}: exit ${result.status} ${result.stderr.trim()}`,
-    )
-  }
-  for (const name of ownedGenerated) removePath(join(root, name))
-  if (installed) removePath(join(root, 'node_modules'))
-  manifest.finishedAt = new Date().toISOString()
-  manifest.failure = failure ? String(failure.message ?? failure) : null
-  writeFileSync(
-    join(evidence, 'manifest.json'),
-    `${JSON.stringify(manifest, null, 2)}\n`,
-  )
-  console.log(`Manifest: ${join(evidence, 'manifest.json')}`)
+  await lifecycle.cleanup()
 }
 if (failure) throw failure

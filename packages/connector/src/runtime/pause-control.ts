@@ -66,6 +66,8 @@ export type PauseControlDiagnostic =
     }
   | { kind: 'pause-terminal'; reason: string }
   | { kind: 'pause-close-stalled'; waitedMs: number }
+  /** Why the printer's file list failed; fixed values, never free text. */
+  | { kind: 'file-list-failed'; reason: string; requestSent: boolean }
 
 type ClientOptions = NonNullable<
   ConstructorParameters<typeof PauseConnectorSignallingClient>[1]
@@ -182,6 +184,10 @@ type PauseControlInput = {
   >[0]['resinCapabilities']
   /** True while local storage is degraded: commands are refused with `storage`. */
   storageDegraded?: () => boolean
+  /** Latest Kobra X accessory evidence from its status collection. */
+  kobraXControlEvidenceFor?: (
+    printerKey: string,
+  ) => import('../kobra-x/control-support.ts').KobraXControlEvidence | undefined
   speedModesFor?: (
     printerKey: string,
   ) =>
@@ -376,6 +382,13 @@ async function runAssignmentControl(
       ],
       limits: config.collection.limits,
       clock,
+      kobraXControlEvidence(binding) {
+        const mapping =
+          binding === printerBinding ? readPrinterBinding(binding) : null
+        return mapping
+          ? input.kobraXControlEvidenceFor?.(mapping.printer_key)
+          : undefined
+      },
       gcodeConsole: (binding) =>
         binding === printerBinding &&
         pause.control?.consoleAssignmentIds?.includes(assignmentId) === true,
@@ -594,6 +607,8 @@ async function runAssignmentControl(
       config,
       assignmentId,
       dataDirectory: input.dataDirectory,
+      onListFailure: (_printerKey, reason, requestSent) =>
+        diagnostic({ kind: 'file-list-failed', reason, requestSent }),
     }),
     getAdmittedHandle: (transportId) => relay.admittedHandle(transportId),
   }

@@ -35,8 +35,8 @@ const capabilityKeys = [
 
 describe('catálogo Klipper/Moonraker', () => {
   it('segue o contrato de registro com ids únicos', () => {
-    expect(klipperCatalog).toHaveLength(5)
-    expect(new Set(klipperCatalog.map((p) => p.id)).size).toBe(5)
+    expect(klipperCatalog).toHaveLength(6)
+    expect(new Set(klipperCatalog.map((p) => p.id)).size).toBe(6)
     for (const product of klipperCatalog) {
       // `hardwareReports` is optional: present only where hardware was qualified.
       expect(
@@ -57,9 +57,10 @@ describe('catálogo Klipper/Moonraker', () => {
     }
   })
 
-  it('cobre genérico, K1 com root, kit Voron e Sovol', () => {
+  it('cobre genérico, Snapmaker U1, K1 com root, kit Voron e Sovol', () => {
     expect(klipperCatalog.map((p) => p.id)).toEqual([
       'klipper-generic-moonraker',
+      'snapmaker-u1',
       'creality-k1-series-moonraker-root',
       'voron-2-4-kit',
       'sovol-sv08',
@@ -67,6 +68,7 @@ describe('catálogo Klipper/Moonraker', () => {
     ])
     expect(klipperCatalog.map((p) => p.brand)).toEqual([
       'Klipper',
+      'Snapmaker',
       'Creality',
       'Voron Design',
       'Sovol',
@@ -75,16 +77,20 @@ describe('catálogo Klipper/Moonraker', () => {
   })
 
   it('usa os status decididos e nunca documented sem fonte', () => {
+    const telemetryGrades: Record<string, string> = {
+      'klipper-generic-moonraker': 'hardware',
+      'snapmaker-u1': 'reference-matched',
+    }
     for (const product of klipperCatalog) {
       const c = product.capabilities
       // Only the generic entry has recorded hardware qualification reports.
-      expect(c.telemetry).toBe(
-        product.id === 'klipper-generic-moonraker' ? 'hardware' : 'simulated',
-      )
+      expect(c.telemetry).toBe(telemetryGrades[product.id] ?? 'simulated')
       expect(c.pause).toBe('simulated')
       expect(c.resume).toBe('simulated')
       expect(c.cancel).toBe('simulated')
-      expect(c.camera).toBe('simulated')
+      expect(c.camera).toBe(
+        product.id === 'klipper-generic-moonraker' ? 'hardware' : 'simulated',
+      )
       // `createFileTargets` never builds a Moonraker file target, so file
       // listing and upload stay unreachable for the whole family.
       expect(c.files).toBe('unknown')

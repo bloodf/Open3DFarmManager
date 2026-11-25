@@ -48,6 +48,7 @@ import { createConfigurationAuthorityService } from '../../apps/farm/server/serv
 import { createConfigurationRegistrationService } from '../../apps/farm/server/services/configuration-receipt-registration.ts'
 import { ConfigurationSignallingCoordinator } from '../../apps/farm/server/services/configuration-signalling-coordinator.ts'
 import { createConfigurationSocketSession } from '../../apps/farm/server/services/configuration-signalling-session.ts'
+import type { SignallingClock } from '../../apps/farm/server/services/signalling-clock.ts'
 import {
   ConfigurationSignallingRuntime,
   configurationSocketHooks,
@@ -162,7 +163,7 @@ beforeAll(async () => {
 })
 
 /** Synthetic store. One transaction at a time; a rejection restores every map. */
-function memoryStore() {
+function memoryStore(now = Date.now) {
   const state = {
     authority: null as unknown,
     operations: new Map<string, ConfigurationOperationRecord>(),
@@ -184,7 +185,7 @@ function memoryStore() {
             scope.keyId === a.key_id
               ? structuredClone(a)
               : null,
-          observedAt: Date.now(),
+          observedAt: now(),
           operation: async (id) => state.operations.get(id) ?? null,
           createOperation: async (record) =>
             !state.operations.has(record.operation_id) &&
@@ -229,7 +230,12 @@ function memoryStore() {
   return { state, store }
 }
 
-async function fixture() {
+async function fixture(
+  clock: SignallingClock = {
+    wall: Date.now,
+    monotonic: () => performance.now(),
+  },
+) {
   const ed = () =>
     crypto.subtle.generateKey('Ed25519', false, ['sign', 'verify'])
   const [issuer, connector] = await Promise.all([ed(), ed()])
@@ -260,16 +266,16 @@ async function fixture() {
     credential_jti: ids.jti,
     origin,
     audience,
-    validUntil: Date.now() + 3_600_000,
+    validUntil: clock.wall() + 3_600_000,
   }
-  const { state, store } = memoryStore()
+  const { state, store } = memoryStore(clock.wall)
   state.authority = authority
   const thumbprint = (await connectorKeyBinding(spki)).thumbprint
   const credentials = {
     async issue(input: unknown): Promise<CredentialAcceptanceDecision> {
       const request = CredentialProofRequest.parse(input)
       if (request.token !== token) return { ok: false, reason: 'denied' }
-      const now = Date.now()
+      const now = clock.wall()
       return {
         ok: true,
         kind: 'challenge',
@@ -310,8 +316,8 @@ async function fixture() {
         jti: done.challenge.jti,
         connectionId: done.connectionId,
         purpose: 'signalling',
-        acceptedAt: Date.now(),
-        expiresAt: Date.now() + 600_000,
+        acceptedAt: clock.wall(),
+        expiresAt: clock.wall() + 600_000,
       }
     },
   }
@@ -327,7 +333,7 @@ async function fixture() {
     },
     credentials,
     credentialAudience,
-    clock: { wall: Date.now, monotonic: () => performance.now() },
+    clock,
     timers,
   })
   const a = authFixture()
@@ -375,8 +381,7 @@ async function fixture() {
       },
     }
   }
-  /** Drives both peers through the exported socket session, exactly as the routes do. */
-  async function handshake() {
+  async function connect() {
     const c = socket('connector')
     await c.send({
       v: 1,
@@ -408,6 +413,11 @@ async function fixture() {
       enabled: true,
       revision: 0,
     })
+    return c
+  }
+  /** Drives both peers through the exported socket session, exactly as the routes do. */
+  async function handshake(inbox?: Awaited<ReturnType<typeof connect>>) {
+    const c = inbox ?? (await connect())
     const b = socket('browser', sessionRecordId)
     await b.send({
       v: 1,
@@ -486,6 +496,7 @@ async function fixture() {
     coordinator,
     runtime,
     socket,
+    connect,
     handshake,
     event,
   }
@@ -694,6 +705,102 @@ test('socket sessions enforce order, authentication and a session-bound browser'
   live.c.session.close()
   expect(f.coordinator.advertised(ids.farm, ids.agent)).toBeNull()
   expect(f.coordinator.snapshot()).toMatchObject({ inboxes: 0, contexts: 0 })
+})
+
+test('browser waits for inbox renewal when configuration bootstrap goes stale', async () => {
+  const started = Date.now()
+  let elapsed = 0
+  const f = await fixture({
+    wall: () => started + elapsed,
+    monotonic: () => elapsed,
+  })
+  const live = await f.handshake()
+  live.b.session.close()
+  const bootstrapPath = `/api/farms/${ids.farm}/connectors/${ids.agent}/configuration?keyId=${ids.key}`
+  const scope = { farmId: ids.farm, agentId: ids.agent }
+  const bootstrap = () =>
+    configurationBootstrapRequest(f.event(bootstrapPath), f.runtime, scope)
+  const begin = {
+    v: 1,
+    t: 'config.begin',
+    farm_id: ids.farm,
+    agent_id: ids.agent,
+    key_id: ids.key,
+  }
+
+  elapsed = 55_000
+  expect(await bootstrap()).toMatchObject({ available: true, revision: 0 })
+  const lastChance = f.socket('browser', sessionRecordId)
+  await lastChance.send(begin)
+  expect(lastChance.last().t).toBe('config.ready')
+  lastChance.session.close()
+
+  const beforeRetry = live.c.count()
+  elapsed++
+  const browser = f.socket('browser', sessionRecordId)
+  await browser.send(begin)
+  expect(browser.closed).toBe(false)
+  expect(browser.last()).toEqual({
+    v: 1,
+    t: 'config.retry',
+    retry_after_ms: 6499,
+  })
+  expect(f.coordinator.snapshot().contexts).toBe(0)
+  expect(live.c.count()).toBe(beforeRetry)
+  expect(await bootstrap()).toMatchObject({ available: false, revision: null })
+
+  const noRenewal = f.socket('browser', sessionRecordId)
+  await noRenewal.send(begin)
+  expect(noRenewal.last()).toEqual(browser.last())
+
+  elapsed += 6499
+  live.c.session.close()
+  await browser.send(begin)
+  expect(browser.last()).toEqual({
+    v: 1,
+    t: 'config.retry',
+    retry_after_ms: 750,
+  })
+  await noRenewal.send(begin)
+  expect(noRenewal.last()).toEqual(browser.last())
+  expect(f.coordinator.snapshot().contexts).toBe(0)
+
+  elapsed += 750
+  await noRenewal.send(begin)
+  expect(noRenewal.closed).toBe(true)
+  expect(noRenewal.count()).toBe(2)
+
+  const fresh = await f.connect()
+  expect(await bootstrap()).toMatchObject({ available: true, revision: 0 })
+  await browser.send(begin)
+  expect(browser.last().t).toBe('config.ready')
+  expect(fresh.last().t).toBe('config.context-request')
+  expect(fresh.count()).toBe(3)
+  expect(f.coordinator.snapshot().contexts).toBe(1)
+  await browser.send(begin)
+  expect(browser.closed).toBe(true)
+  expect(f.coordinator.snapshot().contexts).toBe(0)
+  fresh.session.close()
+})
+
+test('configuration admission fails closed when owner authority has too little time left', async () => {
+  const started = Date.now()
+  const f = await fixture({ wall: () => started, monotonic: () => 0 })
+  const connector = await f.connect()
+  f.authority.validUntil = started + 4999
+  const browser = f.socket('browser', sessionRecordId)
+  await browser.send({
+    v: 1,
+    t: 'config.begin',
+    farm_id: ids.farm,
+    agent_id: ids.agent,
+    key_id: ids.key,
+  })
+  expect(browser.closed).toBe(true)
+  expect(browser.count()).toBe(0)
+  expect(connector.count()).toBe(2)
+  expect(f.coordinator.snapshot().contexts).toBe(0)
+  connector.session.close()
 })
 
 test('HTTP handlers issue a capability and register the committed receipt end to end', async () => {
@@ -906,6 +1013,165 @@ test('HTTP handlers issue a capability and register the committed receipt end to
   })
   expect(f.state.assignments.size).toBe(1)
   expect(f.limits).toContain(`s:configuration:v1:receipts:${sessionRecordId}`)
+})
+
+test('bound configuration contexts keep authority to their deadline while new admission and bootstrap keep the inbox floor', async () => {
+  const started = Date.now()
+  let elapsed = 0
+  const f = await fixture({
+    wall: () => started + elapsed,
+    monotonic: () => elapsed,
+  })
+  const inbox = await f.connect()
+  // Last instant a new context is admitted: exactly the 5 s floor remains.
+  elapsed = 55_000
+  const live = await f.handshake(inbox)
+  const inboxDeadline = started + 60_000
+  const bootstrapPath = `/api/farms/${ids.farm}/connectors/${ids.agent}/configuration?keyId=${ids.key}`
+  const scope = { farmId: ids.farm, agentId: ids.agent }
+  const bootstrap = () =>
+    configurationBootstrapRequest(f.event(bootstrapPath), f.runtime, scope)
+  expect(await bootstrap()).toMatchObject({ available: true, revision: 0 })
+
+  // Below the floor bootstrap stops advertising (new admission retries, as the
+  // renewal test shows); the already bound context keeps its authority.
+  elapsed = 57_000
+  expect(await bootstrap()).toMatchObject({ available: false, revision: null })
+  expect(f.coordinator.snapshot().contexts).toBe(1)
+
+  const operationId = randomUUID()
+  const targetSha256 = await configurationTargetHash(target)
+  async function admit(action: 'prepare' | 'commit', hash: string) {
+    const issued = await configurationAuthorityRequest(
+      f.event('/api/configuration-authority/challenges', {
+        browserProofWire: live.browserProofWire,
+        connectorProofWire: live.connectorProofWire,
+        admissionNonce: digest(),
+        action,
+        operationId,
+        expectedRevision: 0,
+        targetSha256: hash,
+      }),
+      f.runtime,
+      'challenges',
+    )
+    if (!('challenge' in issued)) throw new Error('challenge expected')
+    // The actual remaining lease, not the 8 s admission window.
+    expect(issued.challenge.issued_at).toBe(started + 57_000)
+    expect(issued.challenge.expires_at).toBe(inboxDeadline)
+    const admission = await signConfigurationAdmissionProof(
+      issued.challenge,
+      f.browser.privateKey,
+    )
+    const granted = await configurationAuthorityRequest(
+      f.event('/api/configuration-authority/capabilities', {
+        admissionProofWire: encodeConfigurationAdmissionProof(admission),
+      }),
+      f.runtime,
+      'capabilities',
+    )
+    if (!('capability' in granted)) throw new Error('capability expected')
+    expect(granted.capability.expires_at).toBe(inboxDeadline)
+    return granted.capability
+  }
+  await admit('prepare', targetSha256)
+
+  const claims = {
+    v: 1,
+    purpose: 'configuration-receipt',
+    protocol: 'config-v1',
+    account_id: 'account-owner',
+    farm_id: ids.farm,
+    agent_id: ids.agent,
+    connector_fingerprint: f.fingerprint,
+    operation_id: operationId,
+    target: {
+      target_sha256: targetSha256,
+      device_id: target.device_id,
+      bridge_instance_id: 'bridge-synthetic-1',
+    },
+    observed: {
+      device_id: target.device_id,
+      model: 'Kobra X',
+      firmware: { status: 'unknown' },
+      support: 'unqualified',
+    },
+    expected_revision: 0,
+    recovery_reason: null,
+    issued_at: started + 57_000,
+  }
+  const prepared = await signConfigurationReceipt(
+    {
+      ...claims,
+      receipt_id: randomUUID(),
+      phase: 'prepared',
+      committed_revision: null,
+      prior_receipt_sha256: null,
+    },
+    f.connector.privateKey,
+  )
+  const preparedSha256 = await configurationReceiptHash(prepared)
+  await admit('commit', preparedSha256)
+  const local = await signConfigurationReceipt(
+    {
+      ...claims,
+      receipt_id: randomUUID(),
+      phase: 'local-committed',
+      committed_revision: 1,
+      prior_receipt_sha256: preparedSha256,
+    },
+    f.connector.privateKey,
+  )
+  const registered = await configurationReceiptRequest(
+    f.event(`/api/farms/${ids.farm}/configuration-receipts`, {
+      keyId: ids.key,
+      receiptWire: encodeConfigurationReceipt(local),
+    }),
+    f.runtime,
+    { farmId: ids.farm },
+  )
+  expect(registered).toMatchObject({ status: 'active', replayed: false })
+  expect(
+    decodeConfigurationInventoryAck(registered.inventoryAckWire).expires_at,
+  ).toBe(inboxDeadline)
+
+  // A different credential no longer pins the context.
+  f.state.authority = { ...f.authority, credential_jti: randomUUID() }
+  await expect(
+    configurationAuthorityRequest(
+      f.event('/api/configuration-authority/challenges', {
+        browserProofWire: live.browserProofWire,
+        connectorProofWire: live.connectorProofWire,
+        admissionNonce: digest(),
+        action: 'status',
+        operationId,
+        expectedRevision: 0,
+        targetSha256: preparedSha256,
+      }),
+      f.runtime,
+      'challenges',
+    ),
+  ).rejects.toMatchObject({ status: 403 })
+  f.state.authority = f.authority
+
+  // At the actual expiry the context is gone and nothing is issued.
+  elapsed = 60_000
+  await expect(
+    configurationAuthorityRequest(
+      f.event('/api/configuration-authority/challenges', {
+        browserProofWire: live.browserProofWire,
+        connectorProofWire: live.connectorProofWire,
+        admissionNonce: digest(),
+        action: 'status',
+        operationId,
+        expectedRevision: 0,
+        targetSha256: preparedSha256,
+      }),
+      f.runtime,
+      'challenges',
+    ),
+  ).rejects.toMatchObject({ status: 403 })
+  expect(f.coordinator.snapshot()).toMatchObject({ inboxes: 0, contexts: 0 })
 })
 
 test('HTTP boundary rejects foreign origin, missing session, bad transport and lost permission', async () => {

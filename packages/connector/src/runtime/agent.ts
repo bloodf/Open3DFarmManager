@@ -44,7 +44,10 @@ import { loadExistingIdentity } from '../identity/store.ts'
 import { readCredentialEnvelope } from '../config/credential.ts'
 import { readAgentRuntimeConfig } from '../config/runtime.ts'
 import { openScopedTelemetryQueue } from './queue-scope.ts'
-import type { Diagnostic as CollectionDiagnostic } from './collect.ts'
+import type {
+  Diagnostic as CollectionDiagnostic,
+  MoonrakerCollectionRefresh,
+} from './collect.ts'
 import type { TelemetrySender } from '../cloud/drain.ts'
 import type { RenewalDiagnostic } from '../cloud/credential-renewal.ts'
 import { credentialLookupId } from '../config/signalling.ts'
@@ -298,6 +301,10 @@ async function runConnectorAgentOnce(
   let controlsFor:
     ((assignmentId: string) => readonly ExtendedControlAction[]) | undefined
   let refreshControls: (() => void) | undefined
+  const kobraXControlEvidence = new Map<
+    string,
+    import('../kobra-x/control-support.ts').KobraXControlEvidence
+  >()
   const printerSpeedModes = new Map<
     string,
     NonNullable<
@@ -309,6 +316,12 @@ async function runConnectorAgentOnce(
   // checked against what each printer itself reported. Never stops the agent.
   const printerProfiles = createPrinterProfiles()
   const jobLinks = createLibraryJobLinks()
+  const moonrakerPrinters =
+    'printers' in config.collection ? config.collection.printers : []
+  const moonrakerCollectionRefresh = new Map<
+    string,
+    MoonrakerCollectionRefresh
+  >(moonrakerPrinters.map(({ printerKey }) => [printerKey, {}]))
   // Bed-collection hold (durable): a run OpenFarm started is held when it
   // finishes until an operator confirms the plate is clear. An unreadable
   // journal refuses every OpenFarm start.
@@ -316,6 +329,12 @@ async function runConnectorAgentOnce(
   try {
     collection = openQueueCollectionJournal(
       join(input.dataDirectory, 'queue-collection.json'),
+      (printerKey) => {
+        const refresh = moonrakerCollectionRefresh.get(printerKey)
+        if (!refresh) return
+        refresh.releasedAtMonoMs = performance.now()
+        refresh.request?.()
+      },
     )
   } catch (error) {
     logger.warn('queue-collection-unavailable', { error })
@@ -323,8 +342,6 @@ async function runConnectorAgentOnce(
   }
   // Locally declared Snapmaker U1 printers get the U1 tool mapping and
   // command capability set; withdrawn when this run ends.
-  const moonrakerPrinters =
-    'printers' in config.collection ? config.collection.printers : []
   const withdrawU1 = declareSnapmakerU1Printers(moonrakerPrinters)
   // A job already finished on connect is reported only when OpenFarm has a
   // pending dispatch on that printer; otherwise the history import owns it.
@@ -467,6 +484,9 @@ async function runConnectorAgentOnce(
     return undefined
   })
   let snapshots: ReturnType<typeof createFarmSnapshotSource> | undefined
+  let spoolMembership:
+    | ReturnType<typeof import('./api-query.ts').createSpoolMembershipReader>
+    | undefined
   try {
     // One startup probe of the native RTC module. Without it the agent keeps
     // collecting and reporting but offers no browser RTC session.
@@ -624,6 +644,11 @@ async function runConnectorAgentOnce(
     let pauseBudget = 256
     const pauseDiagnostic = (value: AgentDiagnostic) => {
       if (pauseBudget-- <= 0) return
+      if (value.kind === 'file-list-failed')
+        logger.warn('file-list-failed', {
+          reason: value.reason,
+          requestSent: value.requestSent,
+        })
       try {
         input.onDiagnostic(value)
       } catch {
@@ -679,13 +704,18 @@ async function runConnectorAgentOnce(
       const { FarmStatusSender } =
         await import('../webrtc/farm-status-sender.ts')
       const { runSignallingLifecycle } = await import('./signalling.ts')
-      const { answerApiQuery, createApiQueryReader } =
-        await import('./api-query.ts')
+      const {
+        answerApiQuery,
+        createApiQueryReader,
+        createSpoolMembershipReader,
+      } = await import('./api-query.ts')
       const signalling = config.signalling
+      spoolMembership = createSpoolMembershipReader()
       const readApiQuery = createApiQueryReader(
         config,
         input.dataDirectory,
         collection,
+        spoolMembership.read,
       )
       const source = snapshots
       const detailSourceFor = detailSources.sourceFor
@@ -943,6 +973,8 @@ async function runConnectorAgentOnce(
           speedModesFor(printerKey) {
             return printerSpeedModes.get(printerKey)
           },
+          kobraXControlEvidenceFor: (printerKey) =>
+            kobraXControlEvidence.get(printerKey),
           libraryPrint(assignmentId) {
             const key = refs.find(
               (ref) => ref.assignmentId === assignmentId,
@@ -1095,6 +1127,18 @@ async function runConnectorAgentOnce(
     tasks.push(
       collectIntoQueue({
         config: config.collection,
+        ...(config.kobraX
+          ? {
+              kobraX: {
+                bindings: config.kobraX,
+                onControlEvidence(printerKey, evidence) {
+                  if (evidence) kobraXControlEvidence.set(printerKey, evidence)
+                  else kobraXControlEvidence.delete(printerKey)
+                  refreshControls?.()
+                },
+              },
+            }
+          : {}),
         apiJobs,
         onPrinterState(printer) {
           if (printer.speedModes === undefined)
@@ -1110,6 +1154,7 @@ async function runConnectorAgentOnce(
           refreshControls = refresh
           refresh()
         },
+        moonrakerCollectionRefresh,
         linkHealthFor: (printerKey) => links.get(printerKey),
         libraryLinks,
         discoverMoonrakerObjects: true,
@@ -1118,6 +1163,7 @@ async function runConnectorAgentOnce(
         ...(input.onInventory || snapshots
           ? {
               onInventory(value: SpoolmanSnapshot) {
+                spoolMembership?.update(value)
                 snapshots?.setInventory(value)
                 input.onInventory?.(value)
               },

@@ -12,7 +12,9 @@ import {
   type CrealityCatalogProduct,
 } from '../../apps/farm/app/utils/compatibility/creality.ts'
 import {
+  isSnapmakerU1CatalogIdentity,
   klipperCatalog,
+  snapmakerU1CatalogId,
   type KlipperCatalogProduct,
 } from '../../apps/farm/app/utils/compatibility/klipper.ts'
 import type {
@@ -81,13 +83,20 @@ export function findMatchingCatalogProduct(
   const mCompact = compact(rawModel)
   const combined = compact(`${rawVendor} ${rawModel}`)
 
+  if (isSnapmakerU1CatalogIdentity(vCompact, mCompact)) {
+    const match = allCatalogEntries.find(
+      (entry) => entry.id === snapmakerU1CatalogId,
+    )
+    if (match) return match
+  }
+
   // 1. Direct ID match
   if (rawModel) {
     const direct = allCatalogEntries.find(
       (entry) =>
         entry.id === rawModel ||
         entry.id === `${vCompact}-${mCompact}` ||
-        entry.id.endsWith(mCompact),
+        (entry.id !== snapmakerU1CatalogId && entry.id.endsWith(mCompact)),
     )
     if (direct) return direct
   }

@@ -12,21 +12,18 @@ const inviteId = '22222222-2222-4222-8222-222222222222'
 
 export async function membersPageBundle() {
   const file = join(pages, 'membros.vue')
-  let source = readFileSync(file, 'utf8')
-  source = source.replace(
-    /onMounted\(async \(\) => \{[\s\S]*?\n\}\)/,
-    `onMounted(async () => {
-  farms.value = [{ farmId: ${JSON.stringify(farmId)} }]
-  farmId.value = ${JSON.stringify(farmId)}
-  await refresh()
-})`,
-  )
+  const source = readFileSync(file, 'utf8')
   const compiled = compileVueSfc(source, file)
   const result = await build({
     stdin: {
       contents: `const calls = []
-const $fetch = async (url, options = {}) => {
+globalThis.useRoute = () => ({ path: '/membros', query: {}, hash: '' })
+globalThis.useRouter = () => ({ replace: async () => {} })
+globalThis.$fetch = async (url, options = {}) => {
   calls.push({ url: String(url), method: options.method ?? 'GET', body: options.body ?? null })
+  if (String(url) === '/api/farms' && !options.method) {
+    return { farms: [{ farmId: ${JSON.stringify(farmId)} }], nextAfter: null }
+  }
   if (String(url).endsWith('/members') && !options.method) {
     return {
       members: [
@@ -53,10 +50,14 @@ const $fetch = async (url, options = {}) => {
   if (String(url).includes('/revoke')) return { message: 'Convite revogado.' }
   throw Object.assign(new Error('unexpected'), { statusCode: 500 })
 }
+window.$fetch = $fetch
 window.__membersFetchCalls = calls
 const definePageMeta = () => {}
 ${compiled.replace('export default', 'const component =')}
-import { createApp, h } from 'vue'
+import { createApp, h, reactive } from 'vue'
+const route = reactive({ path: '/membros', query: {}, hash: '' })
+window.useRoute = () => route
+window.useRouter = () => ({ replace: async (location) => Object.assign(route, location) })
 window.mountMembersPage = (element) => {
   const app = createApp(component)
   app.component('NuxtLink', {

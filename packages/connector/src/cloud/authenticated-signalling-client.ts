@@ -1,5 +1,6 @@
 import {
   API_DISPATCH_QUERY_SUPPORT_HEADER,
+  API_SPOOL_QUERY_SUPPORT_HEADER,
   API_QUERY_SUPPORT_HEADER,
   type ApiQueryReply,
   type ApiQueryRequest,
@@ -134,6 +135,7 @@ async function fixedConnectorSocket(
           headers: {
             [API_QUERY_SUPPORT_HEADER]: '1',
             [API_DISPATCH_QUERY_SUPPORT_HEADER]: '1',
+            [API_SPOOL_QUERY_SUPPORT_HEADER]: '1',
           },
         }
       : {}),

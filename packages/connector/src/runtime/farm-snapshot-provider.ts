@@ -510,6 +510,9 @@ export function createFarmSnapshotSource(input: {
         : {}),
       printerKey: parsedPrinter.data.printerKey,
       state: parsedPrinter.data.state,
+      ...(parsedPrinter.data.statusMessage
+        ? { statusMessage: parsedPrinter.data.statusMessage }
+        : {}),
       ...(parsedPrinter.data.preformStatus
         ? { preformStatus: parsedPrinter.data.preformStatus }
         : {}),
@@ -531,6 +534,13 @@ export function createFarmSnapshotSource(input: {
         : { progress: parsedPrinter.data.progress }),
       ...(parsedPrinter.data.identity
         ? { identity: Object.freeze({ ...parsedPrinter.data.identity }) }
+        : {}),
+      ...(parsedPrinter.data.toolHeaters
+        ? {
+            toolHeaters: parsedPrinter.data.toolHeaters.map((heater) => ({
+              ...heater,
+            })),
+          }
         : {}),
       observedAt: parsedPrinter.data.observedAt,
     })

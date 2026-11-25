@@ -1,5 +1,19 @@
 import { z } from 'zod'
 
+// Existing readers accept statusMessage but leave unknown states read-only.
+// This reserved diagnostic marks current, verified Moonraker terminal evidence;
+// a historical lastJob alone must never be used to infer current state.
+export const MOONRAKER_CANCELLED_STATUS = 'moonraker:print_stats:cancelled'
+export function controlObservationState(observation: {
+  state: string
+  statusMessage?: string | undefined
+}): string {
+  return observation.state === 'unknown' &&
+    observation.statusMessage === MOONRAKER_CANCELLED_STATUS
+    ? 'cancelled'
+    : observation.state
+}
+
 export const ToolIndex = z.literal([0, 1, 2, 3])
 export const ToolTemperatureArgs = z.strictObject({
   tool: ToolIndex,
@@ -139,6 +153,35 @@ export const LibraryPrintArgs = z.strictObject({
 export type LibraryPrintArgs = z.infer<typeof LibraryPrintArgs>
 /** Console line: one line of printable ASCII, at most 256 bytes. */
 export const GCODE_LINE_MAX_BYTES = 256
+
+/** Physical U1 operations can finish after their signed write authority expires. */
+export const U1_CONTROL_RESULT_TIMEOUT_MS = 24_000
+
+/**
+ * Canonical console homing: `G28` with optional, distinct bare axes. The
+ * driver routes exactly these lines through the structured `home` action.
+ */
+function isCanonicalHomeLine(line: string): boolean {
+  const [word, ...axes] = line.trim().toUpperCase().split(/\s+/)
+  return (
+    word === 'G28' &&
+    axes.every((axis) => /^[XYZ]$/.test(axis)) &&
+    new Set(axes).size === axes.length
+  )
+}
+
+export function isU1PhysicalControl(
+  action: string,
+  args: Record<string, unknown>,
+): boolean {
+  return (
+    action === 'home' ||
+    (action === 'gcode' &&
+      typeof args.line === 'string' &&
+      (/^T[0-3]$/i.test(args.line.trim()) || isCanonicalHomeLine(args.line)))
+  )
+}
+
 export const GcodeLine = z
   .string()
   .min(1)

@@ -4,6 +4,7 @@ import { randomBytes, randomUUID, createHash } from 'node:crypto'
 import {
   createPauseCommandClient,
   type PauseCommandIssuer,
+  type PauseResultDriverFamily,
 } from '../../apps/farm/app/utils/webrtc/pause-command-client.ts'
 import {
   controlBindingHash,
@@ -16,6 +17,7 @@ import {
 } from '../../packages/farm-protocol/src/command-v2.ts'
 import { signPauseCapability } from '../../packages/farm-protocol/src/pause-capability.ts'
 import { validateBrowserDevicePublicKey } from '../../packages/farm-protocol/src/browser-device-proof.ts'
+import type { ExtendedControlAction } from '../../packages/farm-protocol/src/control-actions.ts'
 import type {
   PauseCommandMessage,
   PausePhaseMessage,
@@ -53,6 +55,8 @@ async function clientFixture(
     challengeGate?: Promise<void>
     onChallenge?: () => void
     monotonicNow?: () => number
+    actions?: ExtendedControlAction[]
+    driverFamily?: PauseResultDriverFamily
   } = {},
 ) {
   const browser = await crypto.subtle.generateKey(
@@ -139,6 +143,7 @@ async function clientFixture(
   const nonce = digest()
   const client = createPauseCommandClient({
     privateKey: browser.privateKey,
+    ...(options.driverFamily ? { driverFamily: options.driverFamily } : {}),
     now: () => Date.now(),
     monotonicNow: options.monotonicNow ?? (() => performance.now()),
     onOutcome: (outcome) => {
@@ -231,7 +236,7 @@ async function clientFixture(
             printer_key: 'printer-key',
             control_binding_sha256: bindingHash,
             admission_nonce: nonce,
-            actions: ['pause'],
+            actions: options.actions ?? ['pause'],
           },
           issuer.privateKey,
         )
@@ -472,6 +477,47 @@ test('a dropped result settles as unknown at the command bound', async (t) => {
   t.mock.timers.tick(5001)
   assert.equal(await outcome, 'outcome-unknown')
   assert.deepEqual(f.outcomes, ['outcome-unknown'])
+})
+
+test('home accepts a late result within the session without extending its signature or resending', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const f = await clientFixture(t, { actions: ['home'], driverFamily: 'u1' })
+  f.proofsReady()
+  f.client.phase(f.nonceFrame())
+  await waitFor(t.signal, () => f.client.state.admitted)
+  const args = { axes: ['x', 'y', 'z'] }
+  const outcome = f.client.issueControlCommand('home', args)
+  await waitFor(t.signal, () => f.commands.length === 1)
+  const command = decodeCommandV2(f.commands[0]!.wire)
+  assert.ok(command.expires_at - command.issued_at <= 5000)
+  t.mock.timers.tick(5200)
+  assert.deepEqual(f.outcomes, [])
+  assert.equal(await f.client.issueControlCommand('home', args), 'rejected')
+  f.client.data(f.resultFrame(command.cmd_id, 'applied'))
+  assert.equal(await outcome, 'applied')
+  assert.equal(f.commands.length, 1)
+})
+
+test('home on a default-wait driver ends a late result as outcome-unknown and never resends', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const f = await clientFixture(t, {
+    actions: ['home'],
+    driverFamily: 'moonraker',
+  })
+  f.proofsReady()
+  f.client.phase(f.nonceFrame())
+  await waitFor(t.signal, () => f.client.state.admitted)
+  const args = { axes: ['x', 'y', 'z'] }
+  const outcome = f.client.issueControlCommand('home', args)
+  await waitFor(t.signal, () => f.commands.length === 1)
+  const command = decodeCommandV2(f.commands[0]!.wire)
+  assert.ok(command.expires_at - command.issued_at <= 5000)
+  t.mock.timers.tick(5200)
+  assert.equal(await outcome, 'outcome-unknown')
+  assert.deepEqual(f.outcomes, ['outcome-unknown'])
+  f.client.data(f.resultFrame(command.cmd_id, 'applied'))
+  assert.deepEqual(f.outcomes, ['outcome-unknown'])
+  assert.equal(f.commands.length, 1)
 })
 
 test('the admission ends at its own deadline and never reaches the transport', async (t) => {

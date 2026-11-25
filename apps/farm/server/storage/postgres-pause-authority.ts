@@ -4,6 +4,7 @@ import {
   controlRoleAllowed,
 } from '../utils/pause-authority/role-policy.ts'
 import { readPauseAuthorityCredentialRecords } from './postgres-connector-credential-record.ts'
+import { OBSERVATION_FRESH_MS } from '../utils/integration-telemetry.ts'
 import { randomUUID } from 'node:crypto'
 import type { Sql, TransactionSql } from 'postgres'
 import { z } from 'zod'
@@ -86,6 +87,25 @@ export type PauseChallengeDecision =
 export type PauseCapabilityDecision =
   { ok: true; capability: SignedPauseCapabilityV1 } | PauseAuthorityFailure
 const denied = (): PauseAuthorityFailure => ({ ok: false, reason: 'denied' })
+/** An issuer may only grant controls from a current telemetry observation. */
+export function freshAdvertisedActions(
+  controls: unknown,
+  observedAt: unknown,
+  now: number,
+): ExtendedControlAction[] {
+  const observed = time.safeParse(observedAt)
+  if (
+    !observed.success ||
+    observed.data > now ||
+    now - observed.data > OBSERVATION_FRESH_MS ||
+    !Array.isArray(controls)
+  )
+    return []
+  const advertised = new Set<unknown>(controls)
+  return ExtendedControlAction.options.filter((action) =>
+    advertised.has(action),
+  )
+}
 type Current = {
   account: AccountSessionState
   session: SessionRecord
@@ -424,6 +444,18 @@ export class PostgresPauseAuthority {
     if (now < row.issued_at) return
     await tx`UPDATE farm.pause_authority_challenges SET status=${status},consumed_at=${now},retain_until=greatest(${now},expires_at,binding_expires_at,credential_expires_at)+3600000 WHERE challenge_id=${row.challenge_id}::uuid AND status='pending'`
   }
+  private async advertisedActions(
+    tx: TransactionSql,
+    binding: ControlSessionBinding,
+    printerKey: string,
+    now: number,
+  ): Promise<readonly ExtendedControlAction[]> {
+    const [latest] = await tx<{ controls: unknown; observed_at: number }[]>`
+      SELECT controls, observed_at::float8 AS observed_at FROM farm.pause_authority_advertised_controls
+      WHERE farm_id=${binding.farm_id}::uuid AND agent_id=${binding.agent_id}::uuid
+        AND printer_key=${printerKey}`
+    return freshAdvertisedActions(latest?.controls, latest?.observed_at, now)
+  }
   async issueChallenge(input: unknown): Promise<PauseChallengeDecision> {
     const parsed = ChallengeInput.safeParse(input)
     if (!parsed.success) return { ok: false, reason: 'invalid-input' }
@@ -664,6 +696,19 @@ export class PostgresPauseAuthority {
           )
           return denied()
         }
+        const actions = actionsForControlRole(
+          current.role,
+          await this.advertisedActions(
+            tx,
+            binding,
+            current.printerKey,
+            checked,
+          ),
+        )
+        if (actions.length === 0) {
+          await this.terminal(tx, row, 'rejected', await this.now(tx))
+          return denied()
+        }
         let capability: SignedPauseCapabilityV1 | undefined
         try {
           await tx.savepoint(async (save) => {
@@ -705,10 +750,7 @@ export class PostgresPauseAuthority {
               printer_key: current.printerKey,
               control_binding_sha256: stored.control_binding_sha256,
               admission_nonce: stored.admission_nonce,
-              actions: actionsForControlRole(
-                current.role,
-                ExtendedControlAction.options,
-              ),
+              actions,
             })
             const signed = await signPauseCapability(claims, this.signingKey)
             const postSign = await this.validAt(

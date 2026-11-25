@@ -6,6 +6,7 @@ import {
   type KobraXControlContext,
 } from './context.ts'
 import { kobraXGate } from './gate.ts'
+import { isKobraXActivePhase, kobraXPrintSlots } from './facts.ts'
 import {
   refusedLocally,
   reportRefusal,
@@ -30,8 +31,10 @@ export interface KobraXFileDetails {
 export interface KobraXStartOptions {
   /** A file that is already on the printer, for example from `upload`. */
   filename: string
-  /** Filament (as numbered by the slicer) to ACE slot. */
+  /** Filament (as numbered by the slicer) to native feeder slot. */
   slotMapping?: readonly { filament: number; slot: number }[]
+  /** Explicit signed mapping is ambiguous when the printer reports only ACE. */
+  requireReportedHolder?: boolean
   settings?: {
     autoLeveling?: boolean
     vibrationCompensation?: boolean
@@ -188,6 +191,7 @@ export function createKobraXFiles(context: KobraXControlContext) {
       if (response.status === 200 && code === 200 && typeof stored === 'string')
         return {
           kind: 'confirmed',
+          correlated: true,
           report: {
             type: 'http',
             action: 'gcode_upload',
@@ -216,10 +220,19 @@ export function createKobraXFiles(context: KobraXControlContext) {
     if (!validKobraXFilename(options.filename))
       return refuse('invalid-filename')
     const facts = context.facts.get()
-    const slots = new Set(
-      facts.boxes.flatMap((box) => box.slots.map((s) => s.index)),
-    )
     const mapping = options.slotMapping ?? []
+    const slotsAvailable = ({ boxes }: typeof facts) => {
+      if (options.requireReportedHolder && !boxes.some((box) => box.id === -1))
+        return false
+      const slots = kobraXPrintSlots(boxes)
+      return mapping.every(
+        (entry) =>
+          slots.filter(
+            ({ amsIndex, slot }) =>
+              amsIndex === entry.slot && slot.remainingPercent !== 0,
+          ).length === 1,
+      )
+    }
     const filaments = new Set<number>()
     for (const entry of mapping) {
       if (
@@ -230,8 +243,8 @@ export function createKobraXFiles(context: KobraXControlContext) {
       )
         return refuse('invalid-slot-mapping')
       filaments.add(entry.filament)
-      if (!slots.has(entry.slot)) return refuse('unknown-slot')
     }
+    if (!slotsAvailable(facts)) return refuse('unknown-slot')
     const supported = (feature: string) => facts.features[feature] !== false
     const settings = options.settings ?? {}
     const flag = (value: boolean) => (value ? 1 : 0)
@@ -259,17 +272,40 @@ export function createKobraXFiles(context: KobraXControlContext) {
       facts,
     })
     if (reason) return refuse(reason)
-    const present = await list(noGuard)
-    if (present.kind !== 'confirmed')
-      return present.kind === 'refused'
-        ? present
-        : refuse('file-list-unavailable')
+    const present = await list({
+      ...noGuard,
+      ...(call.signal ? { signal: call.signal } : {}),
+    })
+    if (present.kind !== 'confirmed') return refuse('file-list-unavailable')
     if (!present.data.some((file) => file.filename === options.filename))
       return refuse('file-not-on-printer')
+    if (!slotsAvailable(context.facts.get())) return refuse('unknown-slot')
     const watchMs = options.watchMs ?? 5000
+    let startedReport: KobraXReport | undefined
     let ended: KobraXReport | undefined
     const stop = context.requests.onReport((report) => {
-      if (report.type === 'print' && report.state === 'stoped') ended = report
+      if (
+        report.type !== 'print' ||
+        (report.state !== 'stoped' && report.state !== 'finished') ||
+        !startedReport
+      )
+        return
+      const taskId = startedReport.data.taskid
+      const reportedTask = report.data.taskid
+      if (
+        (report.msgid === startedReport.msgid &&
+          report.action === startedReport.action) ||
+        (typeof taskId === 'string' &&
+          taskId !== '-1' &&
+          reportedTask === taskId) ||
+        // The printer's own end report names the job it started from this
+        // request: same file and no different task ID.
+        (report.data.filename === options.filename &&
+          (reportedTask === undefined ||
+            reportedTask === '-1' ||
+            reportedTask === taskId))
+      )
+        ended = report
     })
     try {
       const started = await runGated(
@@ -295,15 +331,20 @@ export function createKobraXFiles(context: KobraXControlContext) {
               : {}),
             task_settings: taskSettings,
           },
-          // A job that already ended cannot confirm a start.
           effect: (report) =>
-            report.state !== 'stoped' && report.state !== 'finished',
-          result: () => ({ filename: options.filename }),
+            isKobraXActivePhase(report.state) &&
+            report.data.filename === options.filename,
+          result(report) {
+            startedReport = report
+            return { filename: options.filename }
+          },
         },
       )
       if (started.kind !== 'confirmed') return started
       const outcome = await watchForEnd(() => ended, watchMs, call.signal)
+      if (call.signal?.aborted) return { kind: 'received' }
       if (outcome) {
+        if (outcome.state === 'finished') return { kind: 'received' }
         const refusal = reportRefusal(outcome)
         return {
           kind: 'refused',

@@ -34,6 +34,7 @@ export default defineConfig({
       'tests/unit/pause-authority-timeout.test.ts',
     ],
     environment: 'node',
+    globalSetup: ['tests/helpers/vitest-temp-dir.ts'],
     isolate: true,
     maxWorkers: 2,
     // The full gate runs on a busy machine, so the 5 s default times out spuriously.

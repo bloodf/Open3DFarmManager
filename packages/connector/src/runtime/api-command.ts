@@ -1,7 +1,4 @@
-import {
-  temperatureJournalAction,
-  toolTemperatureRefusal,
-} from '../control/control-driver.ts'
+import { toolTemperatureRefusal } from '../control/control-driver.ts'
 import type { ToolHeaters } from '../../../farm-protocol/src/state.ts'
 import { createHash } from 'node:crypto'
 import { resinArtifactFormatFor } from '../../../shared/src/print-file/resin-artifacts.ts'
@@ -30,6 +27,7 @@ import {
   controlPrinterBusy,
   controlSourceState,
   LibraryPrintArgs,
+  U1_CONTROL_RESULT_TIMEOUT_MS,
   type ControlArguments,
 } from '../../../farm-protocol/src/control-actions.ts'
 import { macroParamsAllowed } from '../moonraker/control-macros.ts'
@@ -76,7 +74,12 @@ export type ApiPrinterObservation = Readonly<{
 }>
 export type ApiCommandDriver = Pick<
   PreparedPauseDriver,
-  'execute' | 'controls' | 'macros' | 'macroParams' | 'speedModes'
+  | 'execute'
+  | 'controls'
+  | 'macros'
+  | 'macroParams'
+  | 'speedModes'
+  | 'allowsExtendedResult'
 > &
   Partial<Pick<PreparedPauseDriver, 'closeAttempt'>> & {
     prepare?(
@@ -304,6 +307,10 @@ export function createApiCommandRunner(config: {
   ): [ApiEnvelopeRefusalCode, string] | null {
     if (envelope.kind === 'job') {
       const target = jobTarget(binding)
+      const advertised = config.driver.controls?.(binding) ?? []
+      // A held start is still this printer's start. The state check names the hold.
+      const heldForCollection =
+        config.driver.plateStartRefusal?.(binding) === 'awaiting-collection'
       if (envelope.job && resinArtifactFormatFor(envelope.job.display_name))
         return ['unsupported', 'resin-artifact-requires-library-version']
       if (
@@ -311,7 +318,7 @@ export function createApiCommandRunner(config: {
         !envelope.job ||
         !supportsFileUpload(target, envelope.job.display_name) ||
         !config.driver.execute ||
-        !(config.driver.controls?.(binding) ?? []).includes('start_print')
+        (!advertised.includes('start_print') && !heldForCollection)
       )
         return ['unsupported', 'job delivery is not supported by this printer']
       return null
@@ -341,12 +348,15 @@ export function createApiCommandRunner(config: {
     }
     // A library start runs the driver's ordinary `start_print` after the file is in place.
     const libraryStart = action === 'start_library_print'
+    const advertised = config.driver.controls?.(binding) ?? []
+    const heldForCollection =
+      (action === 'start_print' || libraryStart) &&
+      config.driver.plateStartRefusal?.(binding) === 'awaiting-collection'
     if (
       !config.driver.execute ||
       (libraryStart && (!config.libraryPrint || !jobTarget(binding))) ||
-      !(config.driver.controls?.(binding) ?? []).includes(
-        libraryStart ? 'start_print' : action,
-      ) ||
+      (!advertised.includes(libraryStart ? 'start_print' : action) &&
+        !heldForCollection) ||
       !controlWithinLimits(action, args, config.controlLimits) ||
       (action === 'run_macro' &&
         !config.driver
@@ -486,12 +496,7 @@ export function createApiCommandRunner(config: {
         // The journal records the driver action the environment control runs.
         envelope: environment
           ? { ...envelope, action: environment as ApiEnvelopeV1['action'] }
-          : envelope.action?.action === 'set_tool_temperature'
-            ? {
-                ...envelope,
-                action: temperatureJournalAction(envelope.action.args.target_c),
-              }
-            : envelope,
+          : envelope,
         printerKey: mapping.printer_key,
         wireSha256: createHash('sha256').update(String(wire)).digest('hex'),
       })
@@ -613,15 +618,27 @@ export function createApiCommandRunner(config: {
     let threw = false
     let prepared = false
     let jobWatch: ReturnType<ApiJobLifecycle['watch']> | undefined
-    const deadline = AbortSignal.timeout(
-      Math.max(
-        1,
-        Math.min(
-          envelope.kind === 'job' ? 60_000 : MAX_EXECUTE_MS,
-          envelope.expires_at - config.clock.wallNow(),
-        ),
+    const postWrite =
+      envelope.kind === 'action' &&
+      action === 'home' &&
+      config.driver.allowsExtendedResult?.(binding) === true
+        ? new AbortController()
+        : undefined
+    const executeMs = Math.max(
+      1,
+      Math.min(
+        envelope.kind === 'job' ? 60_000 : MAX_EXECUTE_MS,
+        envelope.expires_at - config.clock.wallNow(),
       ),
     )
+    const deadline = postWrite?.signal ?? AbortSignal.timeout(executeMs)
+    const writeDeadline = postWrite
+      ? config.clock.monotonicNow() + executeMs
+      : Infinity
+    let resultDeadline = Infinity
+    let postWriteTimer = postWrite
+      ? setTimeout(() => postWrite.abort(), executeMs)
+      : undefined
     const signal = config.signal
       ? AbortSignal.any([config.signal, deadline])
       : deadline
@@ -636,15 +653,25 @@ export function createApiCommandRunner(config: {
       if (!markWriteStarted(config.journal, receipt)) return false
       const now = sample()
       lastRefusal =
-        config.keys.issuer(API_ENVELOPE_ISSUER, envelope.kid) !== issuerKey
-          ? ['grant-revoked', 'issuer no longer trusted']
-          : (authorityRefusal(envelope, now) ??
-            safetyRefusal(envelope, binding) ??
-            commandStateRefusal())
+        postWrite && now.mono >= writeDeadline
+          ? ['expired', 'write deadline elapsed']
+          : config.keys.issuer(API_ENVELOPE_ISSUER, envelope.kid) !== issuerKey
+            ? ['grant-revoked', 'issuer no longer trusted']
+            : (authorityRefusal(envelope, now) ??
+              safetyRefusal(envelope, binding) ??
+              commandStateRefusal())
       if (lastRefusal || signal.aborted || !readPrinterBinding(binding))
         return false
       sentMono = now.mono
       sentAt = now.wall
+      if (postWrite) {
+        clearTimeout(postWriteTimer)
+        resultDeadline = now.mono + U1_CONTROL_RESULT_TIMEOUT_MS
+        postWriteTimer = setTimeout(
+          () => postWrite.abort(),
+          U1_CONTROL_RESULT_TIMEOUT_MS,
+        )
+      }
       permitted = true
       return true
     }
@@ -778,6 +805,9 @@ export function createApiCommandRunner(config: {
         const parsed = LibraryPrintArgs.safeParse(args)
         if (!target || !config.libraryPrint || !parsed.success)
           throw new JobFileError('unsupported')
+        // Authorization needs the same fresh local observation as file jobs.
+        await config.driver.prepare?.({ binding, signal })
+        prepared = true
         const authorize = () => {
           lastRefusal =
             config.keys.issuer(API_ENVELOPE_ISSUER, envelope.kid) !== issuerKey
@@ -868,6 +898,23 @@ export function createApiCommandRunner(config: {
         })
       } else await executeDriver()
     } catch (error) {
+      // Like the browser dispatcher, trust only the driver's typed local
+      // refusals before the write guard. They certify that nothing was sent.
+      const refusal = (error as { refusal?: unknown } | null)?.refusal
+      if (
+        attempted &&
+        !permitted &&
+        !guardCalled &&
+        (refusal === 'state' ||
+          refusal === 'unsupported-action' ||
+          refusal === 'invalid-command')
+      ) {
+        attempted = false
+        lastRefusal = [
+          refusal === 'state' ? 'wrong-state' : 'unsupported',
+          refusal,
+        ]
+      }
       if (
         !guardCalled &&
         error instanceof Error &&
@@ -893,10 +940,13 @@ export function createApiCommandRunner(config: {
       } catch {
         threw = true
       }
+      clearTimeout(postWriteTimer)
     }
     // Losing the inbox after positive local confirmation only affects reporting.
     const interrupted =
-      signal.aborted && !(jobWatch && acknowledged && confirmed)
+      (signal.aborted ||
+        (postWrite && config.clock.monotonicNow() >= resultDeadline)) &&
+      !(jobWatch && acknowledged && confirmed)
     if (threw || interrupted || !acknowledged || !confirmed) jobWatch?.dispose()
     if (attempted && !guardCalled) {
       finishCommand(

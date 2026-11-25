@@ -279,6 +279,15 @@ export async function testPostgresPauseAuthority(
         printerKey,
       })
     }
+    await admin`INSERT INTO farm.printer_latest_state (farm_id, agent_id, printer_key, observed_at, state)
+      VALUES (${farm}::uuid, ${pc.challenge.agent_id}::uuid, ${printerKey}, ${await databaseNow()},
+        ${admin.json({ controls: ['pause', 'set_temperature', 'future_action'] })})`
+    assert.equal(
+      (
+        await sql`SELECT has_table_privilege(current_user, 'farm.printer_latest_state', 'SELECT') AS allowed`
+      )[0]?.allowed,
+      false,
+    )
     const digest = () => randomBytes(32).toString('base64url'),
       issued = await databaseNow()
     const binding = {
@@ -415,6 +424,7 @@ export async function testPostgresPauseAuthority(
       true,
     )
     assert.equal(success.capability.account_id, account)
+    assert.deepEqual(success.capability.actions, ['pause', 'set_temperature'])
     assert.equal(success.capability.printer_key, printerKey)
     assert.ok(
       success.capability.expires_at - success.capability.issued_at <= 30000,
@@ -952,8 +962,11 @@ export async function testPostgresPauseAuthority(
         ).ok,
       )
       const alternateAssignment = randomUUID(),
+        alternatePrinterKey = 'synthetic-' + kind + '-' + randomUUID(),
         assignedAt = await databaseNow()
-      await admin`INSERT INTO farm.printer_assignments(id,farm_id,agent_id,printer_key,created_at,created_by) VALUES (${alternateAssignment}::uuid,${farm}::uuid,${binding.agent_id}::uuid,${'synthetic-' + kind + '-' + randomUUID()},${assignedAt},${account})`
+      await admin`INSERT INTO farm.printer_assignments(id,farm_id,agent_id,printer_key,created_at,created_by) VALUES (${alternateAssignment}::uuid,${farm}::uuid,${binding.agent_id}::uuid,${alternatePrinterKey},${assignedAt},${account})`
+      await admin`INSERT INTO farm.printer_latest_state (farm_id, agent_id, printer_key, observed_at, state)
+        VALUES (${farm}::uuid, ${binding.agent_id}::uuid, ${alternatePrinterKey}, ${assignedAt}, ${admin.json({ controls: ['pause'] })})`
       const nowBinding = await databaseNow(),
         b = {
           ...binding,

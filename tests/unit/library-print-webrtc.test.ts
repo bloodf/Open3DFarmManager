@@ -227,7 +227,7 @@ type Session = {
 async function connector(
   options: {
     tamper?: boolean
-    state?: 'standby' | 'printing'
+    state?: 'standby' | 'printing' | 'cancelled'
     role?: 'operator' | 'owner'
     actions?: ExtendedControlAction[]
   } = {},
@@ -592,6 +592,17 @@ describe(
   'start_library_print over the browser control path',
   { timeout: 20000 },
   () => {
+    test('a verified cancelled Moonraker state permits a signed replay', async () => {
+      // Snapmaker/u1-klipper print_stats.py at 93cb12faebf6e74c51bbc5f0be66e95124af14c8;
+      // OrcaSlicer MoonrakerPrinterAgent.cpp at f92a7c065c5718b8ef1baac1cd704df2911238f4.
+      const c = await connector({ state: 'cancelled' })
+      await until(() => c.controls().includes('start_library_print'))
+      const result = await c.send(c.command)
+      expect(result).toMatchObject({ t: 'control.result', outcome: 'applied' })
+      expect(c.printStarts()).toHaveLength(1)
+      expect(c.mock.control.model().state).toBe('printing')
+    })
+
     test('server mode: a signed start downloads, verifies, uploads and starts the print once', async () => {
       const c = await connector()
       await until(() => c.controls().includes('start_library_print'))
@@ -707,7 +718,7 @@ describe('command journal', () => {
       ).sql
       expect(sql).toContain("'config_write','start_library_print'")
       db.exec(
-        `DROP INDEX pause_active_assignment; DROP INDEX pause_active_printer; CREATE UNIQUE INDEX pause_active_assignment ON pause_commands(assignment_id) WHERE status IN ('claimed','write-started','outcome-unknown'); CREATE UNIQUE INDEX pause_active_printer ON pause_commands(farm_id,printer_key) WHERE status IN ('claimed','write-started','outcome-unknown'); DROP TABLE control_command_actions; ${sql.replace(",'start_library_print'", '')}; INSERT INTO control_command_actions VALUES ('retained', 'config_write'); PRAGMA user_version=15;`,
+        `DROP INDEX pause_active_assignment; DROP INDEX pause_active_printer; CREATE UNIQUE INDEX pause_active_assignment ON pause_commands(assignment_id) WHERE status IN ('claimed','write-started','outcome-unknown'); CREATE UNIQUE INDEX pause_active_printer ON pause_commands(farm_id,printer_key) WHERE status IN ('claimed','write-started','outcome-unknown'); DROP TABLE control_tool_temperature_args; DROP TABLE control_command_actions; ${sql.replace(",'start_library_print'", '').replace(",'set_tool_temperature'", '')}; INSERT INTO control_command_actions VALUES ('retained', 'config_write'); PRAGMA user_version=15;`,
       )
     } finally {
       db.close()
@@ -724,7 +735,7 @@ describe('command journal', () => {
         .prepare('INSERT INTO control_command_actions VALUES (?,?)')
         .run('library', 'start_library_print')
       expect(upgraded.prepare('PRAGMA user_version').get()).toEqual({
-        user_version: 17,
+        user_version: 18,
       })
     } finally {
       upgraded.close()

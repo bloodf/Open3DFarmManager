@@ -147,6 +147,153 @@ if (journeyEnabled())
     }
   })
 
+if (journeyEnabled())
+  test('U1 tool 2 temperature: define a temperatura da Ferramenta 3 pela rota de controle assinada', async ({
+    browser,
+  }) => {
+    test.setTimeout(5 * 60_000)
+    const journey = await startJourneyHarness({
+      browser,
+      simulator: 'moonraker-fixture',
+      openFarmInspector: true,
+      signedControl: true,
+      history: true,
+      moonraker: {
+        mock: {
+          profile: 'u1',
+          // The Connector reads each heater's configured ceiling before it
+          // writes a tool temperature.
+          configfileSettings: {
+            extruder: { max_temp: 300 },
+            extruder1: { max_temp: 300 },
+            extruder2: { max_temp: 300 },
+            extruder3: { max_temp: 300 },
+          },
+        },
+        declaredModel: 'Snapmaker U1',
+      },
+    })
+    try {
+      const printer = journey.printer.control
+      const page = journey.ownerPage
+      printer.update({
+        activeExtruder: 'extruder2',
+        extruders: {
+          extruder: { temperature: 210, target: 40 },
+          extruder1: { temperature: 220, target: 41 },
+          extruder2: { temperature: 230, target: 42 },
+          extruder3: { temperature: 245, target: 43 },
+        },
+        bedTarget: 55,
+      })
+
+      // The issuer grants only persisted advertised controls: wait for the
+      // Connector's telemetry before opening the single-use control peer.
+      await expect
+        .poll(() => journey.advertisedControls(), { timeout: 90_000 })
+        .toContain('set_tool_temperature')
+      journey.setTelemetryUpload(false)
+      await journey.expectLiveTelemetry()
+      const row = journey.farmRow()
+      printer.update({ state: 'standby' })
+      await expect(row).toContainText('Ociosa', { timeout: 60_000 })
+      expect(journey.printer.subscriptionObjects()).toContainEqual(
+        expect.objectContaining({
+          extruder1: ['temperature', 'target'],
+          extruder2: ['temperature', 'target'],
+          extruder3: ['temperature', 'target'],
+          toolhead: ['extruder'],
+        }),
+      )
+      const temperatures = row.getByLabel('Temperaturas observadas')
+      await expect(temperatures).toContainText('230 °C')
+      await expect(temperatures).toContainText('60 °C')
+
+      await expect
+        .poll(
+          () => {
+            const { pauseInboxReady, pauseInboxes } =
+              journey.simulatorObservation()
+            return pauseInboxReady && pauseInboxes > 0
+          },
+          { timeout: 90_000 },
+        )
+        .toBe(true)
+      const extended = row.getByRole('region', {
+        name: 'Controles adicionais de ' + journey.printerKey,
+      })
+      const toolTwoInput = extended.getByLabel(
+        'Ferramenta 3 — Temperatura em °C',
+      )
+      await expect(toolTwoInput).toBeVisible({ timeout: 10_000 })
+      const setToolTwo = extended.getByRole('button', {
+        name: 'Definir temperatura da Ferramenta 3',
+        exact: true,
+      })
+      await toolTwoInput.fill('222')
+      await expect(setToolTwo).toBeEnabled()
+      await setToolTwo.click()
+
+      const dialog = page.getByRole('dialog', {
+        name: new RegExp(journey.printerKey),
+      })
+      await expect(dialog).toBeVisible()
+      await expect(
+        dialog.getByText(
+          'Confirme a temperatura de 222 °C para a Ferramenta 3.',
+        ),
+      ).toBeVisible()
+      const confirm = dialog.getByRole('button', {
+        name: 'Confirmar comando',
+        exact: true,
+      })
+      await expect(confirm).toBeEnabled({ timeout: 45_000 })
+      await confirm.click()
+      await expect(dialog.getByRole('status')).toHaveText(
+        'Comando confirmado pelo Connector.',
+        { timeout: 60_000 },
+      )
+      await dialog.getByRole('button', { name: 'Fechar', exact: true }).click()
+      await expect(dialog).toBeHidden()
+
+      await expect
+        .poll(() => printer.model().extruders.extruder2?.target)
+        .toBe(222)
+      expect(printer.model().extruders).toMatchObject({
+        extruder: { target: 40 },
+        extruder1: { target: 41 },
+        extruder3: { target: 43 },
+      })
+      expect(printer.model().bedTarget).toBe(55)
+      expect(printer.gcodeScripts).toEqual([
+        'SET_HEATER_TEMPERATURE HEATER=extruder2 TARGET=222',
+      ])
+      // Exactly one write reached the fixture: the signed tool temperature.
+      const calls = journey.printer.calls()
+      expect(calls['printer.gcode.script']).toBe(1)
+      expect(
+        Object.fromEntries(
+          PRINT_CALLS.map((method) => [method, calls[method] ?? 0]),
+        ),
+      ).toEqual({
+        'printer.print.start': 0,
+        'printer.print.pause': 0,
+        'printer.print.resume': 0,
+        'printer.print.cancel': 0,
+        'printer.emergency_stop': 0,
+        'printer.gcode.script': 1,
+      })
+
+      printer.update({
+        extruders: { extruder2: { temperature: 231, target: 222 } },
+      })
+      await expect(temperatures).toContainText('231 °C', { timeout: 60_000 })
+      await expect(row).toContainText('Conexão direta autenticada')
+    } finally {
+      await journey.close()
+    }
+  })
+
 // Authorized direct WebRTC lifecycle commands against the loopback Moonraker
 // fixture. Every command is signed in the browser and travels over its own
 // direct connection; nothing here calls the fixture's RPC surface. The fixture
@@ -167,8 +314,16 @@ const PRINT_CALLS = [
   'printer.gcode.script',
 ] as const
 
-if (journeyEnabled())
-  test.describe('journey: Moonraker lifecycle controls', () => {
+const lifecycleProfiles = [
+  { name: 'journey: Moonraker lifecycle controls' },
+  {
+    name: 'journey: Moonraker lifecycle controls (Snapmaker U1)',
+    moonraker: { mock: { profile: 'u1' }, declaredModel: 'Snapmaker U1' },
+  },
+] as const
+
+for (const profile of journeyEnabled() ? lifecycleProfiles : [])
+  test.describe(profile.name, () => {
     test.describe.configure({ mode: 'serial' })
     let harness: JourneyHarness | undefined
 
@@ -266,6 +421,7 @@ if (journeyEnabled())
         simulator: 'moonraker-fixture',
         openFarmInspector: true,
         signedControl: true,
+        ...('moonraker' in profile ? { moonraker: profile.moonraker } : {}),
       })
     })
 
@@ -360,6 +516,11 @@ if (journeyEnabled())
         'printer.emergency_stop': 0,
         'printer.gcode.script': 0,
       })
+      const calls = journey.printer.calls()
+      for (const method of PRINT_CALLS) {
+        const request = 'HTTP POST /' + method.replaceAll('.', '/')
+        expect(calls[request] ?? 0, request).toBe(0)
+      }
       expect(journey.printer.control.gcodeScripts).toEqual([])
       await expect(row.getByText('Cancelado', { exact: true })).toBeVisible({
         timeout: 60_000,
@@ -374,63 +535,6 @@ if (journeyEnabled())
         )
       expect(journey.simulatorObservation()).toMatchObject({ failure: false })
     })
-  })
-
-// A locally declared Snapmaker U1 advertises no command (every one is
-// unsupported: tool commands have no builder, generic Klipper writes are not
-// qualified on U1 hardware), so the page offers no control and the Connector
-// writes nothing, even though the signed control path is open.
-if (journeyEnabled())
-  test('Snapmaker U1 declarada: nenhum comando é oferecido nem enviado', async ({
-    browser,
-  }) => {
-    test.setTimeout(5 * 60_000)
-    const journey = await startJourneyHarness({
-      browser,
-      simulator: 'moonraker-fixture',
-      openFarmInspector: true,
-      signedControl: true,
-      moonraker: { mock: { profile: 'u1' }, declaredModel: 'Snapmaker U1' },
-    })
-    try {
-      const page = journey.ownerPage
-      await journey.expectLiveTelemetry()
-      const row = journey.farmRow()
-      await expect(row).toContainText('Conexão direta autenticada')
-      await journey.expectProgress(0.25)
-      // The control inbox opens: control is armed, yet no command is offered.
-      await expect
-        .poll(() => journey.simulatorObservation().pauseInboxReady, {
-          timeout: 90_000,
-        })
-        .toBe(true)
-      await expect(
-        row.getByRole('group', {
-          name: 'Controles da impressora ' + journey.printerKey,
-        }),
-      ).toHaveCount(0)
-      for (const label of ['Pausar', 'Retomar', 'Cancelar'])
-        await expect(
-          row.getByRole('button', { name: label, exact: true }),
-        ).toHaveCount(0)
-      await expect(
-        page.getByRole('region', {
-          name: 'Controles adicionais de ' + journey.printerKey,
-        }),
-      ).toHaveCount(0)
-      expect(
-        Object.fromEntries(
-          PRINT_CALLS.map((method) => [
-            method,
-            journey.printer.calls()[method] ?? 0,
-          ]),
-        ),
-      ).toEqual(Object.fromEntries(PRINT_CALLS.map((method) => [method, 0])))
-      expect(journey.printer.control.gcodeScripts).toEqual([])
-      expect(journey.printer.model().state).toBe('printing')
-    } finally {
-      await journey.close()
-    }
   })
 
 // Browser file upload over an authorized direct WebRTC control session against

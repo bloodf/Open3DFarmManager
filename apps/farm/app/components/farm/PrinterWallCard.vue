@@ -8,6 +8,8 @@ import { computed } from 'vue'
 import type { ActiveSpool } from '../../../../../packages/farm-protocol/src/status.ts'
 import type { FarmAlert } from '../../utils/farm-alerts.ts'
 import { farmJobView } from '../../utils/farm-job-view.ts'
+import { farmSlotViews, type SlotBinding } from '../../utils/slot-spools.ts'
+import FarmSlot from '../spool-art/FarmSlot.vue'
 import {
   formatPrinterStateLabel,
   observationAge,
@@ -25,6 +27,7 @@ const props = withDefaults(
     nozzleTarget?: number
     bedTarget?: number
     thumbnailUrl?: string
+    bindings?: Readonly<Record<string, SlotBinding | undefined>>
     activeSpools?: readonly ActiveSpool[]
     /** Plain labels, or the farm alerts so each chip keeps its kind. */
     alerts?: readonly (string | FarmAlert)[]
@@ -76,6 +79,17 @@ const finish = computed(() => {
   }
 })
 
+// Last-known materials are never drawn: a reel with an old colour and level
+// would pass for the filament that is loaded now.
+const slots = computed(() =>
+  props.observation?.historical
+    ? undefined
+    : farmSlotViews(state.value?.materials, props.bindings, props.activeSpools),
+)
+const staleMaterials = computed(
+  () => !!props.observation?.historical && !!state.value?.materials?.length,
+)
+
 function temperature(value: number | undefined) {
   return formatTemperature(value) ?? 'Indisponível'
 }
@@ -86,14 +100,6 @@ const alertKey = (alert: string | FarmAlert) =>
   typeof alert === 'string' ? alert : alert.id
 const alertKind = (alert: string | FarmAlert) =>
   typeof alert === 'string' ? undefined : alert.kind
-
-function spoolLabel(spool: ActiveSpool) {
-  return (
-    spool.name ||
-    spool.material ||
-    (spool.spoolId !== undefined ? `Carretel nº ${spool.spoolId}` : spool.slot)
-  )
-}
 </script>
 
 <template>
@@ -146,39 +152,40 @@ function spoolLabel(spool: ActiveSpool) {
         {{ temperature(bedTarget) }}
       </dd>
     </dl>
-    <ul v-if="state?.materials?.length" aria-label="Slots de filamento">
-      <li v-for="material in state.materials" :key="material.slot">
-        {{ material.slot
-        }}<template v-if="material.materialType">
-          · {{ material.materialType }}</template
+    <ul
+      v-if="!embedded && slots?.length"
+      class="wall-printer__slots"
+      aria-label="Slots de filamento"
+    >
+      <li v-for="slot in slots" :key="slot.key">
+        <FarmSlot
+          :label="slot.label"
+          :material="slot.material"
+          :color="slot.color"
+          :color-name="slot.color && `Cor ${slot.color}`"
+          :printer-percent="slot.printerPercent"
+          :spoolman-remaining-weight="slot.spoolmanRemainingWeight"
+          :spoolman-initial-weight="slot.spoolmanInitialWeight"
+          :active="slot.active"
+          :low="slot.low"
         >
-        <template v-if="material.colorHex">
-          <span
-            class="wall-printer__swatch"
-            :style="{ backgroundColor: '#' + material.colorHex.slice(0, 6) }"
-            aria-hidden="true"
-          />
-          <span class="wall-printer__color"
-            >Cor #{{ material.colorHex.slice(0, 6) }}</span
+          <template v-if="slot.active" #state>
+            <strong>Em uso</strong>
+          </template>
+          <p
+            v-if="
+              slot.level.kind === 'known' && slot.level.source === 'printer'
+            "
+            class="wall-printer__remaining"
           >
-        </template>
-        <template v-if="material.active"> · Em uso</template>
-        <template v-if="material.remainingPercent !== undefined">
-          · {{ material.remainingPercent }}% restante</template
-        >
+            {{ slot.printerPercent }}% restante
+          </p>
+        </FarmSlot>
       </li>
     </ul>
-    <ul v-if="activeSpools?.length" aria-label="Carretéis ativos">
-      <li v-for="spool in activeSpools" :key="spool.slot">
-        {{ spoolLabel(spool)
-        }}<template v-if="spoolLabel(spool) !== spool.slot">
-          · {{ spool.slot }}</template
-        >
-        <template v-if="spool.remainingPercent !== undefined">
-          · {{ spool.remainingPercent }}% restante</template
-        >
-      </li>
-    </ul>
+    <p v-else-if="!embedded && staleMaterials" class="wall-printer__stale">
+      Materiais indisponíveis: os dados estão desatualizados.
+    </p>
     <ul v-if="alerts?.length" class="wall-printer__alerts" aria-label="Alertas">
       <li
         v-for="alert in alerts"
@@ -222,19 +229,16 @@ function spoolLabel(spool: ActiveSpool) {
   border-radius: 0.5rem;
   padding: 0.125rem 0.5rem;
 }
-.wall-printer__swatch {
-  display: inline-block;
-  width: 1em;
-  height: 1em;
-  border: 1px solid currentColor;
-  vertical-align: middle;
+.wall-printer__slots {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 12rem), 1fr));
+  gap: var(--ops-space-2);
+  margin: 0.5rem 0;
+  padding: 0;
+  list-style: none;
 }
-.wall-printer__color {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
+.wall-printer__remaining {
+  margin: 0;
 }
 .wall-printer__alerts {
   display: flex;

@@ -1,0 +1,1 @@
+DROP VIEW farm.pause_authority_advertised_controls;

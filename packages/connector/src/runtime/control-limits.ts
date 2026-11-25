@@ -22,8 +22,15 @@ export function controlWithinLimits(
 ): boolean {
   const parsed = ControlArguments.safeParse({ action, args })
   if (!parsed.success) return false
-  if (parsed.data.action !== 'set_temperature') return true
-  const maximum = limits[parsed.data.args.heater]
+  if (
+    parsed.data.action !== 'set_temperature' &&
+    parsed.data.action !== 'set_tool_temperature'
+  )
+    return true
+  const maximum =
+    parsed.data.action === 'set_tool_temperature'
+      ? limits.extruder
+      : limits[parsed.data.args.heater]
   return (
     Number.isFinite(maximum) &&
     maximum >= 0 &&

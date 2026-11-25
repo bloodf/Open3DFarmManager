@@ -35,6 +35,8 @@ export function createFileTargets(input: {
   assignmentId: string
   dataDirectory: string
   kobraLinkFetch?: KobraLinkFetch
+  /** Local diagnostics for a failed listing; never sent to the browser. */
+  onListFailure?: FileListOptions['onFailure']
 }): { fileTransfer: FileUploadOptions; fileList: FileListOptions } {
   const { collection, assignments } = input.config
   const controlledKey = assignments.find(
@@ -125,6 +127,7 @@ export function createFileTargets(input: {
         upload: {
           backend: 'creality',
           origin: `http://${host}:${creality.httpPort ?? 80}`,
+          endpoint: creality,
         },
         list: {
           backend: 'creality',
@@ -165,6 +168,9 @@ export function createFileTargets(input: {
       directory: join(input.dataDirectory, 'file-staging'),
       targetFor: (printerKey) => forKey(printerKey)?.upload,
     },
-    fileList: { targetFor: (printerKey) => forKey(printerKey)?.list },
+    fileList: {
+      targetFor: (printerKey) => forKey(printerKey)?.list,
+      ...(input.onListFailure ? { onFailure: input.onListFailure } : {}),
+    },
   }
 }

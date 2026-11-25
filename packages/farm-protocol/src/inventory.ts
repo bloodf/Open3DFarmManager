@@ -2,6 +2,7 @@ import { z } from 'zod'
 
 /** Read-only spool summary mirrored from Spoolman. Display evidence only. */
 export const MAX_INVENTORY_SPOOLS = 8
+export const SPOOL_INVENTORY_STALE_MS = 30_000
 export const SpoolSummary = z.strictObject({
   /** Spoolman ID, scoped to the Connector's configured Spoolman service. */
   spoolId: z.number().int().positive().safe().optional(),
@@ -13,6 +14,7 @@ export const SpoolSummary = z.strictObject({
     .nullable(),
   // Grams. Negative values are preserved, never clamped into availability.
   remainingGrams: z.number().int().min(-1_000_000).max(1_000_000).nullable(),
+  remainingPercent: z.number().min(0).max(100).optional(),
   location: z.string().max(32).nullable(),
   archived: z.boolean(),
 })
@@ -20,6 +22,7 @@ export const SpoolInventory = z.strictObject({
   observedAt: z.number().int().nonnegative(),
   stale: z.boolean(),
   total: z.number().int().min(0).max(10_000),
+  serviceId: z.string().uuid().optional(),
   spools: z.array(SpoolSummary).max(MAX_INVENTORY_SPOOLS),
 })
 export type SpoolSummary = z.infer<typeof SpoolSummary>

@@ -82,6 +82,14 @@ export const SpoolmanSpool = z.object({
   archived: z.boolean(),
   extra,
 })
+
+export function spoolmanRemainingPercent(spool: z.infer<typeof SpoolmanSpool>) {
+  const remaining = spool.remaining_weight
+  const initial = spool.initial_weight ?? spool.filament.weight
+  if (remaining === null || initial === null || initial <= 0) return undefined
+  return Math.max(0, Math.min(100, (remaining / initial) * 100))
+}
+
 const contextSchema = z.strictObject({
   farmId: z.string().uuid(),
   serviceId: z.string().uuid(),

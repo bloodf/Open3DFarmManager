@@ -261,7 +261,9 @@ test.each([
       expect(last?.filename).toBe('part.gcode')
       // A print error remains visible until Klipper returns to standby.
       if (terminal === 'error') mock.control.update({ state: 'standby' })
-      await expect.poll(() => snapshots().at(-1)?.state).toBe('idle')
+      await expect
+        .poll(() => snapshots().at(-1)?.state)
+        .toBe(terminal === 'cancelled' ? 'unknown' : 'idle')
       expect(diagnostics).not.toContainEqual({
         kind: 'unavailable',
         reason: 'invalid-response',

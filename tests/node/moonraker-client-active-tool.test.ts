@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { randomUUID } from 'node:crypto'
 import { serveWsTestServer, type WsTestSocket } from '../unit/ws-serve.ts'
 import {
   openMoonrakerClient,
@@ -10,6 +11,8 @@ import {
   createMoonrakerSubscription,
   type RawMoonrakerObservation,
 } from '../../packages/connector/src/moonraker/subscription.ts'
+import { createFarmSnapshotSource } from '../../packages/connector/src/runtime/farm-snapshot-provider.ts'
+import type { CompleteFarmSnapshot } from '../../packages/connector/src/webrtc/farm-status-sender.ts'
 
 const limits = {
   maxMessageBytes: 8192,
@@ -31,19 +34,29 @@ type Rpc = {
   params?: { objects?: Record<string, string[]> }
 }
 type Handlers = {
+  http?: (
+    request: Request,
+  ) => Response | undefined | Promise<Response | undefined>
   list?: (socket: WsTestSocket, rpc: Rpc) => void
   status?: (rpc: Rpc) => Record<string, unknown>
   respond?: (socket: WsTestSocket, rpc: Rpc, send: () => void) => void
+  replyMetadata?: { cli_time: number; dev_time: number }
 }
 
 /** Loopback Moonraker; the object list and complete-query timing are scripted. */
 async function moonraker(objects: string[], handlers: Handlers = {}) {
   const rpcs: Rpc[] = []
   const server = await serveWsTestServer({
-    http: () =>
-      Response.json({
-        result: { klippy_connected: true, klippy_state: 'ready' },
-      }),
+    async http(request) {
+      return (
+        (await handlers.http?.(request)) ??
+        (new URL(request.url).pathname === '/server/info'
+          ? Response.json({
+              result: { klippy_connected: true, klippy_state: 'ready' },
+            })
+          : new Response(null, { status: 404 }))
+      )
+    },
     upgrade: () => true,
     onMessage(socket, wire) {
       const rpc = JSON.parse(wire) as Rpc
@@ -53,13 +66,19 @@ async function moonraker(objects: string[], handlers: Handlers = {}) {
             jsonrpc: '2.0',
             id: rpc.id,
             result: { connection_id: 1 },
+            ...handlers.replyMetadata,
           }),
         )
       rpcs.push(rpc)
       if (rpc.method === 'printer.objects.list') {
         if (handlers.list) return handlers.list(socket, rpc)
         return socket.send(
-          JSON.stringify({ jsonrpc: '2.0', id: rpc.id, result: { objects } }),
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: rpc.id,
+            result: { objects },
+            ...handlers.replyMetadata,
+          }),
         )
       }
       const send = () =>
@@ -72,6 +91,7 @@ async function moonraker(objects: string[], handlers: Handlers = {}) {
               eventtime: rpcs.length,
               status: { ...baseStatus, ...handlers.status?.(rpc) },
             },
+            ...handlers.replyMetadata,
           }),
         )
       if (handlers.respond) handlers.respond(socket, rpc, send)
@@ -120,6 +140,254 @@ async function until(condition: () => boolean, ms = 6000) {
     await new Promise((resolve) => setTimeout(resolve, 20))
   }
 }
+
+test('U1 HTTP inventory and refresh keep a push-only WebSocket farm feed live and fresh', async () => {
+  const status = {
+    webhooks: { state: 'ready' },
+    print_stats: {
+      filename: 'simulator-cube.gcode',
+      state: 'complete',
+      print_duration: 60,
+      total_duration: 70,
+      filament_used: 20,
+      info: { current_layer: 20, total_layer: 20 },
+    },
+    virtual_sdcard: { progress: 1 },
+    extruder: { temperature: 24, target: 0 },
+    extruder1: { temperature: 25, target: 0 },
+    extruder2: { temperature: 26, target: 0 },
+    extruder3: { temperature: 27, target: 0 },
+    toolhead: { extruder: 'extruder3' },
+    heater_bed: { temperature: 28, target: 0 },
+    fan: { speed: 0.4 },
+    'fan_generic cavity_fan': { speed: 0 },
+  }
+  const delayedAt: number[] = []
+  const httpRequests: string[] = []
+  const selectedObjects: Record<string, string>[] = []
+  const objects = Object.keys(status)
+  let connected: WsTestSocket | undefined
+  let holdPoll = false
+  let releasePendingPoll: (() => void) | undefined
+  const service = await moonraker(objects, {
+    replyMetadata: { cli_time: -1, dev_time: 1 },
+    status: () => status,
+    http(request) {
+      const url = new URL(request.url)
+      httpRequests.push(`${request.method} ${url.pathname}`)
+      if (url.pathname === '/printer/objects/list')
+        return Response.json({ result: { objects } })
+      if (url.pathname !== '/printer/objects/query') return
+      selectedObjects.push(Object.fromEntries(url.searchParams))
+      const response = Response.json({
+        result: { eventtime: selectedObjects.length + 1, status },
+      })
+      if (holdPoll)
+        return new Promise((resolve) => {
+          releasePendingPoll = () => resolve(response)
+        })
+      if (delayedAt.length === 2) return response
+      delayedAt.push(performance.now())
+      // The real U1 emits process stats while idle. These give no status
+      // evidence while the complete HTTP snapshot is still in flight.
+      connected?.send(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'notify_proc_stat_update',
+          params: [{ websocket_connections: 1 }],
+        }),
+      )
+      return new Promise((resolve) => setTimeout(resolve, 1300, response))
+    },
+    respond(socket, rpc, send) {
+      if (rpc.method !== 'printer.objects.subscribe') return
+      connected = socket
+      send()
+    },
+  })
+  const agentId = randomUUID()
+  const assignmentRefs = [
+    { assignmentId: randomUUID(), agentId, printerKey: 'u1' },
+  ]
+  const source = createFarmSnapshotSource({ assignmentRefs })
+  const controller = new AbortController()
+  const raw: RawMoonrakerObservation[] = []
+  const live: CompleteFarmSnapshot[] = []
+  let unavailable = 0
+  const reasons: string[] = []
+  const subscription = createMoonrakerSubscription({
+    assignment: {
+      printerKey: 'u1',
+      origin: service.origin,
+      model: 'Snapmaker U1',
+    },
+    allowedOrigins: [service.origin],
+    limits: {
+      ...limits,
+      requestTimeoutMs: 5000,
+      staleAfterMs: 30000,
+      reconnectMinMs: 10_000,
+      reconnectMaxMs: 10_000,
+    },
+    discoverObjects: true,
+    jobFields: true,
+    signal: controller.signal,
+    onEvent(event) {
+      if (event.kind === 'unavailable') reasons.push(event.reason)
+    },
+    onRawUnavailable(value) {
+      source.invalidate(value)
+    },
+    onRawObservation(value) {
+      raw.push(value)
+      source.observe(value)
+      if (raw.length !== 1) return
+      source.open({
+        binding: { agent_id: agentId } as never,
+        deadlineMonoMs: performance.now() + 12_000,
+        assignmentRefs,
+        signal: controller.signal,
+        onComplete(snapshot) {
+          live.push(snapshot)
+        },
+        onUnavailable() {
+          unavailable++
+        },
+      })
+    },
+  })
+  try {
+    await until(
+      () =>
+        unavailable > 0 ||
+        (live.length > 1 && performance.now() > live[0]!.validUntilMonoMs),
+      10000,
+    )
+    assert.equal(unavailable, 0, 'the original read-only feed remained live')
+    assert.deepEqual(httpRequests.slice(0, 3), [
+      'GET /server/info',
+      'GET /printer/objects/list',
+      'GET /printer/objects/query',
+    ])
+    assert.deepEqual(
+      service.rpcs.map(({ method }) => method),
+      ['printer.objects.subscribe'],
+    )
+    const projected = {
+      webhooks: ['state'],
+      print_stats: [
+        'state',
+        'filename',
+        'print_duration',
+        'total_duration',
+        'filament_used',
+        'info',
+      ],
+      virtual_sdcard: ['progress'],
+      extruder: ['temperature', 'target'],
+      extruder1: ['temperature', 'target'],
+      extruder2: ['temperature', 'target'],
+      extruder3: ['temperature', 'target'],
+      heater_bed: ['temperature', 'target'],
+      toolhead: ['extruder'],
+      fan: ['speed'],
+      'fan_generic cavity_fan': ['speed'],
+    }
+    assert.deepEqual(service.rpcs[0]?.params?.objects, projected)
+    assert.deepEqual(
+      selectedObjects[0],
+      Object.fromEntries(
+        Object.entries(projected).map(([object, fields]) => [
+          object,
+          fields.join(','),
+        ]),
+      ),
+    )
+    assert.equal(delayedAt.length, 2)
+    for (const [index, started] of delayedAt.entries()) {
+      assert.equal(raw[index + 1]?.epoch, 1)
+      const snapshot = live[index + 1]!
+      assert.ok(snapshot.capturedAtMonoMs <= started)
+      assert.equal(snapshot.validUntilMonoMs, snapshot.capturedAtMonoMs + 5000)
+    }
+    const delayedFrame = live[1]!
+    assert.deepEqual(
+      {
+        state: delayedFrame.printers[0]?.state,
+        nozzle: delayedFrame.printers[0]?.toolTemperatureCelsius,
+        bed: delayedFrame.printers[0]?.bedTemperatureCelsius,
+      },
+      { state: 'idle', nozzle: 27, bed: 28 },
+    )
+    assert.deepEqual(raw[1]?.printer.materials, [
+      { slot: 'T0', active: false },
+      { slot: 'T1', active: false },
+      { slot: 'T2', active: false },
+      { slot: 'T3', active: true },
+    ])
+    const printer = raw[1]?.printer
+    const stats = raw[1]?.status.print_stats
+    assert.deepEqual(
+      {
+        filename: stats?.filename,
+        progress: printer?.progress,
+        printDuration: printer?.printDuration,
+        totalDuration: stats?.total_duration,
+        currentLayer: printer?.currentLayer,
+        totalLayer: printer?.totalLayer,
+        fans: printer?.fans,
+        toolHeaters: printer?.toolHeaters?.map(({ tool }) => tool),
+      },
+      {
+        filename: 'simulator-cube.gcode',
+        progress: 1,
+        printDuration: 60,
+        totalDuration: 70,
+        currentLayer: 20,
+        totalLayer: 20,
+        fans: { part: 40 },
+        toolHeaters: [0, 1, 2, 3],
+      },
+    )
+
+    assert.ok(connected)
+    connected.send(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'notify_status_update',
+        params: [
+          {
+            print_stats: { state: 'paused' },
+            virtual_sdcard: { progress: 0.5 },
+          },
+          selectedObjects.length + 1.5,
+        ],
+      }),
+    )
+    await until(() => live.at(-1)?.printers[0]?.state === 'paused')
+    assert.equal(live.at(-1)?.printers[0]?.progress, 0.5)
+
+    holdPoll = true
+    await until(() => releasePendingPoll !== undefined)
+    const earlierObservations = raw.length
+    connected.send(
+      JSON.stringify({ jsonrpc: '2.0', method: 'notify_klippy_disconnected' }),
+    )
+    // Reaching the collector's terminal diagnostic requires the pending GET
+    // to settle. The fixture deliberately hasn't produced its response yet.
+    await until(() => reasons.includes('not-ready'))
+    assert.equal(unavailable, 1)
+    releasePendingPoll?.()
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    assert.equal(raw.length, earlierObservations)
+  } finally {
+    controller.abort()
+    releasePendingPoll?.()
+    await subscription.done
+    source.close()
+    await service.stop()
+  }
+})
 
 test('a single-tool printer keeps the unchanged extruder and heater_bed query', async () => {
   for (const discover of [true, false]) {
@@ -410,8 +678,8 @@ test('discovery keeps the fields a Snapmaker U1 subscription already selected', 
   }
 })
 
-for (const discoveryTiming of ['before subscribe', 'after subscribe']) {
-  test(`Snapmaker U1 observes T2 on connect and reconnect with discovery ${discoveryTiming}`, async () => {
+for (const inventoryDelay of [0, 150]) {
+  test(`Snapmaker U1 observes T2 on connect and reconnect with a ${inventoryDelay} ms HTTP inventory`, async () => {
     const objects = [
       'toolhead',
       'extruder',
@@ -419,20 +687,21 @@ for (const discoveryTiming of ['before subscribe', 'after subscribe']) {
       'extruder2',
       'extruder3',
     ]
-    let replyToDiscovery: (() => void) | undefined
+    let inventoryReads = 0
     let connectedSocket: WsTestSocket | undefined
     const service = await moonraker(objects, {
-      list(socket, rpc) {
+      async http(request) {
+        const url = new URL(request.url)
+        if (url.pathname !== '/printer/objects/list') return
+        inventoryReads++
+        if (inventoryDelay)
+          await new Promise((resolve) => setTimeout(resolve, inventoryDelay))
+        return Response.json({ result: { objects } })
+      },
+      respond(socket, rpc, send) {
+        if (rpc.method !== 'printer.objects.subscribe') return
         connectedSocket = socket
-        replyToDiscovery = () =>
-          socket.send(
-            JSON.stringify({
-              jsonrpc: '2.0',
-              id: rpc.id,
-              result: { objects },
-            }),
-          )
-        if (discoveryTiming === 'before subscribe') replyToDiscovery()
+        send()
       },
       status: (rpc) =>
         rpc.params?.objects?.toolhead?.includes('extruder')
@@ -471,17 +740,14 @@ for (const discoveryTiming of ['before subscribe', 'after subscribe']) {
         assert.notEqual(first.epoch, previousEpoch)
         assert.deepEqual(first.temperatureObservation?.fields.tool, reading)
         previousEpoch = first.epoch
-        if (discoveryTiming === 'after subscribe') {
-          assert.ok(replyToDiscovery)
-          replyToDiscovery()
-          await until(() => observations.length >= start + 3)
-          // A status delta precedes the complete extension observation.
-          assert.deepEqual(
-            observations[start + 2]?.temperatureObservation?.fields.tool,
-            reading,
-          )
-        }
-        assert.equal(queries(service.rpcs).length, 0)
+        assert.equal(inventoryReads, connection + 1)
+        assert.deepEqual(
+          service.rpcs.map(({ method }) => method),
+          Array.from(
+            { length: connection + 1 },
+            () => 'printer.objects.subscribe',
+          ),
+        )
         assert.ok(connectedSocket)
         connectedSocket.terminate()
       }

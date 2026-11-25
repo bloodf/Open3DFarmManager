@@ -12,7 +12,7 @@ import {
 describe('compatibility-match', () => {
   describe('catalog coverage: every entry in compatibilityPageCatalog is matched', () => {
     it('matches every catalog entry by its exact id', () => {
-      expect(compatibilityPageCatalog.length).toBe(22)
+      expect(compatibilityPageCatalog.length).toBe(23)
       for (const product of compatibilityPageCatalog) {
         const match = matchCompatibility({ model: product.id })
         expect(match.identified).toBe(true)
@@ -251,6 +251,25 @@ describe('compatibility-match', () => {
           expect(match.capabilityStatuses.telemetry).toBe('simulated')
         }
       }
+    })
+
+    it.each([
+      { vendor: 'Snapmaker', model: 'U1' },
+      { vendor: 'Klipper', model: 'Snapmaker U1' },
+      { vendor: 'Moonraker', model: 'U1' },
+      { model: 'Snapmaker U1' },
+    ])('matches the Snapmaker U1 identity %j', (candidate) => {
+      expect(matchCompatibility(candidate)).toMatchObject({
+        identified: true,
+        product: { id: 'snapmaker-u1' },
+        capabilityStatuses: {
+          telemetry: 'reference-matched',
+          pause: 'simulated',
+          resume: 'simulated',
+          cancel: 'simulated',
+        },
+        statusLabels: { telemetry: 'Validado com a referência' },
+      })
     })
 
     it('matches generic Klipper + Moonraker', () => {

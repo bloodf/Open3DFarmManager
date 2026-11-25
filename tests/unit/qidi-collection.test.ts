@@ -102,7 +102,7 @@ test('collects, withdraws failed sources, and recovers in new read-only epochs',
         (request) =>
           request === 'GET /server/info' ||
           request ===
-            'GET /printer/objects/query?webhooks&print_stats&virtual_sdcard&extruder&heater_bed&fan',
+            'GET /printer/objects/query?webhooks&print_stats&virtual_sdcard&extruder&heater_bed&fan&fan_generic%20cooling_fan',
       ),
     ).toBe(true)
   } finally {

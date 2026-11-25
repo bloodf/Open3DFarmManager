@@ -28,6 +28,7 @@ const props = withDefaults(
     colorName?: string | null
     spoolmanRemainingWeight?: number | null
     spoolmanInitialWeight?: number | null
+    spoolmanPercent?: number | null
     printerPercent?: number | null
     emptyLabel?: string
     active?: boolean
@@ -41,6 +42,7 @@ const props = withDefaults(
     colorName: null,
     spoolmanRemainingWeight: null,
     spoolmanInitialWeight: null,
+    spoolmanPercent: null,
     printerPercent: null,
     emptyLabel: 'Slot vazio',
     active: false,
@@ -53,6 +55,7 @@ const level = computed(() =>
   resolveSpoolLevel({
     spoolmanRemainingWeight: props.spoolmanRemainingWeight,
     spoolmanInitialWeight: props.spoolmanInitialWeight,
+    spoolmanPercent: props.spoolmanPercent,
     printerPercent: props.printerPercent,
   }),
 )
@@ -90,7 +93,9 @@ const amount = computed(() => {
   if (l.source === 'spoolman') {
     const left = formatWeight(props.spoolmanRemainingWeight)
     const total = formatWeight(props.spoolmanInitialWeight)
-    return { main: `${left} de ${total}`, note: pct }
+    return left && total
+      ? { main: `${left} de ${total}`, note: pct }
+      : { main: pct, note: 'informado pelo Spoolman' }
   }
   return { main: pct, note: 'informado pela impressora' }
 })
@@ -118,7 +123,6 @@ const amount = computed(() => {
     </header>
     <div class="farm-slot-main">
       <FarmSpool
-        announce-level
         :color="empty ? null : color"
         :colors="empty ? null : colors"
         :fraction="empty ? 0 : fraction"

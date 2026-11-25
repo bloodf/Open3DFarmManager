@@ -44,8 +44,13 @@ function spoolFraction(spool: {
   remainingPercent?: number
 }) {
   const percent = spool.remainingPercent
-  if (typeof percent === 'number' && Number.isFinite(percent))
-    return Math.max(0, Math.min(1, percent / 100))
+  if (
+    typeof percent === 'number' &&
+    Number.isFinite(percent) &&
+    percent >= 0 &&
+    percent <= 100
+  )
+    return percent / 100
   const level = resolveSpoolLevel({
     spoolmanRemainingWeight: spool.remainingGrams,
   })

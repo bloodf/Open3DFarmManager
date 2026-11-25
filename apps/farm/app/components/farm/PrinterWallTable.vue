@@ -79,13 +79,15 @@ const sortedRows = computed(() => {
       const state = row.observation?.state
       // Last-known materials are never drawn: stale colour and level would
       // pass for the filament that is loaded now.
-      const spools = row.observation?.historical
-        ? undefined
-        : farmSlotViews(
-            state?.materials,
-            props.bindingsFor?.(row),
-            props.activeSpoolsFor?.(row),
-          )
+      const spools =
+        row.observation?.historical ||
+        (row.observation && observationAge(row.observation, now).stale)
+          ? undefined
+          : farmSlotViews(
+              state?.materials,
+              props.bindingsFor?.(row),
+              props.activeSpoolsFor?.(row),
+            )
       const age = row.observation && observationAge(row.observation, now)
       const printerAlarms = formatPrinterAlarmLabel(state?.alarms)
       const alerts = [

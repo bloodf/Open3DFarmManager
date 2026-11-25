@@ -166,7 +166,8 @@ export function spoolRemainingFraction(
     base <= 0 ||
     remaining === undefined ||
     remaining === null ||
-    !Number.isFinite(remaining)
+    !Number.isFinite(remaining) ||
+    remaining < 0
   )
     return null
   return Math.max(0, Math.min(1, remaining / base))

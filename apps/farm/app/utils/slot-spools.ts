@@ -118,6 +118,7 @@ export interface FarmSlotView {
   /** `#RRGGBB` reported for the filament, or null: never a guessed colour. */
   color: string | null
   printerPercent: number | null
+  spoolmanPercent: number | null
   spoolmanRemainingWeight: number | null
   spoolmanInitialWeight: number | null
   active: boolean
@@ -156,9 +157,11 @@ export function farmSlotViews(
     const spoolmanRemainingWeight = binding?.remainingGrams ?? null
     const spoolmanInitialWeight = binding?.initialGrams ?? null
     const printerPercent = material?.remainingPercent ?? null
+    const spoolmanPercent = spool?.remainingPercent ?? null
     const level = resolveSpoolLevel({
       spoolmanRemainingWeight,
       spoolmanInitialWeight,
+      spoolmanPercent,
       printerPercent,
     })
     const rgb = (
@@ -174,6 +177,7 @@ export function farmSlotViews(
         'Material desconhecido',
       color: rgb && /^[0-9A-Fa-f]{6}$/.test(rgb) ? `#${rgb}` : null,
       printerPercent,
+      spoolmanPercent,
       spoolmanRemainingWeight,
       spoolmanInitialWeight,
       active: material?.active === true,

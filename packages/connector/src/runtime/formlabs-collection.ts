@@ -1,6 +1,10 @@
 import { boundPrinterString } from '@open3dfarmmanager/farm-protocol'
 import type { z } from 'zod'
-import { connectFormlabs, isSupportedFormlabsModel } from '../formlabs/index.ts'
+import {
+  connectFormlabs,
+  isSupportedFormlabsModel,
+  matchesBoundFormlabsModel,
+} from '../formlabs/index.ts'
 import type { FormlabsBinding } from '../formlabs/config.ts'
 import type { RawPrinterObservation } from './farm-snapshot-provider.ts'
 
@@ -25,8 +29,20 @@ export function createFormlabsCollection(input: {
         if (!device || !device.is_connected) throw Error('offline')
         if (!isSupportedFormlabsModel(device.product_name))
           throw Error('unsupported model')
+        if (
+          !matchesBoundFormlabsModel(device.product_name, input.binding.model)
+        )
+          throw Error('model mismatch')
         if (input.signal.aborted) return
         const mono = performance.now()
+        const firmware = device.firmware_version?.trim()
+        const remainingMs = device.estimated_print_time_remaining_ms
+        // Zero means no current print. It does not tell idle from an error,
+        // so state stays unknown and only a positive estimate is published.
+        const remaining =
+          remainingMs !== undefined && remainingMs > 0
+            ? { estimatedRemainingSeconds: Math.round(remainingMs / 1000) }
+            : {}
         input.onObservation({
           printerKey: input.binding.printerKey,
           epoch,
@@ -34,12 +50,24 @@ export function createFormlabsCollection(input: {
             printerKey: input.binding.printerKey,
             state: 'unknown',
             preformStatus: boundPrinterString(device.status),
-            identity: { vendor: 'Formlabs', model: device.product_name },
+            identity: {
+              vendor: 'Formlabs',
+              model: input.binding.model,
+              ...(firmware ? { firmware: boundPrinterString(firmware) } : {}),
+            },
+            ...remaining,
             observedAt: result.retrievedAt,
           },
           receivedAtMonoMs: mono,
           fieldObservedAtMonoMs: {
-            formlabs: { state: mono, preformStatus: mono, identity: mono },
+            formlabs: {
+              state: mono,
+              preformStatus: mono,
+              identity: mono,
+              ...('estimatedRemainingSeconds' in remaining
+                ? { estimatedRemainingSeconds: mono }
+                : {}),
+            },
           },
         })
         unavailable = false

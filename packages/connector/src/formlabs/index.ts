@@ -2,6 +2,12 @@ import { isIP } from 'node:net'
 import { z } from 'zod'
 
 // Formlabs Local API 0.9.11: https://formlabs-dashboard-api-resources.s3.us-east-1.amazonaws.com/formlabs-local-api-v0.9.11.html
+// `GET /devices/` returns the shared device fields for every device. The
+// "Form 4 or Form 4L Printer" shape (Form4FamilyDeviceStatusModel) adds
+// `estimated_print_time_remaining_ms`: milliseconds remaining in the current
+// print, if any, and 0 otherwise (PreForm API v1.0.0-alpha.1,
+// https://developer.formlabs.com/reference/openapi-v1.yml, Form4FamilyDevice).
+// A malformed optional field is dropped instead of failing the whole list.
 const Device = z.object({
   id: z.string().min(1).max(128),
   product_name: z.string().min(1).max(128),
@@ -10,6 +16,13 @@ const Device = z.object({
   connection_type: z.string().optional(),
   ip_address: z.string().optional(),
   firmware_version: z.string().optional(),
+  estimated_print_time_remaining_ms: z
+    .number()
+    .int()
+    .nonnegative()
+    .max(31 * 24 * 3600 * 1000)
+    .optional()
+    .catch(undefined),
 })
 const List = z.object({
   count: z.number().int().nonnegative(),
@@ -29,6 +42,14 @@ export function isLocalFormlabsHost(host: string) {
 }
 export const isSupportedFormlabsModel = (model: string) =>
   /^(form 4|form 4l)$/i.test(model.trim())
+/** Models a binding may declare: the "Form 4 or Form 4L Printer" shape. */
+export const FORMLABS_BOUND_MODELS = ['Form 4', 'Form 4L'] as const
+export type FormlabsBoundModel = (typeof FORMLABS_BOUND_MODELS)[number]
+/** The host must report exactly the model the owner bound, ignoring case. */
+export const matchesBoundFormlabsModel = (
+  reported: string,
+  bound: FormlabsBoundModel,
+) => reported.trim().toLowerCase() === bound.toLowerCase()
 
 /** Only a locally configured IP host is accepted. Never follow redirects or issue writes. */
 export function connectFormlabs(input: {

@@ -30,6 +30,8 @@ test('reads the synthetic Form 4 family list using the read-only Local API', asy
       connection_type: index === 2 ? 'REMOTE' : 'ETHERNET',
       ip_address: '192.0.2.1',
       firmware_version: '1.17.1',
+      // Form4FamilyDevice in PreForm API v1.0.0-alpha.1; the fixture's values.
+      estimated_print_time_remaining_ms: index === 1 ? 0 : 12500,
     })),
   )
   assert.equal(result.printerObservedAt, null)

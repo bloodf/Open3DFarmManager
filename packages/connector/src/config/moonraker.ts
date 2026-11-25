@@ -138,3 +138,13 @@ export function validateMoonrakerInput(input: {
   }
   return { printerKey, origin, limits }
 }
+
+/** The v8 collector allowlist also carries validated WebSocket endpoints. */
+export function moonrakerOrigins(collection: {
+  version: number
+  allowedOrigins: readonly string[]
+}) {
+  return collection.version === 8
+    ? collection.allowedOrigins.filter((origin) => !origin.startsWith('ws:'))
+    : collection.allowedOrigins
+}

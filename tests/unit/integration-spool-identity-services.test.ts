@@ -133,9 +133,7 @@ test('search and usage expose only explicitly bound provenance even when spool I
   expect(search.data).toEqual(expected)
   expect(usage.data).toEqual(expected)
   for (const [statement] of sql.mock.calls) {
-    expect(statement.join('')).toContain(
-      'integration_physical_spool_registrations',
-    )
+    expect(statement.join('')).toContain('integration_physical_spool_bindings')
     expect(statement.join('')).not.toContain('connector_inventory_snapshots')
   }
 })

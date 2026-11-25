@@ -1347,7 +1347,9 @@ paths:
         before creating a spool or recording a receipt.
         The binding is immutable. A second local
         spool cannot claim the same external identity in the same farm.
-        A retry with the same key, farm and body returns the original response.
+        Deleting the local spool releases its binding.
+        A retry with the same key, farm and body returns the original response,
+        or 404 (`not-found`) once that spool has been deleted.
         Reusing the key with different input returns 409 (`idempotency-key-reused`).
         A duplicate binding returns 409 (`spool-already-bound`).
       security:

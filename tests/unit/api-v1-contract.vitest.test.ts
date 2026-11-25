@@ -521,14 +521,21 @@ function physicalSpoolScenarios(): Scenario[] {
           }
           if (text.includes('FROM farm.spool_filaments'))
             return values[1] === 1 ? [{ id: 1 }] : []
-          if (text.includes('WHERE response @>')) {
-            expect(values[0]).toEqual({
-              farmId: ids.farmA,
-              spoolman: {
-                serviceId,
-                spoolId,
-              },
-            })
+          if (
+            text.includes(
+              'INSERT INTO farm.integration_physical_spool_bindings',
+            )
+          ) {
+            expect(values).toEqual([ids.farmA, 8, serviceId, spoolId])
+            return []
+          }
+          if (text.includes('FROM farm.integration_physical_spool_bindings')) {
+            // Replay confirms the created spool still holds this binding.
+            if (text.includes('AND spool_id =')) {
+              expect(values).toEqual([ids.farmA, 8, serviceId, spoolId])
+              return [{ exists: true }]
+            }
+            expect(values).toEqual([ids.farmA, serviceId, spoolId])
             return options.bindingConflict ? [{ exists: true }] : []
           }
           if (
@@ -575,6 +582,11 @@ function physicalSpoolScenarios(): Scenario[] {
             return [{ ...spool, id: 8, location: values[3] }]
           if (text.includes('UPDATE farm.spools'))
             return [{ ...spool, location: null, revision: '72:(0,2)' }]
+          if (/SELECT 1 FROM farm\.spools/.test(text)) {
+            // Replay of an unbound registration confirms the created spool.
+            expect(values).toEqual([ids.farmA, 8])
+            return [{ exists: true }]
+          }
           if (text.includes('FROM farm.spools'))
             return values[1] === spool.id ? [spool] : []
           throw new Error('Unexpected physical inventory query')

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import path from 'node:path'
 import test from 'node:test'
-import ts from 'typescript'
+import ts from 'typescript-ast'
 
 const root = process.cwd()
 const server = 'apps/farm/server'

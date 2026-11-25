@@ -161,7 +161,7 @@ Three unconfirmed commands are restart holds and are released without an operato
 
 A restart hold ends at the first of these:
 
-- Ready evidence. At least 5 seconds after the outcome is recorded, the next browser command for that printer (other than `emergency_stop` or `clear_hold`) first reads the printer. If Klipper reports ready, the hold is released and the command continues through the normal checks. An emergency stop pressed during that read takes its place. API envelopes do not make this read.
+- Ready evidence. At least 5 seconds after the outcome is recorded, the next browser command for that printer (other than `emergency_stop` or `clear_hold`) first reads the printer. If Klipper reports ready, the hold is released and the command continues through the normal checks. An authenticated and authorized emergency stop preempts that read. It waits up to 250 milliseconds for the probe to release its slot and returns `busy` if the slot is still held. Caller cancellation and the command result deadline can end that wait sooner. API envelopes do not make this read.
 - 60 seconds after the outcome is recorded, whatever the printer reports.
 - A Connector restart.
 

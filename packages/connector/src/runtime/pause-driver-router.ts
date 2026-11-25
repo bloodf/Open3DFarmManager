@@ -16,7 +16,7 @@ import {
 import { anycubicControls } from '../anycubic/control-support.ts'
 import { readAnycubicPrinterBinding } from '../control/printer-binding.ts'
 import { openFixedCrealityControl } from '../creality/control-driver.ts'
-import { CREALITY_ACTIONS } from '../creality/commands.ts'
+import { CREALITY_ACTIONS, CREALITY_CFS_ACTIONS } from '../creality/commands.ts'
 import { readCrealityPrinterBinding } from '../control/printer-binding.ts'
 import { openFixedBambuControl } from '../bambu/control-driver.ts'
 import { bambuControls } from '../bambu/control-support.ts'
@@ -126,7 +126,11 @@ export function createPauseDriverRouter(config: {
     const mapping = readPrinterBinding(binding)
     if (!mapping) return []
     if (readKobraLinkPrinterBinding(binding)) return KOBRALINK_CONTROLS
-    if (readCrealityPrinterBinding(binding)) return CREALITY_ACTIONS
+    const creality = readCrealityPrinterBinding(binding)
+    if (creality)
+      return creality.cfsFeed
+        ? [...CREALITY_ACTIONS, ...CREALITY_CFS_ACTIONS]
+        : CREALITY_ACTIONS
     if (readKobraXPrinterBinding(binding))
       return config.kobraXControlEvidence
         ? kobraXControls(config.kobraXControlEvidence(binding))

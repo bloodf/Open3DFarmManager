@@ -85,7 +85,8 @@ export function createPrinterDetailSources(config: AgentRuntimeConfig) {
         (item) =>
           item.assignmentId === assignment.assignment_id &&
           'kind' in item.source &&
-          item.source.kind === 'creality-mjpeg',
+          (item.source.kind === 'creality-mjpeg' ||
+            item.source.kind === 'creality-webrtc'),
       )
       sources.set(
         binding.printerKey,

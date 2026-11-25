@@ -9,6 +9,9 @@
  *    envelope format {"method":"set","params":{...}}, pause:1, pause:0, stop:1,
  *    nozzleTempControl, bedTempControl, boxTempControl, fan, fanAuxiliary, fanCase,
  *    lightSw, autohome).
+ *
+ * `set_speed` is built here and CFS feed in `filament.ts`, because both depend
+ * on what the printer reported on the connection that sends them.
  */
 
 import { crealityGcodePath } from './gcode-path.ts'
@@ -22,6 +25,13 @@ export const CREALITY_ACTIONS = [
   'home',
   'set_light',
   'start_print',
+  'set_speed',
+] as const
+
+/** Advertised only for a binding with `cfsFeed: true`. */
+export const CREALITY_CFS_ACTIONS = [
+  'load_filament',
+  'unload_filament',
 ] as const
 
 export type CrealityAction = (typeof CREALITY_ACTIONS)[number]
@@ -33,6 +43,67 @@ export function supportedCrealityActions(_model?: string): readonly string[] {
 export interface CrealitySetFrame {
   method: 'set'
   params: Record<string, unknown>
+}
+
+/** Nothing was sent; `refusal` reaches the signed command result. */
+export class CrealityRefused extends Error {
+  readonly refusal: 'state' | 'unsupported-action' | 'invalid-command'
+  constructor(refusal: CrealityRefused['refusal'], message: string) {
+    super(message)
+    this.name = 'CrealityRefused'
+    this.refusal = refusal
+  }
+}
+
+/**
+ * The maker device UI offers four modes: Silent 25, Stable 50, Standard 100
+ * and Ultrafast 125, in CrealityOfficial/CrealityPrint@
+ * 6262848e302b8c0d593f2b341cd01310aa2f58a1
+ * resources/web/deviceMgr/assets/D-MKTaRJ.js (`PrintSpeed`). The shared levels
+ * map by meaning: `silent` to Silent, `standard` to Standard, `sport` to
+ * Ultrafast. Stable has no shared level, and nothing above 125 is documented,
+ * so `ludicrous` is refused.
+ */
+export const CREALITY_SPEED_PERCENT = {
+  silent: 25,
+  standard: 100,
+  sport: 125,
+} as const
+export type CrealitySpeedLevel = keyof typeof CREALITY_SPEED_PERCENT
+export const CREALITY_SPEED_MODES: readonly CrealitySpeedLevel[] = [
+  'silent',
+  'standard',
+  'sport',
+]
+
+/**
+ * Same frames as the maker UI on a LAN: a printer that reports `speedMode`
+ * gets `{speedMode:1}` for Silent, otherwise `{speedMode:0}` followed by
+ * `{setFeedratePct}`; one that does not gets `{setFeedratePct}` alone.
+ */
+export function buildCrealitySpeedFrames(
+  args: Record<string, unknown>,
+  reportsSpeedMode: boolean,
+): CrealitySetFrame[] {
+  const level = args.level
+  if (Object.keys(args).some((key) => key !== 'level'))
+    throw new CrealityRefused('invalid-command', 'Unexpected speed argument')
+  if (!CREALITY_SPEED_MODES.includes(level as CrealitySpeedLevel))
+    throw new CrealityRefused(
+      'unsupported-action',
+      'Creality documents no speed mode for this level',
+    )
+  const set = (params: Record<string, unknown>): CrealitySetFrame => ({
+    method: 'set',
+    params,
+  })
+  const feed = set({
+    setFeedratePct: CREALITY_SPEED_PERCENT[level as CrealitySpeedLevel],
+  })
+  if (!reportsSpeedMode) return [feed]
+  return level === 'silent'
+    ? [set({ speedMode: 1 })]
+    : [set({ speedMode: 0 }), feed]
 }
 
 /**

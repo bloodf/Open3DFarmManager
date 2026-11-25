@@ -42,6 +42,7 @@ import {
   sdcpStartUnavailableMessage,
   type SdcpQualification,
 } from '../sdcp/models.ts'
+import type { SdcpVideo } from '../sdcp/video.ts'
 import { readSdcpPrinterBinding } from '../control/printer-binding.ts'
 import { bambuControls } from '../bambu/control-support.ts'
 import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
@@ -135,6 +136,8 @@ export function createPauseDriverRouter(config: {
   photonResinSessions?: PhotonResinSessions | undefined
   /** Replaces the shipped resin write list, which is empty. Tests only. */
   photonResinQualifiedWrites?: readonly PhotonResinQualification[] | undefined
+  /** SDCP camera stream state and qualification; absent means no video. */
+  sdcpVideo?: SdcpVideo | undefined
   observe(
     binding: PrinterBinding,
     observation: ControlObservation | null,
@@ -197,10 +200,16 @@ export function createPauseDriverRouter(config: {
     if (sdcp) {
       // Start is offered only for a qualified pair; unknown firmware is not one.
       const firmware = sdcpFirmware.get(binding)
-      return firmware !== undefined &&
+      const lifecycle =
+        firmware !== undefined &&
         sdcpStartQualified(sdcp.model, firmware, sdcpQualified)
-        ? SDCP_CONTROL_ACTIONS
-        : SDCP_CONTROL_ACTIONS.filter((action) => action !== 'start_print')
+          ? SDCP_CONTROL_ACTIONS
+          : SDCP_CONTROL_ACTIONS.filter((action) => action !== 'start_print')
+      // `power` switches the camera stream, only for a qualified pair.
+      return firmware !== undefined &&
+        config.sdcpVideo?.qualified(sdcp, firmware)
+        ? [...lifecycle, 'power']
+        : lifecycle
     }
     const anycubic = readAnycubicPrinterBinding(binding)
     if (anycubic) return anycubicControls(anycubic.modelId)
@@ -258,9 +267,10 @@ export function createPauseDriverRouter(config: {
       // Firmware is only worth asking for when the model has a qualified pair.
       if (
         sdcp &&
-        sdcpQualified.some(
+        (sdcpQualified.some(
           (pair) => sdcpModelKey(pair.model) === sdcpModelKey(sdcp.model),
-        )
+        ) ||
+          config.sdcpVideo?.offered(sdcp))
       ) {
         sdcpFirmware.delete(binding)
         try {
@@ -369,6 +379,7 @@ export function createPauseDriverRouter(config: {
           qualifiedStarts: config.sdcpQualifiedStarts,
           photonResinSessions: config.photonResinSessions,
           photonResinQualifiedWrites: config.photonResinQualifiedWrites,
+          video: config.sdcpVideo,
           gcodeConsole: config.gcodeConsole?.(binding) === true,
           clock: config.clock,
           observeRun,

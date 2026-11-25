@@ -12,6 +12,7 @@ import {
   createPrinterBindingRegistry,
   readRuntimePrinterBinding,
   readPrinterBinding,
+  readSdcpPrinterBinding,
   provisionReadonlyPrinter,
   provisionKobraLinkPrinter,
   provisionKobraXPrinter,
@@ -27,6 +28,7 @@ import { RuntimeSignalling } from './signalling.ts'
 import { parseCameraRuntimeConfig } from './camera.ts'
 import { parseRtcRuntimeConfig } from './rtc.ts'
 import { readKobraXOnboardedConfig } from './kobra-x.ts'
+import { sdcpModelKey } from '../sdcp/models.ts'
 
 const LibraryRuntime = z.strictObject({
   /** Absolute directory of the Connector library store. */
@@ -452,6 +454,18 @@ export function readAgentRuntimeConfig(
       (driver.cameraPort ?? 18088) !== source.port
     )
       throw new Error('Anycubic resin camera does not match its printer')
+  }
+  for (const { assignmentId, source } of camera?.cameras ?? []) {
+    if (!('kind' in source) || source.kind !== 'sdcp-rtsp') continue
+    const binding = provisioned.get(assignmentId)
+    const sdcp = binding && readSdcpPrinterBinding(binding)
+    if (
+      !sdcp ||
+      source.address !== sdcp.host ||
+      source.mainboardId !== sdcp.mainboardId ||
+      sdcpModelKey(source.model) !== sdcpModelKey(sdcp.model)
+    )
+      throw new Error('SDCP camera assignment mismatch')
   }
   // Strict: an invalid address fails startup before any task starts.
   const rtc = parseRtcRuntimeConfig(input.rtc)

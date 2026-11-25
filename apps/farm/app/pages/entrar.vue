@@ -302,49 +302,67 @@ async function login() {
 <style scoped>
 .auth-page {
   display: grid;
-  gap: var(--space-4);
+  gap: var(--ops-space-4);
   align-content: start;
-  max-width: 30rem;
+  max-width: 26rem;
+  padding: var(--ops-space-5) var(--ops-space-4);
+  font-size: var(--ops-text-body);
+  line-height: 20px;
 }
+
 .provider {
   display: grid;
-  gap: var(--space-4);
+  gap: var(--ops-space-4);
+}
+.provider p {
+  line-height: 20px;
 }
 .provider .help {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-muted);
+  font-size: var(--ops-text-small);
+  color: var(--ops-muted);
 }
 .provider-link {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: var(--space-3);
+  gap: var(--ops-space-3);
   min-height: 2.75rem;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--color-accent);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface-raised);
-  color: var(--color-accent);
+  padding: var(--ops-space-2) var(--ops-space-3);
+  border: 1px solid color-mix(in srgb, var(--ops-muted) 70%, var(--ops-panel));
+  border-radius: var(--ops-radius-sm);
+  background: var(--ops-raised);
+  color: var(--ops-text);
   font-weight: var(--font-weight-semibold);
   text-align: center;
   text-decoration: none;
 }
-.google-signin {
-  border-color: var(--color-border);
-  color: var(--color-text);
+.provider-link:hover {
+  border-color: var(--ops-action);
+}
+.provider-link:focus-visible {
+  outline: var(--focus-ring-width) solid var(--ops-action);
+  outline-offset: 2px;
 }
 .google-mark {
   flex: none;
 }
+
 .links {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2) var(--space-5);
+  gap: var(--ops-space-2) var(--ops-space-5);
   margin: 0;
+  padding-block-start: var(--ops-space-2);
+  border-block-start: 1px solid var(--ops-border);
 }
 .links a {
   display: inline-flex;
   align-items: center;
   min-height: 2.75rem;
+  color: var(--ops-action);
+}
+.links a:focus-visible {
+  outline: var(--focus-ring-width) solid var(--ops-action);
+  outline-offset: 2px;
 }
 </style>

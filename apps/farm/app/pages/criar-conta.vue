@@ -4,7 +4,7 @@ import OnboardingPage from '../components/onboarding/OnboardingPage.vue'
 </script>
 
 <template>
-  <OnboardingPage title="Criar conta" narrow>
+  <OnboardingPage title="Criar conta" access narrow>
     <template #intro>
       <p>
         Use o convite enviado por um proprietário da farm. Cada convite funciona
@@ -26,5 +26,12 @@ import OnboardingPage from '../components/onboarding/OnboardingPage.vue'
 <style scoped>
 .alt {
   margin: 0;
+  padding-block-start: var(--ops-space-2);
+  border-block-start: 1px solid var(--ops-border);
+}
+.alt a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
 }
 </style>

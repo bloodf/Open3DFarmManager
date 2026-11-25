@@ -165,7 +165,7 @@ onBeforeUnmount(clear)
 onBeforeRouteLeave(clear)
 </script>
 <template>
-  <OnboardingPage title="Aprovar Connector">
+  <OnboardingPage title="Aprovar Connector" access>
     <template #intro>
       <p>
         Somente proprietários e administradores podem aprovar. Compare a
@@ -308,19 +308,29 @@ onBeforeRouteLeave(clear)
 .links {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2) var(--space-4);
+  gap: var(--ops-space-2) var(--ops-space-5);
+}
+.links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
 }
 .alert:focus-visible {
-  outline: var(--focus-ring-width) solid var(--color-focus-ring);
-  outline-offset: var(--focus-ring-offset);
-  border-radius: var(--radius-md);
+  outline: var(--focus-ring-width) solid var(--ops-action);
+  outline-offset: 2px;
+  border-radius: var(--ops-radius-md);
 }
 .alert:empty {
   display: none;
 }
 .alert :deep(.ui-card) {
-  border: 1px solid var(--color-border);
+  border-inline-start: 3px solid var(--ops-fault);
   box-shadow: none;
+}
+.onboarding-page :deep(.ui-card h2) {
+  margin: 0;
+  font-size: var(--ops-text-body);
+  line-height: 20px;
 }
 .skeletons {
   display: grid;
@@ -328,11 +338,14 @@ onBeforeRouteLeave(clear)
 }
 .form {
   display: grid;
-  gap: var(--space-4);
-  max-width: 34rem;
+  gap: var(--ops-space-4);
 }
 .mono {
-  font-family: ui-monospace, monospace;
+  font-family: var(--ops-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+#pairing-code {
+  font-family: var(--ops-font-mono);
 }
 .check {
   display: flex;
@@ -345,16 +358,36 @@ onBeforeRouteLeave(clear)
   inline-size: 1.5rem;
   block-size: 1.5rem;
   margin: 0;
-  accent-color: var(--color-accent);
+  accent-color: var(--ops-action);
 }
 .check input:focus-visible {
-  outline: var(--focus-ring-width) solid var(--color-focus-ring);
-  outline-offset: var(--focus-ring-offset);
+  outline: var(--focus-ring-width) solid var(--ops-action);
+  outline-offset: 2px;
 }
 .actions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2) var(--space-4);
+}
+.actions :deep(.ui-button) {
+  border-radius: var(--ops-radius-md);
+  font-weight: var(--font-weight-semibold);
+}
+.actions :deep(.ui-button[type='submit']) {
+  flex: 1;
+  border-color: var(--ops-action);
+  background: var(--ops-action);
+  color: var(--ops-on-action);
+}
+.actions :deep(.ui-button:hover:not(:disabled)) {
+  border-color: var(--ops-action);
+}
+.actions :deep(.ui-button[type='submit']:hover:not(:disabled)) {
+  background: color-mix(in srgb, var(--ops-action) 88%, var(--ops-text));
+}
+.actions :deep(.ui-button:focus-visible) {
+  outline: var(--focus-ring-width) solid var(--ops-action);
+  outline-offset: 2px;
 }
 @media (max-width: 30rem) {
   .actions :deep(.ui-button) {

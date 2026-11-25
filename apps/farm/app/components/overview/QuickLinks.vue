@@ -18,7 +18,7 @@ defineProps<{ links: readonly { to: string; label: string }[] }>()
 .quick-links {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr));
-  gap: var(--space-3);
+  gap: var(--ops-space-2);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -29,19 +29,36 @@ defineProps<{ links: readonly { to: string; label: string }[] }>()
 .quick-links a {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: var(--ops-space-2);
   min-height: 2.75rem;
   height: 100%;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-raised);
+  padding: var(--ops-space-2) var(--ops-space-3);
+  border: 1px solid var(--ops-border);
+  border-inline-start: 3px solid var(--ops-action);
+  border-radius: var(--ops-radius-md);
+  background: var(--ops-panel);
+  color: var(--ops-text);
+  font-weight: var(--font-weight-semibold);
+  text-decoration: none;
   overflow-wrap: anywhere;
 }
+/* Decorative chevron, drawn so it is not read as text. */
+.quick-links a::after {
+  content: '';
+  flex: none;
+  inline-size: 0.4rem;
+  block-size: 0.4rem;
+  border-block-start: 2px solid var(--ops-muted);
+  border-inline-end: 2px solid var(--ops-muted);
+  transform: rotate(45deg);
+}
 .quick-links a:hover {
-  border-color: var(--color-accent);
+  border-color: var(--ops-action);
+  background: var(--ops-raised);
 }
 .quick-links a:focus-visible {
-  outline: var(--focus-ring-width) solid var(--color-focus-ring);
-  outline-offset: var(--focus-ring-offset);
+  outline: var(--focus-ring-width) solid var(--ops-action);
+  outline-offset: 2px;
 }
 </style>

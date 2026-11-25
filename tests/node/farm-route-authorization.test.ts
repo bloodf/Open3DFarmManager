@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import path from 'node:path'
 import test from 'node:test'
-import ts from 'typescript-ast'
+import * as ts from 'typescript-ast/unstable/ast'
+import { API } from 'typescript-ast/unstable/sync'
 
 const root = process.cwd()
 const server = 'apps/farm/server'
@@ -43,14 +44,32 @@ type Import = { local: string; exported: string; module: string }
 function source(file: string) {
   return readFileSync(path.join(root, file), 'utf8')
 }
+const virtualFiles = new Map<string, string>()
+const api = new API({
+  cwd: root,
+  fs: {
+    readFile: (file) => virtualFiles.get(file),
+    fileExists: (file) => (virtualFiles.has(file) ? true : undefined),
+  },
+})
+test.after(() => api.close())
+let parseId = 0
 function parse(file: string, text: string) {
-  return ts.createSourceFile(
-    file,
-    text,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TS,
+  const absolute = path.resolve(
+    root,
+    path.dirname(file),
+    `.route-authorization-${parseId++}.ts`,
   )
+  virtualFiles.set(absolute, text)
+  const snapshot = api.updateSnapshot({
+    openFiles: [absolute],
+    fileChanges: { changed: [absolute] },
+  })
+  const tree = snapshot
+    .getDefaultProjectForFile(absolute)
+    ?.program.getSourceFile(absolute)
+  assert.ok(tree, `cannot parse ${file}`)
+  return tree
 }
 function importsAndCalls(file: string, text: string) {
   const tree = parse(file, text)
@@ -75,7 +94,10 @@ function importsAndCalls(file: string, text: string) {
       const bindings = node.importClause?.namedBindings
       if (bindings && ts.isNamedImports(bindings))
         for (const item of bindings.elements) {
-          if (!item.isTypeOnly && !node.importClause?.isTypeOnly)
+          if (
+            !item.isTypeOnly &&
+            node.importClause?.phaseModifier !== ts.SyntaxKind.TypeKeyword
+          )
             imports.push({
               local: item.name.text,
               exported: (item.propertyName ?? item.name).text,
@@ -104,7 +126,7 @@ function importsAndCalls(file: string, text: string) {
           storage = true
       }
     }
-    ts.forEachChild(node, (child) => visit(child, inHandler))
+    node.forEachChild((child) => visit(child, inHandler))
   }
   visit(tree)
   return { imports, calls, storage, text }
@@ -262,6 +284,12 @@ test('direct storage imports are rejected even when a guard is called', () => {
   const file = `${server}/api/farms/[farmId]/fixture.get.ts`
   const fixture = `import { connectorInventory } from '../../../services/connector-inventory.ts'; import { anything } from '../../../storage/example.ts'; connectorInventory();`
   assert.equal(checkRoute(file, fixture), 'direct storage import')
+})
+
+test('type-only imports cannot satisfy an authorization guard', () => {
+  const file = `${server}/api/farms/[farmId]/fixture.get.ts`
+  const fixture = `import type { connectorInventory } from '../../../services/connector-inventory.ts'; export default () => connectorInventory();`
+  assert.equal(checkRoute(file, fixture), 'no recognised authorization guard')
 })
 
 // Pin the security-relevant parts of the recognised entry points as well as

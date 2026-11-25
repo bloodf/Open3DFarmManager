@@ -7,7 +7,7 @@ import {
   TelemetryBatch,
   type SpoolInventory,
 } from '@open3dfarmmanager/farm-protocol'
-import { renderFarmComponent } from '../../apps/farm/app/components/farm/render-farm-component.ts'
+import { renderFarmComponent } from '../helpers/render-farm-component.ts'
 import { durableTelemetryEvent } from '../../apps/farm/server/storage/postgres-telemetry.ts'
 import { freshAdvertisedActions } from '../../apps/farm/server/storage/postgres-pause-authority.ts'
 import { OBSERVATION_FRESH_MS } from '../../apps/farm/server/utils/integration-telemetry.ts'

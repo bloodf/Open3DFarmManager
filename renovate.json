@@ -26,6 +26,27 @@
       "allowedVersions": "<23"
     },
     {
+      "description": "Keep PostgreSQL on major 17 until the persistent database volume has a qualified major upgrade path (Renovate #919).",
+      "matchManagers": ["docker-compose"],
+      "matchDepNames": ["postgres"],
+      "matchFileNames": [
+        "infra/app/docker-compose.yml",
+        "infra/sandbox/compose.yml"
+      ],
+      "allowedVersions": "<18"
+    },
+    {
+      "description": "Keep GitHub Actions runners on Ubuntu 24.04 because CI installs packages from noble-pgdg and jobs fail on Ubuntu 26 (Renovate #918).",
+      "matchManagers": ["github-actions"],
+      "matchDepNames": ["ubuntu"],
+      "matchFileNames": [
+        ".github/workflows/ci.yml",
+        ".github/workflows/sim.yml"
+      ],
+      "allowedVersions": "<25",
+      "matchCurrentVersion": "/^24\\.04/"
+    },
+    {
       "description": "Keep root and farm TypeScript below 7 while vue-tsc uses the legacy compiler entry point and Volar requires TypeScript <7.",
       "matchManagers": ["npm"],
       "matchDepNames": ["typescript"],

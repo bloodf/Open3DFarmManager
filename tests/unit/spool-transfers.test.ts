@@ -519,15 +519,15 @@ describe('HTTP boundary', () => {
   })
 })
 
-test('migration 0113 reverses and reapplies', async () => {
+test('migration 0116 reverses and reapplies', async () => {
   const catalog = await loadMigrationCatalog()
   const through = catalog.slice(
     0,
-    catalog.findIndex((entry) => entry.id === '0113_spool_moves') + 1,
+    catalog.findIndex((entry) => entry.id === '0116_spool_moves') + 1,
   )
   await runMigrations(root, through, {
     kind: 'down',
-    expectedLastId: '0113_spool_moves',
+    expectedLastId: '0116_spool_moves',
   })
   const gone =
     await root`SELECT to_regclass('farm.spool_moves') AS moves, to_regclass('farm.spool_identities') AS identities`

@@ -277,7 +277,7 @@ export in the response body and writes no server-side file).
 - Evidence: `node scripts/test-spoolman-aux-api.mjs` (disposable PostgreSQL in
   Docker, `tests/integration/spoolman-aux/**`).
 
-## Spool moves (migration `0113_spool_moves`)
+## Spool moves (migration `0116_spool_moves`)
 
 `POST /api/farms/{farmId}/spool-library/spools/{id}/move` takes one of:
 

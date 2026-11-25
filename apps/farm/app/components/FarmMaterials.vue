@@ -1,12 +1,14 @@
 <script setup lang="ts">
+import type { ActiveSpool } from '../../../../packages/farm-protocol/src/status.ts'
 import { computed } from 'vue'
 import type { PrinterState } from '../../../../packages/farm-protocol/src/state.ts'
-import { farmSlotViews, type SlotBinding } from '../utils/farm-slot-view.ts'
+import { farmSlotViews, type SlotBinding } from '../utils/slot-spools.ts'
 import FarmSlot from './spool-art/FarmSlot.vue'
 
 const props = withDefaults(
   defineProps<{
     materials: PrinterState['materials']
+    activeSpools?: readonly ActiveSpool[]
     /** Spoolman weights of the spool verified as bound to each slot. */
     bindings?: Readonly<Record<string, SlotBinding | undefined>>
     hideHeading?: boolean
@@ -15,7 +17,9 @@ const props = withDefaults(
   }>(),
   { bindings: undefined, heading: 'Materiais', headingLevel: 4 },
 )
-const trays = computed(() => farmSlotViews(props.materials, props.bindings))
+const trays = computed(() =>
+  farmSlotViews(props.materials, props.bindings, props.activeSpools),
+)
 </script>
 
 <template>

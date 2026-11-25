@@ -15,7 +15,8 @@ import { formatPercentage, formatWeight } from '../../utils/ui-format.ts'
  * sentence saying whether they match. The drawing is decorative: material,
  * colour, amount and the match result are always text. The required filament is
  * drawn full because the file states no level; the slot's level comes from
- * Spoolman weights, then the printer percentage, else "desconhecido".
+ * Spoolman weights, then Spoolman's percentage, then the printer percentage,
+ * else "desconhecido".
  */
 const props = defineProps<{
   /** 1-based position of the filament in the file. */
@@ -29,13 +30,21 @@ const result = computed(() =>
 )
 const wantPaint = computed(() => slotPaint(props.required.colour) ?? null)
 const havePaint = computed(() => slotPaint(props.matched?.colorHex) ?? null)
-const level = computed(() =>
-  resolveSpoolLevel({
-    spoolmanRemainingWeight: props.matched?.spoolmanRemainingWeight ?? null,
-    spoolmanInitialWeight: props.matched?.spoolmanInitialWeight ?? null,
-    printerPercent: props.matched?.remainingPercent ?? null,
-  }),
-)
+const level = computed(() => {
+  const m = props.matched
+  const weighed = resolveSpoolLevel({
+    spoolmanRemainingWeight: m?.spoolmanRemainingWeight ?? null,
+    spoolmanInitialWeight: m?.spoolmanInitialWeight ?? null,
+  })
+  if (weighed.kind === 'known') return weighed
+  // Without weights, Spoolman's own percentage still outranks the printer's.
+  const spoolman = resolveSpoolLevel({
+    printerPercent: m?.spoolmanRemainingPercent ?? null,
+  })
+  if (spoolman.kind === 'known')
+    return { ...spoolman, source: 'spoolman' as const, percentOnly: true }
+  return resolveSpoolLevel({ printerPercent: m?.remainingPercent ?? null })
+})
 const fraction = computed(() =>
   level.value.kind === 'known' ? level.value.fraction : null,
 )
@@ -43,6 +52,7 @@ const amount = computed(() => {
   const l = level.value
   if (l.kind === 'unknown') return 'Quantidade desconhecida'
   const pct = formatPercentage(l.fraction * 100) ?? ''
+  if ('percentOnly' in l) return `${pct}, informado pelo Spoolman`
   if (l.source === 'spoolman') {
     const left = formatWeight(props.matched?.spoolmanRemainingWeight)
     const total = formatWeight(props.matched?.spoolmanInitialWeight)

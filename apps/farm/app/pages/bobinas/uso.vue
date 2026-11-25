@@ -363,11 +363,7 @@ async function submitManual() {
           <tr v-for="record in records" :key="record.id">
             <td>{{ formatStamp(record.createdAt) }}</td>
             <td class="spool-record-cell">
-              <SpoolArt
-                v-if="spoolById.get(record.spoolId)"
-                :spool="spoolById.get(record.spoolId)!"
-                :size="40"
-              />
+              <SpoolArt :spool="spoolById.get(record.spoolId)" :size="40" />
               {{ spoolText(record.spoolId) }}
             </td>
             <td>
@@ -431,6 +427,11 @@ async function submitManual() {
             </option>
           </select>
         </label>
+        <SpoolArt
+          v-if="spoolById.has(Number(manual.spoolId))"
+          :spool="spoolById.get(Number(manual.spoolId))"
+          :size="40"
+        />
         <label class="feature-field">
           Gramas usadas
           <input v-model="manual.grams" type="text" inputmode="decimal" />

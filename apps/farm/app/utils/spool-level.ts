@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { formatPercentage } from './ui-format.ts'
+
 /**
  * How much filament is left on a spool, and where that number came from.
  *
@@ -46,4 +48,14 @@ export function resolveSpoolLevel(input: SpoolLevelInput): SpoolLevel {
     return { kind: 'known', fraction: percent / 100, source: 'printer' }
   }
   return unknown
+}
+
+/**
+ * Accessible name for a drawn spool, in the same words as SpoolIllustration:
+ * the level as text, or that it is unknown.
+ */
+export function spoolLevelLabel(fraction: number | null | undefined): string {
+  return typeof fraction === 'number' && Number.isFinite(fraction)
+    ? `Nível restante: ${formatPercentage(Math.min(1, Math.max(0, fraction)) * 100)}`
+    : 'Nível restante desconhecido'
 }

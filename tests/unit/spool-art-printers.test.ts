@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   slotBindingKey,
   verifiedSlotBindings,
-} from '../../apps/farm/app/utils/farm-slot-view.ts'
+} from '../../apps/farm/app/utils/slot-spools.ts'
 import type { SpoolItem } from '../../apps/farm/app/utils/spool-library-types.ts'
 import { renderFarmComponent } from '../../apps/farm/app/components/farm/render-farm-component.ts'
 import type {

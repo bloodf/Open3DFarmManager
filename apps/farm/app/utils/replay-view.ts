@@ -24,6 +24,10 @@ export type ReplayMaterial = {
   colorHex?: string
   /** Percentage the printer reports for the slot, 0 to 100. */
   remainingPercent?: number
+  /** Percentage Spoolman reports for the spool active in the slot, 0 to 100. */
+  spoolmanRemainingPercent?: number
+  /** `rrggbb` of the spool Spoolman reports active in the slot. */
+  spoolmanColorHex?: string
 }
 export type ReplayPrinter = {
   key: string

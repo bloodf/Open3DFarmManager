@@ -118,6 +118,7 @@ const amount = computed(() => {
     </header>
     <div class="farm-slot-main">
       <FarmSpool
+        announce-level
         :color="empty ? null : color"
         :colors="empty ? null : colors"
         :fraction="empty ? 0 : fraction"

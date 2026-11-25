@@ -17,13 +17,17 @@ describe('Kobra X input selection', () => {
         { slot: '0:3' },
       ]),
     ).toEqual([
-      { id: 0, label: 'Suporte 1 — PLA' },
-      { id: 1, label: 'Suporte 2' },
-      { id: 2, label: 'Suporte 3' },
-      { id: 4, label: 'ACE 1' },
-      { id: 5, label: 'ACE 2' },
-      { id: 6, label: 'ACE 3' },
-      { id: 7, label: 'ACE 4' },
+      {
+        id: 0,
+        label: 'Suporte 1 — PLA',
+        material: { slot: '-1:0', materialType: 'PLA' },
+      },
+      { id: 1, label: 'Suporte 2', material: { slot: '-1:1' } },
+      { id: 2, label: 'Suporte 3', material: { slot: '-1:2' } },
+      { id: 4, label: 'ACE 1', material: { slot: '0:0' } },
+      { id: 5, label: 'ACE 2', material: { slot: '0:1' } },
+      { id: 6, label: 'ACE 3', material: { slot: '0:2' } },
+      { id: 7, label: 'ACE 4', material: { slot: '0:3' } },
     ])
   })
   it('excludes empty and unknown inputs', () => {

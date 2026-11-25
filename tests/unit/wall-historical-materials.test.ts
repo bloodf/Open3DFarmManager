@@ -137,6 +137,7 @@ async function tableCells(historical: boolean) {
     genDefaultAs: 'Wall',
   })
   const bundle = await build({
+    plugins: [vueSfcPlugin],
     stdin: {
       contents: `
         ${script.content}
@@ -153,7 +154,6 @@ async function tableCells(historical: boolean) {
       ).pathname,
       loader: 'ts',
     },
-    plugins: [vueSfcPlugin],
     bundle: true,
     write: false,
   })

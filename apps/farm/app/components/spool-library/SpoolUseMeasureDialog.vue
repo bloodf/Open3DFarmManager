@@ -3,6 +3,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import Button from '../ui/Button.vue'
 import Dialog from '../ui/Dialog.vue'
 import Field from '../ui/Field.vue'
+import SpoolIllustration from './SpoolIllustration.vue'
 import {
   estimateAfterMeasure,
   estimateAfterUse,
@@ -132,6 +133,7 @@ async function submit() {
   <Dialog v-model="open" :title="title">
     <form v-if="spool" class="entity-form" novalidate @submit.prevent="submit">
       <p class="summary">
+        <SpoolIllustration :spool="spool" compact />
         <strong>{{ spoolDisplayTitle(spool) }}</strong>
         · Restante atual: {{ formatSpoolWeight(spool.remaining_weight) }}
       </p>

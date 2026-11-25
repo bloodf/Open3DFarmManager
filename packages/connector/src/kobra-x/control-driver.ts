@@ -16,19 +16,13 @@ import { record } from './discovery.ts'
 import type { KobraXFacts } from './facts.ts'
 import { connectKobraX } from './index.ts'
 import { reportRefusal, type KobraXReport } from './requests.ts'
+import {
+  KOBRA_X_REPORT_WAIT_MS,
+  KOBRA_X_SIGNED_ACTIONS,
+} from './control-support.ts'
 import { createKobraXStateEvidence } from './state-evidence.ts'
 
-export const KOBRA_X_SIGNED_ACTIONS: readonly ExtendedControlAction[] = [
-  'pause',
-  'resume',
-  'cancel',
-  'set_temperature',
-  'set_fan',
-  'set_light',
-  'start_print',
-  'load_filament',
-  'unload_filament',
-]
+export { KOBRA_X_SIGNED_ACTIONS }
 
 function reportedEffect(
   action: ExtendedControlAction,
@@ -38,6 +32,7 @@ function reportedEffect(
 ): ControlObservation['effect'] {
   switch (action) {
     case 'set_temperature': {
+      if (type !== 'tempature' && type !== 'print') return
       const heater = args.heater
       if (heater !== 'extruder' && heater !== 'bed') return
       const target_c =
@@ -49,6 +44,7 @@ function reportedEffect(
       return
     }
     case 'set_fan': {
+      if (type !== 'fan' && type !== 'print') return
       const percent = (type === 'print' ? record(data.settings) : data)
         .fan_speed_pct
       if (typeof percent === 'number')
@@ -56,16 +52,18 @@ function reportedEffect(
       return
     }
     case 'set_light':
-      if (data.status === 0 || data.status === 1)
+      if (type === 'light' && (data.status === 0 || data.status === 1))
         return { kind: 'light', on: data.status === 1, observedMono }
       return
     case 'load_filament':
       // The native executor matches both box id and loaded slot before this result.
-      if (typeof args.tray === 'number')
+      if (type === 'multiColorBox' && typeof args.tray === 'number')
         return { kind: 'filament', tray: args.tray, observedMono }
       return
     case 'unload_filament':
-      return { kind: 'filament', tray: null, observedMono }
+      if (type === 'multiColorBox')
+        return { kind: 'filament', tray: null, observedMono }
+      return
   }
 }
 
@@ -120,7 +118,7 @@ export function openFixedKobraXControl(input: {
       const timer = setTimeout(() => {
         notify = undefined
         reject(failure())
-      }, 3000)
+      }, KOBRA_X_REPORT_WAIT_MS)
       notify = () => {
         if (!stopped && !predicate()) return
         clearTimeout(timer)

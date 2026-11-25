@@ -167,6 +167,8 @@ function printerStateSchema(legacy: boolean) {
         .optional(),
       statusReason: z
         .enum([
+          'anycubic-resin-simulated',
+          'anycubic-resin-unqualified',
           'client-certificate-missing',
           'prusa-link-unqualified',
           'firmware-shutdown',
@@ -307,6 +309,12 @@ function printerStateSchema(legacy: boolean) {
         ((value.state === 'error' || value.state === 'paused') &&
           value.statusReason === 'printer-fault' &&
           value.statusMessage !== undefined) ||
+        // A resin printer reports progress only for a current job.
+        (value.identity?.vendor === 'Anycubic' &&
+          value.state !== 'printing' &&
+          value.state !== 'paused' &&
+          (value.statusReason === 'anycubic-resin-simulated' ||
+            value.statusReason === 'anycubic-resin-unqualified')) ||
         (value.statusReason === 'prusa-link-unqualified' &&
           value.identity?.vendor === 'Prusa' &&
           !value.controls?.length) ||

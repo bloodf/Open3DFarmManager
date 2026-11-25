@@ -1,4 +1,10 @@
 import { moonrakerOrigins } from '../config/moonraker.ts'
+import type { PhotonResinSessions } from '../anycubic-resin/collection.ts'
+import { createPhotonResinCameraSource } from '../anycubic-resin/camera.ts'
+import {
+  photonResinWriteQualified,
+  type PhotonResinQualification,
+} from '../anycubic-resin/qualification.ts'
 import { MAX_HEARTBEAT_HEALTH_BYTES } from '@open3dfarmmanager/farm-protocol'
 import { join, resolve } from 'node:path'
 import {
@@ -164,6 +170,8 @@ type AgentInput = {
   resinCapabilities?: Parameters<
     typeof import('./pause-control.ts').runPauseControl
   >[0]['resinCapabilities']
+  /** Test seam: the shipped resin write list is empty and only code adds one. */
+  photonResinQualifiedWrites?: readonly PhotonResinQualification[]
   clock?: AgentClock
   statusPort?: number
   configPath: string
@@ -322,6 +330,7 @@ async function runConnectorAgentOnce(
     >
   >()
   const detailSources = createPrinterDetailSources(config)
+  const photonResinSessions: PhotonResinSessions = new Map()
   // Library prints (#384): download from the server or read the local copy,
   // checked against what each printer itself reported. Never stops the agent.
   const printerProfiles = createPrinterProfiles()
@@ -537,6 +546,31 @@ async function runConnectorAgentOnce(
             agentId: credential.agent_id,
             farmId: credential.farm_id,
             assignmentRefs: refs,
+            photonResin(assignmentId) {
+              const key = refs.find(
+                (ref) => ref.assignmentId === assignmentId,
+              )?.printerKey
+              const binding =
+                config.collection.version === 8
+                  ? config.collection.drivers.find(
+                      (driver) => driver.printerKey === key,
+                    )
+                  : undefined
+              if (binding?.family !== 'anycubic-resin')
+                throw Error('Photon resin camera is not configured')
+              return createPhotonResinCameraSource({
+                host: new URL(binding.origin).hostname,
+                port: binding.cameraPort ?? 18088,
+                qualified: photonResinWriteQualified(
+                  'camera',
+                  binding.expect.model,
+                  input.photonResinQualifiedWrites,
+                ),
+                session: () => photonResinSessions.get(binding.printerKey),
+                onRefused: (reason) =>
+                  logger.warn('photon-camera-refused', { reason }),
+              })
+            },
           })
         : undefined
     const links = new Map(
@@ -612,6 +646,13 @@ async function runConnectorAgentOnce(
               assignment.backend === 'prusa-link'
             )
               return []
+            // An absent list would offer the legacy pause button.
+            if (
+              assignment &&
+              'backend' in assignment &&
+              assignment.backend === 'anycubic-resin'
+            )
+              return controlsFor?.(id) ?? []
             const ref = refs.find((item) => item.assignmentId === id)
             if (
               config.collection.version === 7 &&
@@ -988,6 +1029,10 @@ async function runConnectorAgentOnce(
           },
           kobraXControlEvidenceFor: (printerKey) =>
             kobraXControlEvidence.get(printerKey),
+          photonResinSessions,
+          ...(input.photonResinQualifiedWrites
+            ? { photonResinQualifiedWrites: input.photonResinQualifiedWrites }
+            : {}),
           libraryPrint(assignmentId) {
             const key = refs.find(
               (ref) => ref.assignmentId === assignmentId,
@@ -1152,6 +1197,10 @@ async function runConnectorAgentOnce(
     tasks.push(
       collectIntoQueue({
         config: config.collection,
+        photonResin: {
+          sessions: photonResinSessions,
+          onCapabilitiesChange: () => refreshControls?.(),
+        },
         ...(config.kobraX
           ? {
               kobraX: {

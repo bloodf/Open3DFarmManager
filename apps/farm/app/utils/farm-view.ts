@@ -328,6 +328,8 @@ const statusSourceLabel: Partial<
   Record<NonNullable<PrinterState['statusReason']>, string>
 > = {
   'printer-fault': 'falha informada pela impressora',
+  'anycubic-resin-simulated': simulatedSource,
+  'anycubic-resin-unqualified': 'não qualificada em hardware',
   'flashforge-simulated': simulatedSource,
   'flashforge-unqualified': unqualifiedSource,
   'phrozen-simulated': simulatedSource,

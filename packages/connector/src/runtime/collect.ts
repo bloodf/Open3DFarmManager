@@ -32,6 +32,10 @@ import type {
 import { createKobraLinkRuntimeSubscription } from '../kobralink/runtime.ts'
 import { createFlashforgeCollection } from '../flashforge/collection.ts'
 import { createPhrozenCollection } from '../phrozen/collection.ts'
+import {
+  createPhotonResinCollection,
+  type PhotonResinSessions,
+} from '../anycubic-resin/collection.ts'
 import { createQidiCollection } from './qidi-collection.ts'
 import { createPrusaLinkCollection } from './prusa-link-collection.ts'
 import {
@@ -166,6 +170,11 @@ export async function collectIntoQueue(input: {
     | FormlabsCollectorConfig
     | PrusaCollectorConfig
     | import('../config/sdcp.ts').SdcpCollectorConfig
+  /** Shares each open Photon resin session with signed control and camera. */
+  photonResin?: {
+    sessions: PhotonResinSessions
+    onCapabilitiesChange?: () => void
+  }
   onInventory?: (snapshot: SpoolmanSnapshot) => void
   onPrinterState?: (printer: PrinterState) => void
   onRawObservation?: (observation: RawPrinterObservation) => void
@@ -936,6 +945,44 @@ export async function collectIntoQueue(input: {
     }
     if (config.version === 8) {
       for (const binding of config.drivers) {
+        if (binding.family === 'anycubic-resin') {
+          // The session is polled every second; only changes are queued, with
+          // a refresh so advertised controls do not go stale on the server.
+          let queuedAs = ''
+          let queuedAt = 0
+          const sub = createPhotonResinCollection({
+            binding,
+            allowedOrigins: config.allowedOrigins,
+            signal,
+            timeoutMs: Math.min(30000, config.limits.requestTimeoutMs),
+            ...(input.photonResin ?? {}),
+            onObservation(value) {
+              input.onRawObservation?.(value)
+              const printer = value.printer as PrinterState
+              const { observedAt: _observedAt, ...content } = printer
+              const next = JSON.stringify(content)
+              if (next === queuedAs && performance.now() - queuedAt < 30_000)
+                return
+              queuedAs = next
+              queuedAt = performance.now()
+              onEvent({ kind: 'snapshot', printer })
+            },
+            onUnavailable(epoch) {
+              queuedAs = ''
+              input.onRawUnavailable?.({
+                printerKey: binding.printerKey,
+                epoch,
+              })
+              onEvent({
+                kind: 'unavailable',
+                printerKey: binding.printerKey,
+                reason: 'stale',
+              })
+            },
+          })
+          subscriptions.push({ done: sub.done.catch(fail) })
+          continue
+        }
         const options = {
           allowedOrigins: config.allowedOrigins,
           signal,

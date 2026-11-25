@@ -11,6 +11,7 @@ import { readSpoolmanAuthorization } from '../spoolman/credential.ts'
 
 import { Binding as QidiBinding, readQidiAuth } from '../qidi/config.ts'
 import { Binding as PhrozenBinding } from '../phrozen/config.ts'
+import { Binding as PhotonResinBinding } from '../anycubic-resin/config.ts'
 import {
   FlashforgeBindingSchema,
   readFlashforgeCredentials,
@@ -55,6 +56,7 @@ const DriverBinding = z.discriminatedUnion('family', [
   QidiBinding,
   PhrozenBinding,
   FlashforgeBindingSchema,
+  PhotonResinBinding,
 ])
 const CollectorOrigin = z.union([LocalOrigin, PhrozenBinding.shape.origin])
 const Config = LocalCollectorConfigSchema.options[0]

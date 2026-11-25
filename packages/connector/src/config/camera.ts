@@ -101,6 +101,13 @@ const CameraRuntime = z.strictObject({
             path: z.literal('/call/webrtc_local').default('/call/webrtc_local'),
           }),
           MjpegSource('anycubic-rinkhals'),
+          // Photon resin FLV, live only while that assignment's printer
+          // session has started capture. Address and port must match it.
+          z.strictObject({
+            kind: z.literal('anycubic-photon-resin'),
+            address: z.ipv4().refine(localAddress),
+            port: z.number().int().min(1).max(65535).default(18088),
+          }),
           Source.extend({
             kind: z.literal('kobra-x-flv'),
             address: z.ipv4().refine(localAddress),

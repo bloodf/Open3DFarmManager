@@ -12,6 +12,7 @@ import type {
   SpoolLibraryRepository,
   SpoolVendor,
 } from '../scope.ts'
+import { MAX_SPOOL_IDS } from '../../../../common/spool-ids.ts'
 import { normalizeUid } from './color.ts'
 import {
   compileExtraFilters,
@@ -452,6 +453,51 @@ async function find(
     page.map((s) => spoolJson(s, s.filament, s.filament.vendor)),
     { 'x-total-count': String(total) },
   )
+}
+
+/**
+ * The farm library's own `ids` list filter, not part of the Spoolman API: reads
+ * only the named records, so it never scans the library. Archived and unknown
+ * spools are left out, as in the default list.
+ */
+export async function findSpoolsByIds(
+  repo: SpoolLibraryRepository,
+  raw: string,
+): Promise<LegacyModuleResult> {
+  const parts = raw.split(',')
+  const ids = [...new Set(parts.map(Number))]
+  if (
+    parts.length > MAX_SPOOL_IDS ||
+    !parts.every((part) => /^[1-9]\d*$/.test(part)) ||
+    !ids.every(Number.isSafeInteger)
+  )
+    return unprocessable([patternIssue('ids', raw)])
+
+  const filaments = new Map<number, HydratedFilament>()
+  const items: Record<string, unknown>[] = []
+  for (const id of ids) {
+    const spool = await repo.spools.get(id)
+    if (!spool.ok) {
+      if (spool.reason === 'not-found') continue
+      return spool
+    }
+    if (spool.value.archived) continue
+    let filament = filaments.get(spool.value.filamentId)
+    if (!filament) {
+      const found = await repo.filaments.get(spool.value.filamentId)
+      if (!found.ok) return found
+      let vendor: SpoolVendor | null = null
+      if (found.value.vendorId !== null) {
+        const fetched = await repo.vendors.get(found.value.vendorId)
+        if (!fetched.ok) return fetched
+        vendor = fetched.value
+      }
+      filament = { ...found.value, vendor }
+      filaments.set(filament.id, filament)
+    }
+    items.push(spoolJson(spool.value, filament, filament.vendor))
+  }
+  return respond(200, items, { 'x-total-count': String(items.length) })
 }
 
 async function get(

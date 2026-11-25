@@ -496,6 +496,21 @@ describe('session-authenticated spool-library farm API', () => {
     expect(searchArchived.total).toBe(1)
     expect(searchArchived.items[0]?.id).toBe(2)
 
+    // The ids filter returns only named, unarchived spools.
+    const byIds = (await spoolLibraryResource(
+      makeEvent('GET', `/api/farms/${farmId}/spool-library/spools?ids=2,1,99`),
+      { farmId, resource: 'spools' },
+      deps,
+    )) as unknown as { items: { id: number }[]; total: number }
+    expect(byIds).toMatchObject({ items: [{ id: 1 }], total: 1 })
+    await expect(
+      spoolLibraryResource(
+        makeEvent('GET', `/api/farms/${farmId}/spool-library/spools?ids=abc`),
+        { farmId, resource: 'spools' },
+        deps,
+      ),
+    ).rejects.toMatchObject({ status: 422 })
+
     // 5. Record use (by grams) and scale measure
     const afterUse = (await spoolLibraryResource(
       makeEvent('PUT', `/api/farms/${farmId}/spool-library/spools/1/use`, {

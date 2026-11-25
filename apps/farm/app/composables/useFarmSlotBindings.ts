@@ -1,12 +1,7 @@
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import type { PrinterState } from '../../../../packages/farm-protocol/src/state.ts'
-import { featureFetch, fetchSpools } from './useSpoolFeaturePage.ts'
-import type { SlotAssignment } from '../utils/spool-features-types.ts'
-import {
-  verifiedSlotBindings,
-  slotBindingKey,
-  type SlotBindingIndex,
-} from '../utils/slot-spools.ts'
+import { loadSlotBindings } from '../utils/slot-bindings-load.ts'
+import { slotBindingKey, type SlotBindingIndex } from '../utils/slot-spools.ts'
 
 export function useFarmSlotBindings(
   farmId: () => string | undefined,
@@ -27,14 +22,8 @@ export function useFarmSlotBindings(
     onCleanup(() => controller.abort())
     const { signal } = controller
     try {
-      const { assignments } = await featureFetch<{
-        assignments: SlotAssignment[]
-      }>(id, 'slots', { signal })
-      if (!assignments.some((assignment) => assignment.unassignedAt === null))
-        return
-      const { items } = await fetchSpools(id, signal)
-      if (!signal.aborted)
-        index.value = verifiedSlotBindings(assignments, items)
+      const loaded = await loadSlotBindings(id, signal)
+      if (!signal.aborted) index.value = loaded
     } catch {
       // Slot metadata is optional. Live telemetry remains visible independently.
     }

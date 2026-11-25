@@ -95,6 +95,7 @@ test('the image is built only when missing, from manifests alone', () => {
   })
   const build = calls.find((call) => call[0] === 'build')!
   assert.ok(build.includes(reused))
+  assert.equal(build[build.indexOf('--build-arg') + 1], 'NODE_IMAGE=node:22')
   assert.ok(context.includes('package-lock.json'))
   assert.ok(!context.includes('scripts') && !context.includes('node_modules'))
   assert.ok(!existsSync(build.at(-1)!), 'build context is removed')
@@ -113,7 +114,7 @@ test('the image is built only when missing, from manifests alone', () => {
   )
   assert.match(
     readFileSync(join(repo, 'infra/test-base/Dockerfile'), 'utf8'),
-    /^FROM node:\d+\.\d+\.\d+-[\w.-]+@sha256:[a-f0-9]{64}$/m,
+    /^ARG NODE_IMAGE=node:\d+\.\d+\.\d+-[\w.-]+@sha256:[a-f0-9]{64}\nFROM \$\{NODE_IMAGE\}$/m,
   )
 })
 

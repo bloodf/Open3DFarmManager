@@ -511,8 +511,9 @@ describe('migration rollback', () => {
     const down = (id: string) =>
       runMigrations(root, through(id), { kind: 'down', expectedLastId: id })
     const last = catalog.at(-1)!.id
-    expect(last).toBe('0122_integration_refusal_message')
+    expect(last).toBe('0123_spool_observation_permissions')
     await down(last)
+    await down('0122_integration_refusal_message')
     await down('0121_spoolman_observation_lock_order')
     await down('0120_inventory_observation_freshness')
     await down('0119_printer_observation_freshness')
@@ -531,6 +532,7 @@ describe('migration rollback', () => {
       '0120_inventory_observation_freshness',
       '0121_spoolman_observation_lock_order',
       '0122_integration_refusal_message',
+      '0123_spool_observation_permissions',
     ])
   })
 })

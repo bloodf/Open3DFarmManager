@@ -49,7 +49,7 @@ describe('issue 913 regressions', () => {
       }),
     ).toContain('NODE_IMAGE=example:node')
     expect(read('../../infra/test-base/Dockerfile')).toMatch(
-      /ARG NODE_IMAGE\s+FROM \$\{NODE_IMAGE\}/,
+      /ARG NODE_IMAGE=[^\s]+\s+FROM \$\{NODE_IMAGE\}/,
     )
   })
   it('keeps vendor certificate crypto in shared code', () => {

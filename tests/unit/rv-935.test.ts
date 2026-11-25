@@ -49,9 +49,7 @@ import {
   loadMigrationCatalog,
   runMigrations,
 } from '../../scripts/db/migrations.ts'
-import { IntegrationAppsService } from '../../apps/farm/server/services/integration-apps.ts'
 import { IntegrationLibraryService } from '../../apps/farm/server/services/integration-library.ts'
-import { PostgresIntegrationApps } from '../../apps/farm/server/storage/integration-apps-postgres.ts'
 import { PostgresIntegrationLibrary } from '../../apps/farm/server/storage/integration-library-postgres.ts'
 import type { AuthRuntime } from '../../apps/farm/server/utils/auth/runtime.ts'
 import type { IntegrationPrincipal } from '../../apps/farm/server/utils/integration-auth.ts'
@@ -179,40 +177,10 @@ it.skipIf(!postgresReady)(
         await readFile(join(sandbox, 'client.json'), 'utf8'),
       )
 
-      // The seeded credential has no library scopes: the farm owner grants them
-      // farm-wide to an app, as in the #926 reproduction.
-      const appsSql = postgres(appEnv['NUXT_INTEGRATION_AUTH_DATABASE_URL']!, {
-        max: 1,
-        ssl: false,
-      })
-      let basic: string
-      try {
-        const apps = new IntegrationAppsService(
-          new PostgresIntegrationApps(appsSql),
-        )
-        const [owner] = await sql<{ id: string }[]>`
-          SELECT account_id AS id FROM farm.memberships
-          WHERE farm_id = ${client.farmId}::uuid AND role = 'owner'`
-        const app = await apps.createApp(owner!.id, {
-          farmId: client.farmId,
-          name: 'Biblioteca',
-          sandbox: true,
-        })
-        if (typeof app !== 'object') throw new Error(app)
-        const grant = await apps.createGrant(owner!.id, {
-          appId: app.id,
-          farmId: client.farmId,
-          scopes: ['library:read', 'library:write'],
-        })
-        if (typeof grant !== 'object') throw new Error(grant)
-        const issued = await apps.issueCredential(owner!.id, app.id)
-        if (typeof issued !== 'object') throw new Error(issued)
-        basic = Buffer.from(
-          `${issued.credential.clientId}:${issued.secret}`,
-        ).toString('base64')
-      } finally {
-        await appsSql.end()
-      }
+      // #941: the seeded credential itself carries the library scopes.
+      const basic = Buffer.from(
+        `${client.clientId}:${client.clientSecret}`,
+      ).toString('base64')
 
       const output = join(sandbox, 'sandbox-output')
       await exec('npx', ['nuxt', 'build', 'infra/sandbox'], {

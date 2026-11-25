@@ -224,6 +224,11 @@ describe('replay dialog in a browser', () => {
               if (window.__reply === 'throw') throw new Error('rtc')
               return window.__reply
             }
+            window.__reconnected = []
+            send.reconnect = async (key) => {
+              window.__reconnected.push(key)
+              return true
+            }
             createApp({
               render: () =>
                 kind === 'dialog'
@@ -371,6 +376,37 @@ describe('replay dialog in a browser', () => {
           .isDisabled(),
       ).toBe(true)
       expect(await sent()).toHaveLength(1)
+    } finally {
+      await close()
+    }
+  })
+
+  it('retries only the connection after a failed handshake', async () => {
+    const { page, sent, close } = await mount(
+      'dialog',
+      { ...base, preferredPrinter: 'voron' },
+      { outcome: 'not-sent', code: 'session-handshake-failed' },
+    )
+    try {
+      const bed = page.getByLabel('Confirmo que a mesa está limpa')
+      const go = page.getByRole('button', { name: 'Imprimir de novo' })
+      await bed.check()
+      await go.click()
+      await page.getByText('falha na negociação da conexão').waitFor()
+      await page
+        .getByRole('button', { name: 'Tentar conectar novamente' })
+        .click()
+      await page.getByText('Conexão restabelecida. Nada foi enviado').waitFor()
+      expect(
+        await page.evaluate(
+          () =>
+            (window as unknown as { __reconnected: string[] }).__reconnected,
+        ),
+      ).toEqual(['voron'])
+      // Nothing is resent: the operator has to confirm the bed and print again.
+      expect(await sent()).toHaveLength(1)
+      expect(await bed.isChecked()).toBe(false)
+      expect(await go.isDisabled()).toBe(true)
     } finally {
       await close()
     }

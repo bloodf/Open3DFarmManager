@@ -2,8 +2,12 @@
 // signed `start_library_print` sessions used by replay.
 import type { LibraryPrintArgs } from '../../../../packages/farm-protocol/src/control-actions.ts'
 import { controlObservationState } from '../../../../packages/farm-protocol/src/control-actions.ts'
-import { controlActionAvailability, type Clock } from './farm-control.ts'
-import type { FarmKeyState, FarmRow } from './farm-view.ts'
+import {
+  clockNotBefore,
+  controlActionAvailability,
+  type Clock,
+} from './farm-control.ts'
+import { observationAge, type FarmKeyState, type FarmRow } from './farm-view.ts'
 import type { ReplayPrinter, ReplayResult } from './replay-view.ts'
 import type { FarmPauseControlState } from './webrtc/farm-pause-control.ts'
 import type { ActiveSpool } from '../../../../packages/farm-protocol/src/status.ts'
@@ -13,7 +17,7 @@ export type LiveReplayInfo = Pick<
   ReplayPrinter,
   'connectorOnline' | 'live' | 'materials'
 > &
-  Partial<Pick<ReplayPrinter, 'state' | 'backend'>>
+  Partial<Pick<ReplayPrinter, 'state' | 'backend' | 'stale' | 'held'>>
 
 /** Live availability, state and loaded materials of one printer row. */
 export function liveReplayInfo(
@@ -27,7 +31,20 @@ export function liveReplayInfo(
   const vendor = state?.identity?.vendor
   const online = state?.state !== 'offline'
   const spoolBySlot = new Map(activeSpools.map((spool) => [spool.slot, spool]))
+  const observation = row.observation
+  const stale =
+    row.connection === 'authenticated' &&
+    !!observation &&
+    (observation.historical ||
+      observationAge(observation, clockNotBefore(observation, now)).stale)
+  // The Connector advertises this while a finished run awaits collection.
+  const held =
+    row.connection === 'authenticated' &&
+    !stale &&
+    state?.controls?.includes('confirm_collection') === true
   return {
+    ...(stale ? { stale } : {}),
+    ...(held ? { held } : {}),
     connectorOnline: online,
     live:
       online &&
@@ -71,12 +88,15 @@ export function liveReplayIndex(
   return index
 }
 
-export type ReplaySend = (
+export type ReplaySend = ((
   printerKey: string,
   args: LibraryPrintArgs,
   selectionCurrent?: () => boolean,
   versionId?: string,
-) => Promise<ReplayResult>
+) => Promise<ReplayResult>) & {
+  /** Opens and closes a session with the printer; never sends a command. */
+  reconnect?: (printerKey: string) => Promise<boolean>
+}
 
 /** A ready control session, as far as the replay send needs it. */
 export type ReplayControl = {
@@ -86,6 +106,8 @@ export type ReplayControl = {
   ): Promise<ReplayResult['outcome'] | undefined>
   close(): void
   dispose(): Promise<void>
+  /** Actions of the session capability, when the session reports them. */
+  admittedActions?: readonly string[]
 }
 
 /** Retry only confirmed-unsent attempts that have no explicit refusal. */
@@ -127,7 +149,11 @@ export async function sendLibraryReplay(
     }
     if (result.outcome !== 'not-sent' || result.code || attempt === 2)
       return result
-    await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)))
+    // A Connector serves one command session at a time and waits at least 1 s
+    // before it listens again (`RETRY_MIN_MS` in
+    // packages/connector/src/runtime/pause-control.ts). The retries outlast
+    // that minimum only; its backoff grows to 30 s, which is left to the user.
+    await new Promise((resolve) => setTimeout(resolve, 1_000 * (attempt + 1)))
   }
   return { outcome: 'not-sent' }
 }

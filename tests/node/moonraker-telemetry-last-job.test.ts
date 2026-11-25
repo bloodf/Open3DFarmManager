@@ -4,6 +4,10 @@ import type { PrinterState } from '@open3dfarmmanager/farm-protocol'
 import { serveWsTestServer } from '../unit/ws-serve.ts'
 import { createMoonrakerSubscription } from '../../packages/connector/src/moonraker/subscription.ts'
 
+import { createLibraryJobLinks } from '../../packages/connector/src/runtime/library-job-links.ts'
+import { jobLibraryLink } from '../../apps/farm/server/utils/job-library-links.ts'
+
+// Synthetic loopback Moonraker fixture.
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /** Snapshot events of one subscription whose printer starts in `initial`. */
@@ -102,6 +106,8 @@ async function observe(
 
 test('a watched Moonraker job end reaches telemetry with its file', async () => {
   const { printers, objects } = await observe('printing', async (push) => {
+    // Correlation requires the completion to have a newer wall timestamp.
+    await sleep(1)
     push({
       print_stats: { state: 'complete', print_duration: 90 },
       virtual_sdcard: { progress: 1 },
@@ -111,7 +117,18 @@ test('a watched Moonraker job end reaches telemetry with its file', async () => 
   assert.ok(
     (objects[0] as { print_stats: string[] }).print_stats.includes('filename'),
   )
+  assert.equal(printers[0]?.filename, 'part.gcode')
   assert.equal(printers[0]?.lastJob, undefined)
+  const links = createLibraryJobLinks()
+  const sha256 = 'a'.repeat(64)
+  links.remember(
+    'fixture',
+    { name: 'part.gcode', sha256, plate: 1 },
+    printers[0]!.observedAt - 1,
+  )
+  const linked = printers.map(links.attach).at(-1)?.lastJob
+  assert.ok(linked)
+  assert.deepEqual(jobLibraryLink(linked), { librarySha256: sha256, plate: 1 })
   const last = printers.at(-1)
   assert.equal(last?.state, 'idle')
   assert.deepEqual(

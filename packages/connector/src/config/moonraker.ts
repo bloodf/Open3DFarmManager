@@ -1,6 +1,6 @@
 import { createMoonrakerSession } from '../moonraker/auth.ts'
 import { z } from 'zod'
-import { readPrivateJsonFile } from './local.ts'
+import { readPrivateJsonFile } from './private-json.ts'
 
 const credentials = new WeakMap<
   MoonrakerLimits,

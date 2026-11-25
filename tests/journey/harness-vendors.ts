@@ -544,6 +544,8 @@ export async function startVendorSimulator(
           // Stock frame field names, the ones the Connector decodes.
           printFileName: 'journey.gcode',
           TotalLayer: 100,
+          speedMode: 0,
+          curFeedratePct: 100,
         },
         // A started print lasts long enough for the page to show it running.
         // The status heartbeat keeps the observation current, as stock

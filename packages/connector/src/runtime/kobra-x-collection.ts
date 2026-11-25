@@ -16,6 +16,8 @@ type Adapter = Pick<
 > &
   Partial<Pick<Awaited<ReturnType<typeof connectKobraX>>, 'facts'>>
 
+/** LAN model id that discovery proves for a Kobra X. */
+const KOBRA_X_MODEL_ID = '20030'
 const POLL_MS = 500
 /** No report for this long: the observation is withdrawn, never kept as fresh. */
 const STALE_MS = 30_000
@@ -132,6 +134,12 @@ export function createKobraXCollection(input: {
         return 'identity'
       }
       const machine = reportedModelProfile(adapter.identity.modelId)
+      // Advertised so the browser can wait as long as this driver may. Any
+      // other model id stays unknown.
+      const identity =
+        adapter.identity.modelId === KOBRA_X_MODEL_ID
+          ? { vendor: 'Anycubic', model: 'Kobra X' }
+          : undefined
       let lastReport = 0
       let lastSeen = performance.now()
       let withdrawn = false
@@ -147,6 +155,7 @@ export function createKobraXCollection(input: {
           lastSeen = now
           const parsed = PrinterState.safeParse({
             ...printer,
+            ...(identity ? { identity } : {}),
             printerKey: binding.printerKey,
           })
           if (parsed.success) {

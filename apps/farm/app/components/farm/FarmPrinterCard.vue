@@ -60,8 +60,9 @@ const DEFAULT_SPOOL_SLOTS = [
 
 function activeSpoolSlots(row: FarmRow): string[] {
   if (
-    row.observation?.historical ||
-    (row.observation && observationAge(row.observation, liveNow()).stale)
+    row.observation &&
+    (row.observation.historical ||
+      observationAge(row.observation, props.liveNow()).stale)
   )
     return [...DEFAULT_SPOOL_SLOTS]
   const fromMaterials = (row.observation?.state.materials ?? []).map(

@@ -36,6 +36,7 @@ const trays = computed(() =>
           :color="tray.color"
           :color-name="tray.color && `Cor ${tray.color}`"
           :printer-percent="tray.printerPercent"
+          :spoolman-percent="tray.spoolmanPercent"
           :spoolman-remaining-weight="tray.spoolmanRemainingWeight"
           :spoolman-initial-weight="tray.spoolmanInitialWeight"
           :active="tray.active"

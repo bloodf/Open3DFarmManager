@@ -166,6 +166,7 @@ const alertKind = (alert: string | FarmAlert) =>
           :color="slot.color"
           :color-name="slot.color && `Cor ${slot.color}`"
           :printer-percent="slot.printerPercent"
+          :spoolman-percent="slot.spoolmanPercent"
           :spoolman-remaining-weight="slot.spoolmanRemainingWeight"
           :spoolman-initial-weight="slot.spoolmanInitialWeight"
           :active="slot.active"
@@ -174,14 +175,6 @@ const alertKind = (alert: string | FarmAlert) =>
           <template v-if="slot.active" #state>
             <strong>Em uso</strong>
           </template>
-          <p
-            v-if="
-              slot.level.kind === 'known' && slot.level.source === 'printer'
-            "
-            class="wall-printer__remaining"
-          >
-            {{ slot.printerPercent }}% restante
-          </p>
         </FarmSlot>
       </li>
     </ul>

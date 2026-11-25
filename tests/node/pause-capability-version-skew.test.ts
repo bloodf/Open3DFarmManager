@@ -203,9 +203,9 @@ async function issue(
         ? []
         : [
             {
-              // An older Connector's record: no send age was ever stored.
+              // A fresh observation lets this fixture exercise action version skew.
               controls: advertised,
-              age_at_send_ms: null,
+              age_at_send_ms: 0,
               observed_at: now,
               received_at: now,
             },

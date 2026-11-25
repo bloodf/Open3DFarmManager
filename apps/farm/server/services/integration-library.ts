@@ -133,8 +133,14 @@ export interface IntegrationLibraryStore {
   fits(file: LibraryFile): Promise<boolean>
   /** Makes a version's file available on the Connector that will print it. */
   placeOn(versionId: string, agentId: string): Promise<LibraryPlacement>
-  /** Throws `LibraryQuotaExceeded` when the file no longer fits. */
-  addVersion(version: NewLibraryVersion): Promise<LibraryItemView>
+  /**
+   * Throws `LibraryQuotaExceeded` when the file no longer fits. `rewrite` stores
+   * the bytes again under the retention locks when a purge may have removed them.
+   */
+  addVersion(
+    version: NewLibraryVersion,
+    rewrite?: () => Promise<void>,
+  ): Promise<LibraryItemView>
   insertAudit(entry: LibraryAudit, now: number): Promise<void>
 }
 
@@ -422,34 +428,39 @@ export class IntegrationLibraryService {
         }))
       )
         return quotaExceeded
-      await this.store.retain(sha256, input.bytes, mode, {
-        farmId: input.farmId,
-        agentId: holder,
-      })
+      const retain = () =>
+        this.store.retain(sha256, input.bytes, mode, {
+          farmId: input.farmId,
+          agentId: holder,
+        })
+      await retain()
 
       const now = this.now()
       const saved =
         existing ??
-        (await this.store.addVersion({
-          id: randomUUID(),
-          itemId: randomUUID(),
-          farmId: input.farmId,
-          title:
-            input.name.slice(0, input.name.lastIndexOf('.')).trim() ||
-            input.name,
-          originalName: input.name,
-          kind,
-          ...(input.resinProfile === undefined
-            ? {}
-            : { resinProfile: input.resinProfile }),
-          sha256,
-          sizeBytes: input.bytes.length,
-          plateCount: parsed.plateCount,
-          storageLocation: mode,
-          agentId,
-          createdAt: now,
-          versionNumber: 1,
-        }))
+        (await this.store.addVersion(
+          {
+            id: randomUUID(),
+            itemId: randomUUID(),
+            farmId: input.farmId,
+            title:
+              input.name.slice(0, input.name.lastIndexOf('.')).trim() ||
+              input.name,
+            originalName: input.name,
+            kind,
+            ...(input.resinProfile === undefined
+              ? {}
+              : { resinProfile: input.resinProfile }),
+            sha256,
+            sizeBytes: input.bytes.length,
+            plateCount: parsed.plateCount,
+            storageLocation: mode,
+            agentId,
+            createdAt: now,
+            versionNumber: 1,
+          },
+          retain,
+        ))
       if (!existing) {
         this.events.push({
           type: 'library.version.created',

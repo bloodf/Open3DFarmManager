@@ -207,6 +207,14 @@ function printerStateSchema(legacy: boolean) {
               .optional(),
             remainingPercent: z.number().min(0).max(100).optional(),
             active: z.boolean().optional(),
+            // Tag identity as the printer reports it. An observation only:
+            // it identifies no Spoolman spool.
+            rfid: z
+              .strictObject({
+                tag: text(64).optional(),
+                sku: text(64).optional(),
+              })
+              .optional(),
             filamentDiameterMm: z.number().finite().positive().optional(),
             filamentDensityGramsPerCm3: z
               .number()

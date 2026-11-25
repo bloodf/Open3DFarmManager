@@ -1,0 +1,15 @@
+{
+  "_provenance": "reference-derived, not captured",
+  "type": "extfilbox",
+  "action": "getInfo",
+  "msgid": "00000000-0000-4000-8000-000000000000",
+  "state": "done",
+  "code": 200,
+  "data": {
+    "status": 5,
+    "type": "PLA",
+    "color": [255, 0, 0],
+    "sku": "",
+    "consumables_percent": 100
+  }
+}

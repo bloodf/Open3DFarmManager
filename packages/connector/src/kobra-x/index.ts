@@ -88,6 +88,8 @@ export async function connectKobraX(options: {
     print: 'query',
     tempature: 'query',
     multiColorBox: 'getInfo',
+    // The external spool; read-only, as spooler's `kx_request` sends it.
+    extfilbox: 'getInfo',
   }
   let tlsEstablished = false
   const client = new MqttClient(
@@ -228,6 +230,7 @@ export async function connectKobraX(options: {
           'print',
           'tempature',
           'multiColorBox',
+          'extfilbox',
         ] as const)
           query(type)
         clearTimeout(timer)

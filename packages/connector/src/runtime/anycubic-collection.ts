@@ -4,6 +4,10 @@ import {
   createAnycubicLanClient,
   decodeAnycubicReport,
 } from '../anycubic/index.ts'
+import {
+  mergeAnycubicMaterials,
+  type AnycubicMaterial,
+} from '../anycubic/ace.ts'
 import type { AnycubicCollectorConfig } from '../config/anycubic.ts'
 import { readKobraClientCertMaterial } from '../config/kobra-x-cert.ts'
 import { readPrivateJsonFile } from '../config/local.ts'
@@ -152,7 +156,12 @@ export function createAnycubicCollection(input: {
             ? Number(value) / 100
             : key === 'state' && value === 'finished'
               ? 'idle'
-              : value
+              : key === 'materials'
+                ? mergeAnycubicMaterials(
+                    values.materials as AnycubicMaterial[] | undefined,
+                    value as AnycubicMaterial[],
+                  )
+                : value
         times[key as keyof PrinterState] = now
       }
       if (

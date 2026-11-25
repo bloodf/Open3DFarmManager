@@ -1,4 +1,9 @@
 import { boundPrinterString } from '@open3dfarmmanager/farm-protocol'
+import {
+  anycubicBoxMaterials,
+  anycubicExternalMaterial,
+  mergeAnycubicMaterials,
+} from './ace.ts'
 
 function estimateSeconds(minutes: unknown) {
   return typeof minutes === 'number' &&
@@ -15,10 +20,19 @@ export function decodeAnycubicReport(payload: Buffer) {
     const envelope: unknown = JSON.parse(payload.toString('utf8'))
     if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope))
       return { kind: 'invalid' as const }
+    const type = 'type' in envelope ? envelope.type : undefined
+    const failed = 'state' in envelope && envelope.state === 'failed'
     const data = 'data' in envelope ? envelope.data : envelope
     if (!data || typeof data !== 'object' || Array.isArray(data))
       return { kind: 'invalid' as const }
     const row = data as Record<string, unknown>
+    // The external spool's own `type` and `status` are not printer telemetry.
+    if (type === 'extfilbox') {
+      const external = failed ? undefined : anycubicExternalMaterial(row)
+      return external
+        ? { kind: 'observation' as const, materials: [external] }
+        : { kind: 'ignored' as const }
+    }
     const project =
       row.project &&
       typeof row.project === 'object' &&
@@ -67,7 +81,7 @@ export function decodeAnycubicReport(payload: Buffer) {
         estimateSeconds(project?.remain_time)
       if (seconds !== undefined) observation.estimatedRemainingSeconds = seconds
     }
-    // LAN field names and ACE slot shape: https://github.com/chrisfore/anycubic_ha_local/blob/main/custom_components/anycubic/anycubic_local/models.py
+    // LAN field names: https://github.com/chrisfore/anycubic_ha_local/blob/main/custom_components/anycubic/anycubic_local/models.py
     const fans: Record<string, number> = {}
     for (const [source, target] of Object.entries({
       fan_speed_pct: 'part',
@@ -94,77 +108,13 @@ export function decodeAnycubicReport(payload: Buffer) {
     ) as Record<string, unknown> | undefined
     if (chamber && (chamber.status === 0 || chamber.status === 1))
       observation.light = { chamber: chamber.status === 1 }
-    if (
-      Array.isArray(row.multi_color_box) &&
-      row.multi_color_box.length <= 17
-    ) {
-      const materials: Record<string, unknown>[] = []
-      for (const box of row.multi_color_box) {
-        if (
-          !box ||
-          typeof box !== 'object' ||
-          !Number.isInteger(box.id) ||
-          box.id < -1 ||
-          box.id > 3 ||
-          !Array.isArray(box.slots)
-        )
-          continue
-        for (const slot of box.slots) {
-          if (
-            !slot ||
-            typeof slot !== 'object' ||
-            !Number.isInteger(slot.index) ||
-            slot.index < 0 ||
-            slot.index > 3
-          )
-            continue
-          const material: Record<string, unknown> = {
-            slot: `${box.id}:${slot.index}`,
-          }
-          if (
-            typeof slot.type === 'string' &&
-            slot.type.length > 0 &&
-            slot.type.length <= 64
-          )
-            material.materialType = boundPrinterString(slot.type)
-          if (
-            Array.isArray(slot.color) &&
-            slot.color.length >= 3 &&
-            slot.color
-              .slice(0, 3)
-              .every(
-                (v: unknown) =>
-                  typeof v === 'number' &&
-                  Number.isInteger(v) &&
-                  v >= 0 &&
-                  v <= 255,
-              )
-          )
-            material.colorHex =
-              slot.color
-                .slice(0, 3)
-                .map((v: number) =>
-                  v.toString(16).padStart(2, '0').toUpperCase(),
-                )
-                .join('') + 'FF'
-          if (
-            typeof slot.consumables_percent === 'number' &&
-            Number.isFinite(slot.consumables_percent) &&
-            slot.consumables_percent >= 0 &&
-            slot.consumables_percent <= 100
-          )
-            material.remainingPercent = slot.consumables_percent
-          if (
-            typeof slot.status === 'number' &&
-            Number.isInteger(slot.status) &&
-            slot.status >= 0
-          )
-            material.active = slot.status === 5
-          materials.push(material)
-        }
-      }
-      if (materials.length <= 17) observation.materials = materials
-    }
+    // `status` 5 marks the active slot only when no `loaded_slot` is reported.
+    const boxes = failed
+      ? undefined
+      : anycubicBoxMaterials(row.multi_color_box, {
+          readyStatusIsActive: true,
+        })
+    if (boxes) observation.materials = mergeAnycubicMaterials(undefined, boxes)
     const filename = row.filename ?? project?.filename
     if (typeof filename === 'string' && filename.length <= 1024)
       observation.filename = boundPrinterString(filename)

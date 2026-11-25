@@ -89,6 +89,50 @@ it('updates spool search and reloads when the route query changes', async () => 
     })
     await pw(search).toHaveValue('#42')
     await pw.poll(() => requestedQueries).toContain('#42')
+    await pw
+      .poll(() => requestedQueries.filter((q) => q === '#42'))
+      .toEqual(['#42'])
+  } finally {
+    await opened.close()
+  }
+})
+
+it('keeps a padded Spoolman UUID intact until blur trims and validates it', async () => {
+  const opened = await harness.open(
+    'spoolman',
+    {
+      'GET /api/farms': reply({ farms: [{ farmId }] }),
+      'GET /api/auth/me': reply({ accountId: 'account-one' }),
+      'GET /api/browser-devices': reply({
+        currentAccountId: 'account-one',
+        currentRole: 'owner',
+        devices: [],
+        nextAfter: null,
+      }),
+      [`GET /api/farms/${farmId}/spoolman`]: reply({
+        settings: [],
+        canManage: true,
+      }),
+      [`GET /api/farms/${farmId}/connectors`]: reply({
+        connectors: [
+          {
+            agentId: '00000000-0000-4000-8000-000000000002',
+            status: 'approved',
+          },
+        ],
+      }),
+    },
+    { route: { query: { farm: farmId } } },
+  )
+  try {
+    const uuid = '00000000-0000-4000-8000-0000000000b1'
+    const padded = '  ' + uuid + '  '
+    const field = opened.page.getByLabel('UUID do serviço (opcional)')
+    await field.pressSequentially(padded)
+    await pw(field).toHaveValue(padded)
+    await field.blur()
+    await pw(field).toHaveValue(uuid)
+    await pw(field).not.toHaveAttribute('aria-invalid', 'true')
   } finally {
     await opened.close()
   }

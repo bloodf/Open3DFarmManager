@@ -42,6 +42,11 @@ const PROBLEMS: Record<ApprovalProblem, { status: number; message: string }> = {
     message:
       'O aplicativo ou a concessão não está mais ativo; a solicitação foi rejeitada.',
   },
+  'version-unavailable': {
+    status: 409,
+    message:
+      'O arquivo foi removido da biblioteca; a solicitação foi rejeitada.',
+  },
   'service-unavailable': {
     status: 503,
     message: 'Entrega de comandos indisponível. Tente novamente mais tarde.',

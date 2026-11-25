@@ -18,7 +18,8 @@ export function anycubicPrinterDetail(
   const detail = {
     print: {
       state: printer.state,
-      message: '',
+      // The printer's own fault or pause reason (`anycubic/alerts.ts`).
+      message: online ? (printer.statusMessage ?? '') : '',
       ...(online && {
         file:
           printer.filename && !/[\uD800-\uDFFF]/u.test(printer.filename)

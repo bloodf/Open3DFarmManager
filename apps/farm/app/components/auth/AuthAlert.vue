@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import Icon from '../ui/Icon.vue'
 
 // Always in the page so a screen reader announces the message when it appears.
 // Empty, it takes no space. The page moves focus here after a failure.
@@ -16,7 +17,8 @@ defineExpose({ focus: () => root.value?.focus() })
     role="alert"
     tabindex="-1"
   >
-    {{ message }}
+    <Icon v-if="message" name="info" />
+    <span>{{ message }}</span>
   </p>
 </template>
 
@@ -28,15 +30,22 @@ defineExpose({ focus: () => root.value?.focus() })
   display: none;
 }
 .auth-alert.filled {
-  padding: var(--space-3);
-  border: 1px solid var(--printer-error);
-  border-inline-start-width: var(--space-1);
-  border-radius: var(--radius-sm);
-  color: var(--color-text);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ops-space-2);
+  padding: var(--ops-space-2) var(--ops-space-3);
+  border-inline-start: 3px solid var(--ops-fault);
+  border-radius: var(--ops-radius-sm);
+  background: var(--ops-fault-bg);
+  color: var(--ops-fault);
+  line-height: 20px;
   overflow-wrap: anywhere;
 }
+.auth-alert svg {
+  flex: none;
+}
 .auth-alert:focus-visible {
-  outline: var(--focus-ring-width) solid var(--color-focus-ring);
-  outline-offset: var(--focus-ring-offset);
+  outline: var(--focus-ring-width) solid var(--ops-action);
+  outline-offset: 2px;
 }
 </style>

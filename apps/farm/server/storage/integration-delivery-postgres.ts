@@ -12,10 +12,10 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const validTime = (value: number) => Number.isSafeInteger(value) && value >= 0
 
 const columns = (sql: Sql) =>
-  sql`e.cmd_id::text AS "cmdId", e.app_id::text AS "appId", e.grant_id::text AS "grantId", e.farm_id::text AS "farmId", e.agent_id::text AS "agentId", e.printer_assignment_id::text AS "printerAssignmentId", e.kind, e.resource_id::text AS "resourceId", e.required_scope AS "requiredScope", e.nonce, e.wire, e.issued_at::float8 AS "issuedAt", e.expires_at::float8 AS "expiresAt", e.status, e.refusal_code AS "refusalCode", e.result_detail AS "resultDetail", e.history_entry_id AS "historyEntryId", e.created_at::float8 AS "createdAt", e.updated_at::float8 AS "updatedAt"`
+  sql`e.cmd_id::text AS "cmdId", e.app_id::text AS "appId", e.grant_id::text AS "grantId", e.farm_id::text AS "farmId", e.agent_id::text AS "agentId", e.printer_assignment_id::text AS "printerAssignmentId", e.kind, e.resource_id::text AS "resourceId", e.required_scope AS "requiredScope", e.nonce, e.wire, e.issued_at::float8 AS "issuedAt", e.expires_at::float8 AS "expiresAt", e.status, e.refusal_code AS "refusalCode", e.result_detail AS "resultDetail", e.result_message AS "resultMessage", e.history_entry_id AS "historyEntryId", e.created_at::float8 AS "createdAt", e.updated_at::float8 AS "updatedAt"`
 // The same columns unqualified, for RETURNING clauses.
 const returning = (sql: Sql) =>
-  sql`cmd_id::text AS "cmdId", app_id::text AS "appId", grant_id::text AS "grantId", farm_id::text AS "farmId", agent_id::text AS "agentId", printer_assignment_id::text AS "printerAssignmentId", kind, resource_id::text AS "resourceId", required_scope AS "requiredScope", nonce, wire, issued_at::float8 AS "issuedAt", expires_at::float8 AS "expiresAt", status, refusal_code AS "refusalCode", result_detail AS "resultDetail", history_entry_id AS "historyEntryId", created_at::float8 AS "createdAt", updated_at::float8 AS "updatedAt"`
+  sql`cmd_id::text AS "cmdId", app_id::text AS "appId", grant_id::text AS "grantId", farm_id::text AS "farmId", agent_id::text AS "agentId", printer_assignment_id::text AS "printerAssignmentId", kind, resource_id::text AS "resourceId", required_scope AS "requiredScope", nonce, wire, issued_at::float8 AS "issuedAt", expires_at::float8 AS "expiresAt", status, refusal_code AS "refusalCode", result_detail AS "resultDetail", result_message AS "resultMessage", history_entry_id AS "historyEntryId", created_at::float8 AS "createdAt", updated_at::float8 AS "updatedAt"`
 
 /** True while the envelope's app, grant and assignment still allow delivery. */
 const authorityActive = (sql: Sql) => sql`
@@ -122,6 +122,7 @@ export class PostgresIntegrationDelivery implements IntegrationDeliveryStore {
         SET status = ${to}, updated_at = GREATEST(${now}, e.updated_at),
             refusal_code = COALESCE(${result.refusalCode ?? null}, e.refusal_code),
             result_detail = COALESCE(${result.detail ?? null}, e.result_detail),
+            result_message = COALESCE(${result.message ?? null}, e.result_message),
             history_entry_id = COALESCE(${result.historyEntryId ?? null}, e.history_entry_id)
         WHERE e.cmd_id = ${cmdId}::uuid AND e.status = ANY (${[...from]}::text[])
         RETURNING ${returning(this.sql)}`

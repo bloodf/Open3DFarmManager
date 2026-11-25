@@ -78,6 +78,7 @@ export const TelemetryEvent = z.discriminatedUnion('kind', [
   z.strictObject({
     ...envelope,
     kind: z.literal('printer-state'),
+    ageAtSendMs: counter.optional(),
     state: PrinterState,
   }),
   z.strictObject({
@@ -98,6 +99,7 @@ export const TelemetryEvent = z.discriminatedUnion('kind', [
   z.strictObject({
     ...envelope,
     kind: z.literal('inventory-snapshot'),
+    ageAtSendMs: counter.optional(),
     inventory: SpoolInventory,
   }),
 ])

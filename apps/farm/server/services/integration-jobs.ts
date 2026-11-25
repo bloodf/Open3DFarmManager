@@ -7,6 +7,7 @@ import {
 } from '../../../../packages/farm-protocol/src/api-envelope.ts'
 import {
   libraryJobFileUrl,
+  type LibraryPlacement,
   type ResolvedLibraryVersion,
   type StorageMode,
 } from './integration-library.ts'
@@ -118,7 +119,7 @@ export interface JobView {
   farmId: string
   printerId: string
   status: JobStatus
-  refusal?: { code: string; detail?: string }
+  refusal?: { code: string; detail?: string; message?: string }
   displayName: string
   fileUrl: string
   sha256: string
@@ -192,6 +193,7 @@ export function jobView(
       view.refusal = {
         code: envelope.refusalCode,
         ...(envelope.resultDetail ? { detail: envelope.resultDetail } : {}),
+        ...(envelope.resultMessage ? { message: envelope.resultMessage } : {}),
       }
     if (envelope.historyEntryId) view.historyEntryId = envelope.historyEntryId
   }
@@ -252,6 +254,17 @@ export function parseLibraryJobRequest(
   return { libraryVersionId: id.toLowerCase(), plate: input.plate }
 }
 
+/** What starts a library version: the Connector fetches it by hash only. */
+export function libraryReplayAction(file: { sha256: string; plate?: number }) {
+  return ApiEnvelopeAction.parse({
+    action: 'start_library_print',
+    args: {
+      sha256: file.sha256,
+      ...(file.plate !== undefined ? { plate: file.plate } : {}),
+    },
+  })
+}
+
 export function resinReplayAction(file: JobFile) {
   return ApiResinReplay.parse({
     action: 'start_library_print',
@@ -297,6 +310,8 @@ export type IntegrationJobsOptions = Readonly<{
   /** Resolves a library version for `libraryVersionId` replays. */
   library?: {
     version(id: string): Promise<ResolvedLibraryVersion | null>
+    /** Copies a Connector-mode file to the target printer's Connector. */
+    placeOn?(versionId: string, agentId: string): Promise<LibraryPlacement>
     recordReplay(entry: {
       farmId: string
       appId: string
@@ -494,6 +509,24 @@ export class IntegrationJobsService {
     // Never store a job that cannot be delivered.
     if (!grant.requiresApproval && !this.o.envelopes)
       return { ok: false, problem: 'service-unavailable' }
+    // The target printer's Connector must hold the file before any command.
+    if (libraryRequest && file.storageMode === 'connector') {
+      let placed: LibraryPlacement | undefined
+      try {
+        placed = await this.o.library?.placeOn?.(
+          libraryRequest.libraryVersionId,
+          target.agentId,
+        )
+      } catch {
+        return { ok: false, problem: 'service-unavailable' }
+      }
+      if (placed === 'quota-exceeded')
+        return {
+          ok: false,
+          problem: 'validation-failed',
+          reason: { pointer: '/libraryVersionId', detail: 'quota-exceeded' },
+        }
+    }
 
     const outcome = await this.o.store.create(
       {
@@ -553,14 +586,9 @@ export class IntegrationJobsService {
             : libraryRequest
               ? {
                   kind: 'action',
-                  action: ApiEnvelopeAction.parse({
-                    action: 'start_library_print',
-                    args: {
-                      sha256: record.sha256,
-                      ...(file.plate !== undefined
-                        ? { plate: file.plate }
-                        : {}),
-                    },
+                  action: libraryReplayAction({
+                    sha256: record.sha256,
+                    ...(file.plate !== undefined ? { plate: file.plate } : {}),
                   }),
                 }
               : {

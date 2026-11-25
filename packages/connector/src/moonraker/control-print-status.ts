@@ -1,15 +1,13 @@
+import { DriverRefusalError } from '../control/driver-refusal.ts'
 import { ExcludeObjectArguments } from '../../../farm-protocol/src/control-actions.ts'
 import { fields, list } from './detail-normalize.ts'
 
-export class ExcludeObjectRefusal extends Error {
-  readonly refusal: 'state' | 'unsupported-action' | 'invalid-command'
-
+export class ExcludeObjectRefusal extends DriverRefusalError {
   constructor(
     message: string,
-    refusal: 'state' | 'unsupported-action' | 'invalid-command' = 'state',
+    refusal: DriverRefusalError['refusal'] = 'state',
   ) {
-    super(message)
-    this.refusal = refusal
+    super(refusal, message)
   }
 }
 

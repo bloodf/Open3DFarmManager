@@ -202,6 +202,11 @@ export const PG_SUITE_CONTRACTS: Record<string, PgSuiteContract> = {
       admitted: 'MEMBERS_SYNTHETIC_TEST_DISPOSABLE',
     },
   },
+  'test-postgres-observation-followups.ts': {
+    migrations: 'full',
+    fixture: { admitted: 'OBSERVATION_FOLLOWUPS_FIXTURE_ADMITTED' },
+    extra: ({ url }) => ({ OBSERVATION_FOLLOWUPS_FIXTURE_URL: url }),
+  },
   'test-postgres-pairing.ts': {
     migrations: 'full',
     fixture: {

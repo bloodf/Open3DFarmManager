@@ -157,6 +157,19 @@ export const GCODE_LINE_MAX_BYTES = 256
 /** Physical U1 operations can finish after their signed write authority expires. */
 export const U1_CONTROL_RESULT_TIMEOUT_MS = 24_000
 
+/**
+ * Canonical console homing: `G28` with optional, distinct bare axes. The
+ * driver routes exactly these lines through the structured `home` action.
+ */
+function isCanonicalHomeLine(line: string): boolean {
+  const [word, ...axes] = line.trim().toUpperCase().split(/\s+/)
+  return (
+    word === 'G28' &&
+    axes.every((axis) => /^[XYZ]$/.test(axis)) &&
+    new Set(axes).size === axes.length
+  )
+}
+
 export function isU1PhysicalControl(
   action: string,
   args: Record<string, unknown>,
@@ -165,7 +178,7 @@ export function isU1PhysicalControl(
     action === 'home' ||
     (action === 'gcode' &&
       typeof args.line === 'string' &&
-      /^T[0-3]$/i.test(args.line.trim()))
+      (/^T[0-3]$/i.test(args.line.trim()) || isCanonicalHomeLine(args.line)))
   )
 }
 
@@ -474,7 +487,15 @@ export const ControlArguments = z.discriminatedUnion('action', [
   }),
   z.strictObject({
     action: z.literal('load_filament'),
-    args: z.strictObject({ tray: z.number().int().min(0).max(15).optional() }),
+    args: z.strictObject({
+      // Global tray index: 0-15, or an AMS HT unit id (128-135).
+      tray: z
+        .union([
+          z.number().int().min(0).max(15),
+          z.number().int().min(128).max(135),
+        ])
+        .optional(),
+    }),
   }),
   z.strictObject({
     action: z.enum([

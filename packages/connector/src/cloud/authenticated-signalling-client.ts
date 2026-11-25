@@ -5,6 +5,10 @@ import {
   type ApiQueryReply,
   type ApiQueryRequest,
 } from '../../../farm-protocol/src/api-query.ts'
+import {
+  API_REFUSAL_MESSAGE_SUPPORT_HEADER,
+  withoutRefusalMessage,
+} from '../../../farm-protocol/src/api-envelope.ts'
 import { MAX_PAUSE_SIGNALLING_WIRE_BYTES } from '../../../farm-protocol/src/pause-signalling.ts'
 import { assignmentSetDigest } from '../../../farm-protocol/src/rtc-assignment-set.ts'
 import {
@@ -136,6 +140,7 @@ async function fixedConnectorSocket(
             [API_QUERY_SUPPORT_HEADER]: '1',
             [API_DISPATCH_QUERY_SUPPORT_HEADER]: '1',
             [API_SPOOL_QUERY_SUPPORT_HEADER]: '1',
+            [API_REFUSAL_MESSAGE_SUPPORT_HEADER]: '1',
           },
         }
       : {}),
@@ -448,7 +453,11 @@ export class AuthenticatedConnectorSignallingClient {
         throw Error('Unexpected API command')
       runSynchronous(() =>
         this.#options.onApiCommand?.(frame, (wire) => {
-          this.#channel.send({ v: 1, t: 'connector.api-result', wire })
+          this.#channel.send({
+            v: 1,
+            t: 'connector.api-result',
+            wire: frame.refusal_message ? wire : withoutRefusalMessage(wire),
+          })
         }),
       )
       return

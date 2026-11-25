@@ -89,6 +89,19 @@ test('envelope schema accepts a job and an action and rejects everything else', 
   const action = claims({ ...pauseCommand, job: undefined })
   delete (action as Record<string, unknown>).job
   assert.ok(ApiEnvelopeV1.safeParse(action).success)
+  assert.ok(
+    ApiEnvelopeV1.safeParse({
+      ...action,
+      action: { action: 'emergency_stop', args: {} },
+    }).success,
+  )
+  assert.equal(
+    requiredScopeFor({
+      kind: 'action',
+      action: { action: 'emergency_stop', args: {} },
+    }),
+    'control:extended',
+  )
   const bad = (extra: Record<string, unknown>) =>
     assert.equal(ApiEnvelopeV1.safeParse(claims(extra)).success, false)
   bad({ extra: 1 })
@@ -101,7 +114,7 @@ test('envelope schema accepts a job and an action and rejects everything else', 
   bad({ job: undefined }) // job without payload
   bad({ job: { ...jobCommand.job, extra: true } })
   for (const action of [
-    { action: 'emergency_stop', args: {} },
+    { action: 'emergency_stop', args: { extra: 1 } },
     { action: 'start_print', args: { file: 'a.gcode' } },
     { action: 'firmware_restart', args: {} },
     { action: 'pause', args: { extra: 1 } },
@@ -641,7 +654,7 @@ test('issue refuses bad lifetimes, unsupported actions, and a lost authority', a
       ttlMs: 30_000,
       command: {
         kind: 'action',
-        action: { action: 'emergency_stop', args: {} },
+        action: { action: 'start_print', args: { file: 'a.gcode' } },
       } as never,
     }),
     { ok: false, reason: 'invalid' },

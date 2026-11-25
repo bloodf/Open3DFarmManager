@@ -22,6 +22,12 @@ export type ReplayMaterial = {
   materialType?: string
   /** `RRGGBBAA`, as the Connector reports it. */
   colorHex?: string
+  /** Percentage the printer reports for the slot, 0 to 100. */
+  remainingPercent?: number
+  /** Percentage Spoolman reports for the spool active in the slot, 0 to 100. */
+  spoolmanRemainingPercent?: number
+  /** `rrggbb` of the spool Spoolman reports active in the slot. */
+  spoolmanColorHex?: string
 }
 export type ReplayPrinter = {
   key: string
@@ -34,6 +40,10 @@ export type ReplayPrinter = {
   connectorOnline: boolean
   /** A live, authenticated session to the Connector exists. */
   live: boolean
+  /** The session is up but the printer's live data is too old to command. */
+  stale?: boolean
+  /** The Connector holds new starts until the plate is confirmed clear. */
+  held?: boolean
   state?: string
   materials: readonly ReplayMaterial[]
 }
@@ -47,6 +57,7 @@ export type ReplayEntry = {
 }
 export type ReplayGroups = Record<ReplayLevel, ReplayEntry[]>
 export type ReplayResult = {
+  message?: string
   outcome: 'applied' | 'rejected' | 'not-sent' | 'outcome-unknown'
   code?: string
   reasons?: readonly string[]
@@ -59,8 +70,13 @@ export const GROUP_LABELS: Record<ReplayLevel, string> = {
   blocked: 'Bloqueadas ou indisponíveis',
 }
 
+export const effectiveSlotColour = (m: ReplayMaterial) =>
+  m.spoolmanColorHex ?? m.colorHex
+
 const colour = (hex: string | undefined) =>
-  hex && /^[0-9A-F]{8}$/i.test(hex) ? `#${hex.slice(0, 6)}` : undefined
+  hex && /^(?:[0-9A-F]{6}|[0-9A-F]{8})$/i.test(hex)
+    ? `#${hex.slice(0, 6)}`
+    : undefined
 
 /** Why a printer cannot be picked right now; undefined when it can. */
 export function disabledReason(
@@ -76,6 +92,10 @@ export function disabledReason(
     return connectorMode
       ? 'O Connector que guarda o arquivo está offline. Ligue-o para imprimir de novo.'
       : 'O Connector desta impressora está offline.'
+  if (!printer.live && printer.stale)
+    return 'Os dados ao vivo desta impressora estão desatualizados. Aguarde a atualização.'
+  if (!printer.live && printer.held)
+    return RESULT_CODE_HINTS['awaiting-collection']
   if (!printer.live)
     return 'Não há conexão direta segura com o Connector. Nenhum comando pode ser enviado.'
   if (printer.state && !['idle', 'cancelled'].includes(printer.state))
@@ -99,7 +119,9 @@ export function groupPrinters(
       },
       printer.materials.map((m) => ({
         ...(m.materialType ? { type: m.materialType } : {}),
-        ...(colour(m.colorHex) ? { colour: colour(m.colorHex)! } : {}),
+        ...(colour(effectiveSlotColour(m))
+          ? { colour: colour(effectiveSlotColour(m))! }
+          : {}),
       })),
     )
     const reasons = verdict.reasons
@@ -153,7 +175,8 @@ export function suggestMapping(
     const sameType = (m: ReplayMaterial) =>
       m.materialType?.toLowerCase() === type
     let index = fits(
-      (m) => sameType(m) && colour(m.colorHex)?.toLowerCase() === want,
+      (m) =>
+        sameType(m) && colour(effectiveSlotColour(m))?.toLowerCase() === want,
     )
     if (index < 0) index = fits(sameType)
     if (index < 0) return -1
@@ -198,6 +221,10 @@ export const REFUSAL_TEXT: Record<string, string> = {
   'stale-selection': 'A seleção mudou. Confira o arquivo e a impressora.',
   'library-unavailable': 'Não foi possível verificar a versão na biblioteca.',
   'webrtc-unavailable': 'A conexão ao vivo com o Connector está indisponível.',
+  'availability-stale':
+    'A disponibilidade ao vivo desta impressora está desatualizada e não permite iniciar a impressão agora.',
+  'session-handshake-failed':
+    'Não foi possível estabelecer a sessão segura com o Connector (falha na negociação da conexão).',
   incompatible: 'O arquivo é incompatível com esta impressora.',
   'download-failed':
     'O Connector não conseguiu baixar o arquivo da biblioteca do servidor.',
@@ -219,6 +246,11 @@ const SOURCE_TEXT = {
 
 /** Outcome text; `retry` is never offered, an uncertain command stays uncertain. */
 export function replayOutcomeText(result: ReplayResult): string {
+  if (
+    result.message &&
+    (result.outcome === 'rejected' || result.outcome === 'not-sent')
+  )
+    return result.message
   switch (result.outcome) {
     case 'applied':
       return `Impressão iniciada. O Connector confirmou o comando${

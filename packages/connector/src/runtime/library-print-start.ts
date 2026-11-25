@@ -1,3 +1,4 @@
+import { DriverRefusalError } from '../control/driver-refusal.ts'
 import { open } from 'node:fs/promises'
 import { get } from 'node:https'
 import {
@@ -256,9 +257,7 @@ export function createLibraryPrintStarter(config: {
         ])
       const requireAuthorization = () => {
         if (!input.authorize())
-          throw Object.assign(new Error('unauthorized'), {
-            refusal: 'state',
-          })
+          throw new DriverRefusalError('state', 'unauthorized')
       }
       requireAuthorization()
 
@@ -364,15 +363,17 @@ export type LibraryPrintLink = LibraryJobStart
 
 /** A refusal the dispatcher records as not sent: nothing reached the printer. */
 function driverRefusal(result: Extract<LibraryPrintResult, { ok: false }>) {
-  return Object.assign(new Error(result.message), {
-    refusal:
+  return Object.assign(
+    new DriverRefusalError(
       result.code === 'unsupported'
         ? 'unsupported-action'
         : result.code === 'incompatible' || result.code === 'checksum-mismatch'
           ? 'invalid-command'
           : 'state',
-    ...(result.code === 'unsupported' ? {} : { resultCode: result.code }),
-  })
+      result.message,
+    ),
+    result.code === 'unsupported' ? {} : { resultCode: result.code },
+  )
 }
 
 /**
@@ -409,9 +410,13 @@ export function withLibraryPrint<D extends PreparedPauseDriver>(
     ...driver,
     controls(binding: PrinterBinding): readonly ExtendedControlAction[] {
       const base = controls(binding)
+      const target = config.targetFor(binding)
+      // Not for SDCP: the library holds no CTB/GOO, SDCP telemetry reports no
+      // nozzle profile, and a transferring printer reports no startable state.
       return base.includes('start_print') &&
         !base.includes('start_library_print') &&
-        config.targetFor(binding)
+        target &&
+        target.backend !== 'sdcp'
         ? Object.freeze([...base, 'start_library_print' as const])
         : base
     },
@@ -426,14 +431,13 @@ export function withLibraryPrint<D extends PreparedPauseDriver>(
       started.delete(binding)
       const parsed = LibraryPrintArgs.safeParse(args)
       if (!parsed.success)
-        throw Object.assign(new Error('Invalid library print'), {
-          refusal: 'invalid-command',
-        })
+        throw new DriverRefusalError('invalid-command', 'Invalid library print')
       const target = config.targetFor(binding)
       if (!target || !controls(binding).includes('start_print'))
-        throw Object.assign(new Error('Library print unavailable'), {
-          refusal: 'unsupported-action',
-        })
+        throw new DriverRefusalError(
+          'unsupported-action',
+          'Library print unavailable',
+        )
       let rpc: Awaited<ReturnType<typeof execute>> | undefined
       const outcome = await starter.start({
         args: parsed.data,

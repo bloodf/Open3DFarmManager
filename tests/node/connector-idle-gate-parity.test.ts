@@ -61,6 +61,7 @@ const ARGS: Partial<Record<Action, Record<string, unknown>>> = {
   pause: {},
   resume: {},
   cancel: {},
+  emergency_stop: {},
   set_temperature: { heater: 'extruder', target_c: 200 },
   set_tool_temperature: { tool: 0, target_c: 200 },
   set_fan: { fan: 'part', percent: 50 },
@@ -447,14 +448,23 @@ test('the busy rule covers motion, filament, macros, job starts and tool heating
 })
 
 for (const [action, args] of CASES)
-  test(`browser and API paths agree on ${action} in every state`, async () => {
+  test(`browser and API paths enforce the local state rules for ${action}`, async () => {
     let sentSomewhere = false
     for (const state of STATES) {
       const browser = await browserDecision(action, args, state)
       const api = await apiDecision(action, args, state)
       sentSomewhere ||= browser.sent
       const label = `${action} while ${state}`
-      assert.equal(browser.sent, api.sent, `${label}: same send decision`)
+      if (action === 'emergency_stop') {
+        assert.equal(browser.sent, true, `${label}: browser stop`)
+        assert.equal(
+          api.sent,
+          !['unknown', 'error'].includes(state),
+          `${label}: API readiness gate`,
+        )
+      } else {
+        assert.equal(browser.sent, api.sent, `${label}: same send decision`)
+      }
       if (action === 'set_tool_temperature')
         assert.equal(browser.sent, state === 'idle', `${label}: idle only`)
       if (

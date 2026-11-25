@@ -53,24 +53,70 @@ const links = [
 <style scoped>
 .home-page {
   display: grid;
-  gap: var(--space-5);
+  gap: var(--ops-space-4);
   align-content: start;
+  padding: var(--ops-space-5) var(--ops-space-4);
+  font-size: var(--ops-text-body);
+  line-height: 20px;
+}
+.home-page :deep(.overview-header) {
+  display: grid;
+  gap: var(--ops-space-1);
+  padding-block-end: var(--ops-space-3);
+  border-block-end: 1px solid var(--ops-border);
+}
+.home-page :deep(.overview-header__eyebrow) {
+  margin: 0;
+  font-family: var(--ops-font-mono);
+  font-size: var(--ops-text-label);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.08em;
+  line-height: 16px;
+  color: var(--ops-muted);
+}
+.home-page :deep(h1) {
+  margin: 0;
+  font-size: var(--ops-text-title);
+  line-height: 24px;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+}
+.home-page :deep(h1:focus-visible) {
+  outline: var(--focus-ring-width) solid var(--ops-action);
+  outline-offset: 2px;
 }
 .panel {
   margin: 0;
-  padding: var(--space-5);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-raised);
+  padding: var(--ops-space-4);
+  border: 1px solid var(--ops-border);
+  border-radius: var(--ops-radius-lg);
+  background: var(--ops-panel);
+  color: var(--ops-text);
   min-width: 0;
 }
 h2 {
-  margin: 0 0 var(--space-3);
-  font-size: var(--font-size-lg);
-  line-height: var(--line-height-tight);
+  display: flex;
+  align-items: center;
+  gap: var(--ops-space-2);
+  margin: 0 0 var(--ops-space-3);
+  padding-block-end: var(--ops-space-2);
+  border-block-end: 1px solid var(--ops-border);
+  font-size: var(--ops-text-body);
+  line-height: 20px;
+}
+/* Decorative hatch: the heading already says these are unavailable. */
+h2::before {
+  content: '';
+  flex: none;
+  inline-size: var(--ops-space-3);
+  block-size: var(--ops-space-3);
+  border: 1px solid var(--ops-offline);
+  background: var(--ops-offline-hatch);
 }
 .panel p {
-  margin: 0 0 var(--space-3);
+  margin: 0 0 var(--ops-space-3);
+  line-height: 20px;
+  color: var(--ops-muted);
 }
 .panel p:last-child {
   margin-bottom: 0;
@@ -79,13 +125,14 @@ h2 {
   margin: 0;
   overflow-wrap: anywhere;
 }
-a:focus-visible {
-  outline: var(--focus-ring-width) solid var(--color-focus-ring);
-  outline-offset: var(--focus-ring-offset);
+.source a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  color: var(--ops-action);
 }
-@media (max-width: 30rem) {
-  .panel {
-    padding: var(--space-4);
-  }
+a:focus-visible {
+  outline: var(--focus-ring-width) solid var(--ops-action);
+  outline-offset: 2px;
 }
 </style>

@@ -1,3 +1,4 @@
+import { moonrakerOrigins } from '../config/moonraker.ts'
 import { MAX_HEARTBEAT_HEALTH_BYTES } from '@open3dfarmmanager/farm-protocol'
 import { join, resolve } from 'node:path'
 import {
@@ -65,6 +66,7 @@ import {
 import {
   readBambuPrinterBinding,
   readCrealityPrinterBinding,
+  readSdcpPrinterBinding,
 } from '../control/printer-binding.ts'
 import {
   moonrakerAuthHeaders,
@@ -116,6 +118,7 @@ type AgentDiagnostic =
   | { kind: 'delivery'; status: 'delivered' | 'retained'; count: number }
   | { kind: 'drain-loss'; expired: number; capacity: number }
   | { kind: 'telemetry-entry-dropped' }
+  | { kind: 'telemetry-batch-refused'; records: number; total: number }
   | { kind: 'storage-degraded'; lost: number }
   | { kind: 'storage-recovered'; lost: number }
   | {
@@ -272,6 +275,8 @@ async function runConnectorAgentOnce(
     capacity: 0,
     credentialExpired: false,
   }
+  /** Records dropped since start because the server refused their batch. */
+  let refusedRecords = 0
   function diagnostic(value: AgentDiagnostic) {
     if (value.kind === 'drain-loss') {
       logger.warn('queue-loss', { ...value })
@@ -279,6 +284,11 @@ async function runConnectorAgentOnce(
       logger.warn('storage-degraded', { lost: value.lost })
     } else if (value.kind === 'telemetry-entry-dropped') {
       logger.warn('telemetry-entry-dropped')
+    } else if (value.kind === 'telemetry-batch-refused') {
+      logger.warn('telemetry-batch-refused', {
+        records: value.records,
+        total: value.total,
+      })
     }
     if (value.kind === 'summary' || diagnosticBudget-- > 0)
       input.onDiagnostic(value)
@@ -301,6 +311,10 @@ async function runConnectorAgentOnce(
   let controlsFor:
     ((assignmentId: string) => readonly ExtendedControlAction[]) | undefined
   let refreshControls: (() => void) | undefined
+  const kobraXControlEvidence = new Map<
+    string,
+    import('../kobra-x/control-support.ts').KobraXControlEvidence
+  >()
   const printerSpeedModes = new Map<
     string,
     NonNullable<
@@ -379,7 +393,7 @@ async function runConnectorAgentOnce(
         moonrakerPrinters.map((printer) => {
           const selected = validateMoonrakerInput({
             assignment: printer,
-            allowedOrigins: config.collection.allowedOrigins,
+            allowedOrigins: moonrakerOrigins(config.collection),
             limits: config.collection.limits,
           })
           return [
@@ -606,11 +620,14 @@ async function runConnectorAgentOnce(
               )
             )
               return []
+            // SDCP advertises controls only for a local control opt-in.
+            const local = config.bindingFor(id)
             if (
               config.collection.version === 6 &&
               config.collection.sdcp.printers.some(
                 (printer) => printer.printerKey === ref?.printerKey,
-              )
+              ) &&
+              !(local && readSdcpPrinterBinding(local))
             )
               return []
             return controlsFor?.(id)
@@ -640,6 +657,11 @@ async function runConnectorAgentOnce(
     let pauseBudget = 256
     const pauseDiagnostic = (value: AgentDiagnostic) => {
       if (pauseBudget-- <= 0) return
+      if (value.kind === 'file-list-failed')
+        logger.warn('file-list-failed', {
+          reason: value.reason,
+          requestSent: value.requestSent,
+        })
       try {
         input.onDiagnostic(value)
       } catch {
@@ -964,6 +986,8 @@ async function runConnectorAgentOnce(
           speedModesFor(printerKey) {
             return printerSpeedModes.get(printerKey)
           },
+          kobraXControlEvidenceFor: (printerKey) =>
+            kobraXControlEvidence.get(printerKey),
           libraryPrint(assignmentId) {
             const key = refs.find(
               (ref) => ref.assignmentId === assignmentId,
@@ -1064,6 +1088,14 @@ async function runConnectorAgentOnce(
             () => clock.now(),
             attemptSignal,
             () => diagnostic({ kind: 'telemetry-entry-dropped' }),
+            (records) => {
+              refusedRecords += records
+              diagnostic({
+                kind: 'telemetry-batch-refused',
+                records,
+                total: refusedRecords,
+              })
+            },
           )
         } finally {
           // Drain may return cancelled before its sender releases the active slot.
@@ -1090,7 +1122,11 @@ async function runConnectorAgentOnce(
         )
           throw new Error('Telemetry drain requires operator review')
         if (signal.aborted) return
-        if (result.status === 'delivered') {
+        if (result.status === 'refused') {
+          // The refused batch is gone; newer records are due at once.
+          backoff = config.telemetry.retryMinMs
+          notBefore = 0
+        } else if (result.status === 'delivered') {
           diagnostic({
             kind: 'delivery',
             status: 'delivered',
@@ -1116,7 +1152,18 @@ async function runConnectorAgentOnce(
     tasks.push(
       collectIntoQueue({
         config: config.collection,
-        ...(config.kobraX ? { kobraX: { bindings: config.kobraX } } : {}),
+        ...(config.kobraX
+          ? {
+              kobraX: {
+                bindings: config.kobraX,
+                onControlEvidence(printerKey, evidence) {
+                  if (evidence) kobraXControlEvidence.set(printerKey, evidence)
+                  else kobraXControlEvidence.delete(printerKey)
+                  refreshControls?.()
+                },
+              },
+            }
+          : {}),
         apiJobs,
         onPrinterState(printer) {
           if (printer.speedModes === undefined)

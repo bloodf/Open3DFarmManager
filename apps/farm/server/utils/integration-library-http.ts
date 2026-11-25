@@ -21,6 +21,16 @@ export function libraryUploadLimit(config: object) {
     : DEFAULT_MAX
 }
 
+function libraryEnabled(config: object) {
+  const library = 'library' in config ? config.library : undefined
+  return (
+    !!library &&
+    typeof library === 'object' &&
+    'enabled' in library &&
+    library.enabled === true
+  )
+}
+
 function problem(code: LibraryProblem, headers?: HeadersInit) {
   return integrationProblem(code, headers)
 }
@@ -250,17 +260,24 @@ export async function uploadIntegrationLibrary(
       return integrationProblem(
         result.problem,
         headers,
-        result.reason
-          ? [
-              {
-                pointer:
-                  result.reason === 'profile-mismatch'
-                    ? '/resinProfile'
-                    : '/name',
-                detail: result.reason,
-              },
-            ]
-          : undefined,
+        result.problem === 'service-unavailable' &&
+          !libraryEnabled(useRuntimeConfig())
+          ? [{ pointer: '', detail: 'Biblioteca desativada nesta instalação.' }]
+          : result.reason
+            ? [
+                {
+                  pointer:
+                    result.reason === 'library-busy'
+                      ? ''
+                      : result.reason === 'profile-mismatch'
+                        ? '/resinProfile'
+                        : result.reason === 'quota-exceeded'
+                          ? '/contentBase64'
+                          : '/name',
+                  detail: result.reason,
+                },
+              ]
+            : undefined,
       )
     const responseHeaders = new Headers(headers)
     responseHeaders.set('cache-control', 'no-store')

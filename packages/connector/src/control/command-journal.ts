@@ -50,7 +50,7 @@ if (
 const RETENTION_MS = 600_000
 const MAX_CAPACITY = 10_000
 const APPLICATION_ID = 0x4f334450
-const SCHEMA_VERSION = 18
+const SCHEMA_VERSION = 19
 const MAX_CLOCK_STEP_MS = RETENTION_MS + 1_000
 const reasons = [
   'guard-denied',
@@ -75,7 +75,8 @@ export type CommandJournalOutcome = 'not-sent' | 'applied' | 'outcome-unknown'
  * reported back (`state-unconfirmed`). They are shown as an unknown result, yet
  * must not hold the printer's single active row: nothing later depends on them
  * the way it depends on an unconfirmed pause, cancel, emergency stop or
- * firmware restart, and the journal keeps no other way to clear a row.
+ * firmware restart. Of those, only the firmware restart hold is ever released
+ * (see FIRMWARE_RESTART_HOLD_MS).
  */
 const holdsPrinterWhenUnconfirmed = new Set([
   'pause',
@@ -85,6 +86,39 @@ const holdsPrinterWhenUnconfirmed = new Set([
   'firmware_restart',
 ])
 const actionlessCommands = new Set(['confirm_collection'])
+/**
+ * How long an unconfirmed `firmware_restart` keeps its printer busy (#938).
+ * The restart drops the state read-back, so its outcome is usually never
+ * learned. It matches the Service restart window, so the release never admits an
+ * earlier second restart. Releasing authorizes nothing: every later command
+ * still needs fresh ready state, and the restart itself is never retried.
+ */
+export const FIRMWARE_RESTART_HOLD_MS = 60_000
+/**
+ * Accepted claims per printer in one minute. Every action shares this allowance
+ * except `exclude_object`, which has its own of the same size.
+ */
+const RATE_LIMIT = 10
+/** Stricter caps applied on top of the shared allowance. */
+const ACTION_RATE_LIMITS: Readonly<Record<string, number>> = Object.freeze({
+  bed_mesh: 1,
+  power: 2,
+  config_write: 2,
+})
+/**
+ * One cap for every printer restart, whichever action asks for it (#929).
+ * Unlike the caps above it ignores `not-sent` rows: a refusal before the send
+ * restarted nothing. Claimed, sent and unknown rows all count.
+ */
+const RESTART_RATE_LIMIT = 1
+function restartsPrinter(action: string, args: unknown): boolean {
+  return (
+    action === 'firmware_restart' ||
+    action === 'service' ||
+    (action === 'config_write' &&
+      (args as { restart?: unknown } | undefined)?.restart === true)
+  )
+}
 const time = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
 const printerKey = z
   .string()
@@ -121,6 +155,8 @@ type ClaimRow = {
   capability_id: string
   action: string
   toolArgs?: { tool: number; target_c: number }
+  /** True when sending the command restarts the printer. */
+  restart: boolean
   /** Earliest local time the command may be claimed. */
   not_before: number
   expires_at: number
@@ -323,9 +359,12 @@ const previousActionSchemas: Record<number, readonly string[]> = {
   14: [bedMeshActionSchema],
   15: [configWriteActionSchema],
 }
+/** Claims that restart the printer; `config_write` only with `restart: true`. */
+const restartSchema = `CREATE TABLE control_command_restarts (cmd_id TEXT PRIMARY KEY) STRICT`
 const schema = [
   actionSchema,
   toolArgsSchema,
+  restartSchema,
   `CREATE TABLE pause_meta (id INTEGER PRIMARY KEY CHECK(id=1), high_water INTEGER NOT NULL CHECK(high_water BETWEEN 0 AND 9007199254140991)) STRICT`,
   `CREATE TABLE pause_commands (
     cmd_id TEXT PRIMARY KEY, key_id TEXT NOT NULL, nonce TEXT NOT NULL,
@@ -349,7 +388,8 @@ const schema = [
   `CREATE INDEX pause_recent_printer ON pause_commands(farm_id,printer_key,claimed_at)`,
   `CREATE INDEX pause_terminal_retention ON pause_commands(retain_until) WHERE status IN ('not-sent','applied')`,
 ]
-const v17Schema = schema
+const v18Schema = schema.filter((sql) => sql !== restartSchema)
+const v17Schema = v18Schema
   .filter((sql) => sql !== toolArgsSchema)
   .map((sql) => (sql === actionSchema ? v17ActionSchema : sql))
 const previousSchema = v17Schema.map((sql) =>
@@ -417,6 +457,21 @@ function clockStep(state: State, observedWall = sample(state)): number | null {
     .prepare('UPDATE pause_meta SET high_water=? WHERE id=1')
     .run(now)
   return now
+}
+/**
+ * Settles unconfirmed firmware restarts finished by `finishedBy`, in the form
+ * every released row takes: kept for replay protection and the restart cap,
+ * read back as an unknown outcome, and no longer excluding other commands.
+ */
+function releaseFirmwareRestarts(
+  database: DatabaseSyncType,
+  finishedBy: number,
+): void {
+  database
+    .prepare(
+      "UPDATE pause_commands SET status='applied',reason='state-unconfirmed',write_started_at=COALESCE(write_started_at,finished_at),retain_until=finished_at+? WHERE status='outcome-unknown' AND finished_at<=? AND cmd_id IN (SELECT cmd_id FROM control_command_actions WHERE action='firmware_restart')",
+    )
+    .run(RETENTION_MS, finishedBy)
 }
 function transaction<T>(state: State, run: () => T): T {
   privateStorage(state)
@@ -504,6 +559,7 @@ export function openCommandJournal(input: {
         15,
         16,
         17,
+        18,
         SCHEMA_VERSION,
       ].includes(Number(initialVersion)) ||
         initialApplication !== APPLICATION_ID)
@@ -590,6 +646,20 @@ export function openCommandJournal(input: {
           )!,
         )
         database.exec(`PRAGMA user_version=${SCHEMA_VERSION}`)
+      } else if (version === 18 && app === APPLICATION_ID) {
+        const definitions = database
+          .prepare(
+            "SELECT sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY sql",
+          )
+          .all()
+          .map((row) => row.sql)
+        const expected = [...v18Schema].sort()
+        if (
+          definitions.length !== expected.length ||
+          definitions.some((sql, index) => sql !== expected[index])
+        )
+          throw new Error('Invalid command journal schema')
+        database.exec(`PRAGMA user_version=${SCHEMA_VERSION}`)
       } else if (
         Object.hasOwn(previousActionSchemas, Number(version)) &&
         app === APPLICATION_ID
@@ -637,6 +707,15 @@ export function openCommandJournal(input: {
         database.exec(`PRAGMA user_version=${SCHEMA_VERSION}`)
       } else if (version !== SCHEMA_VERSION || app !== APPLICATION_ID)
         throw new Error('Unknown command journal version')
+      // Every upgrade gains the restart table. A restart action claimed just
+      // before the upgrade still counts; old rows never kept a config write's
+      // `restart` flag.
+      if (!created && version !== SCHEMA_VERSION) {
+        database.exec(restartSchema)
+        database.exec(
+          "INSERT INTO control_command_restarts(cmd_id) SELECT cmd_id FROM control_command_actions WHERE action IN ('firmware_restart','service')",
+        )
+      }
       const definitions = database
         .prepare(
           "SELECT sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY sql",
@@ -659,6 +738,8 @@ export function openCommandJournal(input: {
           "UPDATE pause_commands SET status='outcome-unknown', reason='outcome-unknown', finished_at=COALESCE(write_started_at, claimed_at), retain_until=NULL WHERE writer_id<>? AND status IN ('claimed','write-started')",
         )
         .run(writerId)
+      // The firmware restart hold never outlives the Connector that sent it.
+      releaseFirmwareRestarts(database, Number.MAX_SAFE_INTEGER)
       database.exec('COMMIT')
     } catch (error) {
       try {
@@ -705,6 +786,7 @@ export function claimCommand(
       ...(command.action === 'set_tool_temperature'
         ? { toolArgs: ToolTemperatureArgs.parse(command.args) }
         : {}),
+      restart: restartsPrinter(command.action, command.args),
       not_before: command.issued_at,
     },
     parsed.data.printerKey,
@@ -725,6 +807,12 @@ export function claimApiCommand(
   if (!parsed.success) return { ok: false, reason: 'storage-unavailable' }
   const envelope = parsed.data.envelope
   const run = ApiRunAction.safeParse(envelope.action)
+  const action =
+    envelope.kind === 'job'
+      ? 'start_print'
+      : run.success
+        ? API_RUN_CONTROLS[run.data.action]
+        : envelope.action!.action
   return claimRow(
     handle,
     {
@@ -737,12 +825,8 @@ export function claimApiCommand(
       account_id: envelope.app_id,
       transport_id: 'api-envelope',
       capability_id: envelope.grant_id,
-      action:
-        envelope.kind === 'job'
-          ? 'start_print'
-          : run.success
-            ? API_RUN_CONTROLS[run.data.action]
-            : envelope.action!.action,
+      action,
+      restart: restartsPrinter(action, envelope.action?.args),
       ...(envelope.action?.action === 'set_tool_temperature'
         ? { toolArgs: envelope.action.args }
         : {}),
@@ -785,6 +869,7 @@ function claimRow(
             .get(command.cmd_id, command.key_id, command.nonce)
         )
           return { ok: false, reason: 'replay' }
+        releaseFirmwareRestarts(state.database, now - FIRMWARE_RESTART_HOLD_MS)
         if (
           command.action !== 'emergency_stop' &&
           state.database
@@ -814,17 +899,29 @@ function claimRow(
             now - 60000,
           )?.n
         if (typeof recent !== 'number') throw new Error('Invalid rate count')
-        if (command.action !== 'emergency_stop' && recent >= 10)
+        if (command.action !== 'emergency_stop' && recent >= RATE_LIMIT)
           return { ok: false, reason: 'rate-limited' }
-        // Bed mesh is its own class: one accepted dispatch per printer a minute.
-        if (command.action === 'bed_mesh') {
-          const meshes = state.database
+        if (Object.hasOwn(ACTION_RATE_LIMITS, command.action)) {
+          const claims = state.database
             .prepare(
-              "SELECT count(*) AS n FROM pause_commands p JOIN control_command_actions a ON a.cmd_id=p.cmd_id WHERE p.farm_id=? AND p.printer_key=? AND a.action='bed_mesh' AND p.claimed_at>?",
+              'SELECT count(*) AS n FROM pause_commands p JOIN control_command_actions a ON a.cmd_id=p.cmd_id WHERE p.farm_id=? AND p.printer_key=? AND a.action=? AND p.claimed_at>?',
+            )
+            .get(command.farm_id, printerKey, command.action, now - 60000)?.n
+          if (typeof claims !== 'number')
+            throw new Error('Invalid action rate count')
+          if (claims >= ACTION_RATE_LIMITS[command.action]!)
+            return { ok: false, reason: 'rate-limited' }
+        }
+        if (command.restart) {
+          const restarts = state.database
+            .prepare(
+              "SELECT count(*) AS n FROM pause_commands p JOIN control_command_restarts r ON r.cmd_id=p.cmd_id WHERE p.farm_id=? AND p.printer_key=? AND p.status<>'not-sent' AND p.claimed_at>?",
             )
             .get(command.farm_id, printerKey, now - 60000)?.n
-          if (typeof meshes !== 'number') throw new Error('Invalid mesh count')
-          if (meshes >= 1) return { ok: false, reason: 'rate-limited' }
+          if (typeof restarts !== 'number')
+            throw new Error('Invalid restart rate count')
+          if (restarts >= RESTART_RATE_LIMIT)
+            return { ok: false, reason: 'rate-limited' }
         }
         state.database
           .prepare(
@@ -850,6 +947,15 @@ function claimRow(
             'DELETE FROM control_command_actions WHERE cmd_id NOT IN (SELECT cmd_id FROM pause_commands)',
           )
           .run()
+        state.database
+          .prepare(
+            'DELETE FROM control_command_restarts WHERE cmd_id NOT IN (SELECT cmd_id FROM pause_commands)',
+          )
+          .run()
+        if (command.restart)
+          state.database
+            .prepare('INSERT INTO control_command_restarts VALUES(?)')
+            .run(command.cmd_id)
         // A plate confirmation is a local collection-journal write with no
         // printer effect. The v17 action table predates it, so its row keeps
         // replay protection, exclusion and the rate limit without an action.

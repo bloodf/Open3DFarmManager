@@ -51,7 +51,13 @@ test(
       const [body] = await once(lines, 'line', {
         signal: AbortSignal.timeout(5000),
       })
-      const records = JSON.parse(body) as { eventId: string }[]
+      const records = JSON.parse(body) as {
+        eventId: string
+        ageAtSendMs: number
+      }[]
+      for (const { ageAtSendMs } of records) {
+        assert.ok(Number.isSafeInteger(ageAtSendMs) && ageAtSendMs >= 0)
+      }
       assert.equal(records.length, 2)
       assert.throws(() => new TelemetryQueue(directory, 1000), /EEXIST/)
       const store = new MemoryTelemetryStore()
@@ -70,7 +76,21 @@ test(
       const result = await drainTelemetryOnce(
         queue,
         async (replay) => {
-          assert.equal(replay, body)
+          assert.equal(
+            replay,
+            JSON.stringify(
+              records.map((record) => ({
+                ...record,
+                ageAtSendMs: 86_400_000,
+              })),
+            ),
+          )
+          assert.equal(
+            JSON.stringify(queue!.batch(1001).records),
+            JSON.stringify(
+              records.map(({ ageAtSendMs: _age, ...record }) => record),
+            ),
+          )
           const result = await ingestTelemetry(replay, context, store)
           if (!result.ok) throw new Error(result.reason)
           return result.acceptedEventIds

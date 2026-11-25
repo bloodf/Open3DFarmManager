@@ -4,7 +4,7 @@ import OnboardingPage from '../components/onboarding/OnboardingPage.vue'
 </script>
 
 <template>
-  <OnboardingPage title="Primeiro acesso" narrow>
+  <OnboardingPage title="Primeiro acesso" access narrow>
     <template #intro>
       <p>
         Crie a conta de proprietário desta instalação. Só funciona enquanto não
@@ -27,5 +27,12 @@ import OnboardingPage from '../components/onboarding/OnboardingPage.vue'
 <style scoped>
 .alt {
   margin: 0;
+  padding-block-start: var(--ops-space-2);
+  border-block-start: 1px solid var(--ops-border);
+}
+.alt a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
 }
 </style>

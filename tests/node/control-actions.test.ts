@@ -463,7 +463,7 @@ test('legacy journal migration preserves retained pause commands and replay guar
   const db = new DatabaseSync(join(directory, 'pause-commands.sqlite'))
   try {
     db.exec(
-      'DROP TABLE control_tool_temperature_args; DROP TABLE control_command_actions; PRAGMA user_version=1',
+      'DROP TABLE control_command_restarts; DROP TABLE control_tool_temperature_args;DROP TABLE control_command_actions; PRAGMA user_version=1',
     )
   } finally {
     db.close()

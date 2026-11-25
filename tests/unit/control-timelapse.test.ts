@@ -37,7 +37,7 @@ import {
   moonrakerControls,
 } from '../../packages/connector/src/moonraker/control-support.ts'
 import { openFixedMoonrakerPause } from '../../packages/connector/src/moonraker/pause-driver.ts'
-import { renderFarmComponent } from '../../apps/farm/app/components/farm/render-farm-component.ts'
+import { renderFarmComponent } from '../helpers/render-farm-component.ts'
 import { actionsForControlRole } from '../../apps/farm/server/utils/pause-authority/role-policy.ts'
 import { startMoonrakerMock } from '../../packages/sim-tools/src/mocks/moonraker-mock.ts'
 import type { MoonrakerMockOptions } from '../../packages/sim-tools/src/mocks/moonraker-mock.ts'
@@ -484,7 +484,7 @@ describe('command journal', () => {
     const db = new DatabaseSync(join(directory, 'pause-commands.sqlite'))
     try {
       db.exec(
-        "DROP INDEX pause_active_assignment; DROP INDEX pause_active_printer; CREATE UNIQUE INDEX pause_active_assignment ON pause_commands(assignment_id) WHERE status IN ('claimed','write-started','outcome-unknown'); CREATE UNIQUE INDEX pause_active_printer ON pause_commands(farm_id,printer_key) WHERE status IN ('claimed','write-started','outcome-unknown'); DROP TABLE control_tool_temperature_args; DROP TABLE control_command_actions; CREATE TABLE control_command_actions (cmd_id TEXT PRIMARY KEY, action TEXT NOT NULL CHECK(action IN ('pause','resume','cancel','emergency_stop','firmware_restart','run_macro','load_filament','unload_filament','extrude','set_led','set_pin','jog','motors_off','z_babystep','set_factor','queue_op','service','set_temperature','set_fan','home','set_light','set_speed','start_print'))) STRICT; INSERT INTO control_command_actions VALUES ('retained', 'queue_op'); PRAGMA user_version=8;",
+        "DROP INDEX pause_active_assignment; DROP INDEX pause_active_printer; CREATE UNIQUE INDEX pause_active_assignment ON pause_commands(assignment_id) WHERE status IN ('claimed','write-started','outcome-unknown'); CREATE UNIQUE INDEX pause_active_printer ON pause_commands(farm_id,printer_key) WHERE status IN ('claimed','write-started','outcome-unknown'); DROP TABLE control_command_restarts; DROP TABLE control_tool_temperature_args;DROP TABLE control_command_actions; CREATE TABLE control_command_actions (cmd_id TEXT PRIMARY KEY, action TEXT NOT NULL CHECK(action IN ('pause','resume','cancel','emergency_stop','firmware_restart','run_macro','load_filament','unload_filament','extrude','set_led','set_pin','jog','motors_off','z_babystep','set_factor','queue_op','service','set_temperature','set_fan','home','set_light','set_speed','start_print'))) STRICT; INSERT INTO control_command_actions VALUES ('retained', 'queue_op'); PRAGMA user_version=8;",
       )
     } finally {
       db.close()

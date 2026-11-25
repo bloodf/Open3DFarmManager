@@ -170,6 +170,13 @@ function printerStateSchema(legacy: boolean) {
           'client-certificate-missing',
           'prusa-link-unqualified',
           'firmware-shutdown',
+          'flashforge-simulated',
+          'flashforge-unqualified',
+          'phrozen-simulated',
+          'phrozen-unqualified',
+          'printer-fault',
+          'qidi-simulated',
+          'qidi-unqualified',
         ])
         .optional(),
       alarms: z
@@ -207,6 +214,14 @@ function printerStateSchema(legacy: boolean) {
               .optional(),
             remainingPercent: z.number().min(0).max(100).optional(),
             active: z.boolean().optional(),
+            // Tag identity as the printer reports it. An observation only:
+            // it identifies no Spoolman spool.
+            rfid: z
+              .strictObject({
+                tag: text(64).optional(),
+                sku: text(64).optional(),
+              })
+              .optional(),
             filamentDiameterMm: z.number().finite().positive().optional(),
             filamentDensityGramsPerCm3: z
               .number()
@@ -280,12 +295,34 @@ function printerStateSchema(legacy: boolean) {
     .refine(
       (value) =>
         value.state === 'offline' ||
+        // An idle printer reports no progress. Older servers require it, so the
+        // Connector's telemetry sender adds 0 only after such a server refuses.
+        (value.state === 'idle' &&
+          value.lastJob !== undefined &&
+          value.statusReason === undefined) ||
         (value.state === 'error' &&
           value.statusReason === 'firmware-shutdown') ||
         (value.state === 'unknown' && value.preformStatus !== undefined) ||
+        // A printer-reported fault is news even before any progress is known.
+        ((value.state === 'error' || value.state === 'paused') &&
+          value.statusReason === 'printer-fault' &&
+          value.statusMessage !== undefined) ||
         (value.statusReason === 'prusa-link-unqualified' &&
           value.identity?.vendor === 'Prusa' &&
           !value.controls?.length) ||
+        (!value.controls?.length &&
+          ((value.identity?.vendor === 'Phrozen' &&
+            (value.statusReason === 'phrozen-simulated' ||
+              value.statusReason === 'phrozen-unqualified')) ||
+            (value.identity?.vendor === 'Qidi' &&
+              value.state === 'unknown' &&
+              (value.statusReason === 'qidi-simulated' ||
+                value.statusReason === 'qidi-unqualified')) ||
+            (value.identity?.vendor === 'Flashforge' &&
+              value.state !== 'printing' &&
+              value.state !== 'paused' &&
+              (value.statusReason === 'flashforge-simulated' ||
+                value.statusReason === 'flashforge-unqualified')))) ||
         value.progress !== undefined,
       {
         path: ['progress'],

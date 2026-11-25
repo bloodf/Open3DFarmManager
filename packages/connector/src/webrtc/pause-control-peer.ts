@@ -13,7 +13,14 @@ import {
   controlDtlsFingerprint,
   validateControlSessionBinding,
 } from '../../../farm-protocol/src/control-session-binding.ts'
-import { MAX_PAUSE_CHANNEL_WIRE_BYTES } from '../../../farm-protocol/src/pause-channel.ts'
+import {
+  hasSdpLine,
+  MAX_PAUSE_CHANNEL_WIRE_BYTES,
+  PauseRefusalMessage,
+  REFUSAL_MESSAGE_ANSWER_LINE,
+  REFUSAL_MESSAGE_OFFER_LINE,
+  withSdpLine,
+} from '../../../farm-protocol/src/pause-channel.ts'
 import {
   captureEffectiveRtcDescriptions,
   type EffectiveRtcDescriptions,
@@ -287,8 +294,8 @@ export class PauseConnectorPeer {
       const local = this.#peer.localDescription()
       if (!local) throw Error('Control offer missing')
       controlOnly(local.sdp)
-      this.#offer = local.sdp
-      return local.sdp
+      this.#offer = withSdpLine(local.sdp, REFUSAL_MESSAGE_OFFER_LINE)
+      return this.#offer
     } catch (error) {
       this.close('offer-failed')
       throw error
@@ -384,7 +391,13 @@ export class PauseConnectorPeer {
   /** Connector only result. The peer never emits a command. */
   sendResult(result: PauseResultMessage): boolean {
     if (!this.#options.onData) return false
-    return this.current() && this.#session.sendResult(result)
+    // The result always goes; its text only to a browser that can read it.
+    const { message, ...rest } = result
+    const readable =
+      !!this.#answer &&
+      hasSdpLine(this.#answer, REFUSAL_MESSAGE_ANSWER_LINE) &&
+      PauseRefusalMessage.safeParse(message).success
+    return this.current() && this.#session.sendResult(readable ? result : rest)
   }
   close(reason = 'closed'): void {
     if (this.#terminal) return

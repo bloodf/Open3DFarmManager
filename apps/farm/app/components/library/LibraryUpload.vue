@@ -149,10 +149,15 @@ async function submit() {
       </template>
     </Field>
     <ProgressBar v-if="busy" label="Progresso do envio" :value="progress" />
-    <Button type="submit" :disabled="busy">
+    <Button type="submit" class="ops-primary send" :disabled="busy">
       {{ busy ? 'Enviando…' : 'Enviar para a biblioteca' }}
     </Button>
-    <section v-if="result" aria-labelledby="upload-preview" role="status">
+    <section
+      v-if="result"
+      class="result"
+      aria-labelledby="upload-preview"
+      role="status"
+    >
       <h3 id="upload-preview">
         Arquivo enviado: versão {{ result.version.versionNumber }}
       </h3>
@@ -184,6 +189,32 @@ async function submit() {
 }
 .selected {
   margin: 0;
+  color: var(--ops-muted);
+  font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
+}
+.send {
+  justify-self: start;
+}
+.upload :deep(.field span) {
+  color: var(--ops-muted);
+  font-size: var(--ops-text-small);
+}
+.upload :deep(.field span.error) {
+  color: var(--ops-fault);
+}
+.upload :deep(progress) {
+  accent-color: var(--ops-action);
+}
+.result {
+  display: grid;
+  gap: var(--ops-space-2);
+  padding: var(--ops-space-3);
+  border: 1px solid var(--ops-action);
+  border-radius: var(--ops-radius-lg);
+  background: var(--ops-raised);
+}
+.result > :is(h3, p) {
+  margin: 0;
 }
 </style>

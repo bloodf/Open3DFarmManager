@@ -7,12 +7,13 @@ import type {
   NewAction,
 } from '../services/integration-actions.ts'
 import type { EnvelopeRecord } from '../services/integration-delivery.ts'
+import { freshAdvertisedActions } from './postgres-pause-authority.ts'
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const actionColumns = (sql: Sql) =>
   sql`a.id::text AS "id", a.app_id::text AS "appId", a.grant_id::text AS "grantId", a.farm_id::text AS "farmId", a.printer_assignment_id::text AS "printerAssignmentId", a.idempotency_key AS "idempotencyKey", a.request_hash AS "requestHash", a.action, a.required_scope AS "requiredScope", a.status, a.created_at::float8 AS "createdAt", a.updated_at::float8 AS "updatedAt"`
 const envelopeColumns = (sql: Sql) =>
-  sql`e.cmd_id::text AS "cmdId", e.app_id::text AS "appId", e.grant_id::text AS "grantId", e.farm_id::text AS "farmId", e.agent_id::text AS "agentId", e.printer_assignment_id::text AS "printerAssignmentId", e.kind, e.resource_id::text AS "resourceId", e.required_scope AS "requiredScope", e.nonce, e.wire, e.issued_at::float8 AS "issuedAt", e.expires_at::float8 AS "expiresAt", e.status, e.refusal_code AS "refusalCode", e.result_detail AS "resultDetail", e.history_entry_id AS "historyEntryId", e.created_at::float8 AS "createdAt", e.updated_at::float8 AS "updatedAt"`
+  sql`e.cmd_id::text AS "cmdId", e.app_id::text AS "appId", e.grant_id::text AS "grantId", e.farm_id::text AS "farmId", e.agent_id::text AS "agentId", e.printer_assignment_id::text AS "printerAssignmentId", e.kind, e.resource_id::text AS "resourceId", e.required_scope AS "requiredScope", e.nonce, e.wire, e.issued_at::float8 AS "issuedAt", e.expires_at::float8 AS "expiresAt", e.status, e.refusal_code AS "refusalCode", e.result_detail AS "resultDetail", e.result_message AS "resultMessage", e.history_entry_id AS "historyEntryId", e.created_at::float8 AS "createdAt", e.updated_at::float8 AS "updatedAt"`
 
 /** Least privilege is supplied by farm_integration_jobs, shared with the action API. */
 export class PostgresIntegrationActions implements IntegrationActionsStore {
@@ -23,17 +24,33 @@ export class PostgresIntegrationActions implements IntegrationActionsStore {
 
   async target(printerAssignmentId: string): Promise<ActionTarget | null> {
     if (!uuid.test(printerAssignmentId)) return null
-    const rows = await this.sql<ActionTarget[]>`
+    const rows = await this.sql<
+      (ActionTarget & {
+        observedAt: number | null
+        receivedAt: number | null
+        ageAtSendMs: number | null
+        now: number
+      })[]
+    >`
       SELECT p.farm_id::text AS "farmId", p.agent_id::text AS "agentId",
-        s.state->'controls' AS controls
+        s.state->'controls' AS controls, s.observed_at::float8 AS "observedAt",
+        s.received_at::float8 AS "receivedAt", s.age_at_send_ms::float8 AS "ageAtSendMs",
+        floor(extract(epoch FROM pg_catalog.clock_timestamp())*1000)::float8 AS "now"
       FROM farm.printer_assignments p
       LEFT JOIN farm.printer_latest_state s
         ON s.farm_id = p.farm_id AND s.agent_id = p.agent_id AND s.printer_key = p.printer_key
       WHERE p.id = ${printerAssignmentId}::uuid AND p.revoked_at IS NULL`
     const row = rows[0]
     if (!row) return null
+    // Same freshness rule as browser grants. `null` means no list was reported.
     const controls = Array.isArray(row.controls)
-      ? row.controls.filter((item): item is string => typeof item === 'string')
+      ? freshAdvertisedActions(
+          row.controls,
+          row.ageAtSendMs,
+          row.receivedAt,
+          row.now,
+          row.observedAt,
+        )
       : null
     return { farmId: row.farmId, agentId: row.agentId, controls }
   }

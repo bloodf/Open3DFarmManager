@@ -96,7 +96,7 @@ export interface ActionView {
   status: ActionStatus
   createdAt: number
   updatedAt: number
-  refusal?: { code: string; detail?: string }
+  refusal?: { code: string; detail?: string; message?: string }
 }
 export type SubmitActionResult =
   | { ok: true; created: boolean; action: ActionView }
@@ -201,6 +201,7 @@ export function actionView(
     view.refusal = {
       code: envelope.refusalCode,
       ...(envelope.resultDetail ? { detail: envelope.resultDetail } : {}),
+      ...(envelope.resultMessage ? { message: envelope.resultMessage } : {}),
     }
   return view
 }

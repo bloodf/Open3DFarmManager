@@ -48,6 +48,7 @@ function registration(key: LocalDeviceKey) {
     </p>
     <div class="actions">
       <Button
+        class="ops-primary"
         :disabled="busy || keys.length >= maxKeys"
         @click="emit('create')"
       >
@@ -99,13 +100,10 @@ function registration(key: LocalDeviceKey) {
 </template>
 
 <style scoped>
-code {
-  overflow-wrap: anywhere;
-}
 .actions {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2) var(--space-4);
+  gap: var(--ops-space-2);
 }
 .keys {
   list-style: none;
@@ -115,21 +113,17 @@ code {
 }
 li {
   display: grid;
-  gap: var(--space-2);
-  padding-block: var(--space-4);
-  border-block-end: 1px solid var(--color-border);
+  gap: var(--ops-space-2);
+  padding-block: var(--ops-space-3);
+  border-block-start: 1px solid var(--ops-border);
   min-width: 0;
-}
-li:first-child {
-  padding-block-start: 0;
 }
 li:last-child {
   padding-block-end: 0;
-  border-block-end: 0;
 }
 .hint,
 .limit {
-  color: var(--color-text-muted);
+  color: var(--ops-muted);
 }
 @media (max-width: 30rem) {
   .actions :deep(.ui-button) {

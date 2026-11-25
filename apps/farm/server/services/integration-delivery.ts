@@ -68,6 +68,8 @@ export interface EnvelopeRecord {
   status: EnvelopeStatus
   refusalCode: ApiEnvelopeRefusalCode | null
   resultDetail: string | null
+  /** Operator text of a refusal; `resultDetail` keeps the reason code. */
+  resultMessage?: string | null
   historyEntryId: string | null
   createdAt: number
   updatedAt: number
@@ -77,6 +79,7 @@ export type NewEnvelope = Omit<
   | 'status'
   | 'refusalCode'
   | 'resultDetail'
+  | 'resultMessage'
   | 'historyEntryId'
   | 'createdAt'
   | 'updatedAt'
@@ -84,6 +87,7 @@ export type NewEnvelope = Omit<
 export interface EnvelopeResult {
   refusalCode?: ApiEnvelopeRefusalCode | undefined
   detail?: string | undefined
+  message?: string | undefined
   historyEntryId?: string | undefined
 }
 export type InsertOutcome =
@@ -439,6 +443,7 @@ export class IntegrationDeliveryService {
       {
         refusalCode: frame.refusal_code,
         detail: frame.detail,
+        message: frame.message,
         historyEntryId: frame.history_entry_id,
       },
     )

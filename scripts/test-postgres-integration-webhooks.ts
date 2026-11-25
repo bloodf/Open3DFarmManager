@@ -183,6 +183,35 @@ try {
     [{ code: 'not-ready', detail: 'Sintético' }],
   )
 
+  const jobCmd = randomUUID()
+  await admin`INSERT INTO farm.integration_envelopes (cmd_id, app_id, grant_id, farm_id, agent_id,
+    printer_assignment_id, kind, resource_id, required_scope, nonce, wire, issued_at, expires_at,
+    created_at, updated_at)
+    VALUES (${jobCmd}, ${app}, ${grant}, ${farm}, ${allowed.agent}, ${allowed.printer}, 'job', ${job},
+      'jobs:start', ${'d'.repeat(22)}, 'synthetic fixture', 12, 1012, 12, 12)`
+  await admin`UPDATE farm.integration_envelopes SET status = 'sending', updated_at = 13 WHERE cmd_id = ${jobCmd}`
+  await admin`UPDATE farm.integration_envelopes SET status = 'refused', refusal_code = 'unsupported',
+    result_detail = 'invalid-command', result_message = 'Texto sintético', updated_at = 14
+    WHERE cmd_id = ${jobCmd}`
+  const worded = await admin`SELECT body->'data'->'refusal' AS refusal
+    FROM farm.integration_webhook_outbox
+    WHERE body->>'type' = 'job.status_changed' AND body#>>'{data,status}' = 'refused'`
+  assert.deepEqual(
+    worded.map((row) => row.refusal),
+    [
+      {
+        code: 'unsupported',
+        detail: 'invalid-command',
+        message: 'Texto sintético',
+      },
+    ],
+  )
+  await assert.rejects(
+    async () =>
+      await admin`UPDATE farm.integration_envelopes SET result_message = 'outro' WHERE cmd_id = ${jobCmd}`,
+    /A result is recorded once/,
+  )
+
   const success = await store.queueTest(app, subscription.id)
   assert.ok(success)
   const deliveredIds: string[] = []

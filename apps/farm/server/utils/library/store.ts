@@ -343,7 +343,13 @@ export class PostgresLibrary {
     )
   }
 
-  addVersion(input: Authority & { version: AddVersionInput }) {
+  addVersion(
+    input: Authority & {
+      version: AddVersionInput
+      /** Throws when the bytes this upload wrote are no longer there. */
+      confirmFile?: () => Promise<void>
+    },
+  ) {
     const v = input.version
     const metadata = PrintFileMetadata.safeParse(v.metadata)
     const title = v.title?.trim()
@@ -459,6 +465,16 @@ export class PostgresLibrary {
             await tx`INSERT INTO farm.library_blobs (farm_id, sha256, size_bytes, storage_location, agent_id, created_at)
               VALUES (${farm}::uuid, ${v.sha256}, ${v.sizeBytes}, ${targetLocation}, ${targetAgentId}, ${now})`
         }
+        // Retention or a refused Connector copy may have removed the file after it
+        // was written and before these locks. Throwing rolls the record back, so
+        // the upload is retried. A server file is shared across farms, so it is
+        // always checked.
+        if (
+          targetLocation === v.location &&
+          targetAgentId === (v.agentId ?? null) &&
+          (targetLocation === 'server' || !matched || restoring)
+        )
+          await input.confirmFile?.()
         // Refusals above return before this point, so a rejected upload creates no item.
         item ??= (
           await tx<

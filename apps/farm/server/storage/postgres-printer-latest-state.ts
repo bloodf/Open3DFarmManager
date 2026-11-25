@@ -20,22 +20,23 @@ export async function recordLatestStates(
 ): Promise<void> {
   const states = events
     .filter((event) => event.kind === 'printer-state')
-    .map((event) => event.state)
-    .sort(
-      (a, b) =>
-        Buffer.compare(Buffer.from(a.printerKey), Buffer.from(b.printerKey)) ||
-        a.observedAt - b.observedAt,
+    .sort((a, b) =>
+      Buffer.compare(
+        Buffer.from(a.state.printerKey),
+        Buffer.from(b.state.printerKey),
+      ),
     )
   let canRecordAlerts: boolean | undefined
-  for (const state of states) {
+  for (const { state, ageAtSendMs } of states) {
     const updated =
-      await tx`INSERT INTO farm.printer_latest_state (farm_id, agent_id, printer_key, observed_at, state)
-      VALUES (${scope.farmId}::uuid, ${scope.agentId}::uuid, ${state.printerKey}, ${state.observedAt}, ${tx.json(state)}::jsonb)
-      ON CONFLICT (farm_id, agent_id, printer_key) DO UPDATE SET observed_at = EXCLUDED.observed_at, state = CASE
+      await tx`INSERT INTO farm.printer_latest_state (farm_id, agent_id, printer_key, observed_at, state, received_at, age_at_send_ms)
+      VALUES (${scope.farmId}::uuid, ${scope.agentId}::uuid, ${state.printerKey}, ${state.observedAt}, ${tx.json(state)}::jsonb, floor(extract(epoch FROM pg_catalog.clock_timestamp())*1000)::bigint, ${ageAtSendMs ?? null})
+      ON CONFLICT (farm_id, agent_id, printer_key) DO UPDATE SET observed_at = EXCLUDED.observed_at,
+      received_at = EXCLUDED.received_at, age_at_send_ms = EXCLUDED.age_at_send_ms,
+      revision = printer_latest_state.revision + 1, state = CASE
   WHEN EXCLUDED.state ? 'machine' OR NOT (printer_latest_state.state ? 'machine') THEN EXCLUDED.state
   ELSE EXCLUDED.state || jsonb_build_object('machine', printer_latest_state.state->'machine')
 END
-      WHERE farm.printer_latest_state.observed_at < EXCLUDED.observed_at
       RETURNING printer_key`
     if (!updated.length) continue
     if (canRecordAlerts === undefined) {

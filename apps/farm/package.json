@@ -14,15 +14,17 @@
     "@open3dfarmmanager/farm-protocol": "*",
     "@open3dfarmmanager/shared": "*",
     "jose": "6.2.18",
-    "nuxt": "4.6.4",
-    "openid-client": "6.9.0",
+    "nuxt": "4.7.0",
+    "ofetch": "1.5.1",
+    "openid-client": "6.9.1",
     "postgres": "4.1.1",
-    "vue": "3.5.45",
+    "vue": "3.5.46",
     "vue-router": "5.5.1",
     "yaml": "2.9.1",
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "typescript": "6.0.3",
     "vue-tsc": "3.3.14"
   }
 }

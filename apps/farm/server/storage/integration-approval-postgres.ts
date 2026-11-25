@@ -7,7 +7,11 @@ import {
   type HeldItem,
   type IntegrationApprovalStore,
 } from '../services/integration-approval.ts'
-import { HELD_TTL_MS, resinReplayAction } from '../services/integration-jobs.ts'
+import {
+  HELD_TTL_MS,
+  libraryReplayAction,
+  resinReplayAction,
+} from '../services/integration-jobs.ts'
 
 const validTime = (value: number) => Number.isSafeInteger(value) && value >= 0
 
@@ -27,8 +31,8 @@ interface HeldRow {
   sha256?: string
   sizeBytes?: number
   displayName?: string
-  libraryVersionId?: string
-  plate?: number
+  libraryVersionId?: string | null
+  plate?: number | null
   resinProfile?: string | null
   // Action column.
   action?: ApiEnvelopeAction
@@ -69,15 +73,23 @@ function toItem(kind: ApprovalKind, row: HeldRow): HeldItem {
                 resinProfile: row.resinProfile,
               }),
             }
-          : {
-              kind: 'job',
-              job: {
-                file_url: row.fileUrl!,
-                sha256: row.sha256!,
-                size_bytes: row.sizeBytes!,
-                display_name: row.displayName!,
+          : row.libraryVersionId != null
+            ? {
+                kind: 'action',
+                action: libraryReplayAction({
+                  sha256: row.sha256!,
+                  ...(row.plate != null ? { plate: row.plate } : {}),
+                }),
+              }
+            : {
+                kind: 'job',
+                job: {
+                  file_url: row.fileUrl!,
+                  sha256: row.sha256!,
+                  size_bytes: row.sizeBytes!,
+                  display_name: row.displayName!,
+                },
               },
-            },
     }
   return {
     ...base,
@@ -255,6 +267,29 @@ export class PostgresIntegrationApprovals implements IntegrationApprovalStore {
             now,
           )
           return { kind: 'authority-lost', item }
+        }
+        // The file must still be in the library: a version removed while held
+        // is never printed, even before retention purges its bytes.
+        if (kind === 'job' && row.libraryVersionId != null) {
+          const live = await tx`
+            SELECT 1 FROM farm.library_versions v
+            JOIN farm.library_blobs b ON b.farm_id = v.farm_id AND b.sha256 = v.sha256
+              AND b.storage_location = v.storage_location AND b.location_agent_id = v.location_agent_id
+            WHERE v.id = ${row.libraryVersionId}::uuid AND v.farm_id = ${row.farmId}::uuid
+              AND v.deleted_at IS NULL AND b.purged_at IS NULL`
+          if (live.length === 0) {
+            await settle('rejected')
+            await this.audit(
+              tx,
+              kind,
+              row,
+              { kind: 'owner', id: input.accountId },
+              'rejected',
+              'version-unavailable',
+              now,
+            )
+            return { kind: 'version-unavailable', item }
+          }
         }
         await settle('submitted')
         await this.audit(

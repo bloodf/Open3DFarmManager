@@ -11,7 +11,7 @@ export async function startFlashforgeSimulator(
     request: IncomingMessage,
     response: ServerResponse,
     body: Buffer,
-  ) => void,
+  ) => void | Promise<void>,
   discoveryPid = 36,
 ) {
   const host = '127.0.0.1'
@@ -19,7 +19,7 @@ export async function startFlashforgeSimulator(
     try {
       const chunks: Buffer[] = []
       for await (const chunk of req) chunks.push(Buffer.from(chunk))
-      handler(req, res, Buffer.concat(chunks))
+      await handler(req, res, Buffer.concat(chunks))
     } catch (error) {
       res.destroy(error instanceof Error ? error : undefined)
     }
@@ -54,4 +54,142 @@ export async function startFlashforgeSimulator(
       ])
     },
   }
+}
+
+// Original stateful fixtures for https://github.com/Parallel-7/flashforge-api-docs/wiki/HTTP-REST-API
+export function startStatefulFlashforgeSimulator(fixture: {
+  pid: number
+  detail: Record<string, unknown>
+  files: readonly string[]
+}) {
+  const detail = { ...fixture.detail }
+  const files = new Set(fixture.files)
+
+  return startFlashforgeSimulator(async (req, res, body) => {
+    const send = (payload: object) => res.end(JSON.stringify(payload))
+    const reject = () => {
+      send({ code: 1 })
+    }
+    if (
+      req.method === 'GET' &&
+      req.url === '/?action=stream' &&
+      detail.cameraStreamUrl
+    ) {
+      res.writeHead(200, {
+        'content-type': 'multipart/x-mixed-replace; boundary=fixture',
+      })
+      res.end(
+        '--fixture\r\nContent-Type: image/jpeg\r\n\r\nfixture-frame\r\n--fixture--\r\n',
+      )
+      return
+    }
+    if (req.method !== 'POST') {
+      res.writeHead(405).end()
+      return
+    }
+    if (req.url === '/uploadGcode') {
+      if (fixture.pid !== 35 && fixture.pid !== 36) return reject()
+      if (
+        req.headers.serialnumber !== 'FIXTURE-SERIAL' ||
+        req.headers.checkcode !== 'fixture01' ||
+        req.headers.printnow !== 'false' ||
+        detail.status !== 'ready'
+      )
+        return reject()
+      const form = await new Response(new Uint8Array(body), {
+        headers: { 'content-type': req.headers['content-type'] ?? '' },
+      }).formData()
+      const file = form.get('gcodeFile')
+      if (
+        !(file instanceof File) ||
+        !file.size ||
+        String(file.size) !== req.headers.filesize
+      )
+        return reject()
+      files.add(file.name)
+      send({ code: 0 })
+      return
+    }
+    const data = JSON.parse(body.toString())
+    if (
+      data.serialNumber !== 'FIXTURE-SERIAL' ||
+      data.checkCode !== 'fixture01'
+    )
+      return reject()
+    if (req.url === '/detail') {
+      send({ code: 0, detail })
+      return
+    }
+    if (req.url === '/gcodeList') {
+      send(
+        fixture.pid === 38
+          ? {
+              code: 0,
+              gcodeListDetail: Array.from(files, (gcodeFileName) => ({
+                gcodeFileName,
+              })),
+            }
+          : { code: 0, gcodeList: [...files] },
+      )
+      return
+    }
+    if (fixture.pid !== 35 && fixture.pid !== 36) return reject()
+    if (
+      req.url === '/printGcode' &&
+      detail.status === 'ready' &&
+      files.has(data.fileName) &&
+      data.levelingBeforePrint === true
+    ) {
+      detail.status = 'printing'
+      detail.printProgress = 0
+      detail.printFileName = data.fileName
+    } else if (req.url === '/control') {
+      const { cmd, args } = data.payload
+      switch (cmd) {
+        case 'jobCtl_cmd':
+          switch (args.action) {
+            case 'pause':
+              if (detail.status !== 'printing') return reject()
+              detail.status = 'pause'
+              break
+            case 'continue':
+              if (detail.status !== 'pause') return reject()
+              detail.status = 'printing'
+              break
+            case 'cancel':
+              if (
+                !['printing', 'pause', 'heating'].includes(
+                  String(detail.status),
+                )
+              )
+                return reject()
+              detail.status = 'cancel'
+              detail.printFileName = ''
+              break
+            default:
+              return reject()
+          }
+          break
+        case 'temperatureCtl_cmd':
+          if (typeof args.rightNozzle === 'number')
+            detail.rightTargetTemp =
+              args.rightNozzle === -100 ? 0 : args.rightNozzle
+          else if (typeof args.platform === 'number')
+            detail.platTargetTemp = args.platform === -100 ? 0 : args.platform
+          else return reject()
+          break
+        case 'printerCtl_cmd':
+          if (
+            detail.status !== 'printing' ||
+            typeof args.coolingFan !== 'number'
+          )
+            return reject()
+          detail.coolingFanSpeed = args.coolingFan
+          break
+        default:
+          return reject()
+      }
+    } else return reject()
+    send({ code: 0 })
+  }, fixture.pid)
 }

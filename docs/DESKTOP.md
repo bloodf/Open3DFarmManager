@@ -113,11 +113,18 @@ npm ci --ignore-scripts
 npm run test:journey -- tests/journey/bambu.spec.ts --grep "câmera Bambu Lab simulada"
 ```
 
-A jornada sobe um banco descartável, o aplicativo e os simuladores locais. O Chrome verifica a imagem ao vivo da câmera TLS JPEG e confirma que revogar o Connector encerra a conexão e o encoder. Os modelos RTSPS e os modelos sem suporte aparecem com a câmera indisponível.
+A jornada sobe um banco descartável, o aplicativo e os simuladores locais. O Chrome verifica a imagem ao vivo da câmera TLS JPEG (A1) e da câmera RTSPS (X1C) e confirma, em ambos os casos, que revogar o Connector encerra a conexão, o encoder e o vídeo. Os modelos sem suporte (por exemplo o A2L) aparecem com a câmera indisponível. A jornada RTSPS roda somente contra o simulador em loopback e não envia nenhum comando de controle à impressora simulada.
 
-Configure câmeras TLS JPEG Bambu Lab (A1, A1 mini, P1P e P1S) com `kind: bambu-lan` na origem da câmera. A origem exige `ffmpeg` com o caminho absoluto do encoder e seu SHA-256, um `credentialFile` privado e `caFile` ou `pinSha256` para TLS. A configuração `camera.helper` identifica o binário Go para as câmeras RTSP genéricas.
+Configure câmeras Bambu Lab com `kind: bambu-lan`. Os modelos A1, A1 mini, P1P e P1S usam TLS JPEG; X1, X1C, X1E, H2D, H2S, H2C, P2 e P2S usam RTSPS (veja abaixo) na origem da câmera. A origem exige `ffmpeg` com o caminho absoluto do encoder e seu SHA-256, um `credentialFile` privado e `caFile` ou `pinSha256` para TLS. A configuração `camera.helper` identifica o binário Go para as câmeras RTSP genéricas.
 
-Para habilitar RTSPS, o helper de ingestão precisa de um modo autenticado próprio. Esse modo deve verificar o IP literal e a porta no socket de captura, validar a cadeia de certificados e a identidade do IP durante o handshake TLS e só então permitir a autenticação RTSP nesse mesmo socket. O modo deve recusar redirecionamentos, controles que troquem o destino e qualquer fallback para RTSP sem TLS. O Connector deve encerrar o socket e o processo ao revogar a sessão.
+Câmeras RTSPS exigem `caFile`; um `pinSha256` sozinho não habilita RTSPS. O Connector não passa pelo helper Go: ele abre um socket TLS próprio para o IP literal e a porta da impressora, valida a cadeia e a identidade do IP no handshake e só então envia o primeiro byte RTSP, com a credencial `bblp` anexada dentro desse mesmo socket. O FFmpeg lê de uma ponte RTSP em `127.0.0.1` que aceita um único cliente e um caminho com token aleatório por sessão; o token e a credencial nunca vão para o argv. A ponte recusa redirecionamentos, URLs de controle fora do IP e da porta, UDP e qualquer método além de OPTIONS, DESCRIBE, SETUP, PLAY, GET_PARAMETER e TEARDOWN, e não há RTSP sem TLS. Revogar a sessão encerra a ponte, o socket TLS e o FFmpeg.
+
+Limites conhecidos do perfil RTSPS (somente simulador em loopback, sem hardware):
+
+- Apenas o X1C foi exercitado, com certificado de IP no SAN. Impressoras reais podem apresentar um certificado sem SAN de IP; nesse caso a câmera permanece indisponível em vez de aceitar a identidade.
+- A autenticação RTSP é Basic enviada de forma preventiva; o desafio Digest não foi verificado.
+- O Connector copia o H.264 sem recodificar e marca o tempo pela chegada. A taxa de quadros, o perfil e o tamanho do GOP reais não foram verificados.
+- O A2L, o X2D, o H2D Pro e o H3C não têm porta de vídeo documentada e continuam indisponíveis.
 
 ## 6. Verificar o ambiente
 

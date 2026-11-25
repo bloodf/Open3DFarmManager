@@ -10,26 +10,25 @@
 // libraries, symlinked from the read-only Node image mount; libraries the
 // container already provides (glibc, libssl, zlib, ...) are never shadowed.
 //
-// Scratch space. /tmp is an anonymous Docker volume rather than a tmpfs: it
-// lives on the Docker host disk, so suites that require real free space (the
+// Scratch space. /tmp is a bind mount of the run directory rather than a tmpfs:
+// it lives on the host disk, so suites that require real free space (the
 // release rehearsal asserts > 10 GiB under TMPDIR) see an honestly sized
-// filesystem without spending container memory. An anonymous volume has no
-// name to share or reuse; it belongs to the task container alone and is
-// deleted with it by `docker rm -f -v`.
+// filesystem without spending container memory. The directory belongs to this
+// run alone and is removed with it.
 //
-// Everything generated lives on that /tmp volume and disappears with it.
+// Everything generated lives on that /tmp directory and disappears with it.
 
 const PYTHON_DIR = '/tmp/gate-python'
 /** Generated python3 wrapper directory; placed before /opt/gate-tools/bin. */
 export const PYTHON_BIN_DIR = `${PYTHON_DIR}/bin`
-/** Container path of the task-owned scratch volume. */
+/** Container path of the task-owned scratch directory. */
 export const SCRATCH_DIR = '/tmp'
 /** Fail-closed floor checked before the gate; the rehearsal needs > 10 GiB. */
 export const MIN_SCRATCH_BYTES = 12 * 1024 ** 3
 
-/** Anonymous (task-owned, removed with the container) scratch volume. */
-export function scratchMount() {
-  return `type=volume,destination=${SCRATCH_DIR}`
+/** Bind mount of the run directory's scratch folder (removed with the run). */
+export function scratchMount(runDir) {
+  return `type=bind,source=${runDir}/tmp,destination=${SCRATCH_DIR}`
 }
 
 /** Shell run in the container before anything writes to /tmp. */
@@ -37,8 +36,8 @@ export const PREPARE_SCRATCH = [
   'set -eu',
   `avail=$(df -Pk ${SCRATCH_DIR} | awk 'NR==2 {print $4}')`,
   `echo "scratch ${SCRATCH_DIR}: $((avail / 1048576)) GiB free"`,
-  `[ "$avail" -ge ${MIN_SCRATCH_BYTES / 1024} ] || { echo "scratch volume ${SCRATCH_DIR} has less than ${MIN_SCRATCH_BYTES / 1024 ** 3} GiB free on the Docker host disk" >&2; exit 1; }`,
-  `[ -w ${SCRATCH_DIR} ] || { echo "scratch volume ${SCRATCH_DIR} is not writable" >&2; exit 1; }`,
+  `[ "$avail" -ge ${MIN_SCRATCH_BYTES / 1024} ] || { echo "scratch directory ${SCRATCH_DIR} has less than ${MIN_SCRATCH_BYTES / 1024 ** 3} GiB free on the host disk" >&2; exit 1; }`,
+  `[ -w ${SCRATCH_DIR} ] || { echo "scratch directory ${SCRATCH_DIR} is not writable" >&2; exit 1; }`,
 ].join('\n')
 
 /**
@@ -68,7 +67,7 @@ export const PREPARE_PYTHON = [
 ].join('\n')
 
 /** Self-test predicates for the runtime part of the docker plan: [name, ok][]. */
-export function runtimePlanChecks(calls, plan) {
+export function runtimePlanChecks(calls, plan, runDir) {
   const create = calls[0]
   const steps = plan.map((step) => step.label)
   const at = (label) => steps.indexOf(label)
@@ -86,8 +85,8 @@ export function runtimePlanChecks(calls, plan) {
         !/\b(curl|wget|apt-get|pip|npx)\b/.test(PREPARE_PYTHON),
     ],
     [
-      '/tmp is a task-owned anonymous volume checked for free space first',
-      create.includes(scratchMount()) &&
+      '/tmp is a run-owned bind directory checked for free space first',
+      create.includes(scratchMount(runDir)) &&
         at('check scratch space') >= 0 &&
         at('check scratch space') < at('prepare home') &&
         MIN_SCRATCH_BYTES > 10 * 1024 ** 3,

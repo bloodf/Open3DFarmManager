@@ -1,7 +1,8 @@
 import type { FileListExtra } from '../../../../../packages/farm-protocol/src/file-list.ts'
-import type {
-  ControlResultCode,
+import {
+  controlRoleAllowed,
   ExtendedControlAction,
+  type ControlResultCode,
 } from '../../../../../packages/farm-protocol/src/control-actions.ts'
 import type {
   PauseCommandOutcome,
@@ -10,6 +11,7 @@ import type {
 import { PauseBrowserSignallingClient } from './pause-signalling-client.ts'
 import {
   createPauseCommandClient,
+  type PauseResultDriverFamily,
   type PauseCommandIssuer,
 } from './pause-command-client.ts'
 import { createPauseCommandIssuer } from './pause-command-issuer.ts'
@@ -22,7 +24,12 @@ export type FarmPauseControlState =
   /** Admitted peer with a fresh signed capability, valid until `expiresAt` (wall). */
   | { kind: 'ready'; expiresAt: number }
   | { kind: 'sending' }
-  | { kind: 'settled'; outcome: PauseCommandOutcome; code?: ControlResultCode }
+  | {
+      kind: 'settled'
+      outcome: PauseCommandOutcome
+      code?: ControlResultCode
+      message?: string
+    }
   | { kind: 'failed'; reason: FarmPauseFailure }
 
 /** `not-ready`: no fresh capability in time, often a wrong device clock. */
@@ -31,6 +38,16 @@ export type FarmPauseFailure =
 
 /** A session that is not ready by then fails closed. */
 export const PAUSE_READY_DEADLINE_MS = 15_000
+
+/** Minimum gap between two re-admissions of one control session. */
+export const PAUSE_READMIT_DEBOUNCE_MS = 5_000
+/** A control session never re-admits more often than this in total. */
+export const PAUSE_READMIT_MAX = 3
+/**
+ * The Connector serves one control session at a time and waits at least 1 s
+ * before listening again. The margin covers its own disposal and reconnection.
+ */
+export const PAUSE_READMIT_RELISTEN_MS = 2_000
 
 export type FarmPauseKey = Readonly<{
   publicKey: unknown
@@ -55,6 +72,7 @@ export type FarmPauseControlInput = Readonly<{
   keyId: string
   agentId: string
   assignmentId: string
+  driverFamily?: PauseResultDriverFamily
   /** Resolves the approved local key and the pause metadata, or throws. */
   resolveKey(signal: AbortSignal): Promise<FarmPauseKey>
   onState(state: FarmPauseControlState): void
@@ -83,6 +101,17 @@ export function openFarmPauseControl(input: FarmPauseControlInput) {
   let expiry: ReturnType<typeof setTimeout> | undefined
   let resultCode: ControlResultCode | undefined
   let disposed: Promise<void> | undefined
+  // The actions the current capability was issued with, from the issuer.
+  let admittedActions: readonly ExtendedControlAction[] = []
+  // The role the issuer signed into that capability.
+  let admittedRole: string | undefined
+  // Disposal of the transport replaced by the latest re-admission.
+  let replaced: Promise<unknown> = Promise.resolve()
+  // Bumped on every re-admission: callbacks of an older session are ignored.
+  let generation = 0
+  let readmissions = 0
+  let lastReadmitAt = Number.NEGATIVE_INFINITY
+  let lastReadmitKey = ''
   function set(next: FarmPauseControlState) {
     // A settled outcome or failure is final for this session.
     if (state.kind === 'settled' || state.kind === 'failed') return
@@ -98,9 +127,14 @@ export function openFarmPauseControl(input: FarmPauseControlInput) {
     set({ kind: 'failed', reason })
     close()
   }
-  const readyDeadline = setTimeout(() => {
-    if (state.kind === 'connecting') fail('not-ready')
-  }, PAUSE_READY_DEADLINE_MS)
+  let readyDeadline: ReturnType<typeof setTimeout>
+  function armReadyDeadline() {
+    clearTimeout(readyDeadline)
+    readyDeadline = setTimeout(() => {
+      if (state.kind === 'connecting') fail('not-ready')
+    }, PAUSE_READY_DEADLINE_MS)
+  }
+  armReadyDeadline()
   function close() {
     clearTimeout(readyDeadline)
     clearTimeout(expiry)
@@ -114,33 +148,46 @@ export function openFarmPauseControl(input: FarmPauseControlInput) {
     async capability(value) {
       const issued = await baseIssuer.capability(value)
       capabilityExpiresAt = issued.expires_at
+      admittedActions = [...issued.actions]
+      admittedRole = issued.role
       return issued
     },
   })
   async function start() {
+    const mine = generation
     let key: FarmPauseKey
     try {
       key = await input.resolveKey(controller.signal)
     } catch {
-      fail('unavailable')
+      if (mine === generation) fail('unavailable')
       return
     }
-    if (controller.signal.aborted) return
+    if (controller.signal.aborted || mine !== generation) return
+    const current = () => mine === generation
     command = createPauseCommandClient({
       privateKey: key.privateKey,
       issuer,
+      ...(input.driverFamily ? { driverFamily: input.driverFamily } : {}),
       signal: controller.signal,
       transport: {
         sendPhase(message) {
+          if (!current()) return false
           const sent = signalling?.sendPhase(message) ?? false
           if (sent && message.t === 'control.admission-proof') admitted()
           return sent
         },
-        sendCommand: (message) => signalling?.sendCommand(message) ?? false,
+        sendCommand: (message) =>
+          current() ? (signalling?.sendCommand(message) ?? false) : false,
       },
-      onOutcome: (outcome, code) => {
+      onOutcome: (outcome, code, message) => {
+        if (!current()) return
         resultCode = code
-        set({ kind: 'settled', outcome, ...(code ? { code } : {}) })
+        set({
+          kind: 'settled',
+          outcome,
+          ...(code ? { code } : {}),
+          ...(message ? { message } : {}),
+        })
       },
     })
     const create =
@@ -162,17 +209,96 @@ export function openFarmPauseControl(input: FarmPauseControlInput) {
         {
           signal: controller.signal,
           onProofsReady: (ready: PauseProofsReady) =>
-            command?.proofsReady(ready),
-          onPhase: (frame) => command?.phase(frame),
-          onData: (frame) => command?.data(frame),
-          onTerminal: () => fail('closed'),
+            current() && command?.proofsReady(ready),
+          onPhase: (frame) => current() && command?.phase(frame),
+          onData: (frame) => current() && command?.data(frame),
+          onTerminal: () => current() && fail('closed'),
         },
       )
     } catch {
       fail('unavailable')
       return
     }
-    void signalling.start().catch(() => fail('unavailable'))
+    void signalling.start().catch(() => current() && fail('unavailable'))
+  }
+  /** Resolves after the Connector's re-listen delay, or at once when closed. */
+  function relistenDelay(): Promise<void> {
+    return new Promise((resolve) => {
+      if (controller.signal.aborted) return resolve()
+      const done = () => {
+        clearTimeout(timer)
+        controller.signal.removeEventListener('abort', done)
+        resolve()
+      }
+      const timer = setTimeout(done, PAUSE_READMIT_RELISTEN_MS)
+      controller.signal.addEventListener('abort', done, { once: true })
+    })
+  }
+  /** Admits again only after the old transport ended on both sides. */
+  async function restart() {
+    await replaced
+    await relistenDelay()
+    if (controller.signal.aborted) return
+    armReadyDeadline()
+    await start()
+  }
+  /**
+   * Fresh advertised controls the current capability does not cover. Admission
+   * is one-shot per transport, so a capability issued while a collection hold
+   * hid start actions never grows by itself: the session is admitted again.
+   */
+  function controlsChanged(
+    controls: readonly unknown[] | undefined,
+    fresh: boolean,
+  ): boolean {
+    if (
+      !fresh ||
+      !Array.isArray(controls) ||
+      state.kind !== 'ready' ||
+      controller.signal.aborted
+    )
+      return false
+    const advertised = new Set<unknown>(controls)
+    // The issuer never grants an action the role lacks: not a reason to ask.
+    const missing = ExtendedControlAction.options.filter(
+      (action) =>
+        advertised.has(action) &&
+        !admittedActions.includes(action) &&
+        admittedRole !== undefined &&
+        controlRoleAllowed(admittedRole, action),
+    )
+    if (!missing.length) return false
+    const key = missing.join(',')
+    const at = now()
+    // Debounced and bounded: the same missing set is asked for only once.
+    if (
+      key === lastReadmitKey ||
+      at - lastReadmitAt < PAUSE_READMIT_DEBOUNCE_MS ||
+      readmissions >= PAUSE_READMIT_MAX
+    )
+      return false
+    lastReadmitKey = key
+    lastReadmitAt = at
+    readmissions++
+    // Only the transport is replaced. No command is ever sent again.
+    generation++
+    clearTimeout(expiry)
+    const previous = { command, signalling }
+    command = undefined
+    signalling = undefined
+    capabilityExpiresAt = undefined
+    admittedActions = []
+    admittedRole = undefined
+    previous.command?.abort()
+    previous.signalling?.close()
+    // A failed disposal still ends here; a busy Connector then fails closed.
+    replaced = Promise.resolve(previous.signalling?.dispose(3000)).catch(
+      () => {},
+    )
+    set({ kind: 'connecting' })
+    armReadyDeadline()
+    void restart()
+    return true
   }
   function admitted() {
     const expiresAt = capabilityExpiresAt
@@ -219,6 +345,15 @@ export function openFarmPauseControl(input: FarmPauseControlInput) {
   return Object.freeze({
     /** Sends the single signed pause. Only valid in the `ready` state. */
     issueControlCommand,
+    /**
+     * Reports the printer's advertised controls. Re-admits the session once
+     * when fresh controls include an action the capability lacks.
+     */
+    controlsChanged,
+    /** Actions of the current capability; empty until admitted. */
+    get admittedActions(): readonly ExtendedControlAction[] {
+      return admittedActions
+    },
     async listFiles(
       printerKey: string,
       directory?: string,
@@ -253,6 +388,7 @@ export function openFarmPauseControl(input: FarmPauseControlInput) {
     dispose(): Promise<void> {
       close()
       disposed ??= Promise.allSettled([
+        replaced,
         command?.settled,
         signalling?.dispose(3000),
       ]).then(() => {})

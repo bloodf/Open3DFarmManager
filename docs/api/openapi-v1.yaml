@@ -1347,7 +1347,9 @@ paths:
         before creating a spool or recording a receipt.
         The binding is immutable. A second local
         spool cannot claim the same external identity in the same farm.
-        A retry with the same key, farm and body returns the original response.
+        Deleting the local spool releases its binding.
+        A retry with the same key, farm and body returns the original response,
+        or 404 (`not-found`) once that spool has been deleted.
         Reusing the key with different input returns 409 (`idempotency-key-reused`).
         A duplicate binding returns 409 (`spool-already-bound`).
       security:
@@ -3681,6 +3683,7 @@ components:
               client-certificate-missing,
               prusa-link-unqualified,
               firmware-shutdown,
+              printer-fault,
             ]
           description: Specific reason for the observed status, when known.
         progress:
@@ -4045,6 +4048,11 @@ components:
         remainingGrams:
           type: [integer, 'null']
           description: Negative values are reported as stored, never clamped.
+        remainingPercent:
+          type: number
+          minimum: 0
+          maximum: 100
+          description: Derived from remaining and initial filament weight when both are available.
         location:
           type: [string, 'null']
           maxLength: 32
@@ -4808,6 +4816,12 @@ components:
         detail:
           type: string
           maxLength: 500
+          description: Machine-readable reason, when the Connector reported one.
+        message:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Operator text (pt-BR), when the Connector reported one.
     Job:
       type: object
       required:
@@ -4894,6 +4908,7 @@ components:
         - pause
         - resume
         - cancel
+        - emergency_stop
         - set_temperature
         - set_tool_temperature
         - set_fan
@@ -4947,7 +4962,7 @@ components:
           properties:
             action:
               type: string
-              enum: [pause, resume, cancel, unload_filament]
+              enum: [pause, resume, cancel, emergency_stop, unload_filament]
             args:
               type: object
               additionalProperties: false
@@ -5082,9 +5097,14 @@ components:
               additionalProperties: false
               properties:
                 tray:
-                  type: integer
-                  minimum: 0
-                  maximum: 15
+                  description: AMS tray (0-15) or AMS HT unit id (128-135).
+                  anyOf:
+                    - type: integer
+                      minimum: 0
+                      maximum: 15
+                    - type: integer
+                      minimum: 128
+                      maximum: 135
     Action:
       type: object
       required:

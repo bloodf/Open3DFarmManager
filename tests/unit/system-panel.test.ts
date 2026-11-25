@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { renderFarmComponent } from '../../apps/farm/app/components/farm/render-farm-component.ts'
+import { renderFarmComponent } from '../helpers/render-farm-component.ts'
 import { detailTabs } from '../../apps/farm/app/utils/printer-detail-view.ts'
 
 it('keeps cached system readings visible and disables restarts offline', async () => {

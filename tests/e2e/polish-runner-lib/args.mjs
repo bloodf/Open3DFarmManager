@@ -21,7 +21,7 @@ Options:
                           as 'node <script> <output-dir>' (must exit 0).
   --page <path>           Repeatable. Page that must differ between baseline and HEAD.
   --unit <args>           Repeatable. Extra vitest arguments (whitespace-separated),
-                          run on host Node 22 against the after tree.
+                          run offline in the dependency image against the after tree.
 `
 
 const positiveInt = (name, value, fallback) => {

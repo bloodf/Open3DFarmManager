@@ -1,7 +1,9 @@
+import { DriverRefusalError } from '../control/driver-refusal.ts'
 import { z } from 'zod'
 import { ControlArguments } from '../../../farm-protocol/src/control-actions.ts'
 import type { ControlObservation } from '../control/pause-dispatcher.ts'
 import { ConsoleRefusal } from './control-console.ts'
+import { klipperCommandName } from './klipper-command.ts'
 import { type MotionState, MotionRefusal } from './control-motion.ts'
 import { U1_TOOL_OBJECTS } from './u1-marker.ts'
 
@@ -9,10 +11,14 @@ type AuditEffect = NonNullable<ControlObservation['effect']>
 export type U1Audit = {
   objects: Record<string, string[]>
   effect: (status: unknown, observedMono: number) => AuditEffect | undefined
+  /** One `notify_gcode_response` text received while the command was in flight. */
+  response?: (message: string) => void
 }
 
-export class U1ConfigRefusal extends Error {
-  readonly refusal = 'state' as const
+export class U1ConfigRefusal extends DriverRefusalError {
+  constructor(message: string) {
+    super('state', message)
+  }
 }
 
 const ConfigSettings = z.object({
@@ -104,9 +110,7 @@ export function u1HomeAudit(
   const { axes } = parsed.args
   // The firmware always homes both XY axes if either is requested.
   if (axes.includes('x') !== axes.includes('y'))
-    throw Object.assign(Error('U1 homes X and Y together'), {
-      refusal: 'invalid-command',
-    })
+    throw new DriverRefusalError('invalid-command', 'U1 homes X and Y together')
   return {
     zOnly: axes.length === 1 && axes[0] === 'z',
     objects: { toolhead: ['homed_axes'] },
@@ -185,16 +189,143 @@ export function u1ConsoleTool(
   return tool
 }
 
-export function u1ConsoleAudit(line: string, tool?: string): U1Audit {
+/*
+ * Report formats of the built-in query commands, identical in both:
+ * - https://github.com/Klipper3d/klipper at c9559fa04ec6b11fb1a9a1610903546319fcf310
+ * - https://github.com/Snapmaker/u1-klipper at 7ac453b50fe6779b2ec0b759038a17da5e6d671d
+ * Paths are under klippy/: `gcode.py` (respond_info prefixes each line with
+ * "// "; cmd_M115), `extras/heaters.py` (_get_temp, cmd_M105),
+ * `extras/gcode_move.py` (cmd_M114, cmd_GET_POSITION),
+ * `extras/query_endstops.py`, `extras/probe.py` (cmd_QUERY_PROBE),
+ * `extras/query_adc.py` and `extras/filament_switch_sensor.py`.
+ * Moonraker b559b9a81161f958a43c2f527b6ad96f73310d5d,
+ * moonraker/components/klippy_connection.py (_process_gcode_response), relays
+ * each text as `notify_gcode_response`. Only the formats are used, no code.
+ */
+const ENDSTOP = '\\w+:(?:open|TRIGGERED)'
+const QUERY_REPORTS: Readonly<
+  Record<string, (message: string, params: string) => boolean>
+> = {
+  // The "T:0" placeholder of a printer without sensors is not a reading.
+  M105: (message) =>
+    /^(?:(?:T\d*|B|C):-?\d+\.\d \/-?\d+\.\d(?: |$))+/.test(message),
+  M114: (message) =>
+    /^X:-?\d+\.\d{3} Y:-?\d+\.\d{3} Z:-?\d+\.\d{3} E:-?\d+\.\d{3}$/.test(
+      message,
+    ),
+  M115: (message) => /^\/\/ .*\bFIRMWARE_NAME:\S/.test(message),
+  GET_POSITION: (message) =>
+    /^\/\/ mcu: [\s\S]*\n\/\/ toolhead: [\s\S]*\n\/\/ gcode homing: /.test(
+      message,
+    ),
+  QUERY_ENDSTOPS: (message) =>
+    new RegExp(`^${ENDSTOP}(?: ${ENDSTOP})*$`).test(message),
+  QUERY_PROBE: (message) => /^\/\/ probe: (?:open|TRIGGERED)$/.test(message),
+  QUERY_ADC(message, params) {
+    const name = /(?:^| )NAME=(\S+)/i.exec(params)?.[1]
+    return message.startsWith(
+      name
+        ? `// ADC object "${name}" has value `
+        : '// Available ADC objects: ',
+    )
+  },
+  QUERY_FILAMENT_SENSOR(message, params) {
+    const name = /(?:^| )SENSOR=(\S+)/i.exec(params)?.[1]
+    return (
+      !!name &&
+      new RegExp(
+        `^// Filament Sensor ${name.replace(/[.+]/g, '\\$&')}: filament (?:not )?detected$`,
+      ).test(message)
+    )
+  },
+}
+
+const BedTargetStatus = z.object({
+  heater_bed: z.object({ target: z.number().finite() }),
+})
+const SpeedFactorStatus = z.object({
+  gcode_move: z.object({ speed_factor: z.number().finite() }),
+})
+
+type Readback = {
+  objects: Record<string, string[]>
+  confirmed: (status: unknown) => boolean
+}
+
+/** Output-only commands: the script acknowledgement is all the evidence there is. */
+const READ_ONLY_COMMANDS = new Set(['M118'])
+
+/**
+ * How to read back the state a console line leaves behind. `undefined` means
+ * the effect cannot be read: the line was sent and acknowledged, but it is
+ * reported as unconfirmed rather than applied.
+ */
+function consoleReadback(
+  command: string,
+  params: readonly string[],
+): Readback | undefined {
+  if (READ_ONLY_COMMANDS.has(command))
+    return { objects: {}, confirmed: () => true }
+  if (
+    command === 'M140' &&
+    params.length === 1 &&
+    /^S0(?:\.0+)?$/i.test(params[0]!)
+  )
+    return {
+      objects: { heater_bed: ['target'] },
+      confirmed(status) {
+        const result = BedTargetStatus.safeParse(status)
+        return result.success && result.data.heater_bed.target === 0
+      },
+    }
+  const speed = /^S(\d{1,3})$/i.exec(params[0] ?? '')
+  if (command === 'M220' && params.length === 1 && speed)
+    return {
+      objects: { gcode_move: ['speed_factor'] },
+      confirmed(status) {
+        const result = SpeedFactorStatus.safeParse(status)
+        return (
+          result.success &&
+          Math.abs(
+            result.data.gcode_move.speed_factor - Number(speed[1]) / 100,
+          ) <= 0.0005
+        )
+      },
+    }
+}
+
+/**
+ * Evidence for a console line. Only tool selection, canonical homing and the
+ * few lines whose state can be read back are ever confirmed; any other line
+ * has no effect to offer, so it ends as sent but unconfirmed and is not retried.
+ */
+export function u1ConsoleAudit(
+  line: string,
+  tool?: string,
+  home?: U1Audit,
+): U1Audit {
+  const command = klipperCommandName(line)
+  const [, ...params] = line.trim().split(/\s+/)
+  const readback = tool || home ? undefined : consoleReadback(command, params)
+  const isQuery =
+    command.startsWith('QUERY_') ||
+    ['M105', 'M114', 'M115', 'GET_POSITION'].includes(command)
+  let reported = false
   return {
-    objects: tool ? { toolhead: ['extruder'] } : {},
+    response(message) {
+      if (QUERY_REPORTS[command]?.(message, params.join(' '))) reported = true
+    },
+    objects: tool
+      ? { toolhead: ['extruder'] }
+      : (home?.objects ?? readback?.objects ?? {}),
     effect(status, observedMono) {
       if (tool) {
         const result = ActiveToolhead.safeParse(status)
         if (!result.success || result.data.toolhead.extruder !== tool) return
-      }
-      // Arbitrary console lines only have the matching script acknowledgement.
-      // Their output is still delivered by the separate console response stream.
+      } else if (home) {
+        // The console home is signed as `gcode` but proven by the homed axes.
+        if (!home.effect(status, observedMono)) return
+      } else if (isQuery ? !reported : !readback?.confirmed(status)) return
       return { kind: 'gcode', line, observedMono }
     },
   }

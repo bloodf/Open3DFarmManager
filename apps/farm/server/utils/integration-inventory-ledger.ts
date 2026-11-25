@@ -91,18 +91,16 @@ export async function searchIntegrationSpools(
       ORDER BY distance NULLS LAST, farm_id, id
       LIMIT ${limit}
     )
-    SELECT farm_id::text AS "farmId", id::float8 AS "spoolId", name, material,
+    SELECT page.farm_id::text AS "farmId", page.id::float8 AS "spoolId", name, material,
       color_hex AS "colorHex", location, remaining AS "remainingGrams",
       distance::float8 AS "colorDistance", loaded_at IS NOT NULL AS loaded,
       COALESCE(loaded_at, '[]'::jsonb) AS "loadedAt",
-      r.response->'spoolman'->>'serviceId' AS "serviceId",
-      (r.response->'spoolman'->>'spoolId')::float8 AS "serviceSpoolId"
+      b.spoolman_service_id::text AS "serviceId",
+      b.spoolman_spool_id::float8 AS "serviceSpoolId"
     FROM page
-    LEFT JOIN farm.integration_physical_spool_registrations r
-      ON r.response ? 'spoolman'
-      AND r.response->>'farmId' = page.farm_id::text
-      AND r.response->>'spoolId' = page.id::text
-    ORDER BY distance NULLS LAST, farm_id, id`
+    LEFT JOIN farm.integration_physical_spool_bindings b
+      ON b.farm_id = page.farm_id AND b.spool_id = page.id
+    ORDER BY distance NULLS LAST, page.farm_id, page.id`
   return { data: rows.map(publishSpoolBinding), assessedAt: Date.now() }
 }
 
@@ -138,13 +136,11 @@ export async function listIntegrationSpoolUsage(
       u.job_id::text AS "jobId", u.spool_id::float8 AS "spoolId",
       u.printer_id::text AS "printerId", u.grams, u.source,
       u.created_at::float8 AS "observedAt", u.corrected_by IS NOT NULL AS corrected,
-      r.response->'spoolman'->>'serviceId' AS "serviceId",
-      (r.response->'spoolman'->>'spoolId')::float8 AS "serviceSpoolId"
+      b.spoolman_service_id::text AS "serviceId",
+      b.spoolman_spool_id::float8 AS "serviceSpoolId"
     FROM page u
-    LEFT JOIN farm.integration_physical_spool_registrations r
-      ON r.response ? 'spoolman'
-      AND r.response->>'farmId' = u.farm_id::text
-      AND r.response->>'spoolId' = u.spool_id::text
+    LEFT JOIN farm.integration_physical_spool_bindings b
+      ON b.farm_id = u.farm_id AND b.spool_id = u.spool_id
     ORDER BY u.id`
   const data = rows.slice(0, limit).map(publishSpoolBinding)
   return { data, nextCursor: rows.length > limit ? data.at(-1)!.usageId : null }

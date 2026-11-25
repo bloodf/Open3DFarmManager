@@ -6,7 +6,38 @@ import {
 } from '@open3dfarmmanager/farm-protocol'
 import { TelemetryProofChallenge } from '../../../farm-protocol/src/telemetry-proof.ts'
 import type { ConnectorIdentity } from '../identity/store.ts'
-import type { TelemetrySender } from './drain.ts'
+import { TelemetryBatchRefused, type TelemetrySender } from './drain.ts'
+
+class RequestRefused extends Error {}
+
+/**
+ * Older servers parse records strictly and refuse the whole batch for a shape
+ * they do not know: an idle printer with no progress, or a send age. This
+ * returns the shapes to try after a refusal, least changed first. Idle
+ * progress is 0 only for such a server; the queue keeps the record as observed.
+ */
+function olderShapes(body: string): string[] {
+  const records = TelemetryBatch.parse(
+    parseBoundedJson(body, TELEMETRY_BATCH_JSON_LIMITS),
+  )
+  const withProgress = records.map((record) =>
+    record.kind === 'printer-state' &&
+    record.state.state === 'idle' &&
+    record.state.progress === undefined
+      ? { ...record, state: { ...record.state, progress: 0 } }
+      : record,
+  )
+  const withoutAge = withProgress.map((record) => {
+    if (!('ageAtSendMs' in record)) return record
+    const { ageAtSendMs: _age, ...rest } = record
+    return rest
+  })
+  const shapes = new Set(
+    [withProgress, withoutAge].map((shape) => JSON.stringify(shape)),
+  )
+  shapes.delete(JSON.stringify(records))
+  return [...shapes]
+}
 
 /** Explicit trusted configuration; no fallback to the unauthenticated prototype. */
 export function createAuthenticatedTelemetrySender(options: {
@@ -68,7 +99,7 @@ export function createAuthenticatedTelemetrySender(options: {
     const timer = setTimeout(() => controller.abort(), timeoutMs)
     try {
       if (signal.aborted) throw new Error()
-      const bytes = new TextEncoder().encode(body)
+      let bytes = new TextEncoder().encode(body)
       TelemetryBatch.parse(parseBoundedJson(body, TELEMETRY_BATCH_JSON_LIMITS))
       async function post(
         path: string,
@@ -83,6 +114,15 @@ export function createAuthenticatedTelemetrySender(options: {
           cache: 'no-store',
           headers: requestHeaders,
         })
+        if (response.status === 400) {
+          await response.body?.cancel().catch(() => {})
+          throw new RequestRefused()
+        }
+        // Only the commit compares event IDs, so only its 409 is permanent.
+        if (response.status === 409 && path === endpoint) {
+          await response.body?.cancel().catch(() => {})
+          throw new TelemetryBatchRefused()
+        }
         if (
           ![200, 429].includes(response.status) ||
           !/^application\/json(?:\s*;|\s*$)/i.test(
@@ -160,11 +200,24 @@ export function createAuthenticatedTelemetrySender(options: {
         }
         throw new Error()
       }
-      const reply = await requestWithRetry(
-        endpoint + '/challenge',
-        headers,
-        deadlineAt,
-      )
+      const requestChallenge = () =>
+        requestWithRetry(endpoint + '/challenge', headers, deadlineAt)
+      let reply: unknown
+      let older: string[] | undefined
+      for (;;) {
+        try {
+          reply = await requestChallenge()
+          break
+        } catch (error) {
+          // Nothing is committed by a refused challenge, so asking again with
+          // an older record shape is safe. Each batch tries the current shape
+          // first, so an upgraded server receives it without a restart.
+          if (!(error instanceof RequestRefused)) throw error
+          const next = (older ??= olderShapes(body)).shift()
+          if (next === undefined) throw error
+          bytes = new TextEncoder().encode(next)
+        }
+      }
       if (
         !reply ||
         typeof reply !== 'object' ||
@@ -214,7 +267,8 @@ export function createAuthenticatedTelemetrySender(options: {
       )
         throw new Error()
       return result.acceptedEventIds
-    } catch {
+    } catch (error) {
+      if (error instanceof TelemetryBatchRefused) throw error
       throw new Error('Telemetry transport failed')
     } finally {
       clearTimeout(timer)

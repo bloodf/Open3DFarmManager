@@ -9,6 +9,7 @@ import {
   type ApiQueryReply,
   type ApiQueryRequest,
 } from '../../../../packages/farm-protocol/src/api-query.ts'
+import { API_REFUSAL_MESSAGE_SUPPORT_HEADER } from '../../../../packages/farm-protocol/src/api-envelope.ts'
 import type {
   EnvelopeInbox,
   IntegrationDeliveryService,
@@ -152,6 +153,7 @@ interface Connection {
   lastSample: SignallingClockSample
   readonly supportsApiQueries: boolean
   readonly supportsDispatchQueries: boolean
+  readonly acceptsRefusalMessage: boolean
   readonly supportsSpoolQueries: boolean
   readonly inboxId: string
   inboxGeneration: number
@@ -288,9 +290,42 @@ export class SignallingRuntime {
       wire,
       scope: authority.scope,
       confirmed_at: authority.confirmedAt,
+      ...(connection.acceptsRefusalMessage ? { refusal_message: true } : {}),
     })
     return 'sent'
   }
+  querySpoolMembership(
+    farmId: string,
+    agentId: string,
+    binding: { serviceId: string; spoolId: number },
+    signal?: AbortSignal,
+  ) {
+    const connection = this.#inboxes.get('read-only:' + agentId)
+    if (
+      !connection?.supportsSpoolQueries ||
+      !this.#canQueryInbox(connection, farmId, signal)
+    )
+      return undefined
+    return this.queryAgentInbox(
+      farmId,
+      agentId,
+      { kind: 'spool-membership', farmId, ...binding },
+      signal,
+    )
+  }
+
+  #canQueryInbox(connection: Connection, farmId: string, signal?: AbortSignal) {
+    return (
+      connection.supportsApiQueries &&
+      this.#apiIdentity(connection)?.farm_id === farmId &&
+      !signal?.aborted &&
+      this.#apiQueries.size < 32 &&
+      [...this.#apiQueries.values()].filter(
+        (pending) => pending.connection === connection,
+      ).length < 4
+    )
+  }
+
   async queryAgentInbox(
     farmId: string,
     agentId: string,
@@ -303,16 +338,11 @@ export class SignallingRuntime {
       error: 'connector-unavailable',
     } as const
     if (
-      !connection?.supportsApiQueries ||
+      !connection ||
+      !this.#canQueryInbox(connection, farmId, signal) ||
       (input.kind === 'dispatch' && !connection.supportsDispatchQueries) ||
       (input.kind === 'spool-membership' &&
-        (!connection.supportsSpoolQueries || input.farmId !== farmId)) ||
-      this.#apiIdentity(connection)?.farm_id !== farmId ||
-      signal?.aborted ||
-      this.#apiQueries.size >= 32 ||
-      [...this.#apiQueries.values()].filter(
-        (pending) => pending.connection === connection,
-      ).length >= 4
+        (!connection.supportsSpoolQueries || input.farmId !== farmId))
     )
       return unavailable
 
@@ -500,6 +530,9 @@ export class SignallingRuntime {
           role === 'connector' &&
           mode === 'read-only' &&
           inspected.headers.get(API_QUERY_SUPPORT_HEADER) === '1',
+        acceptsRefusalMessage:
+          role === 'connector' &&
+          inspected.headers.get(API_REFUSAL_MESSAGE_SUPPORT_HEADER) === '1',
         supportsSpoolQueries:
           inspected.headers.get(API_SPOOL_QUERY_SUPPORT_HEADER) === '1',
         supportsDispatchQueries:

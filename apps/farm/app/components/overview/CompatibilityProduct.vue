@@ -74,31 +74,24 @@ defineProps<{ product: AnycubicCatalogProduct; klipperFamily: boolean }>()
 <style scoped>
 .product {
   min-width: 0;
-  padding: var(--space-5);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-raised);
 }
 h2 {
-  margin: 0 0 var(--space-3);
-  font-size: var(--font-size-lg);
-  line-height: var(--line-height-tight);
-  overflow-wrap: anywhere;
+  margin: 0;
 }
 h3 {
-  margin: var(--space-4) 0 var(--space-2);
-  font-size: var(--font-size-base);
+  margin: var(--ops-space-2) 0 0;
+  padding-block-start: var(--ops-space-3);
+  border-block-start: 1px solid var(--ops-border);
 }
 p,
 ul {
   margin: 0;
 }
 .note {
-  margin-bottom: var(--space-3);
-  color: var(--color-text-muted);
+  color: var(--ops-muted);
 }
 ul {
-  padding-inline-start: var(--space-5);
+  padding-inline-start: var(--ops-space-5);
 }
 li,
 dd {
@@ -106,20 +99,19 @@ dd {
 }
 .facts {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 8.5rem), 1fr));
-  gap: var(--space-2) var(--space-4);
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 9.5rem), 1fr));
+  gap: var(--ops-space-3) var(--ops-space-4);
   margin: 0;
 }
 .facts div {
+  display: grid;
+  align-content: start;
+  gap: var(--ops-space-1);
   min-width: 0;
-}
-dt {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-muted);
 }
 dd {
   margin: 0;
-  font-weight: var(--font-weight-semibold);
+  font-weight: 600;
 }
 li a {
   display: inline-flex;
@@ -129,10 +121,5 @@ li a {
 a:focus-visible {
   outline: var(--focus-ring-width) solid var(--color-focus-ring);
   outline-offset: var(--focus-ring-offset);
-}
-@media (max-width: 30rem) {
-  .product {
-    padding: var(--space-4);
-  }
 }
 </style>

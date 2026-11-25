@@ -94,7 +94,7 @@ async function submit() {
 </script>
 
 <template>
-  <main id="conteudo" class="invite-page">
+  <main id="conteudo" class="ops-account invite-page">
     <header class="page-header">
       <p class="eyebrow">Open3DFarmManager</p>
       <h1>Convidar pessoa</h1>
@@ -185,122 +185,28 @@ async function submit() {
 </template>
 
 <style scoped>
-.invite-page {
-  display: grid;
-  gap: var(--space-4);
-  align-content: start;
-}
-.page-header {
-  display: grid;
-  gap: var(--space-2);
-}
-.page-header h1,
-.page-header p {
-  margin: 0;
-}
-.eyebrow {
-  font-size: var(--font-size-sm);
-  letter-spacing: 0.04em;
-  color: var(--color-text-muted);
-}
-.intro {
-  color: var(--color-text-muted);
-}
 .alert:empty {
   display: none;
-}
-.alert:focus-visible {
-  outline: var(--focus-ring-width) solid var(--color-focus-ring);
-  outline-offset: var(--focus-ring-offset);
-  border-radius: var(--radius-md);
-}
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-4);
-  align-items: center;
-}
-.panel {
-  margin: 0;
-  padding: var(--space-5);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-raised);
-  min-width: 0;
-}
-.panel p {
-  margin: 0;
-}
-.loading,
-.result {
-  display: grid;
-  gap: var(--space-3);
 }
 .loading :deep(.skeleton) {
   min-block-size: 3rem;
 }
-.invite-form {
-  display: grid;
-  gap: var(--space-4);
-  max-width: 36rem;
-}
-.result {
-  max-width: 36rem;
-}
-h2 {
-  margin: 0;
-  font-size: var(--font-size-lg);
-  line-height: var(--line-height-tight);
-}
-h2:focus-visible {
-  outline: var(--focus-ring-width) solid var(--color-focus-ring);
-  outline-offset: var(--focus-ring-offset);
-  border-radius: var(--radius-sm);
-}
-label {
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
-}
 .link-field {
   display: grid;
   gap: var(--space-1);
-}
-select,
-input {
-  width: 100%;
-  min-height: 2.75rem;
-  padding: var(--space-2) var(--space-3);
-  font: inherit;
-  color: inherit;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-}
-input {
-  font-family: ui-monospace, monospace;
-  font-size: var(--font-size-sm);
-}
-select:focus-visible,
-input:focus-visible {
-  outline: var(--focus-ring-width) solid var(--color-focus-ring);
-  outline-offset: var(--focus-ring-offset);
-}
-select:disabled {
-  opacity: 0.6;
 }
 .links {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2) var(--space-4);
 }
-/* Same bordered surface as the panels. */
-.invite-page :deep(.ui-card) {
-  border: 1px solid var(--color-border);
-  box-shadow: none;
-}
-@media (max-width: 30rem) {
-  .panel {
-    padding: var(--space-4);
+@media (min-width: 64rem) {
+  #conteudo form.invite-form.panel {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto;
+    align-items: end;
+  }
+  .invite-form h2 {
+    grid-column: 1 / -1;
   }
 }
 </style>

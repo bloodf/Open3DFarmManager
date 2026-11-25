@@ -331,3 +331,44 @@ test('a single-use session that served its peer resets backoff; one that never s
   assert.deepEqual(late.slice(0, 4), [20, 40, 80, 160])
   assert.deepEqual(never.slice(0, 4), [20, 40, 80, 160])
 })
+
+test('idle inbox expiry just before 30 s resets reconnect pressure', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] })
+  const controller = new AbortController()
+  const delays: number[] = []
+  let attempts = 0
+  const running = runSignallingLifecycle({
+    credentialExpiresAt: Date.now() + 120_000,
+    monotonic: Date.now,
+    retryMinMs: 20,
+    retryMaxMs: 400,
+    signal: controller.signal,
+    async sleep(ms) {
+      delays.push(ms)
+      if (delays.length === 3) controller.abort()
+    },
+    createSession(terminal, admitted) {
+      return {
+        async start() {
+          if (++attempts <= 2) terminal()
+          else {
+            admitted()
+            setTimeout(terminal, 29_950)
+          }
+        },
+        close() {},
+        async dispose() {},
+      }
+    },
+  })
+  try {
+    await tick()
+    assert.equal(attempts, 3)
+    t.mock.timers.tick(29_950)
+    await tick()
+    assert.deepEqual(delays, [20, 40, 20])
+  } finally {
+    controller.abort()
+    await running
+  }
+})

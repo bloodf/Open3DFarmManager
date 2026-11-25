@@ -1,5 +1,5 @@
 import { record } from './discovery.ts'
-import type { KobraXReport } from './requests.ts'
+import { reportRefusal, type KobraXReport } from './requests.ts'
 
 const preparing = new Set([
   'checking',
@@ -16,6 +16,13 @@ const preparing = new Set([
   'hotbed_cooling_off',
   'nozzle_cooling_off',
 ])
+
+export function isKobraXActivePhase(phase: unknown): phase is string {
+  return (
+    typeof phase === 'string' &&
+    (phase === 'printing' || phase === 'paused' || preparing.has(phase))
+  )
+}
 
 export interface KobraXAceSlotFact {
   index: number
@@ -135,6 +142,7 @@ export function createKobraXFacts() {
   >()
 
   function report(input: KobraXReport) {
+    if (reportRefusal(input) !== null) return
     if (input.type === 'print' && input.action === 'getSliceParam') return
     const { data } = input
     const previous = facts
@@ -175,11 +183,7 @@ export function createKobraXFacts() {
         next.filename = data.filename.slice(0, 255)
       if (typeof data.taskid === 'string') next.taskId = data.taskid
       if (typeof phase === 'string') {
-        if (
-          phase === 'printing' ||
-          phase === 'paused' ||
-          preparing.has(phase)
-        ) {
+        if (isKobraXActivePhase(phase)) {
           next.jobActive = true
           next.jobPhase = phase
         } else if (phase === 'finished' || phase === 'stoped') {

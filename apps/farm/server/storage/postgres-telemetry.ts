@@ -8,6 +8,31 @@ import { jobsFromEvents } from '../services/job-history-core.ts'
 import { recordJobs } from './job-history-store.ts'
 import { recordLatestStates } from './postgres-printer-latest-state.ts'
 import { recordNetworkTelemetry } from './postgres-farm-network.ts'
+// Send age is per delivery attempt and does not participate in replay matching.
+export function durableTelemetryEvent(event: TelemetryEvent) {
+  if (event.kind !== 'printer-state' && event.kind !== 'inventory-snapshot')
+    return event
+  const { ageAtSendMs: _age, ...payload } = event
+  return payload
+}
+
+/**
+ * The Connector adds progress 0 to an idle printer only for a server that
+ * requires it, so a resend after a server upgrade or rollback can differ from
+ * the stored copy in just that. Both forms are one observation: this returns
+ * the other form, or undefined when the event has only one.
+ */
+export function equivalentTelemetryResend(event: TelemetryEvent) {
+  if (event.kind !== 'printer-state' || event.state.state !== 'idle') return
+  const { progress, ...state } = event.state
+  if (progress !== undefined && progress !== 0) return
+  const { ageAtSendMs: _age, ...payload } = event
+  return {
+    ...payload,
+    state: progress === undefined ? { ...state, progress: 0 } : state,
+  }
+}
+
 class EventConflict extends Error {}
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
@@ -34,24 +59,34 @@ export class PostgresTelemetryStore implements TelemetryEventStore {
       if (Buffer.byteLength(JSON.stringify(snapshot)) > 64 * 1024)
         throw new Error()
       // Stable lock acquisition order for overlapping concurrent batches.
-      snapshot.sort((a, b) => a.eventId.localeCompare(b.eventId))
+      const sorted = [...snapshot].sort((a, b) =>
+        a.eventId.localeCompare(b.eventId),
+      )
       await this.#sql.begin(async (tx) => {
         await tx`SET LOCAL statement_timeout = '2000ms'`
         await tx`SET LOCAL lock_timeout = '1000ms'`
-        for (const event of snapshot) {
-          const payload = event
-          await tx`INSERT INTO farm.telemetry_events (farm_id, agent_id, event_id, payload)
+        const inserted = new Set<string>()
+        for (const event of sorted) {
+          const payload = durableTelemetryEvent(event)
+          const resend = equivalentTelemetryResend(event) ?? payload
+          const result =
+            await tx`INSERT INTO farm.telemetry_events (farm_id, agent_id, event_id, payload)
             VALUES (${farmId}::uuid, ${agentId}::uuid, ${event.eventId}::uuid, ${tx.json(payload)}::jsonb)
-            ON CONFLICT (farm_id, agent_id, event_id) DO NOTHING`
+            ON CONFLICT (farm_id, agent_id, event_id) DO NOTHING RETURNING event_id`
+          if (result.length) inserted.add(event.eventId)
           const rows =
-            await tx`SELECT payload = ${tx.json(payload)}::jsonb AS matches
+            await tx`SELECT payload IN (${tx.json(payload)}::jsonb, ${tx.json(resend)}::jsonb) AS matches
             FROM farm.telemetry_events
             WHERE farm_id = ${farmId}::uuid AND agent_id = ${agentId}::uuid AND event_id = ${event.eventId}::uuid
             FOR SHARE`
           if (rows.length !== 1 || rows[0]?.matches !== true)
             throw new EventConflict()
         }
-        await recordLatestStates(tx, { farmId, agentId }, snapshot)
+        await recordLatestStates(
+          tx,
+          { farmId, agentId },
+          snapshot.filter((event) => inserted.has(event.eventId)),
+        )
         await recordNetworkTelemetry(tx, { farmId, agentId }, snapshot)
         // Finished jobs ride along in the same transaction; repeats are a no-op.
         await recordJobs(tx, { farmId, agentId }, jobsFromEvents(snapshot))

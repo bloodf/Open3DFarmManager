@@ -33,7 +33,7 @@ assert.equal(
   JSON.parse(
     readFileSync(builderRequire.resolve('nitropack/package.json'), 'utf8'),
   ).version,
-  '2.13.6',
+  '2.14.0',
 )
 assert.equal(
   JSON.parse(

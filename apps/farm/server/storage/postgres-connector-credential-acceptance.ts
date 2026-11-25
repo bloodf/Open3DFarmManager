@@ -1,3 +1,7 @@
+import {
+  durableTelemetryEvent,
+  equivalentTelemetryResend,
+} from './postgres-telemetry.ts'
 import { recordInventorySnapshot } from './postgres-inventory-snapshot.ts'
 import { recordNetworkTelemetry } from './postgres-farm-network.ts'
 import {
@@ -656,25 +660,35 @@ export class PostgresConnectorCredentialAcceptance {
                 const batch = save.json(
                   sorted.map((record) => ({
                     id: record.eventId,
-                    payload: record,
+                    payload: durableTelemetryEvent(record),
+                    // Absent (SQL NULL) when the event has only one form.
+                    resend: equivalentTelemetryResend(record),
                   })),
                 )
-                await save`INSERT INTO farm.telemetry_events (farm_id,agent_id,event_id,payload) SELECT ${request.farmId}::uuid,${request.agentId}::uuid,(e->>'id')::uuid,e->'payload' FROM jsonb_array_elements(${batch}::jsonb) WITH ORDINALITY AS t(e,n) ORDER BY n ON CONFLICT (farm_id,agent_id,event_id) DO NOTHING`
+                const inserted = await save<
+                  { event_id: string }[]
+                >`INSERT INTO farm.telemetry_events (farm_id,agent_id,event_id,payload) SELECT ${request.farmId}::uuid,${request.agentId}::uuid,(e->>'id')::uuid,e->'payload' FROM jsonb_array_elements(${batch}::jsonb) WITH ORDINALITY AS t(e,n) ORDER BY n ON CONFLICT (farm_id,agent_id,event_id) DO NOTHING RETURNING event_id::text`
                 const stored =
-                  await save`SELECT s.payload=e->'payload' AS matches FROM jsonb_array_elements(${batch}::jsonb) WITH ORDINALITY AS t(e,n) JOIN farm.telemetry_events s ON s.farm_id=${request.farmId}::uuid AND s.agent_id=${request.agentId}::uuid AND s.event_id=(e->>'id')::uuid ORDER BY n FOR SHARE OF s`
+                  await save`SELECT s.payload IN (e->'payload', e->'resend') AS matches FROM jsonb_array_elements(${batch}::jsonb) WITH ORDINALITY AS t(e,n) JOIN farm.telemetry_events s ON s.farm_id=${request.farmId}::uuid AND s.agent_id=${request.agentId}::uuid AND s.event_id=(e->>'id')::uuid ORDER BY n FOR SHARE OF s`
                 if (
                   stored.length !== sorted.length ||
                   stored.some((row) => row.matches !== true)
                 )
                   throw new TelemetryConflict()
+                const insertedIds = new Set(
+                  inserted.map(({ event_id }) => event_id),
+                )
+                const accepted = operation.records.filter((event) =>
+                  insertedIds.has(event.eventId),
+                )
                 if (
-                  sorted.some((event) => event.kind === 'printer-state') &&
+                  accepted.some((event) => event.kind === 'printer-state') &&
                   (await latestStateTableExists(save))
                 )
                   await recordLatestStates(
                     save,
                     { farmId: request.farmId, agentId: request.agentId },
-                    sorted,
+                    accepted,
                   )
                 await recordNetworkTelemetry(
                   save,
@@ -682,11 +696,12 @@ export class PostgresConnectorCredentialAcceptance {
                   sorted,
                 )
                 for (const event of operation.inventorySnapshots) {
+                  if (!insertedIds.has(event.eventId)) continue
                   await recordInventorySnapshot(
                     save,
                     request,
                     event.inventory,
-                    readNow(),
+                    event.ageAtSendMs,
                   )
                 }
                 // Finished jobs carried by the snapshots are recorded in the

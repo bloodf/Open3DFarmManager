@@ -97,7 +97,7 @@ export async function realRehearsal() {
     containers: docker('ps', '-aq'),
     volumes: docker('volume', 'ls', '-q'),
     worktrees: git('worktree', 'list'),
-    freeBytes: statfsSync(directory).bavail * statfsSync(directory).bsize,
+    freeBytes: readFreeBytes(directory),
   }
   writeFileSync(
     join(evidence, 'baseline.json'),
@@ -483,4 +483,15 @@ export async function realRehearsal() {
         `Cleanup incomplete; manifest retained at ${manifest}`,
       )
   }
+}
+
+function readFreeBytes(directory: string) {
+  const override = process.env.OPENFARM_REHEARSAL_FREE_BYTES
+  if (override !== undefined) {
+    const bytes = Number(override)
+    assert.ok(Number.isSafeInteger(bytes) && bytes >= 0, 'Invalid free bytes')
+    return bytes
+  }
+  const { bavail, bsize } = statfsSync(directory)
+  return bavail * bsize
 }

@@ -79,7 +79,7 @@ describe('spool illustration surfaces', () => {
         for (const [material, percent, level] of [
           ['PLA', '25', '6'],
           ['PETG', '0', '8'],
-        ]) {
+        ] as const) {
           const slot = wallSlots
             .getByRole('listitem')
             .filter({ hasText: material })

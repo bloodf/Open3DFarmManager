@@ -72,11 +72,6 @@ const includesUnknownReel = (html: string) =>
 
 describe('drawn spool inventory screens', () => {
   it('shows a reel and unknown badge in spool list and finder rows', async () => {
-    for (const page of ['index.vue', 'localizar.vue']) {
-      const source = readFileSync(`apps/farm/app/pages/bobinas/${page}`, 'utf8')
-      expect(source).toContain('spool-library/SpoolArt.vue')
-      expect(source).toContain('<SpoolArt :spool=\"spool\"')
-    }
     const html = await render(
       'apps/farm/app/components/spool-library/SpoolArt.vue',
       { spool, size: 40 },

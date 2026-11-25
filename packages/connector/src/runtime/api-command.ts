@@ -805,6 +805,9 @@ export function createApiCommandRunner(config: {
         const parsed = LibraryPrintArgs.safeParse(args)
         if (!target || !config.libraryPrint || !parsed.success)
           throw new JobFileError('unsupported')
+        // Authorization needs the same fresh local observation as file jobs.
+        await config.driver.prepare?.({ binding, signal })
+        prepared = true
         const authorize = () => {
           lastRefusal =
             config.keys.issuer(API_ENVELOPE_ISSUER, envelope.kid) !== issuerKey

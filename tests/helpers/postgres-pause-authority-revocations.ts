@@ -236,6 +236,9 @@ export async function testPauseConnectorRevocations(
     })
     assert.ok(assignment.ok && assignment.status === 'active')
     const assignmentId = assignment.assignmentId
+    const receivedAt = await now()
+    await admin`INSERT INTO farm.printer_latest_state (farm_id, agent_id, printer_key, observed_at, received_at, state)
+      VALUES (${farm}::uuid, ${agentId}::uuid, ${printerKey}, ${receivedAt}, ${receivedAt}, ${admin.json({ controls: ['pause'] })})`
     const authority = new PostgresPauseAuthority(issuerPool, {
       origin,
       audience,

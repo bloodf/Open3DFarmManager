@@ -1,5 +1,6 @@
 import {
   hasCurrentSpoolObservation,
+  prefetchSpoolMembership,
   recordInventorySnapshot,
 } from '../../apps/farm/server/storage/postgres-inventory-snapshot.ts'
 import {
@@ -186,6 +187,7 @@ test('registration rejects untrusted snapshot data before allocating or writing 
     const tx = Object.assign(
       vi.fn((parts: TemplateStringsArray) => {
         const query = parts.join('')
+        if (query === 'FOR SHARE OF a, g') return []
         if (query.includes('lock_physical_spool_observations')) return rows
         if (
           query.includes('SELECT g.id') ||
@@ -228,6 +230,81 @@ test.each([-20_000, 20_000])(
     ).toBe(true)
   },
 )
+
+test('rejects inventory snapshots reported too far in the future before writing', async () => {
+  const tx = Object.assign(vi.fn(), { json: (value: unknown) => value })
+  await recordInventorySnapshot(
+    tx as unknown as TransactionSql,
+    { farmId, agentId: connectorA },
+    observation(serviceA, connectorA, 0, 40_001, [1]).snapshot,
+    10_000,
+  )
+  expect(tx).not.toHaveBeenCalled()
+})
+
+test('rejects targeted membership replies for a different service', async () => {
+  const now = Date.now()
+  const rows = [
+    {
+      agentId: connectorA,
+      observedAt: now,
+      receivedAt: now,
+      snapshot: {
+        ...observation(serviceA, connectorA, 0, now, [1]).snapshot,
+        total: 2,
+      },
+    },
+  ]
+  const sql = vi.fn(async () => rows)
+  const evidence = await prefetchSpoolMembership(
+    sql as unknown as Sql,
+    farmId,
+    { serviceId: serviceA, spoolId: 99 },
+    async () => ({
+      kind: 'spool-membership',
+      serviceId: serviceB,
+      spoolId: 99,
+      present: true,
+      observedAt: now,
+    }),
+  )
+  expect(evidence).toEqual([])
+})
+
+test('does not use targeted membership after its reply freshness window expires', async () => {
+  vi.useFakeTimers()
+  try {
+    vi.setSystemTime(100_000)
+    const row = {
+      agentId: connectorA,
+      observedAt: 100_000,
+      receivedAt: 100_000,
+      snapshot: {
+        ...observation(serviceA, connectorA, 0, 100_000, [1]).snapshot,
+        total: 2,
+      },
+    }
+    const evidence = [
+      {
+        agentId: connectorA,
+        observedAt: 100_000,
+        receivedAt: 100_000,
+        repliedAt: 70_000,
+      },
+    ]
+    const tx = vi.fn(async () => [row])
+    expect(
+      await hasCurrentSpoolObservation(
+        tx as unknown as TransactionSql,
+        farmId,
+        { serviceId: serviceA, spoolId: 99 },
+        evidence,
+      ),
+    ).toBe(false)
+  } finally {
+    vi.useRealTimers()
+  }
+})
 
 const cappedIds = [1, 2, 3, 4, 5, 6, 7, 8, 99]
 
@@ -292,11 +369,13 @@ test('binds an omitted ninth spool only with current targeted membership', async
     scope: 'inventory:write' as const,
   }
   let grant = true
+  let transactionOpen = false
+  const original = { agentId: connectorA, snapshot, observedAt, receivedAt }
+  let lockedRows = [original]
   const tx = Object.assign(
     vi.fn((parts: TemplateStringsArray) => {
       const query = parts.join('')
-      if (query.includes('lock_physical_spool_observations'))
-        return [{ agentId: connectorA, snapshot, observedAt, receivedAt }]
+      if (query.includes('lock_physical_spool_observations')) return lockedRows
       if (query.includes('SELECT g.id')) return grant ? [{ id: 1 }] : []
       if (query.includes('SELECT id FROM farm.spool_filaments'))
         return [{ id: 1 }]
@@ -306,10 +385,23 @@ test('binds an omitted ninth spool only with current targeted membership', async
     }),
     { json: (value: unknown) => value },
   )
-  const sql = {
-    begin: (work: (tx: TransactionSql) => Promise<unknown>) =>
-      work(tx as unknown as TransactionSql),
-  } as unknown as Sql
+  const sql = Object.assign(
+    (parts: TemplateStringsArray) => {
+      const query = parts.join('')
+      if (query.includes('read_physical_spool_observations')) return [original]
+      return tx(parts)
+    },
+    {
+      begin: async (work: (tx: TransactionSql) => Promise<unknown>) => {
+        transactionOpen = true
+        try {
+          return await work(tx as unknown as TransactionSql)
+        } finally {
+          transactionOpen = false
+        }
+      },
+    },
+  ) as unknown as Sql
   const register = (spoolman = binding, read = lookup) =>
     registerPhysicalSpool(
       sql,
@@ -318,7 +410,16 @@ test('binds an omitted ninth spool only with current targeted membership', async
       'binding',
       read,
     )
-  expect(await register()).toMatchObject({ outcome: 'registered' })
+  const slowLookup = vi.fn(async (agentId: string, target: typeof binding) => {
+    expect(transactionOpen).toBe(false)
+    await delay(10)
+    expect(transactionOpen).toBe(false)
+    return lookup(agentId, target)
+  })
+  expect(await register(binding, slowLookup)).toMatchObject({
+    outcome: 'registered',
+  })
+  expect(slowLookup).toHaveBeenCalledOnce()
   expect(lookup).toHaveBeenCalledWith(connectorA, binding)
   tx.mockClear()
   for (const result of [
@@ -345,6 +446,29 @@ test('binds an omitted ninth spool only with current targeted membership', async
     ),
   ])
     expect(result).toEqual({ outcome: 'spool-not-observed' })
+  for (const replacement of [
+    [{ ...original, receivedAt: receivedAt - 1 }],
+    [
+      {
+        ...original,
+        observedAt: observedAt + 1,
+        snapshot: { ...snapshot, observedAt: observedAt + 1 },
+      },
+    ],
+    [],
+  ]) {
+    lockedRows = [original]
+    const changeDuringLookup = vi.fn(async () => {
+      const reply = await lookup(connectorA, binding)
+      lockedRows = replacement
+      return reply
+    })
+    expect(await register(binding, changeDuringLookup)).toEqual({
+      outcome: 'spool-not-observed',
+    })
+    expect(changeDuringLookup).toHaveBeenCalledOnce()
+  }
+  lockedRows = [original]
   reader.update({ kind: 'stale', inventory: null, ageMs: null })
   expect(await register()).toEqual({ outcome: 'spool-not-observed' })
   expect(tx.mock.calls.map(([parts]) => parts.join('')).join('')).not.toMatch(
@@ -629,7 +753,7 @@ test.runIf(
           throw new Error('Registration did not wait for the provenance update')
         })
         expect(await registration).toEqual(rejected)
-        expect(lookup).not.toHaveBeenCalled()
+        expect(lookup).toHaveBeenCalledOnce()
       }
 
       await registerDuringUpdate(
@@ -660,6 +784,17 @@ test.runIf(
       ).toEqual(rejected)
       await root`UPDATE farm.spoolman_connector_settings SET service_id = ${serviceA}
         WHERE farm_id = ${farmId} AND agent_id = ${connectorA}`
+      await registerDuringUpdate(
+        async (tx) => {
+          await publish(serviceA, connectorA, {
+            db: tx,
+            observedAt: Date.now() + 1000,
+            spoolIds: cappedIds,
+          })
+        },
+        { serviceId: serviceA, spoolId: 99 },
+        'refreshed-snapshot',
+      )
       await registerDuringUpdate(
         async (tx) => {
           await publish(serviceB, connectorA, { db: tx })

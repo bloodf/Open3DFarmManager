@@ -2,6 +2,9 @@ import { uploadMoonrakerFile } from '../moonraker/upload.ts'
 
 // Qidi ships a Moonraker fork. See https://github.com/QIDITECH/QIDI_Q1_Pro
 // HTTP contracts: https://moonraker.readthedocs.io/en/latest/external_api/
+// Q1 Pro routes its part fan through cooling_fan.
+// https://github.com/QIDITECH/QIDI_Q1_Pro/blob/main/config/gcode_macro.cfg
+const namedPartFan = 'fan_generic cooling_fan'
 const objects = [
   'webhooks',
   'print_stats',
@@ -9,6 +12,7 @@ const objects = [
   'extruder',
   'heater_bed',
   'fan',
+  namedPartFan,
 ] as const
 
 type Failure =
@@ -133,8 +137,11 @@ export function createQidiAdapter(input: {
       }
     },
     async readState() {
-      const result = await query(`/printer/objects/query?${objects.join('&')}`)
+      const result = await query(
+        `/printer/objects/query?${objects.map(encodeURIComponent).join('&')}`,
+      )
       const status = record(result.status)
+      const fan = status.fan === undefined ? status[namedPartFan] : status.fan
       return {
         webhooks:
           status.webhooks === undefined ? undefined : record(status.webhooks),
@@ -152,7 +159,7 @@ export function createQidiAdapter(input: {
           status.heater_bed === undefined
             ? undefined
             : record(status.heater_bed),
-        fan: status.fan === undefined ? undefined : record(status.fan),
+        fan: fan === undefined ? undefined : record(fan),
       }
     },
     async readHistory() {

@@ -170,6 +170,12 @@ function printerStateSchema(legacy: boolean) {
           'client-certificate-missing',
           'prusa-link-unqualified',
           'firmware-shutdown',
+          'flashforge-simulated',
+          'flashforge-unqualified',
+          'phrozen-simulated',
+          'phrozen-unqualified',
+          'qidi-simulated',
+          'qidi-unqualified',
         ])
         .optional(),
       alarms: z
@@ -294,6 +300,15 @@ function printerStateSchema(legacy: boolean) {
         (value.statusReason === 'prusa-link-unqualified' &&
           value.identity?.vendor === 'Prusa' &&
           !value.controls?.length) ||
+        (!value.controls?.length &&
+          ((value.identity?.vendor === 'Phrozen' &&
+            (value.statusReason === 'phrozen-simulated' ||
+              value.statusReason === 'phrozen-unqualified')) ||
+            (value.identity?.vendor === 'Flashforge' &&
+              value.state !== 'printing' &&
+              value.state !== 'paused' &&
+              (value.statusReason === 'flashforge-simulated' ||
+                value.statusReason === 'flashforge-unqualified')))) ||
         value.progress !== undefined,
       {
         path: ['progress'],

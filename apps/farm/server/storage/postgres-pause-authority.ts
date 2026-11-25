@@ -1,9 +1,11 @@
+import { MAX_FUTURE_OBSERVATION_MS } from './telemetry-clock-skew.ts'
 import { ExtendedControlAction } from '../../../../packages/farm-protocol/src/control-actions.ts'
 import {
   actionsForControlRole,
   controlRoleAllowed,
 } from '../utils/pause-authority/role-policy.ts'
 import { readPauseAuthorityCredentialRecords } from './postgres-connector-credential-record.ts'
+import { OBSERVATION_FRESH_MS } from '../utils/integration-telemetry.ts'
 import { randomUUID } from 'node:crypto'
 import type { Sql, TransactionSql } from 'postgres'
 import { z } from 'zod'
@@ -86,13 +88,29 @@ export type PauseChallengeDecision =
 export type PauseCapabilityDecision =
   { ok: true; capability: SignedPauseCapabilityV1 } | PauseAuthorityFailure
 const denied = (): PauseAuthorityFailure => ({ ok: false, reason: 'denied' })
-// Keep the fallback readable by legacy Connectors as the action enum grows.
-const legacyActions = [
-  'pause',
-  'resume',
-  'cancel',
-  'emergency_stop',
-] as const satisfies readonly ExtendedControlAction[]
+/** An issuer may only grant controls from a current telemetry observation. */
+export function freshAdvertisedActions(
+  controls: unknown,
+  observedAt: unknown,
+  receivedAt: unknown,
+  now: number,
+): ExtendedControlAction[] {
+  const observed = time.safeParse(observedAt)
+  const received = time.safeParse(receivedAt)
+  if (
+    !observed.success ||
+    !received.success ||
+    observed.data > received.data + MAX_FUTURE_OBSERVATION_MS ||
+    received.data > now ||
+    now - received.data > OBSERVATION_FRESH_MS ||
+    !Array.isArray(controls)
+  )
+    return []
+  const advertised = new Set<unknown>(controls)
+  return ExtendedControlAction.options.filter((action) =>
+    advertised.has(action),
+  )
+}
 type Current = {
   account: AccountSessionState
   session: SessionRecord
@@ -435,16 +453,19 @@ export class PostgresPauseAuthority {
     tx: TransactionSql,
     binding: ControlSessionBinding,
     printerKey: string,
+    now: number,
   ): Promise<readonly ExtendedControlAction[]> {
-    const [latest] = await tx<{ controls: unknown }[]>`
-      SELECT controls FROM farm.pause_authority_advertised_controls
+    const [latest] = await tx<
+      { controls: unknown; observed_at: number; received_at: number | null }[]
+    >`
+      SELECT controls, observed_at::float8 AS observed_at, received_at::float8 AS received_at FROM farm.pause_authority_advertised_controls
       WHERE farm_id=${binding.farm_id}::uuid AND agent_id=${binding.agent_id}::uuid
         AND printer_key=${printerKey}`
-    if (latest?.controls == null) return legacyActions
-    if (!Array.isArray(latest.controls)) return []
-    const advertised = new Set<unknown>(latest.controls)
-    return ExtendedControlAction.options.filter((action) =>
-      advertised.has(action),
+    return freshAdvertisedActions(
+      latest?.controls,
+      latest?.observed_at,
+      latest?.received_at,
+      now,
     )
   }
   async issueChallenge(input: unknown): Promise<PauseChallengeDecision> {
@@ -689,7 +710,12 @@ export class PostgresPauseAuthority {
         }
         const actions = actionsForControlRole(
           current.role,
-          await this.advertisedActions(tx, binding, current.printerKey),
+          await this.advertisedActions(
+            tx,
+            binding,
+            current.printerKey,
+            checked,
+          ),
         )
         if (actions.length === 0) {
           await this.terminal(tx, row, 'rejected', await this.now(tx))

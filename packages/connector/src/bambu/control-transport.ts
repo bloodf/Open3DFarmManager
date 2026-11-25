@@ -11,11 +11,47 @@ import { z } from 'zod'
  */
 const MAX_REQUEST_BYTES = 1024
 const sequence = z.string().regex(/^[0-9]{1,16}$/)
+// AMS HT ids and their tray indexes start at 128 (see ams.ts).
+const amsHt = z.number().int().min(128).max(135)
+const amsUnit = z.union([z.number().int().min(0).max(3), amsHt])
+const amsTray = z.union([z.number().int().min(0).max(15), amsHt])
 const ControlRequest = z.union([
   z.strictObject({
     print: z.strictObject({
+      command: z.literal('set_ctt'),
+      ctt_val: z.number().int().min(0).max(65),
+      sequence_id: sequence,
+    }),
+  }),
+  z.strictObject({
+    print: z.strictObject({
+      command: z.literal('set_bed_temp'),
+      temp: z.number().int().min(0).max(120),
+      sequence_id: sequence,
+    }),
+  }),
+  z.strictObject({
+    print: z.strictObject({
+      command: z.literal('set_nozzle_temp'),
+      extruder_index: z.number().int().min(0).max(1),
+      target_temp: z.number().int().min(0).max(300),
+      sequence_id: sequence,
+    }),
+  }),
+  z.strictObject({
+    print: z.strictObject({
+      command: z.literal('set_fan'),
+      fan_index: z.number().int().min(1).max(3),
+      speed: z.number().int().min(0).max(100),
+      sequence_id: sequence,
+    }),
+  }),
+  z.strictObject({
+    print: z.strictObject({
       command: z.literal('ams_change_filament'),
-      target: z.union([z.number().int().min(0).max(15), z.literal(255)]),
+      ams_id: amsUnit.optional(),
+      target: z.union([amsTray, z.literal(255)]),
+      slot_id: z.union([z.number().int().min(0).max(3), z.literal(255)]),
       curr_temp: z.number().finite().min(0).max(300),
       tar_temp: z.number().finite().min(0).max(300),
       sequence_id: sequence,

@@ -40,7 +40,10 @@ import {
   runParity,
 } from '../tests/contract/spoolman-parity/index.mjs'
 import { loadCorpora } from '../tests/contract/spoolman-parity/corpora.mjs'
-import { startUpstream } from '../tests/contract/spoolman-parity/upstream.mjs'
+import {
+  removeFixtureDirs,
+  startUpstream,
+} from '../tests/contract/spoolman-parity/upstream.mjs'
 
 if (process.argv.length !== 2)
   throw new Error(
@@ -86,6 +89,18 @@ let builtin
 let pg
 let failed = false
 const containerPrefix = `o3dfm-parity-546-pg-${randomBytes(3).toString('hex')}`
+
+// On interruption: wait for in-flight creates, then remove what was created.
+for (const [signal, code] of [
+  ['SIGINT', 130],
+  ['SIGTERM', 143],
+])
+  process.on(signal, async () => {
+    const remaining = await removeContainers(created)
+    await removeFixtureDirs()
+    ledger({ interrupted: signal, cleanup: created, remaining })
+    process.exit(code)
+  })
 
 try {
   const pulls = {
@@ -248,6 +263,7 @@ try {
     )
   }
   const remaining = await removeContainers(created)
+  await removeFixtureDirs()
   ledger({ cleanup: created, remaining })
   if (remaining.length) {
     failed = true

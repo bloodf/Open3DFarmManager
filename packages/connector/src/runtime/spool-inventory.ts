@@ -4,6 +4,7 @@ import {
   SpoolInventory,
   SpoolSummary,
 } from '../../../farm-protocol/src/inventory.ts'
+import { spoolmanRemainingPercent } from '../spoolman/read.ts'
 import type { SpoolmanSnapshot } from './spoolman-provider.ts'
 
 function clip(value: string | null, max: number): string | null {
@@ -21,8 +22,9 @@ export function summarizeSpoolman(snapshot: SpoolmanSnapshot) {
   const items = [...snapshot.inventory.items].sort(
     (a, b) => Number(a.archived) - Number(b.archived) || a.id - b.id,
   )
-  const spools = items.slice(0, MAX_INVENTORY_SPOOLS).map((item) =>
-    SpoolSummary.parse({
+  const spools = items.slice(0, MAX_INVENTORY_SPOOLS).map((item) => {
+    const percent = spoolmanRemainingPercent(item)
+    return SpoolSummary.parse({
       spoolId: item.id,
       name: clip(item.filament.name, 32),
       material: clip(item.filament.material, 16),
@@ -34,10 +36,11 @@ export function summarizeSpoolman(snapshot: SpoolmanSnapshot) {
               -1_000_000,
               Math.min(1_000_000, Math.round(item.remaining_weight)),
             ),
+      ...(percent !== undefined ? { remainingPercent: percent } : {}),
       location: clip(item.location, 32),
       archived: item.archived,
-    }),
-  )
+    })
+  })
   return Object.freeze({
     serviceId: snapshot.inventory.serviceId,
     spools: Object.freeze(spools),

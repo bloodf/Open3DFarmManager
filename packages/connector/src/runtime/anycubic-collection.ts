@@ -8,6 +8,7 @@ import {
   mergeAnycubicMaterials,
   type AnycubicMaterial,
 } from '../anycubic/ace.ts'
+import type { AnycubicAlert } from '../anycubic/alerts.ts'
 import type { AnycubicCollectorConfig } from '../config/anycubic.ts'
 import { readKobraClientCertMaterial } from '../config/kobra-x-cert.ts'
 import { readPrivateJsonFile } from '../config/local.ts'
@@ -62,6 +63,8 @@ export function createAnycubicCollection(input: {
   // Repeated in every observation until the next job starts, so a telemetry
   // batch that misses the transition report still carries the finished job.
   let lastJob: PrinterState['lastJob']
+  // An end fault stays until a new job; a pause reason until the pause ends.
+  let alert: AnycubicAlert | undefined
   let epoch = 1
   let timer: ReturnType<typeof setTimeout> | undefined
   let values: Record<string, unknown> = {}
@@ -71,6 +74,7 @@ export function createAnycubicCollection(input: {
     estimateActive = false
     activeJob = false
     activeFilename = undefined
+    alert = undefined
     clearTimeout(timer)
     values = {}
     times = {}
@@ -106,9 +110,16 @@ export function createAnycubicCollection(input: {
       const firmware = mapAnycubicFirmware(JSON.parse(payload.toString('utf8')))
       if (firmware) firmwareObservation = { firmware, observedAtMonoMs: now }
       const observation: Record<string, unknown> = report
-      const { kind, estimateBlocked, ...fields } = observation
+      const { kind, estimateBlocked, alert: reported, ...fields } = observation
       if (kind === 'ignored' && !firmware) return
       const state = fields.state
+      if (reported) alert = reported as AnycubicAlert
+      else if (
+        state !== undefined &&
+        (state === 'printing' ||
+          (alert?.kind === 'paused') !== (state === 'paused'))
+      )
+        alert = undefined
       const printing = state === 'printing' || state === 'paused'
       // An explicit phase can withdraw the estimate without ending the job.
       if (state !== undefined || estimateBlocked) estimateActive = printing
@@ -172,6 +183,7 @@ export function createAnycubicCollection(input: {
       const parsed = PrinterState.safeParse({
         ...values,
         ...(lastJob ? { lastJob } : {}),
+        ...(alert ? { statusMessage: alert.message } : {}),
         printerKey: input.binding.printerKey,
         observedAt: Date.now(),
       })

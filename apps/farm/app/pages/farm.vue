@@ -9,6 +9,7 @@ import {
   writeFarmWallQuery,
 } from '../utils/farm-filters.ts'
 import SpoolInventory from '../components/SpoolInventory.vue'
+import { useFarmSlotBindings } from '../composables/useFarmSlotBindings.ts'
 import { useFarmView } from '../composables/useFarmView.ts'
 import { useLastKnownStates } from '../composables/useLastKnownStates.ts'
 import { offlineCards } from '../composables/useLastKnownStates-core.ts'
@@ -18,6 +19,7 @@ import FarmScopeSelector from '../components/farm/FarmScopeSelector.vue'
 import PrinterWallFilters from '../components/farm/PrinterWallFilters.vue'
 import FarmDeviceSelector from '../components/farm/FarmDeviceSelector.vue'
 import PrinterWallTable from '../components/farm/PrinterWallTable.vue'
+import FarmMaterials from '../components/FarmMaterials.vue'
 import FarmPrinterCard from '../components/farm/FarmPrinterCard.vue'
 import PrinterWallCard from '../components/farm/PrinterWallCard.vue'
 import PrinterWallSummary from '../components/farm/PrinterWallSummary.vue'
@@ -67,6 +69,17 @@ const {
   confirmOrigin,
   cameraFor,
 } = view
+
+const slotBindings = useFarmSlotBindings(
+  () => ready.value?.scope?.farmId,
+  () =>
+    ready.value?.rows.some(
+      ({ observation }) =>
+        !observation?.historical && !!observation?.state.materials?.length,
+    ) ?? false,
+)
+const bindingsFor = (row: FarmRow) =>
+  slotBindings(row.assignment.assignmentId, row.observation?.state.materials)
 
 // A live feed owns the printers it reports. While none is authenticated, the
 // stored last known states are read so the page is not empty.
@@ -458,6 +471,7 @@ function cancelPause(event: Event) {
               v-if="rows.length"
               v-slot="{ rows: wallRows }"
               :rows="renderedRows"
+              :bindings-for="bindingsFor"
               :farm-id="ready.scope.farmId"
               :live-now="liveNow"
             >
@@ -511,6 +525,18 @@ function cancelPause(event: Event) {
                         row.observation.state.filename
                       }}</span>
                     </button>
+                    <FarmMaterials
+                      v-if="
+                        row.observation?.state.materials?.length &&
+                        !row.observation.historical
+                      "
+                      :materials="row.observation.state.materials"
+                      :bindings="bindingsFor(row)"
+                      hide-heading
+                    />
+                    <p v-else-if="row.observation?.state.materials?.length">
+                      Materiais indisponíveis: os dados estão desatualizados.
+                    </p>
                     <CollectionHold
                       :row="row"
                       :keys="ready.keys"
@@ -572,6 +598,7 @@ function cancelPause(event: Event) {
           v-if="inspectedRow"
           :key="inspectedRow.assignment.assignmentId"
           :row="inspectedRow"
+          :bindings="bindingsFor(inspectedRow)"
           :farm-id="ready.scope.farmId"
           :camera-for="cameraFor"
           :live-now="liveNow"

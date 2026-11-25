@@ -18,6 +18,8 @@ import PowerPanel from '../../components/printer-detail/PowerPanel.vue'
 import SystemServicesPanel from '../../components/printer-detail/SystemServicesPanel.vue'
 import WebcamsPanel from '../../components/printer-detail/WebcamsPanel.vue'
 import type { WebcamDetailOptions } from '../../utils/webrtc/readonly-peer.ts'
+import { useFarmSlotBindings } from '../../composables/useFarmSlotBindings.ts'
+import PrinterDetailMaterials from '../../components/printer-detail/PrinterDetailMaterials.vue'
 import PrinterDetailDashboard from '../../components/printer-detail/PrinterDetailDashboard.vue'
 import Button from '../../components/ui/Button.vue'
 import EmptyState from '../../components/ui/EmptyState.vue'
@@ -251,6 +253,29 @@ const live = computed(
     row.value?.connection === 'authenticated' &&
     !!age.value &&
     !age.value.stale,
+)
+const detailMaterials = computed(() =>
+  live.value && detailFrame.value?.printerKey === printerKey.value
+    ? detailFrame.value.detail.materials
+    : undefined,
+)
+const vendorHasMaterials = computed(
+  () => !!vendorFrame.value && !!detailMaterials.value?.length,
+)
+const displayedMaterials = computed(() =>
+  detailMaterials.value?.length
+    ? detailMaterials.value
+    : state.value?.materials,
+)
+const slotBindings = useFarmSlotBindings(
+  () => ready.value?.scope?.farmId,
+  () =>
+    !row.value?.observation?.historical && !!displayedMaterials.value?.length,
+)
+const bindings = computed(() =>
+  row.value && !row.value.observation?.historical
+    ? slotBindings(row.value.assignment.assignmentId, displayedMaterials.value)
+    : undefined,
 )
 const heaters = computed(() => {
   const observed = state.value ? heatersFromObservation(state.value) : []
@@ -1236,19 +1261,25 @@ watch(
           }}
         </Button>
       </template>
-      <template v-if="vendorFrame.detail.materials?.length">
-        <h2>Slots ACE</h2>
-        <ul>
-          <li v-for="slot in vendorFrame.detail.materials" :key="slot.slot">
-            {{ slot.slot
-            }}<template v-if="slot.materialType">
-              · {{ slot.materialType }}</template
-            >
-            <template v-if="slot.active"> · Em uso</template>
-          </li>
-        </ul>
-      </template>
+      <PrinterDetailMaterials
+        v-if="vendorHasMaterials"
+        :materials="detailMaterials"
+        :bindings="bindings"
+        :heading="
+          vendorFrame.vendor === 'kobra-x'
+            ? 'Slots ACE'
+            : 'Bandejas de filamento'
+        "
+      />
     </section>
+
+    <PrinterDetailMaterials
+      v-if="!vendorHasMaterials"
+      :materials="displayedMaterials"
+      :bindings="bindings"
+      :historical="row?.observation?.historical"
+      class="panel"
+    />
 
     <ResinLedgerPanel
       v-if="row && ready?.scope?.farmId"

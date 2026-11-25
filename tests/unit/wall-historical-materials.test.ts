@@ -9,6 +9,7 @@ import type {
 } from '../../apps/farm/app/utils/farm-view.ts'
 import { startHttpMock } from '../../packages/sim-tools/src/mocks/http-mock.ts'
 import { withBrowser } from '../helpers/browser.ts'
+import { vueSfcPlugin } from '../e2e/vue-sfc-plugin.ts'
 
 const now = { wall: Date.UTC(2026, 10, 19, 12), mono: 3000 }
 const colors = ['FF4400', '00AA55']
@@ -152,6 +153,7 @@ async function tableCells(historical: boolean) {
       ).pathname,
       loader: 'ts',
     },
+    plugins: [vueSfcPlugin],
     bundle: true,
     write: false,
   })

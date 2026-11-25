@@ -2,6 +2,7 @@
 import ProgressRing from '../ui/charts/ProgressRing.vue'
 import { formatDateTime, formatTemperature } from '../../utils/ui-format.ts'
 import { computed } from 'vue'
+import type { SlotBinding } from '../../utils/farm-slot-view.ts'
 import FarmMaterials from '../FarmMaterials.vue'
 import FarmEnvironment from '../FarmEnvironment.vue'
 import CameraDisplay from '../CameraDisplay.vue'
@@ -25,6 +26,7 @@ const props = defineProps<{
     draft?: { value: string; confirmed: boolean; error: string }
   }
   farmId: string
+  bindings?: Readonly<Record<string, SlotBinding | undefined>>
   cameraFor: (id: string) => MediaStream | null
   liveNow: () => { wall: number; mono: number }
   alerts?: readonly FarmAlert[]
@@ -179,7 +181,14 @@ function dateLabel(time: number) {
         <FarmMaterials
           v-if="!row.observation.historical"
           :materials="row.observation.state.materials"
+          :bindings="bindings"
         />
+        <p
+          v-else-if="row.observation.state.materials?.length"
+          class="farm-card-stale"
+        >
+          Materiais indisponíveis: os dados estão desatualizados.
+        </p>
         <p
           v-if="
             row.connection !== 'authenticated' ||
@@ -196,9 +205,16 @@ function dateLabel(time: number) {
           :slots="activeSpoolSlots(row)"
           :busy="
             row.connection !== 'authenticated' ||
+            row.observation.historical ||
             observationAge(row.observation, liveNow()).stale
           "
           :moonraker-managed="moonrakerActiveSpool(row)"
+          :materials="
+            row.observation.historical
+              ? undefined
+              : row.observation.state.materials
+          "
+          :bindings="bindings"
         />
         <FarmEnvironment
           :fans="row.observation.state.fans"

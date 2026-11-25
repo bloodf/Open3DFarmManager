@@ -1,0 +1,203 @@
+/*
+ * Operations look for the camera, library and files screens: the --ops-*
+ * contract applied to the existing UI kit. Everything is scoped to
+ * `.ops-screen`, so no other page changes.
+ */
+.ops-screen {
+  display: grid;
+  gap: var(--ops-space-4);
+  align-content: start;
+  color: var(--ops-text);
+  font-size: var(--ops-text-body);
+  line-height: 20px;
+}
+main.ops-screen {
+  padding: var(--ops-space-5) var(--ops-space-4);
+}
+.ops-screen > * {
+  min-width: 0;
+}
+.ops-screen p {
+  line-height: 20px;
+}
+.ops-screen .ops-heading {
+  display: grid;
+  gap: var(--ops-space-1);
+}
+.ops-screen .ops-heading p {
+  margin-block: var(--ops-space-1) 0;
+}
+.ops-screen .ops-heading p.ops-wordmark {
+  margin: 0;
+  color: var(--ops-muted);
+  font: 600 var(--ops-text-label) / 16px var(--ops-font-mono);
+  letter-spacing: 0.08em;
+}
+.ops-screen h1 {
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+}
+
+/* Instrument panels: flat surface, one rule, small corners. */
+.ops-screen .ops-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ops-space-3);
+  min-width: 0;
+  margin: 0;
+  padding: var(--ops-space-4);
+  border: 1px solid var(--ops-border);
+  border-radius: var(--ops-radius-lg);
+  background: var(--ops-panel);
+}
+.ops-screen .ops-panel > * {
+  min-width: 0;
+}
+.ops-screen .ops-title {
+  margin: 0 calc(-1 * var(--ops-space-4));
+  padding: 0 var(--ops-space-4) var(--ops-space-3);
+  border-block-end: 1px solid var(--ops-border);
+  font-size: var(--ops-text-body);
+  line-height: 20px;
+}
+
+/* Controls keep a 44px target and an edge stronger than the panel rules. */
+.ops-screen
+  :is(
+    select,
+    textarea,
+    input:not([type='file'], [type='checkbox'], [type='radio'])
+  ) {
+  box-sizing: border-box;
+  inline-size: 100%;
+  max-inline-size: 100%;
+  min-inline-size: 0;
+  min-block-size: 2.75rem;
+  padding: var(--ops-space-2) var(--ops-space-3);
+  font: inherit;
+  color: var(--ops-text);
+  background: var(--ops-canvas);
+  border: 1px solid var(--ops-muted);
+  border-radius: var(--ops-radius-md);
+}
+.ops-screen input[type='file'] {
+  box-sizing: border-box;
+  inline-size: 100%;
+  max-inline-size: 100%;
+  min-inline-size: 0;
+  min-block-size: 2.75rem;
+  padding: var(--ops-space-2);
+  font: inherit;
+  color: var(--ops-text);
+  background: var(--ops-raised);
+  border: 1px dashed var(--ops-muted);
+  border-radius: var(--ops-radius-md);
+}
+.ops-screen input::file-selector-button {
+  margin-inline-end: var(--ops-space-3);
+  padding: var(--ops-space-1) var(--ops-space-3);
+  font: inherit;
+  color: var(--ops-text);
+  background: var(--ops-panel);
+  border: 1px solid var(--ops-muted);
+  border-radius: var(--ops-radius-sm);
+}
+.ops-screen :is(input[type='checkbox'], input[type='radio']) {
+  inline-size: 1.25rem;
+  block-size: 1.25rem;
+  accent-color: var(--ops-action);
+}
+.ops-screen :is(select, input):disabled {
+  opacity: 0.6;
+}
+@media (pointer: coarse) {
+  /* 16px stops mobile browsers from zooming into a focused field. */
+  .ops-screen.ops-screen :is(select, textarea, input) {
+    font-size: 1rem;
+  }
+}
+
+.ops-screen button.ui-button {
+  padding: var(--ops-space-2) var(--ops-space-3);
+  font-weight: 600;
+  color: var(--ops-text);
+  background: var(--ops-panel);
+  border: 1px solid var(--ops-muted);
+  border-radius: var(--ops-radius-md);
+  touch-action: manipulation;
+}
+.ops-screen button.ui-button:where(:hover:not(:disabled)) {
+  background: var(--ops-raised);
+}
+.ops-screen button.ui-button.ops-primary {
+  color: var(--ops-on-action);
+  background: var(--ops-action);
+  border-color: var(--ops-action);
+}
+.ops-screen button.ui-button.ops-primary:hover:not(:disabled) {
+  box-shadow: inset 0 0 0 2px var(--ops-on-action);
+}
+.ops-screen button.ui-button.ops-danger {
+  color: var(--ops-fault);
+  border-color: var(--ops-fault);
+}
+.ops-screen button.ui-button.ops-danger:hover:not(:disabled) {
+  background: var(--ops-fault-bg);
+}
+
+.ops-screen a {
+  color: var(--ops-action);
+}
+.ops-screen
+  :is(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/*
+ * Shared kit blocks inside these screens. The extra element or attribute in each
+ * selector outranks the kit's own scoped rule whatever the stylesheet order.
+ */
+.ops-screen div.ui-card {
+  border-radius: var(--ops-radius-lg);
+}
+.ops-screen .ui-card > :is(h2, h3) {
+  margin: 0 0 var(--ops-space-2);
+  font-size: var(--ops-text-body);
+}
+.ops-screen .ui-card > p {
+  margin-block: 0 var(--ops-space-2);
+}
+.ops-screen div.stale {
+  display: grid;
+  gap: var(--ops-space-2);
+  justify-items: start;
+  padding: var(--ops-space-3) var(--ops-space-4);
+  color: var(--ops-attention);
+  background: var(--ops-attention-bg);
+  border: 1px solid var(--ops-attention);
+  border-radius: var(--ops-radius-lg);
+}
+
+.ops-screen dialog[aria-labelledby] {
+  box-sizing: border-box;
+  max-block-size: calc(100% - 2 * var(--ops-space-4));
+  padding: var(--ops-space-4);
+  color: var(--ops-text);
+  background: var(--ops-panel);
+  border: 1px solid var(--ops-muted);
+  border-radius: var(--ops-radius-lg);
+  overflow-wrap: anywhere;
+  overscroll-behavior: contain;
+}
+.ops-screen dialog > h2 {
+  margin: 0 calc(-1 * var(--ops-space-4)) var(--ops-space-3);
+  padding: 0 var(--ops-space-4) var(--ops-space-3);
+  border-block-end: 1px solid var(--ops-border);
+  font-size: var(--ops-text-title);
+  line-height: 24px;
+}
+.ops-screen dialog h3 {
+  margin: var(--ops-space-4) 0 var(--ops-space-2);
+  font-size: var(--ops-text-body);
+}

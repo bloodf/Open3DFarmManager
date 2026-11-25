@@ -20,7 +20,7 @@ defineProps<{ metadata: LibraryMetadata }>()
     </div>
     <div>
       <dt>Bico</dt>
-      <dd>
+      <dd class="num">
         {{
           nozzles(metadata).length
             ? nozzles(metadata)
@@ -50,11 +50,11 @@ defineProps<{ metadata: LibraryMetadata }>()
     </div>
     <div>
       <dt>Tempo estimado</dt>
-      <dd>{{ formatDuration(metadata.estimatedTimeSeconds) }}</dd>
+      <dd class="num">{{ formatDuration(metadata.estimatedTimeSeconds) }}</dd>
     </div>
     <div>
       <dt>Filamento</dt>
-      <dd>
+      <dd class="num">
         {{ formatWeight(totalGrams(metadata)) ?? 'não informado' }}
       </dd>
     </div>
@@ -69,7 +69,7 @@ defineProps<{ metadata: LibraryMetadata }>()
     </div>
     <div v-if="metadata.layerHeight">
       <dt>Altura de camada</dt>
-      <dd>{{ formatNumber(metadata.layerHeight) }} mm</dd>
+      <dd class="num">{{ formatNumber(metadata.layerHeight) }} mm</dd>
     </div>
   </dl>
 </template>
@@ -77,17 +77,22 @@ defineProps<{ metadata: LibraryMetadata }>()
 <style scoped>
 .meta {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
-  gap: var(--space-2) var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
+  gap: var(--ops-space-3) var(--ops-space-4);
   margin: 0;
 }
 dt {
-  font-size: var(--type-small);
-  color: var(--text-muted);
+  color: var(--ops-muted);
+  font: 600 var(--ops-text-label) / 16px var(--ops-font-mono);
+  text-transform: uppercase;
 }
 dd {
   margin: 0;
   overflow-wrap: anywhere;
+}
+.num {
+  font-family: var(--ops-font-mono);
+  font-variant-numeric: tabular-nums;
 }
 .materials {
   list-style: none;

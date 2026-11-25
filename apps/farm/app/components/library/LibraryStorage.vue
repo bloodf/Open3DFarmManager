@@ -21,8 +21,8 @@ const next = ref<StorageMode | ''>('')
 </script>
 
 <template>
-  <section aria-labelledby="library-storage">
-    <h2 id="library-storage">Armazenamento</h2>
+  <section class="storage" aria-labelledby="library-storage">
+    <h2 id="library-storage" class="ops-title">Armazenamento</h2>
     <p>
       Modo atual: <strong>{{ locationLabel(mode) }}</strong>.
       {{
@@ -36,7 +36,7 @@ const next = ref<StorageMode | ''>('')
       >. Versões excluídas ficam {{ retentionDays }} dias antes da remoção.
     </p>
     <h3>Onde estão os arquivos hoje</h3>
-    <ul>
+    <ul class="locations">
       <li v-for="l in locations" :key="`${l.location}-${l.agentId}`">
         {{ locationLabel(l.location)
         }}<template v-if="l.agentId"> ({{ l.agentId }})</template>:
@@ -44,7 +44,11 @@ const next = ref<StorageMode | ''>('')
       </li>
       <li v-if="!locations.length">Nenhum arquivo guardado ainda.</li>
     </ul>
-    <form v-if="canManage" @submit.prevent="next && emit('change-mode', next)">
+    <form
+      v-if="canManage"
+      class="mode"
+      @submit.prevent="next && emit('change-mode', next)"
+    >
       <label for="library-mode">Modo para novos envios</label>
       <select id="library-mode" v-model="next">
         <option value="">Escolha um modo</option>
@@ -61,3 +65,43 @@ const next = ref<StorageMode | ''>('')
     </form>
   </section>
 </template>
+
+<style scoped>
+p {
+  margin: 0;
+}
+h3 {
+  margin: 0;
+  color: var(--ops-muted);
+  font: 600 var(--ops-text-label) / 16px var(--ops-font-mono);
+  text-transform: uppercase;
+}
+.locations {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-variant-numeric: tabular-nums;
+}
+.locations li {
+  padding-block: var(--ops-space-2);
+  border-block-end: 1px solid var(--ops-border);
+  overflow-wrap: anywhere;
+}
+.mode {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ops-space-2) var(--ops-space-3);
+  align-items: center;
+}
+.mode label {
+  font-weight: 600;
+}
+.mode select {
+  flex: 0 1 16rem;
+}
+.mode p {
+  flex-basis: 100%;
+  color: var(--ops-muted);
+  font-size: var(--ops-text-small);
+}
+</style>

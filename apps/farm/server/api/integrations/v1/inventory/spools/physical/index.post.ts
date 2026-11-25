@@ -40,10 +40,10 @@ export default defineEventHandler(async (event) => {
       body,
       key,
       (agentId, binding) =>
-        signallingRuntime()?.queryAgentInbox(
+        signallingRuntime()?.querySpoolMembership(
           access.farmId,
           agentId,
-          { kind: 'spool-membership', farmId: access.farmId, ...binding },
+          binding,
           event.req.signal,
         ),
     )

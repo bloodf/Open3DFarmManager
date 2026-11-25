@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { FarmKeyState, FarmRow } from '../utils/farm-view.ts'
+import {
+  observationAge,
+  type FarmKeyState,
+  type FarmRow,
+} from '../utils/farm-view.ts'
 import { controlActionAvailability, type Clock } from '../utils/farm-control.ts'
 import { filamentTrays, macroActions, macroArgs } from '../utils/farm-macros.ts'
 import FarmSpool from './spool-art/FarmSpool.vue'
@@ -25,20 +29,21 @@ const emit = defineEmits<{
   ): void
 }>()
 const actions = computed(() => macroActions(props.row.observation?.state))
-const trays = computed(() =>
-  filamentTrays(
-    props.row.observation?.historical
-      ? undefined
-      : props.row.observation?.state,
-  ),
-)
+const trays = computed(() => {
+  const observation = props.row.observation
+  return filamentTrays(
+    observation && !observationAge(observation, props.now).stale
+      ? observation.state
+      : undefined,
+  )
+})
 const tray = ref('')
 const selected = computed(() =>
   trays.value.find((item) => String(item.id) === tray.value),
 )
 const selectedSpool = computed(() => {
   const material = selected.value?.material
-  if (!material || props.row.observation?.historical) return undefined
+  if (!material) return undefined
   return farmSlotViews([material], props.bindings, props.activeSpools)?.[0]
 })
 function available(action: ExtendedControlAction) {

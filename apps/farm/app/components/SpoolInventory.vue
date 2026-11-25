@@ -89,7 +89,7 @@ function grams(value: number | null) {
           {{ section.age }}.
         </p>
       </div>
-      <template v-if="section.item.inventory">
+      <template v-if="section.item.inventory && !section.stale">
         <p v-if="section.item.inventory.total === 0">
           Nenhuma bobina cadastrada no Spoolman.
         </p>

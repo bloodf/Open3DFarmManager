@@ -110,8 +110,7 @@ try {
   }
 
   let observedAt = Date.now()
-  async function observe(state: 'error' | 'idle') {
-    const time = ++observedAt
+  async function observe(state: 'error' | 'idle', time = ++observedAt) {
     await sql.begin(async (tx) => {
       await tx`SET LOCAL ROLE farm_connector_telemetry_writer`
       await recordLatestStates(tx, { farmId: farm, agentId }, [
@@ -172,7 +171,7 @@ try {
     return result.data[0]?.alerts.map(({ kind }) => kind)
   }
 
-  await observe('error')
+  await observe('error', observedAt + 120_000)
   assert.deepEqual(
     [...(await sql`SELECT kind, raised FROM farm.integration_alert_lifecycle`)],
     [{ kind: 'error', raised: false }],
@@ -188,6 +187,8 @@ try {
     [],
     'disabled alert omitted from bulk status',
   )
+  // The Connector clock fell back after opening the alert. The accepted
+  // recovery must still resolve it without a negative lifecycle duration.
   await observe('idle')
   assert.equal(
     (

@@ -9,44 +9,41 @@ describe('advertised controls used for issuance', () => {
   const now = 1_000_000
   const controls = ['pause', 'cancel', 'emergency_stop'] as const
 
-  test.each([-20_000, 20_000])(
-    'grants freshly received controls with Connector clock skew of %i ms',
-    (skew) => {
-      expect(freshAdvertisedActions(controls, now + skew, now, now)).toEqual(
-        controls,
-      )
-    },
-  )
+  test('grants controls when send age plus database receipt age is within the window', () => {
+    expect(freshAdvertisedActions(controls, 20_000, now - 1000, now)).toEqual(
+      controls,
+    )
+  })
 
-  test('rejects missing, stale, malformed and implausibly future observations', () => {
-    expect(freshAdvertisedActions(controls, now, null, now)).toEqual([])
+  test('rejects missing, stale, malformed and implausible ages and receipts', () => {
+    expect(freshAdvertisedActions(controls, 0, null, now)).toEqual([])
+    expect(freshAdvertisedActions(controls, undefined, now, now)).toEqual([])
+    expect(freshAdvertisedActions(controls, -1, now, now)).toEqual([])
     const staleReceipt = now - OBSERVATION_FRESH_MS - 1
+    expect(freshAdvertisedActions(controls, 0, staleReceipt, now)).toEqual([])
+    expect(freshAdvertisedActions(controls, 0, now + 1, now)).toEqual([])
     expect(
-      freshAdvertisedActions(
-        controls,
-        staleReceipt + 20_000,
-        staleReceipt,
-        now,
-      ),
+      freshAdvertisedActions(controls, OBSERVATION_FRESH_MS + 1, now, now),
     ).toEqual([])
-    expect(freshAdvertisedActions(controls, now, now + 1, now)).toEqual([])
-    expect(freshAdvertisedActions(controls, now + 30_001, now, now)).toEqual([])
-    expect(freshAdvertisedActions(null, now, now, now)).toEqual([])
+    expect(
+      freshAdvertisedActions(controls, OBSERVATION_FRESH_MS, now - 1, now),
+    ).toEqual([])
+    expect(freshAdvertisedActions(null, 0, now, now)).toEqual([])
   })
 
   test('uses fresh controls again when a hold is released', () => {
-    expect(freshAdvertisedActions(['pause'], now, now, now)).toEqual(['pause'])
+    expect(freshAdvertisedActions(['pause'], 0, now, now)).toEqual(['pause'])
     expect(
       freshAdvertisedActions(
         ['pause', 'start_print', 'start_library_print'],
-        now + 1,
+        0,
         now + 1,
         now + 1,
       ),
     ).toEqual(['pause', 'start_print', 'start_library_print'])
   })
 
-  test('skips a far-future report and stores the next report for the same printer', async () => {
+  test('stores a far-future report and its successor after a Connector clock step', async () => {
     const query = vi.fn(
       async (_sql: TemplateStringsArray, ..._params: unknown[]) => [],
     )
@@ -68,20 +65,27 @@ describe('advertised controls used for issuance', () => {
         controls: [...controls],
       },
     })
-    await recordLatestStates(tx, scope, [report(now + 30_001)], now)
-    expect(query).not.toHaveBeenCalled()
-
-    const next = report(now + 20_000)
-    await recordLatestStates(tx, scope, [next], now + 1)
-    expect(query).toHaveBeenCalledExactlyOnceWith(
-      expect.anything(),
-      scope.farmId,
-      scope.agentId,
-      next.state.printerKey,
-      next.state.observedAt,
-      next.state,
-      now + 1,
-      30_000,
-    )
+    const future = report(now + 30_001)
+    const next = { ...report(now - 30_001), ageAtSendMs: 100 }
+    await recordLatestStates(tx, scope, [future, next])
+    expect(query).toHaveBeenCalledTimes(2)
+    for (const [index, event] of [future, next].entries()) {
+      expect(query).toHaveBeenNthCalledWith(
+        index + 1,
+        expect.anything(),
+        scope.farmId,
+        scope.agentId,
+        event.state.printerKey,
+        event.state.observedAt,
+        event.state,
+        event.ageAtSendMs ?? null,
+      )
+      const statement = query.mock.calls[index]![0].join('')
+      expect(statement).toContain('pg_catalog.clock_timestamp()')
+      expect(statement).toContain(
+        'revision = printer_latest_state.revision + 1',
+      )
+      expect(statement).not.toMatch(/WHERE.*observed_at/)
+    }
   })
 })

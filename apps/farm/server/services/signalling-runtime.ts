@@ -291,6 +291,38 @@ export class SignallingRuntime {
     })
     return 'sent'
   }
+  querySpoolMembership(
+    farmId: string,
+    agentId: string,
+    binding: { serviceId: string; spoolId: number },
+    signal?: AbortSignal,
+  ) {
+    const connection = this.#inboxes.get('read-only:' + agentId)
+    if (
+      !connection?.supportsSpoolQueries ||
+      !this.#canQueryInbox(connection, farmId, signal)
+    )
+      return undefined
+    return this.queryAgentInbox(
+      farmId,
+      agentId,
+      { kind: 'spool-membership', farmId, ...binding },
+      signal,
+    )
+  }
+
+  #canQueryInbox(connection: Connection, farmId: string, signal?: AbortSignal) {
+    return (
+      connection.supportsApiQueries &&
+      this.#apiIdentity(connection)?.farm_id === farmId &&
+      !signal?.aborted &&
+      this.#apiQueries.size < 32 &&
+      [...this.#apiQueries.values()].filter(
+        (pending) => pending.connection === connection,
+      ).length < 4
+    )
+  }
+
   async queryAgentInbox(
     farmId: string,
     agentId: string,
@@ -303,16 +335,11 @@ export class SignallingRuntime {
       error: 'connector-unavailable',
     } as const
     if (
-      !connection?.supportsApiQueries ||
+      !connection ||
+      !this.#canQueryInbox(connection, farmId, signal) ||
       (input.kind === 'dispatch' && !connection.supportsDispatchQueries) ||
       (input.kind === 'spool-membership' &&
-        (!connection.supportsSpoolQueries || input.farmId !== farmId)) ||
-      this.#apiIdentity(connection)?.farm_id !== farmId ||
-      signal?.aborted ||
-      this.#apiQueries.size >= 32 ||
-      [...this.#apiQueries.values()].filter(
-        (pending) => pending.connection === connection,
-      ).length >= 4
+        (!connection.supportsSpoolQueries || input.farmId !== farmId))
     )
       return unavailable
 

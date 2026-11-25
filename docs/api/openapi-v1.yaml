@@ -4908,6 +4908,7 @@ components:
         - pause
         - resume
         - cancel
+        - emergency_stop
         - set_temperature
         - set_tool_temperature
         - set_fan
@@ -4961,7 +4962,7 @@ components:
           properties:
             action:
               type: string
-              enum: [pause, resume, cancel, unload_filament]
+              enum: [pause, resume, cancel, emergency_stop, unload_filament]
             args:
               type: object
               additionalProperties: false

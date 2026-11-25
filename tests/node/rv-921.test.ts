@@ -102,8 +102,8 @@ test('API actions follow the browser freshness rule for advertised controls', as
     'set_temperature',
   ])
   assert.deepEqual(await admitted(null, now), ['pause'])
-  assert.deepEqual(await admitted(OBSERVATION_FRESH_MS + 1, now), [])
-  assert.deepEqual(await admitted(0, now - OBSERVATION_FRESH_MS - 1), [])
+  assert.deepEqual(await admitted(OBSERVATION_FRESH_MS + 1, now), ['pause'])
+  assert.deepEqual(await admitted(0, now - OBSERVATION_FRESH_MS - 1), ['pause'])
   assert.deepEqual(await admitted(0, null), [])
 })
 

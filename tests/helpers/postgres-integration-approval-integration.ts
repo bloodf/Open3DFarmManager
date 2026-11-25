@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import type { Sql } from 'postgres'
 import { PostgresIntegrationActions } from '../../apps/farm/server/storage/integration-actions-postgres.ts'
+import { IntegrationActionsService } from '../../apps/farm/server/services/integration-actions.ts'
 import { IntegrationAuditService } from '../../apps/farm/server/services/integration-audit.ts'
 import { IntegrationApprovalService } from '../../apps/farm/server/services/integration-approval.ts'
 import { IntegrationDeliveryService } from '../../apps/farm/server/services/integration-delivery.ts'
@@ -419,14 +420,66 @@ export async function testPostgresIntegrationApproval(
     VALUES (${farm}::uuid, ${agent}::uuid, 'printer-a', 1, '{"state":"idle","progress":0}')`
   const advertise = async (ageAtSendMs: number | null, receivedAt: number) => {
     await admin`UPDATE farm.printer_latest_state SET revision = revision + 1,
-      state = '{"state":"printing","controls":["pause","set_temperature"]}',
+      state = '{"state":"printing","controls":["pause","emergency_stop","set_temperature"]}',
       received_at = ${receivedAt}, age_at_send_ms = ${ageAtSendMs}, observed_at = ${receivedAt}`
     return (await actionTargets.target(printer))?.controls
   }
-  assert.deepEqual(await advertise(0, Date.now()), ['pause', 'set_temperature'])
-  assert.deepEqual(await advertise(null, Date.now()), ['pause'])
-  assert.deepEqual(await advertise(0, Date.now() - 600_000), [])
-  check('API action targets only carry fresh advertised controls')
+  assert.deepEqual(await advertise(0, Date.now()), [
+    'pause',
+    'emergency_stop',
+    'set_temperature',
+  ])
+  assert.deepEqual(await advertise(null, Date.now()), [
+    'pause',
+    'emergency_stop',
+  ])
+  assert.deepEqual(await advertise(0, Date.now() - 600_000), [
+    'pause',
+    'emergency_stop',
+  ])
+  check(
+    'API action targets carry only advertised stops when controls are stale or unaged',
+  )
+
+  const stopGrant = await grant(['control:extended'], true)
+  const stopService = new IntegrationActionsService({ store: actionTargets })
+  const stop = await stopService.submit(
+    {
+      appId,
+      scopes: ['control:extended'],
+      grants: [
+        {
+          id: stopGrant,
+          appId,
+          farmId: farm,
+          printerAssignmentId: printer,
+          scopes: ['control:extended'],
+          requiresApproval: true,
+          createdAt: 1,
+          disabledAt: null,
+          disabledReason: null,
+        },
+      ],
+    },
+    printer,
+    'stop-stale',
+    { action: 'emergency_stop', args: {} },
+  )
+  assert.ok(stop.ok, JSON.stringify(stop))
+  assert.equal(stop.action.status, 'held')
+  const sentBeforeStop = sent.length
+  const approvedStop = await approvals.decide(
+    operator.id,
+    farm,
+    stop.action.id,
+    'approve',
+  )
+  assert.ok(approvedStop.ok)
+  assert.equal(await envelopeCount(stop.action.id), 1)
+  assert.equal(sent.length, sentBeforeStop + 1)
+  check(
+    'an extended grant can store and issue an advertised emergency stop on stale controls',
+  )
 
   return checks
 }

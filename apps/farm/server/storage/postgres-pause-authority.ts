@@ -95,10 +95,9 @@ const STOP_ACTIONS: ReadonlySet<ExtendedControlAction> = new Set([
   'emergency_stop',
 ])
 /**
- * An issuer may only grant controls from a current telemetry observation.
- * An older Connector sends no age (SQL NULL): freshness then counts from the
- * database receipt, the observation may not be far ahead of it, and only
- * stop actions are allowed. A present but invalid age grants nothing.
+ * Stale or unaged telemetry grants only advertised stop actions. Unaged
+ * observations must still have a plausible timestamp relative to receipt.
+ * Invalid ages or receipts grant nothing.
  */
 export function freshAdvertisedActions(
   controls: unknown,
@@ -114,7 +113,6 @@ export function freshAdvertisedActions(
     !sendAge.success ||
     !received.success ||
     received.data > now ||
-    sendAge.data + (now - received.data) > OBSERVATION_FRESH_MS ||
     !Array.isArray(controls)
   )
     return []
@@ -126,10 +124,12 @@ export function freshAdvertisedActions(
     )
       return []
   }
+  const stopOnly =
+    withoutAge || sendAge.data + (now - received.data) > OBSERVATION_FRESH_MS
   const advertised = new Set<unknown>(controls)
   return ExtendedControlAction.options.filter(
     (action) =>
-      advertised.has(action) && (!withoutAge || STOP_ACTIONS.has(action)),
+      advertised.has(action) && (!stopOnly || STOP_ACTIONS.has(action)),
   )
 }
 type Current = {

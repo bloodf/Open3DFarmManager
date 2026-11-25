@@ -103,7 +103,7 @@ test('#872 drains backlog with per-attempt age that cannot refresh spool binding
     expect(snapshot.ageAtSendMs).toBe(OBSERVATION_FRESH_MS + 2_000)
     expect(
       freshAdvertisedActions(controls, state.ageAtSendMs, dbNow, dbNow),
-    ).toEqual([])
+    ).toEqual(controls)
     const row = {
       agentId: 'agent',
       observedAt: inventory.observedAt,

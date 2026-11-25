@@ -56,6 +56,7 @@ const STATES: State[] = [
  * Plain arguments for every action both entry points carry. The API path
  * takes only `API_ENVELOPE_ACTIONS`; `start_library_print` also needs a
  * library relay, so its state rule is covered by the shared predicate test.
+ * Emergency stop has separate local state gates on the two paths.
  */
 const ARGS: Partial<Record<Action, Record<string, unknown>>> = {
   pause: {},
@@ -72,7 +73,7 @@ const ARGS: Partial<Record<Action, Record<string, unknown>>> = {
   unload_filament: {},
 }
 const CASES = API_ENVELOPE_ACTIONS.filter(
-  (action) => action !== 'start_library_print',
+  (action) => action !== 'start_library_print' && action !== 'emergency_stop',
 ).map((action) => {
   const args = ARGS[action]
   assert.ok(args, `parity arguments for ${action}`)
@@ -468,3 +469,8 @@ for (const [action, args] of CASES)
     }
     assert.ok(sentSomewhere, `${action} is written in some state`)
   })
+
+test('the API emergency stop uses its local readiness gate', async () => {
+  assert.equal((await apiDecision('emergency_stop', {}, 'paused')).sent, true)
+  assert.equal((await apiDecision('emergency_stop', {}, 'unknown')).sent, false)
+})

@@ -59,7 +59,7 @@ test('the restarted Connector sends ages for queued printer state and inventory'
           receipt,
           printerRecord.state.observedAt,
         ),
-        [],
+        ['pause'],
       )
       return [printerRecord.eventId, inventoryRecord.eventId]
     },

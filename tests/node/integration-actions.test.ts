@@ -184,7 +184,14 @@ test('validates API action arguments and translates temperatures to the envelope
     }),
     null,
   )
-  assert.equal(parseActionRequest({ action: 'emergency_stop', args: {} }), null)
+  assert.deepEqual(parseActionRequest({ action: 'emergency_stop', args: {} }), {
+    action: 'emergency_stop',
+    args: {},
+  })
+  assert.equal(
+    parseActionRequest({ action: 'emergency_stop', args: { extra: 1 } }),
+    null,
+  )
 })
 
 test('unsupported advertised controls do not create a resource or issue an envelope', async () => {
@@ -198,6 +205,44 @@ test('unsupported advertised controls do not create a resource or issue an envel
   assert.deepEqual(result, { ok: false, problem: 'unsupported' })
   assert.equal(f.saved.length, 0)
   assert.equal(f.issued.length, 0)
+})
+
+test('API emergency stop requires its grant and an advertised control', async () => {
+  const request = { action: 'emergency_stop', args: {} }
+  const advertised = fixture(['emergency_stop'])
+  assert.deepEqual(
+    await advertised.service.submit(
+      principal(['control:basic']),
+      printerId,
+      'stop-no-scope',
+      request,
+    ),
+    { ok: false, problem: 'insufficient-scope' },
+  )
+  assert.equal(advertised.issued.length, 0)
+  assert.equal(
+    (
+      await advertised.service.submit(
+        principal(['control:extended']),
+        printerId,
+        'stop-extended',
+        request,
+      )
+    ).ok,
+    true,
+  )
+  assert.equal(advertised.issued.length, 1)
+  const missing = fixture(null)
+  assert.deepEqual(
+    await missing.service.submit(
+      principal(['control:extended']),
+      printerId,
+      'stop-no-list',
+      request,
+    ),
+    { ok: false, problem: 'unsupported' },
+  )
+  assert.equal(missing.issued.length, 0)
 })
 
 test('unknown capabilities defer basic actions to the Connector but reject extended actions', async () => {

@@ -12,6 +12,8 @@ Journal denials (`replay`, `assignment-busy`, `capacity`, `clock-regressed`, `ra
 
 Browser commands stay WebRTC-only with no TURN or HTTP fallback; API-originated commands are allowed only with an owner-granted scope, delivered as issuer-signed envelopes, and enforced by the Connector, which refuses unsafe or unauthorized commands with a reason. No automatic retry of uncertain commands, and never command physical printers in automated tests.
 
+For browser capabilities and direct API printer actions, a valid telemetry list older than 120 seconds or reported without a send age can authorize only advertised stop actions (`pause`, `cancel`, and `emergency_stop`). With no controls list, browser capability issuance is denied and direct API basic actions still defer to the Connector. API `emergency_stop` requires the owner-granted `control:extended` scope and an advertised control. The Connector independently applies its local authorization and safety checks.
+
 ## Connector checks for API commands
 
 API-originated commands travel via the integration API (`/api/integrations/v1`) and are delivered to the Connector as issuer-signed envelopes. The Connector enforces local safety and authorization independently before dispatching any command to a printer driver. An offline or isolated Connector fails closed on expired or unverified authority.

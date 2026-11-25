@@ -15,20 +15,26 @@ describe('advertised controls used for issuance', () => {
     )
   })
 
-  test('rejects missing, stale, malformed and implausible ages and receipts', () => {
+  test('rejects missing, malformed and implausible ages and receipts', () => {
     expect(freshAdvertisedActions(controls, 0, null, now)).toEqual([])
     expect(freshAdvertisedActions(controls, undefined, now, now)).toEqual([])
     expect(freshAdvertisedActions(controls, -1, now, now)).toEqual([])
-    const staleReceipt = now - OBSERVATION_FRESH_MS - 1
-    expect(freshAdvertisedActions(controls, 0, staleReceipt, now)).toEqual([])
     expect(freshAdvertisedActions(controls, 0, now + 1, now)).toEqual([])
-    expect(
-      freshAdvertisedActions(controls, OBSERVATION_FRESH_MS + 1, now, now),
-    ).toEqual([])
-    expect(
-      freshAdvertisedActions(controls, OBSERVATION_FRESH_MS, now - 1, now),
-    ).toEqual([])
     expect(freshAdvertisedActions(null, 0, now, now)).toEqual([])
+  })
+
+  test('keeps advertised stops when the observation is stale', () => {
+    const advertised = [...controls, 'resume']
+    const staleReceipt = now - OBSERVATION_FRESH_MS - 1
+    expect(freshAdvertisedActions(advertised, 0, staleReceipt, now)).toEqual(
+      controls,
+    )
+    expect(
+      freshAdvertisedActions(advertised, OBSERVATION_FRESH_MS + 1, now, now),
+    ).toEqual(controls)
+    expect(
+      freshAdvertisedActions(advertised, OBSERVATION_FRESH_MS, now - 1, now),
+    ).toEqual(controls)
   })
 
   test('uses fresh controls again when a hold is released', () => {

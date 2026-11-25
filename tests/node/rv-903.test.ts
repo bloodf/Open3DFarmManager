@@ -56,7 +56,7 @@ test('old Connector to new server: records without an age keep stop actions', ()
   assert.deepEqual(grant(undefined, now, now), stop)
   const oldest = now - OBSERVATION_FRESH_MS
   assert.deepEqual(grant(null, oldest, oldest), stop)
-  assert.deepEqual(grant(null, oldest - 1, oldest - 1), [])
+  assert.deepEqual(grant(null, oldest - 1, oldest - 1), stop)
   // A Connector clock behind the server does not take the stop actions away.
   assert.deepEqual(grant(null, now, now - 3_600_000), stop)
   // Bounded skew: an observation far ahead of its receipt is not current.

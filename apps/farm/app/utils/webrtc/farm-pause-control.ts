@@ -1,5 +1,6 @@
 import type { FileListExtra } from '../../../../../packages/farm-protocol/src/file-list.ts'
 import {
+  controlRoleAllowed,
   ExtendedControlAction,
   type ControlResultCode,
 } from '../../../../../packages/farm-protocol/src/control-actions.ts'
@@ -37,6 +38,11 @@ export const PAUSE_READY_DEADLINE_MS = 15_000
 export const PAUSE_READMIT_DEBOUNCE_MS = 5_000
 /** A control session never re-admits more often than this in total. */
 export const PAUSE_READMIT_MAX = 3
+/**
+ * The Connector serves one control session at a time and waits at least 1 s
+ * before listening again. The margin covers its own disposal and reconnection.
+ */
+export const PAUSE_READMIT_RELISTEN_MS = 2_000
 
 export type FarmPauseKey = Readonly<{
   publicKey: unknown
@@ -92,6 +98,10 @@ export function openFarmPauseControl(input: FarmPauseControlInput) {
   let disposed: Promise<void> | undefined
   // The actions the current capability was issued with, from the issuer.
   let admittedActions: readonly ExtendedControlAction[] = []
+  // The role the issuer signed into that capability.
+  let admittedRole: string | undefined
+  // Disposal of the transport replaced by the latest re-admission.
+  let replaced: Promise<unknown> = Promise.resolve()
   // Bumped on every re-admission: callbacks of an older session are ignored.
   let generation = 0
   let readmissions = 0
@@ -134,6 +144,7 @@ export function openFarmPauseControl(input: FarmPauseControlInput) {
       const issued = await baseIssuer.capability(value)
       capabilityExpiresAt = issued.expires_at
       admittedActions = [...issued.actions]
+      admittedRole = issued.role
       return issued
     },
   })
@@ -200,6 +211,27 @@ export function openFarmPauseControl(input: FarmPauseControlInput) {
     }
     void signalling.start().catch(() => current() && fail('unavailable'))
   }
+  /** Resolves after the Connector's re-listen delay, or at once when closed. */
+  function relistenDelay(): Promise<void> {
+    return new Promise((resolve) => {
+      if (controller.signal.aborted) return resolve()
+      const done = () => {
+        clearTimeout(timer)
+        controller.signal.removeEventListener('abort', done)
+        resolve()
+      }
+      const timer = setTimeout(done, PAUSE_READMIT_RELISTEN_MS)
+      controller.signal.addEventListener('abort', done, { once: true })
+    })
+  }
+  /** Admits again only after the old transport ended on both sides. */
+  async function restart() {
+    await replaced
+    await relistenDelay()
+    if (controller.signal.aborted) return
+    armReadyDeadline()
+    await start()
+  }
   /**
    * Fresh advertised controls the current capability does not cover. Admission
    * is one-shot per transport, so a capability issued while a collection hold
@@ -217,8 +249,13 @@ export function openFarmPauseControl(input: FarmPauseControlInput) {
     )
       return false
     const advertised = new Set<unknown>(controls)
+    // The issuer never grants an action the role lacks: not a reason to ask.
     const missing = ExtendedControlAction.options.filter(
-      (action) => advertised.has(action) && !admittedActions.includes(action),
+      (action) =>
+        advertised.has(action) &&
+        !admittedActions.includes(action) &&
+        admittedRole !== undefined &&
+        controlRoleAllowed(admittedRole, action),
     )
     if (!missing.length) return false
     const key = missing.join(',')
@@ -241,12 +278,16 @@ export function openFarmPauseControl(input: FarmPauseControlInput) {
     signalling = undefined
     capabilityExpiresAt = undefined
     admittedActions = []
+    admittedRole = undefined
     previous.command?.abort()
     previous.signalling?.close()
-    void previous.signalling?.dispose(3000)?.catch(() => {})
+    // A failed disposal still ends here; a busy Connector then fails closed.
+    replaced = Promise.resolve(previous.signalling?.dispose(3000)).catch(
+      () => {},
+    )
     set({ kind: 'connecting' })
     armReadyDeadline()
-    void start()
+    void restart()
     return true
   }
   function admitted() {
@@ -337,6 +378,7 @@ export function openFarmPauseControl(input: FarmPauseControlInput) {
     dispose(): Promise<void> {
       close()
       disposed ??= Promise.allSettled([
+        replaced,
         command?.settled,
         signalling?.dispose(3000),
       ]).then(() => {})

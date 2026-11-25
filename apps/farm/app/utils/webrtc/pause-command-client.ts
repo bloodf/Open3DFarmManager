@@ -1,5 +1,6 @@
 import {
   ExtendedControlAction,
+  isU1PhysicalControl,
   U1_CONTROL_RESULT_TIMEOUT_MS,
   type ControlResultCode,
 } from '../../../../../packages/farm-protocol/src/control-actions.ts'
@@ -142,11 +143,22 @@ const SESSION_MS = PAUSE_POLICY_HARD_MAXIMUMS.capabilityMs
 export type PauseResultDriverFamily =
   'moonraker' | 'u1' | 'kobra-x' | 'bambu' | 'unknown'
 
-/** Result waits are selected by the Connector-reported printer family. */
+/**
+ * Result waits are selected by the Connector-reported printer family. Moonraker
+ * collection reports no identity, a U1 included, so an unknown family falls back
+ * to the action. A longer wait never resends and never widens what the
+ * Connector allows.
+ */
 export function pauseCommandResultWaitMs(
   driverFamily: PauseResultDriverFamily,
+  action?: ExtendedControlAction,
+  args: Record<string, unknown> = {},
 ): number {
-  return driverFamily === 'u1' || driverFamily === 'kobra-x'
+  return driverFamily === 'u1' ||
+    driverFamily === 'kobra-x' ||
+    (driverFamily === 'unknown' &&
+      action !== undefined &&
+      isU1PhysicalControl(action, args))
     ? COMMAND_MS + U1_CONTROL_RESULT_TIMEOUT_MS
     : COMMAND_MS
 }
@@ -465,7 +477,13 @@ export function createPauseCommandClient(
       // never reported as a clean rejection: the frame may have left the
       // transport before the failure.
       commandSent = true
-      armResult(pauseCommandResultWaitMs(options.driverFamily ?? 'unknown'))
+      armResult(
+        pauseCommandResultWaitMs(
+          options.driverFamily ?? 'unknown',
+          signed.action,
+          signed.args,
+        ),
+      )
       if (
         attemptSend(() => sendCommand({ t: 'control.command', wire })) !==
         'sent'

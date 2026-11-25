@@ -503,7 +503,7 @@ describe('#885 ledger reads', () => {
   })
 })
 
-// Last: it rolls the two new migrations back and forward again.
+// Last: it rolls the binding migrations back and forward again.
 describe('migration rollback', () => {
   test('refuses to lose a binding, then round-trips', async () => {
     const catalog = await loadMigrationCatalog()
@@ -511,8 +511,9 @@ describe('migration rollback', () => {
     const down = (id: string) =>
       runMigrations(root, through(id), { kind: 'down', expectedLastId: id })
     const last = catalog.at(-1)!.id
-    expect(last).toBe('0120_inventory_observation_freshness')
+    expect(last).toBe('0121_spoolman_observation_lock_order')
     await down(last)
+    await down('0120_inventory_observation_freshness')
     await down('0119_printer_observation_freshness')
     await down('0118_spoolman_effective_service_id')
     await expect(down('0117_physical_spool_bindings')).rejects.toThrow(
@@ -527,6 +528,7 @@ describe('migration rollback', () => {
       '0118_spoolman_effective_service_id',
       '0119_printer_observation_freshness',
       '0120_inventory_observation_freshness',
+      '0121_spoolman_observation_lock_order',
     ])
   })
 })

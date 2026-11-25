@@ -8,6 +8,8 @@ export const kobraXQueries = {
   print: 'query',
   tempature: 'query',
   multiColorBox: 'getInfo',
+  // The external spool; read-only, as spooler's `kx_request` sends it.
+  extfilbox: 'getInfo',
 } as const
 export type KobraXQuery = keyof typeof kobraXQueries
 

@@ -1,5 +1,10 @@
 import { boundPrinterString } from '@open3dfarmmanager/farm-protocol'
 import type { KobraXPrinterState } from './gate.ts'
+import {
+  anycubicBoxMaterials,
+  anycubicExternalMaterial,
+  mergeAnycubicMaterials,
+} from '../anycubic/ace.ts'
 import type { PrinterState } from '../../../farm-protocol/src/state.ts'
 import { record } from './discovery.ts'
 import { anycubicAlert, isAnycubicFaultCode } from '../anycubic/alerts.ts'
@@ -185,40 +190,17 @@ export function createKobraXStatus(printerKey: string, address: string) {
         ended = true
       }
     }
-    if (type === 'multiColorBox' && Array.isArray(data.multi_color_box)) {
-      next.materials = data.multi_color_box
-        .flatMap((value, boxIndex) => {
-          const box = record(value)
-          if (!Array.isArray(box.slots)) return []
-          return box.slots.map((value, slotIndex) => {
-            const slot = record(value)
-            const remaining = nonnegative(slot.consumables_percent)
-            const rgb = slot.color
-            const colorHex =
-              Array.isArray(rgb) &&
-              rgb.length === 3 &&
-              rgb.every(
-                (channel) =>
-                  Number.isInteger(channel) && channel >= 0 && channel <= 255,
-              )
-                ? Buffer.from([...rgb, 255])
-                    .toString('hex')
-                    .toUpperCase()
-                : undefined
-            return {
-              slot: `${Number.isInteger(box.id) ? box.id : boxIndex}:${Number.isInteger(slot.index) ? slot.index : slotIndex}`,
-              active: (slot.index ?? slotIndex) === box.loaded_slot,
-              ...(typeof slot.type === 'string'
-                ? { materialType: boundPrinterString(slot.type, 64) }
-                : {}),
-              ...(remaining !== undefined && remaining <= 100
-                ? { remainingPercent: remaining }
-                : {}),
-              ...(colorHex ? { colorHex } : {}),
-            }
-          })
-        })
-        .slice(0, 17)
+    if (message.state !== 'failed') {
+      const external =
+        type === 'extfilbox'
+          ? anycubicExternalMaterial(message.data)
+          : undefined
+      const slots =
+        type === 'multiColorBox'
+          ? anycubicBoxMaterials(data.multi_color_box)
+          : external && [external]
+      if (slots)
+        next.materials = mergeAnycubicMaterials(status.materials, slots)
     }
     status = next
   }
@@ -228,8 +210,9 @@ export function createKobraXStatus(printerKey: string, address: string) {
     snapshot: () => status,
     cameraUrl: () => cameraUrl,
     disconnect() {
-      status = { ...status, state: 'offline', observedAt: Date.now() }
-      delete status.statusMessage
+      // Slots merge across partial reports: a new session starts without them.
+      const { materials: _materials, statusMessage: _message, ...kept } = status
+      status = { ...kept, state: 'offline', observedAt: Date.now() }
       cameraUrl = undefined
     },
   }

@@ -83,7 +83,7 @@ export const KOBRA_X_REPORT_TYPES = [
 ] as const
 
 export type KobraXReportType =
-  (typeof KOBRA_X_REPORT_TYPES)[number] | 'properties'
+  (typeof KOBRA_X_REPORT_TYPES)[number] | 'extfilbox' | 'properties'
 
 export type KobraXClientKind = 'slicer' | 'web'
 
@@ -183,6 +183,8 @@ export interface KobraXMockOptions {
   credentials?: { username: string; password: string } | undefined
   initialState?: KobraXPrintState | undefined
   spoolHolder?: boolean | undefined
+  /** `data` of the `extfilbox` reply. Without it the query goes unanswered. */
+  externalSpool?: Record<string, unknown> | undefined
   /**
    * Accessories this synthetic printer reports. Each defaults to present. An
    * absent one is left out of every report, as hardware without it would.
@@ -385,7 +387,7 @@ function defaultAceBox(): KobraXAceBox {
         color: [255, 255, 255],
         consumables_percent: 100,
         material_name: 'PLA',
-        status: 0,
+        status: 5,
         type: 'PLA',
         weight: 1000,
       },
@@ -395,7 +397,7 @@ function defaultAceBox(): KobraXAceBox {
         color: [0, 0, 0],
         consumables_percent: 85,
         material_name: 'PLA',
-        status: 0,
+        status: 5,
         type: 'PLA',
         weight: 1000,
       },
@@ -405,7 +407,7 @@ function defaultAceBox(): KobraXAceBox {
         color: [255, 0, 0],
         consumables_percent: 70,
         material_name: 'PETG',
-        status: 0,
+        status: 5,
         type: 'PETG',
         weight: 1000,
       },
@@ -415,7 +417,7 @@ function defaultAceBox(): KobraXAceBox {
         color: [0, 128, 255],
         consumables_percent: 50,
         material_name: 'PLA',
-        status: 0,
+        status: 5,
         type: 'PLA',
         weight: 1000,
       },
@@ -1448,6 +1450,17 @@ export async function startKobraXMock(
           break
         }
 
+        case 'extfilbox': {
+          if (options.externalSpool)
+            publishTypedReport(
+              'extfilbox',
+              action || 'getInfo',
+              { ...options.externalSpool },
+              { clientKind },
+            )
+          break
+        }
+
         case 'light': {
           if (action === 'control') {
             lightState = {
@@ -1681,7 +1694,7 @@ export async function startKobraXMock(
 
   function applyAceFeed(slotIndex: number, box = aceBox) {
     for (const slot of box.slots) {
-      slot.status = slot.index === slotIndex ? 5 : 0
+      if (slot.index === slotIndex) slot.status = 5
     }
     box.loaded_slot = slotIndex
   }

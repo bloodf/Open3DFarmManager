@@ -241,6 +241,7 @@ export async function connectKobraX(options: {
           'print',
           'tempature',
           'multiColorBox',
+          'extfilbox',
         ] as const)
           query(type)
         clearTimeout(timer)

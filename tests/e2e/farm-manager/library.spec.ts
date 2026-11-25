@@ -101,9 +101,7 @@ async function replayFromDialog(
     await dialog.getByLabel(printerKey).check()
     await dialog.getByLabel(/mesa está limpa/).check()
     await expect
-      .poll(() => farm.harness.simulatorObservation().pauseInboxReady, {
-        timeout: 90_000,
-      })
+      .poll(() => farm.commandInboxReady(printerKey), { timeout: 90_000 })
       .toBe(true)
     // The server signs a command capability only from fresh stored controls.
     await expect
@@ -360,19 +358,20 @@ test('envia e imprime arquivos da biblioteca com armazenamento no servidor e no 
   await test.step('confirma a placa livre do primeiro Moonraker', async () => {
     // Its finished library job holds new starts until the operator confirms.
     await farm.openFarm()
-    await farm
-      .printerCard('moonraker-a')
-      .getByRole('button', { name: 'Confirmar placa livre' })
-      .click({ timeout: 90_000 })
-    const dialog = page.getByRole('dialog', { name: /^Confirmar placa livre/ })
+    const confirm = page
+      .locator('li.floor-tile')
+      .filter({ hasText: 'moonraker-a' })
+      .getByRole('button', { name: 'Confirmar placa livre', exact: true })
+    await confirm.click({ timeout: 90_000 })
+    const dialog = page.getByRole('dialog', { name: /Confirmar placa livre/ })
     await dialog
-      .getByRole('button', { name: 'Confirmar placa livre' })
+      .getByRole('button', { name: 'Confirmar placa livre', exact: true })
       .click({ timeout: 90_000 })
-    await expect(
-      farm
-        .printerCard('moonraker-a')
-        .getByRole('button', { name: 'Confirmar placa livre' }),
-    ).toBeHidden({ timeout: 90_000 })
+    await expect(dialog.getByRole('status')).toHaveText(
+      'Comando confirmado pelo Connector.',
+    )
+    await dialog.getByRole('button', { name: 'Fechar' }).click()
+    await expect(confirm).toBeHidden({ timeout: 90_000 })
     await page.goto(farm.origin + '/biblioteca')
   })
 

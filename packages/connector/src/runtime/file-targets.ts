@@ -1,3 +1,4 @@
+import { moonrakerOrigins } from '../config/moonraker.ts'
 import { join } from 'node:path'
 import { readFileSync } from 'node:fs'
 import { ANYCUBIC_FILE_MODEL } from '../anycubic/files.ts'
@@ -53,7 +54,7 @@ export function createFileTargets(input: {
       if (!printer || binding?.printer_key !== controlledKey) return undefined
       const { origin, limits } = validateMoonrakerInput({
         assignment: printer,
-        allowedOrigins: collection.allowedOrigins,
+        allowedOrigins: moonrakerOrigins(collection),
         limits: collection.limits,
       })
       if (origin !== binding.moonraker_origin) return undefined

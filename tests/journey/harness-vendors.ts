@@ -28,6 +28,7 @@ import { createCrealitySimulator } from '../../packages/sim-tools/src/creality-s
 import { startFormlabsJourneyFixture } from './formlabs-fixture.ts'
 import { startSdcpFixture } from './sdcp-fixture.ts'
 import { startPrusaLinkJourneyFixture } from './prusa-link-fixture.ts'
+import { startStatusFixture } from './status-fixtures.ts'
 import { createJourneyCameraEncoder, realFfmpeg } from './camera-encoder.ts'
 import { startBambuCameraFixture } from './bambu-camera-fixture.ts'
 import { startKobraBridgeSimulator } from './harness-kobralink-bridge.ts'
@@ -40,6 +41,9 @@ export type VendorName =
   | 'sdcp'
   | 'formlabs'
   | 'prusa-link'
+  | 'qidi'
+  | 'flashforge'
+  | 'phrozen'
 
 /** What a spec can do to the running simulated print. */
 export type VendorControls = Readonly<{
@@ -136,6 +140,9 @@ export type VendorSimulator = Readonly<{
 /** Moonraker is the harness default; everything else is a VendorName. */
 export const VENDOR_DESCRIPTIONS: Readonly<Record<VendorName, string>> = {
   'prusa-link': 'Loopback PrusaLink status simulator',
+  qidi: 'Loopback Qidi status simulator',
+  flashforge: 'Loopback Flashforge status simulator',
+  phrozen: 'Loopback Phrozen status simulator',
   formlabs: 'Loopback Formlabs PreForm status simulator',
   sdcp: 'Loopback SDCP status simulator',
   bambu:
@@ -323,7 +330,30 @@ export async function startVendorSimulator(
     let controls: VendorControls
     let runtime: VendorSimulator['runtime']
 
-    if (name === 'prusa-link') {
+    if (name === 'qidi' || name === 'flashforge' || name === 'phrozen') {
+      const fixture = await startStatusFixture(name, directory)
+      undo.push(fixture.close)
+      raw = fixture
+      const unsupported = () => {
+        throw new Error('Status journey is read-only')
+      }
+      controls = {
+        setProgress: unsupported,
+        finishPrint: unsupported,
+        failPrint: unsupported,
+      }
+      runtime = async (scope) => ({
+        version: 8,
+        collection: {
+          version: 8,
+          allowedOrigins: [fixture.origin],
+          printers: [],
+          drivers: [{ ...fixture.binding, printerKey: scope.printerKey }],
+          limits: { staleAfterMs: 5000 },
+        },
+        assignment: { ...localAssignment(scope), backend: name },
+      })
+    } else if (name === 'prusa-link') {
       const fixture = await startPrusaLinkJourneyFixture()
       undo.push(fixture.close)
       raw = fixture

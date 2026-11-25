@@ -1,3 +1,4 @@
+import { moonrakerOrigins } from '../config/moonraker.ts'
 import type { ApiJobLifecycle } from './api-job-lifecycle.ts'
 import type { MoonrakerLinkHealth } from '../moonraker/subscription.ts'
 import { readMoonrakerFirmware } from '../moonraker/firmware.ts'
@@ -26,6 +27,9 @@ import { createBambuRuntimeSubscription } from '../bambu/runtime.ts'
 import type { createBambuTransport } from '../bambu/transport.ts'
 import type { RawPrinterObservation } from './farm-snapshot-provider.ts'
 import { createKobraLinkRuntimeSubscription } from '../kobralink/runtime.ts'
+import { createFlashforgeCollection } from '../flashforge/collection.ts'
+import { createPhrozenCollection } from '../phrozen/collection.ts'
+import { createQidiCollection } from './qidi-collection.ts'
 import { createPrusaLinkCollection } from './prusa-link-collection.ts'
 import {
   parseCollectorConfig,
@@ -389,7 +393,7 @@ export async function collectIntoQueue(input: {
       )
       const selected = validateMoonrakerInput({
         assignment,
-        allowedOrigins: config.allowedOrigins,
+        allowedOrigins: moonrakerOrigins(config),
         limits: config.limits,
       })
       let cached: RawPrinterObservation['materialsObservation'] | undefined
@@ -460,7 +464,7 @@ export async function collectIntoQueue(input: {
         ...(input.discoverMoonrakerObjects ? { discoverObjects: true } : {}),
         jobFields: true,
         assignment,
-        allowedOrigins: config.allowedOrigins,
+        allowedOrigins: moonrakerOrigins(config),
         limits: config.limits,
         signal,
         ...(collectionRefresh
@@ -932,17 +936,27 @@ export async function collectIntoQueue(input: {
     }
     if (config.version === 8) {
       for (const binding of config.drivers) {
-        const sub = createPrusaLinkCollection({
-          binding,
+        const options = {
+          allowedOrigins: config.allowedOrigins,
           signal,
           timeoutMs: Math.min(30000, config.limits.requestTimeoutMs),
-          onObservation(value) {
-            input.onRawObservation?.(value)
-          },
-          onUnavailable(epoch) {
-            input.onRawUnavailable?.({ printerKey: binding.printerKey, epoch })
-          },
-        })
+          onObservation: (value: RawPrinterObservation) =>
+            input.onRawObservation?.(value),
+          onUnavailable: (epoch: number) =>
+            input.onRawUnavailable?.({ printerKey: binding.printerKey, epoch }),
+        }
+        const sub =
+          binding.family === 'prusa-link'
+            ? createPrusaLinkCollection({ ...options, binding })
+            : binding.family === 'flashforge'
+              ? createFlashforgeCollection({ ...options, binding })
+              : binding.family === 'phrozen'
+                ? createPhrozenCollection({ ...options, binding })
+                : createQidiCollection({
+                    ...options,
+                    binding,
+                    timeoutMs: Math.min(3000, options.timeoutMs),
+                  })
         subscriptions.push({ done: sub.done.catch(fail) })
       }
     }

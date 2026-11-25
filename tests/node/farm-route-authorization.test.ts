@@ -24,6 +24,7 @@ const GUARDS: Record<string, string[]> = {
   'services/spool-library-import.ts': ['spoolLibraryImport'],
   'services/spool-drying.ts': ['spoolFeature'],
   'services/spool-slots-http.ts': ['spoolSlotsFeature'],
+  'services/spool-moves.ts': ['spoolMoves'],
   'services/spool-usage.ts': [
     'spoolUsageFeature',
     'spoolUsageReport',
@@ -337,6 +338,7 @@ test('recognised guards retain their session and scope checks', () => {
     spoolLibraryImport: 'runSpoolLibraryImport',
     spoolFeature: ').run(',
     spoolSlotsFeature: 'access.authorize',
+    spoolMoves: 'moves.move',
     spoolUsageFeature: ').run(',
     libraryRoutes: 'runtime.store.getSettings',
     bambuCloudAccountHttp: 'readBambuCloudAccount',
@@ -387,6 +389,7 @@ test('recognised guards retain their session and scope checks', () => {
   for (const file of [
     'storage/postgres-spool-slot-access.ts',
     'storage/postgres-spool-usage.ts',
+    'storage/postgres-spool-moves.ts',
   ]) {
     const body = source(`${server}/${file}`)
     for (const marker of [

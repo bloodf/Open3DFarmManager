@@ -21,7 +21,7 @@ const script = fileURLToPath(
 function environment(extra: Record<string, string> = {}) {
   const env: NodeJS.ProcessEnv = { ...process.env, ...extra }
   for (const name of Object.keys(env)) {
-    if (name.startsWith('GIT_') || name === 'ORQ_BASE_SHA') {
+    if (name.startsWith('GIT_') || name.startsWith('ORQ_')) {
       if (!(name in extra)) delete env[name]
     }
   }
@@ -79,8 +79,8 @@ function checks(
   })
 }
 
-function plan(root: string, base: string) {
-  const result = checks(root, ['plan', 'unit', base])
+function plan(root: string, base: string, extra: Record<string, string> = {}) {
+  const result = checks(root, ['plan', 'unit', base], extra)
   assert.equal(result.status, 0, result.stderr)
   return result.stdout.split('\n').filter(Boolean)
 }
@@ -142,7 +142,7 @@ test('an rtsp-ingest change runs the Go tests', (t) => {
   assert.ok(!lines.includes('npm run typecheck'))
 })
 
-test('the base falls back to ORQ_BASE_SHA and an unknown base fails', (t) => {
+test('the base falls back to ORQ_BASE_SHA and an unknown base runs the full unit suite', (t) => {
   const { root, base } = fixture(t)
   commit(root, { 'README.md': 'two\n' })
   const fallback = checks(root, ['plan', 'unit'], { ORQ_BASE_SHA: base })
@@ -150,8 +150,105 @@ test('the base falls back to ORQ_BASE_SHA and an unknown base fails', (t) => {
   assert.match(fallback.stdout, /prettier .*README\.md/)
 
   const unknown = checks(root, ['plan', 'unit', 'no-such-ref'])
-  assert.equal(unknown.status, 2)
+  assert.equal(unknown.status, 0, unknown.stderr)
+  assertFullUnitPlan(unknown.stdout.trim().split('\n'))
   assert.match(unknown.stderr, /unknown base/)
+})
+
+function assertFullUnitPlan(lines: string[]) {
+  assert.ok(lines.includes('npm run typecheck'))
+  assert.ok(lines.includes('npx vitest run --maxWorkers=50%'))
+  assert.ok(lines.includes('npm run test:node'))
+  assert.ok(!lines.some((line) => line.startsWith(vitestRelated)))
+  assert.ok(!lines.some((line) => line.startsWith(nodeFlags)))
+}
+
+test('transitive imports select node tests and extra test:node entry points', (t) => {
+  const { root } = fixture(t)
+  const idle = 'packages/connector/src/moonraker/console-idle.ts'
+  const driver = 'packages/connector/src/moonraker/pause-driver.ts'
+  const nodeTest = 'tests/node/pause-driver.test.ts'
+  const extraTest = 'tests/helpers/extra.test.mts'
+  const base = commit(root, {
+    [idle]: "import './pause-driver.ts'\n",
+    [driver]: "export * from './console-idle.js'\n",
+    [nodeTest]: `import '../../${driver}'\n`,
+    [extraTest]: `await import('../../${driver}')\n`,
+    'package.json': JSON.stringify({
+      scripts: { 'test:node': `node --test tests/node/*.test.ts ${extraTest}` },
+    }),
+  })
+  commit(root, {
+    [idle]: "import './pause-driver.ts'\nexport const idle = true\n",
+  })
+  assert.ok(plan(root, base).includes(`${nodeFlags} ${extraTest} ${nodeTest}`))
+})
+
+test('fixtures select node and Vitest tests by path or basename', (t) => {
+  const { root } = fixture(t)
+  const data = 'tests/fixtures/example.data'
+  const job = 'samples/example.gcode.gz'
+  const nodeTest = 'tests/node/fixture.test.ts'
+  const unitTest = 'tests/unit/job.test.ts'
+  const base = commit(root, {
+    [data]: 'old\n',
+    [job]: 'old\n',
+    [nodeTest]: `const fixture = '${data}'\n`,
+    [unitTest]: "const fixture = 'example.gcode.gz'\n",
+  })
+  commit(root, { [data]: 'new\n', [job]: 'new\n' })
+  const lines = plan(root, base)
+  assert.ok(lines.includes(`${nodeFlags} ${nodeTest}`))
+  assert.ok(lines.includes(`npx vitest run --maxWorkers=50% ${unitTest}`))
+})
+
+test('migrations select referencing tests and the PostgreSQL suite', (t) => {
+  const { root } = fixture(t)
+  const migration = 'infra/db/migrations/001.sql'
+  const nodeTest = 'tests/node/migration.test.ts'
+  const unitTest = 'tests/unit/migration.test.ts'
+  const base = commit(root, {
+    [migration]: 'select 1;\n',
+    [nodeTest]: "const dir = 'infra/db/migrations'\n",
+    [unitTest]: `const migration = '${migration}'\n`,
+  })
+  commit(root, { [migration]: 'select 2;\n' })
+  const expected = [
+    `npx vitest run --maxWorkers=50% ${unitTest}`,
+    `${nodeFlags} ${nodeTest}`,
+  ]
+  assert.deepEqual(plan(root, base).slice(1), expected)
+  write(root, 'scripts/test-postgres.ts', 'export {}\n')
+  assert.deepEqual(plan(root, base).slice(1), [
+    ...expected,
+    'npm run test:postgres',
+  ])
+})
+
+test('a Git deletion runs the full unit suite', (t) => {
+  const { root, base } = fixture(t)
+  rmSync(join(root, util))
+  commit(root, {})
+  assertFullUnitPlan(plan(root, base))
+})
+
+test('orq change lists override Git and work with an unknown base', (t) => {
+  const { root, base } = fixture(t)
+  commit(root, { 'README.md': 'two\n' })
+  write(root, 'changed.list', `${util}\n`)
+  write(root, 'deleted.list', '')
+  const extra = {
+    ORQ_CHANGED_FILES: 'changed.list',
+    ORQ_DELETED_FILES: 'deleted.list',
+  }
+  for (const ref of [base, 'no-such-ref']) {
+    const lines = plan(root, ref, extra)
+    assert.ok(lines.includes(`${nodeFlags} ${importer}`))
+    assert.ok(!lines.some((line) => line.includes('README.md')))
+  }
+
+  write(root, 'deleted.list', 'removed.ts\n')
+  assertFullUnitPlan(plan(root, 'no-such-ref', extra))
 })
 
 test('final runs the full suite and at most two Playwright workers', (t) => {

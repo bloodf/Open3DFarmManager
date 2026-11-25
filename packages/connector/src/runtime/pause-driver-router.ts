@@ -221,11 +221,15 @@ export function createPauseDriverRouter(config: {
         )
       ) {
         sdcpFirmware.delete(binding)
-        const target = await resolveSdcpTarget(sdcp, {
-          ...(sdcp.discoveryPort ? { port: sdcp.discoveryPort } : {}),
-          ...(signal ? { signal } : {}),
-        })
-        sdcpFirmware.set(binding, target.firmwareVersion)
+        try {
+          const target = await resolveSdcpTarget(sdcp, {
+            ...(sdcp.discoveryPort ? { port: sdcp.discoveryPort } : {}),
+            ...(signal ? { signal } : {}),
+          })
+          sdcpFirmware.set(binding, target.firmwareVersion)
+        } catch {
+          // A failed firmware read cannot establish start qualification.
+        }
       }
       if (
         readPrinterBinding(binding) &&

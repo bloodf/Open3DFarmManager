@@ -34,7 +34,7 @@ export const OPT_IN_TOKEN = 'synthetic-identification-diagnostic'
 export const PINNED_IMAGE_REFERENCE =
   'ghcr.io/mainsail-crew/virtual-klipper-printer@sha256:c2ab1d20a3f6d9dda182bf69a078c5f37a066a44f1f34ffea48d49ddf7bbce47'
 export const PINNED_COMPOSE_BASE =
-  'ghcr.io/mainsail-crew/virtual-klipper-printer@sha256:759f09e063d906832198b7090b7ecce1099a8a1d9ef065bab59a48a4208459cf'
+  'ghcr.io/mainsail-crew/virtual-klipper-printer@sha256:84da96e5d7b96fcc9ba4d781c768815d262d88bccbdb9671af6491a7b350aa1a'
 export const PINNED_AMD64_DIGEST =
   'sha256:c2ab1d20a3f6d9dda182bf69a078c5f37a066a44f1f34ffea48d49ddf7bbce47'
 export const PINNED_PLATFORM = 'linux/amd64'

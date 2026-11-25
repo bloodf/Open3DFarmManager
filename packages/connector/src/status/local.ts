@@ -18,6 +18,8 @@ export type LocalStatus = {
   storageDegraded?: boolean
   /** Records dropped while storage was degraded. */
   storageLost?: number
+  /** Records dropped since start because the server refused them (409). */
+  refusedRecords?: number
   /** Active WebRTC backend; absent when the runtime has not probed it. */
   rtc?: RtcBackendStatus
 }
@@ -54,6 +56,9 @@ export function projectStatus(value: LocalStatus) {
     ...(rtc ? { rtc } : {}),
     ...(count(value.storageLost ?? 0) > 0
       ? { storageLost: count(value.storageLost ?? 0) }
+      : {}),
+    ...(count(value.refusedRecords ?? 0) > 0
+      ? { refusedRecords: count(value.refusedRecords ?? 0) }
       : {}),
   }
 }
@@ -108,7 +113,7 @@ export async function openLocalStatus(input: {
         res
           .writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
           .end(
-            `<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Estado local do Connector</title><main><h1>Estado local do Connector</h1><p>Somente leitura. Atualize a página para consultar novamente.</p><dl><dt>Registros na fila</dt><dd>${status.queueDepth}</dd><dt>Registros enviados</dt><dd>${status.delivered}</dd><dt>Novas tentativas</dt><dd>${status.retries}</dd><dt>Credencial</dt><dd>${status.credentialExpired ? 'Expirada' : 'Válida'}</dd><dt>Armazenamento da fila</dt><dd>${'storage' in status ? 'Degradado: sem espaço ou erro de disco. Novos registros não são gravados e os comandos são recusados.' : 'Normal'}</dd>${'rtc' in status && status.rtc ? `<dt>Backend WebRTC</dt><dd>${status.rtc.backend === 'none' ? 'Indisponível: modo somente leitura degradado. Sem sessões WebRTC no navegador.' : 'node-datachannel (direto)'}</dd>` : ''}<dt>Registros perdidos por falha de armazenamento</dt><dd>${'storageLost' in status ? status.storageLost : 0}</dd></dl><p>Estes dados descrevem o processo local. Não confirmam o estado de uma impressora.</p></main></html>`,
+            `<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Estado local do Connector</title><main><h1>Estado local do Connector</h1><p>Somente leitura. Atualize a página para consultar novamente.</p><dl><dt>Registros na fila</dt><dd>${status.queueDepth}</dd><dt>Registros enviados</dt><dd>${status.delivered}</dd><dt>Novas tentativas</dt><dd>${status.retries}</dd><dt>Credencial</dt><dd>${status.credentialExpired ? 'Expirada' : 'Válida'}</dd><dt>Armazenamento da fila</dt><dd>${'storage' in status ? 'Degradado: sem espaço ou erro de disco. Novos registros não são gravados e os comandos são recusados.' : 'Normal'}</dd>${'rtc' in status && status.rtc ? `<dt>Backend WebRTC</dt><dd>${status.rtc.backend === 'none' ? 'Indisponível: modo somente leitura degradado. Sem sessões WebRTC no navegador.' : 'node-datachannel (direto)'}</dd>` : ''}<dt>Registros perdidos por falha de armazenamento</dt><dd>${'storageLost' in status ? status.storageLost : 0}</dd><dt>Registros descartados por conflito no servidor</dt><dd>${'refusedRecords' in status ? status.refusedRecords : 0}</dd></dl><p>Estes dados descrevem o processo local. Não confirmam o estado de uma impressora.</p></main></html>`,
           )
       }
     } catch {

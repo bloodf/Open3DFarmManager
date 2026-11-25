@@ -136,6 +136,7 @@ type AgentDiagnostic =
       capacity: number
       credentialExpired: boolean
       storageLost: number
+      refusedRecords: number
     }
 
 let bootstrapped = false
@@ -289,7 +290,7 @@ async function runConnectorAgentOnce(
     capacity: 0,
     credentialExpired: false,
   }
-  /** Records dropped since start because the server refused their batch. */
+  /** Records dropped since start because the server refused them. */
   let refusedRecords = 0
   function diagnostic(value: AgentDiagnostic) {
     if (value.kind === 'drain-loss') {
@@ -542,6 +543,7 @@ async function runConnectorAgentOnce(
             totals.credentialExpired || clock.now() >= credential.expires_at,
           storageDegraded: queue.storageDegraded,
           storageLost: queue.storageLost,
+          refusedRecords,
           rtc: rtcBackend,
         }),
         onError: fail,
@@ -1330,6 +1332,7 @@ async function runConnectorAgentOnce(
         kind: 'agent-summary',
         ...totals,
         storageLost: queue.storageLost,
+        refusedRecords,
       })
     } catch (error) {
       fail(error)

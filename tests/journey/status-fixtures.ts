@@ -123,9 +123,12 @@ export async function startStatusFixture(
     requests: simulator.commands,
     loseConnection: () => simulator.setFault('disconnect'),
     recover: () => {
-      data.fixtureStatus.CurrentStatus = [0]
+      // The simulator owns a copy of the fixture state.
+      simulator.reset()
       simulator.setFault()
     },
     close: simulator.close,
+    /** Synthetic printer, for the control journey's state assertions. */
+    simulator,
   }
 }

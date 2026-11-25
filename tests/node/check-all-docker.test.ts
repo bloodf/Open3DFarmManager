@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
@@ -77,9 +78,17 @@ test('check-all-docker supplies the Node image Chromium to the unmodified check:
 
   // Read-only image mount of the Node image's Playwright browsers; no download.
   assert.ok(create.includes(browser.browserMount(cfg.nodeImage)))
+  const nodeVersion = readFileSync(
+    fileURLToPath(new URL('../../.nvmrc', import.meta.url)),
+    'utf8',
+  )
+    .trim()
+    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   assert.match(
     browser.browserMount(cfg.nodeImage),
-    /^type=image,source=openfarm-e2e-node22\.23\.5:latest,destination=\/opt\/ms-playwright,image-subpath=ms-playwright,readonly$/,
+    new RegExp(
+      `^type=image,source=openfarm-e2e-node${nodeVersion}:latest,destination=\\/opt\\/ms-playwright,image-subpath=ms-playwright,readonly$`,
+    ),
   )
   // Prepared after HOME exists and before the gate, which stays verbatim.
   assert.ok(

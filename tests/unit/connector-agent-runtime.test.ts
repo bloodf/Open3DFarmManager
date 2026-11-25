@@ -861,20 +861,22 @@ test('local credential expiry stops authentication attempts while bounded local 
   }
 }, 20000)
 
-test('expired or mismatched credentials fail before any queue or network', async () => {
-  for (const mode of [
-    'expiry',
-    'fingerprint',
-    'mapping',
-    'oversized',
-    'public',
-    'duplicate',
-    'fifo',
-    'missing-identity',
-    'audience',
-    'signalling-origin',
-    'signalling-token',
-  ]) {
+test.for([
+  'expiry',
+  'fingerprint',
+  'mapping',
+  'oversized',
+  'public',
+  'duplicate',
+  'fifo',
+  'missing-identity',
+  'audience',
+  'signalling-origin',
+  'signalling-token',
+])(
+  'expired or mismatched credentials fail before any queue or network (%s)',
+  { timeout: 20000 },
+  async (mode) => {
     const server = await fixture()
     try {
       if (mode === 'expiry')
@@ -938,8 +940,8 @@ test('expired or mismatched credentials fail before any queue or network', async
     } finally {
       await server.close()
     }
-  }
-}, 20000)
+  },
+)
 
 test('malformed, missing and interrupted scope receipts stay untouched and cannot reach any network', async () => {
   const server = await fixture()

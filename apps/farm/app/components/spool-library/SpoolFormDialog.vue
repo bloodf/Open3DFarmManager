@@ -3,6 +3,7 @@ import { computed, nextTick, reactive, ref, watch } from 'vue'
 import Button from '../ui/Button.vue'
 import Dialog from '../ui/Dialog.vue'
 import Field from '../ui/Field.vue'
+import SpoolIllustration from './SpoolIllustration.vue'
 import {
   filamentDisplayTitle,
   validateSpoolForm,
@@ -118,6 +119,7 @@ async function submit() {
 <template>
   <Dialog v-model="open" :title="title">
     <form class="entity-form" novalidate @submit.prevent="submit">
+      <SpoolIllustration v-if="spool" :spool="spool" />
       <div
         v-if="serverError || Object.keys(fieldErrors).length"
         ref="errorBox"

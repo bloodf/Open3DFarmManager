@@ -1,6 +1,7 @@
 <script setup lang="ts" generic="Row extends FarmRow">
-import { formatTemperature } from '../../utils/ui-format.ts'
+import { formatPercentage, formatTemperature } from '../../utils/ui-format.ts'
 import { computed, onMounted, ref } from 'vue'
+import type { ActiveSpool } from '../../../../../packages/farm-protocol/src/status.ts'
 import {
   formatPrinterAlarmLabel,
   formatPrinterOperationalStateLabel,
@@ -9,11 +10,17 @@ import {
 } from '../../utils/farm-view.ts'
 import { formatJobTime } from '../../utils/farm-job-view.ts'
 import { printerDetailHref } from '../../utils/farm-wall-card.ts'
+import { farmSlotViews, type SlotBinding } from '../../utils/slot-spools.ts'
+import FarmSpool from '../spool-art/FarmSpool.vue'
 
 const props = defineProps<{
   farmId?: string
   rows: readonly Row[]
+  bindingsFor?: (
+    row: Row,
+  ) => Readonly<Record<string, SlotBinding | undefined>> | undefined
   liveNow: () => { wall: number; mono: number }
+  activeSpoolsFor?: (row: Row) => readonly ActiveSpool[]
 }>()
 
 const storageKey = 'openfarm:printer-wall-view'
@@ -51,9 +58,12 @@ const columns = [
   { label: 'Mesa', format: temperature },
   { label: 'Arquivo' },
   { label: 'Materiais' },
+  { label: 'Bobinas' },
   { label: 'Alertas' },
   { label: 'Idade dos dados', format: (value: number) => `${value} s` },
 ]
+
+const SPOOLS_COLUMN = columns.findIndex((column) => column.label === 'Bobinas')
 
 function temperature(value: number) {
   return formatTemperature(value) ?? 'Indisponível'
@@ -67,6 +77,15 @@ const sortedRows = computed(() => {
   return props.rows
     .map((row) => {
       const state = row.observation?.state
+      // Last-known materials are never drawn: stale colour and level would
+      // pass for the filament that is loaded now.
+      const spools = row.observation?.historical
+        ? undefined
+        : farmSlotViews(
+            state?.materials,
+            props.bindingsFor?.(row),
+            props.activeSpoolsFor?.(row),
+          )
       const age = row.observation && observationAge(row.observation, now)
       const printerAlarms = formatPrinterAlarmLabel(state?.alarms)
       const alerts = [
@@ -84,15 +103,19 @@ const sortedRows = computed(() => {
         state?.toolTemperatureCelsius,
         state?.bedTemperatureCelsius,
         state?.filename,
-        state?.materials
-          ?.map((material) => material.materialType || material.slot)
-          .join(', '),
+        row.observation?.historical
+          ? undefined
+          : state?.materials
+              ?.map((material) => material.materialType || material.slot)
+              .join(', '),
+        spools?.length || undefined,
         alerts.length ? alerts.join(', ') : 'Nenhum',
         age?.seconds,
       ]
       return {
         id: row.assignment.assignmentId,
         printerKey: row.assignment.printerKey,
+        spools,
         cells,
       }
     })
@@ -184,13 +207,36 @@ function display(value: string | number | null | undefined, index: number) {
               row.cells[0]
             }}</a>
           </th>
-          <td
-            v-for="index in columns.length - 1"
-            :key="index"
-            :class="{ numeric: [4, 5, 6, 7, 11].includes(index) }"
-          >
-            {{ display(row.cells[index], index) }}
-          </td>
+          <template v-for="index in columns.length - 1" :key="index">
+            <td v-if="index === SPOOLS_COLUMN && row.spools?.length">
+              <ul class="wall-spools" aria-label="Bobinas">
+                <li v-for="spool in row.spools" :key="spool.key">
+                  <FarmSpool
+                    announce-level
+                    :color="spool.color"
+                    :fraction="
+                      spool.level.kind === 'known' ? spool.level.fraction : null
+                    "
+                    :size="32"
+                  />
+                  <span>
+                    {{ spool.label }} · {{ spool.material }}
+                    <template v-if="spool.level.kind === 'known'">
+                      ·
+                      {{ formatPercentage(spool.level.fraction * 100) }}
+                      restante
+                    </template>
+                    <template v-if="!spool.color">
+                      · Cor não informada</template
+                    >
+                  </span>
+                </li>
+              </ul>
+            </td>
+            <td v-else :class="{ numeric: [4, 5, 6, 7, 12].includes(index) }">
+              {{ display(row.cells[index], index) }}
+            </td>
+          </template>
         </tr>
       </tbody>
     </table>
@@ -215,6 +261,20 @@ function display(value: string | number | null | undefined, index: number) {
   border-bottom: 1px solid currentColor;
   text-align: start;
   overflow-wrap: anywhere;
+}
+
+.wall-spools {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wall-spools li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .wall-table .numeric {

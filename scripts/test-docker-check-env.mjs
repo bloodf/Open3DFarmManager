@@ -8,6 +8,7 @@
 import { spawnSync } from 'node:child_process'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { checkImageRunArgs, createLifecycle } from './docker-run-lib.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const imageTag =
@@ -57,36 +58,30 @@ if (!skipBuild) {
   }
 }
 
-const containerName = `o3dfm-check-env-${process.pid}`
+const lifecycle = createLifecycle()
+lifecycle.installSignals()
 let status = 1
 try {
-  const result = run(
-    'docker',
-    [
-      'run',
-      '--rm',
-      '--name',
-      containerName,
-      '--network',
-      'none',
-      '--shm-size',
-      '1g',
-      imageTag,
-      'node',
-      '--test',
-      '--test-concurrency=1',
-      '--test-timeout=120000',
-      '--test-force-exit',
-      ...SUITES,
-    ],
-    { cwd: root, stdio: 'inherit' },
+  const result = await lifecycle.run(
+    checkImageRunArgs({
+      name: `o3dfm-check-env-${process.pid}`,
+      image: imageTag,
+      command: [
+        'node',
+        '--test',
+        '--test-concurrency=1',
+        '--test-timeout=120000',
+        '--test-force-exit',
+        ...SUITES,
+      ],
+    }),
+    { inherit: true },
   )
-  status = result.status ?? 1
-  if (status !== 0) {
-    fail(`environment-sensitive suites failed (${status})`, result)
-  }
+  status = result.status
+  if (status !== 0)
+    console.error(`environment-sensitive suites failed (${status})`)
 } finally {
-  spawnSync('docker', ['rm', '--force', containerName], { encoding: 'utf8' })
+  await lifecycle.cleanup()
 }
 
 process.exit(status)

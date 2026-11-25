@@ -6,8 +6,8 @@ import { exchange, object, parse } from './transport.ts'
 // Phrozen demonstrates ChituManager on the Revo 14K with V138:
 // https://www.youtube.com/watch?v=ngnSR3nWJGw
 // Wire contract: https://github.com/cbd-tech/SDCP-Smart-Device-Control-Protocol-V3.0.0
-const MODEL = 'Sonic Mighty Revo 14K'
-const FIRMWARE = new Set(['V138', 'V153'])
+export const PhrozenModel = 'Sonic Mighty Revo 14K'
+export const PhrozenFirmware = ['V138', 'V153'] as const
 
 function identity(frame: string) {
   const { Id, Data } = parse(frame)
@@ -16,9 +16,9 @@ function identity(frame: string) {
   const { MachineName, MainboardID, FirmwareVersion, ProtocolVersion } =
     attributes
   if (
-    MachineName !== MODEL ||
+    MachineName !== PhrozenModel ||
     typeof FirmwareVersion !== 'string' ||
-    !FIRMWARE.has(FirmwareVersion) ||
+    !PhrozenFirmware.some((firmware) => firmware === FirmwareVersion) ||
     ProtocolVersion !== 'V3.0.0'
   ) {
     throw new Error('Unsupported Phrozen SDCP model, firmware or protocol')

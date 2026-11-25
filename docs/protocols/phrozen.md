@@ -21,3 +21,5 @@ Firmware listings checked 2026-11-22. Fixtures are original synthetic protocol e
 - Capture discovery and status on owner Revo 14K hardware for each firmware and verify identity strings, wire versions and reported fields. Add endpoint and board binding in `packages/connector/src/control/printer-binding.ts` and register discovery and collection in `packages/connector/src/runtime/background-discovery.ts` and `packages/connector/src/runtime/collect.ts`.
 - Update `docs/fullfarmmanager/catalog-resin.md` with verified model and firmware support. Map status into the shared schema and expose only qualified capabilities in `apps/farm/app/`.
 - Obtain firmware-specific camera, file and history evidence before wiring `packages/connector/src/camera/`, `packages/connector/src/runtime/file-targets.ts` and `packages/connector/src/runtime/file-upload.ts`. Route any future supported controls through `packages/connector/src/runtime/pause-driver-router.ts`, preserving signed authorization, state and capability gates and the no-retry rule.
+
+The v8 live snapshot advertises an empty controls list for this collector.

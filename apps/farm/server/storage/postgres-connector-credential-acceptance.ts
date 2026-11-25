@@ -675,6 +675,7 @@ export class PostgresConnectorCredentialAcceptance {
                     save,
                     { farmId: request.farmId, agentId: request.agentId },
                     sorted,
+                    readNow(),
                   )
                 await recordNetworkTelemetry(
                   save,

@@ -309,6 +309,9 @@ export async function startPhrozenSimulator(fixture: Fixture, fault?: Fault) {
       wsPort: (http.address() as AddressInfo).port,
       commands,
       requests,
+      setFault(next?: Fault) {
+        fault = next
+      },
       close,
       /** What the printer would report now, without advancing it. */
       state: () => ({

@@ -3,6 +3,7 @@ import {
   selectCrealityCamera,
   streamCrealityJpegs,
 } from '../creality/camera.ts'
+import { openCrealityWebRtcSource } from '../creality/camera-webrtc.ts'
 import { openAnycubicCameraSource } from '../anycubic/camera-media.ts'
 import {
   selectAnycubicCamera,
@@ -48,7 +49,8 @@ function readConfiguredBambuCamera(
       ...(caFile ? { caFile } : {}),
       ...(pinSha256 ? { pinSha256 } : {}),
     }
-    if (selectBambuCamera(source).kind === 'jpeg') return { source, ffmpeg }
+    const selected = selectBambuCamera(source)
+    if (selected.kind === 'jpeg' || caFile) return { source, ffmpeg }
   } catch {
     return undefined
   }
@@ -122,7 +124,7 @@ export function getRtspCameraStatus(
         available,
         status: available ? ('available' as const) : ('unavailable' as const),
         message: available
-          ? 'Bambu TLS JPEG camera'
+          ? 'Bambu camera available'
           : 'Bambu camera unavailable',
       })
     }
@@ -215,6 +217,15 @@ export async function createCameraMediaFactory(input: {
     configured.map(({ handle, host, port }) => {
       selectCrealityCamera({ host, port })
       return [handle, Object.freeze({ host, port })] as const
+    }),
+  )
+  const crealityWebRtc = new Map(
+    config.cameras.flatMap((camera, index) => {
+      const source = camera.source
+      if (!('kind' in source) || source.kind !== 'creality-webrtc') return []
+      const { address: host, port } = source
+      selectCrealityCamera({ host, port })
+      return [['camera-' + index, Object.freeze({ host, port })] as const]
     }),
   )
   const configuredAnycubic = new Map(
@@ -312,7 +323,8 @@ export async function createCameraMediaFactory(input: {
       })) ?? []),
     ].flatMap((camera, index) => {
       if (
-        selectBambuCamera(camera.source).kind !== 'jpeg' ||
+        (selectBambuCamera(camera.source).kind === 'rtsps' &&
+          !camera.source.caFile) ||
         (!camera.source.caFile && !camera.source.pinSha256) ||
         camera.ffmpeg.path === helper.path ||
         camera.ffmpeg.sha256 === helper.sha256
@@ -399,6 +411,27 @@ export async function createCameraMediaFactory(input: {
           return openAnycubicCameraSource({
             source: anycubicSource,
             ffmpeg: anycubicFfmpeg ?? helper,
+            isCurrent,
+            signal: AbortSignal.any([
+              signal,
+              AbortSignal.timeout(
+                Math.max(1, Math.ceil(expiresAtMonoMs - performance.now())),
+              ),
+            ]),
+          })
+        }
+        const webRtc = crealityWebRtc.get(handle)
+        if (webRtc) {
+          if (
+            !isCurrent() ||
+            signal.aborted ||
+            expiresAtMonoMs <= performance.now() ||
+            expiresAtMonoMs - performance.now() > 30000
+          )
+            throw Error('Creality camera admission expired')
+          // The printer already sends H.264: no encoder process.
+          return openCrealityWebRtcSource({
+            ...webRtc,
             isCurrent,
             signal: AbortSignal.any([
               signal,

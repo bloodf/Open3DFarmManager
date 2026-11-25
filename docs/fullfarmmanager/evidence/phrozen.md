@@ -98,5 +98,5 @@ Limits:
 2. Confirm that status carries `TaskId`. The older status fixture has none. Without it, start ends `uncertain`, and pause, resume and stop are refused.
 3. Confirm the `CurrentLayerTalVolume` meaning, its value for stopped runs, and when it is written.
 4. Confirm that V153 video is LAN RTSP and not only Phrozen GO app streaming.
-5. Nothing calls these operations yet. Printer binding, the signed command router, camera pipeline, upload targets and runtime collection are not wired, so no browser or API user can reach them.
+5. Only status is wired: the v8 read-only collector (`collection.ts`) uses discovery and command 0 and advertises no controls. Control, upload, video and task usage have no runtime caller. Printer binding for commands, the signed command router, camera pipeline, upload targets and usage collection are not wired, so no browser or API user can reach those operations.
 6. No production ledger sink exists. The server accepts only `manual` entries (`resin-ledger/request.ts` and `resin-ledger-postgres.ts`), and no Connector-to-server resin transport exists. `PhrozenResinLedger` is the port to implement. An atomic server-side debit keyed by run key, with its own consumption kind, would remove the read-then-append gap and the provenance ambiguity.

@@ -89,17 +89,16 @@ export type PauseCapabilityDecision =
 const denied = (): PauseAuthorityFailure => ({ ok: false, reason: 'denied' })
 /** How far ahead of its receipt an observation without a send age may claim to be. */
 const MAX_FUTURE_OBSERVATION_MS = 30_000
-/** Actions that start a job. They always need a send age. */
-const SEND_AGE_REQUIRED: ReadonlySet<ExtendedControlAction> = new Set([
-  'start_print',
-  'start_library_print',
-  'queue_op',
+const STOP_ACTIONS: ReadonlySet<ExtendedControlAction> = new Set([
+  'pause',
+  'cancel',
+  'emergency_stop',
 ])
 /**
  * An issuer may only grant controls from a current telemetry observation.
  * An older Connector sends no age (SQL NULL): freshness then counts from the
- * database receipt, the observation may not be far ahead of it, and job starts
- * are withheld. A present but invalid age grants nothing.
+ * database receipt, the observation may not be far ahead of it, and only
+ * stop actions are allowed. A present but invalid age grants nothing.
  */
 export function freshAdvertisedActions(
   controls: unknown,
@@ -130,7 +129,7 @@ export function freshAdvertisedActions(
   const advertised = new Set<unknown>(controls)
   return ExtendedControlAction.options.filter(
     (action) =>
-      advertised.has(action) && !(withoutAge && SEND_AGE_REQUIRED.has(action)),
+      advertised.has(action) && (!withoutAge || STOP_ACTIONS.has(action)),
   )
 }
 type Current = {

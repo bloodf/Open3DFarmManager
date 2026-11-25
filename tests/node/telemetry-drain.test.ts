@@ -79,7 +79,7 @@ test('synthetic Moonraker state survives outage and restart, then drains to an i
         )
         assert.equal(
           second[0]?.kind === 'printer-state' && second[0].ageAtSendMs,
-          undefined,
+          86_400_000,
         )
         ids(body).forEach((id) => received.add(id))
         return ids(body)

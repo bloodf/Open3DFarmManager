@@ -8,14 +8,14 @@ Upgrade the application first, then each Connector. Both orders keep telemetry f
 
 **New server, older Connector (recommended order).** The Connector sends no send age, so the server counts freshness from the time it received the report. It ignores a report dated more than 30 seconds ahead of that time.
 
-- Pause, cancel and emergency stop stay available in the browser, as do the other controls that do not start a job.
-- Starting a print, a library print or a queue operation is not offered in the browser until the Connector is upgraded.
+- Pause, cancel and emergency stop stay available in the browser.
+- All other controls require a fresh observation with a send age.
 - Binding a physical spool to a Spoolman spool is refused (`spool-not-observed`) until the Connector is upgraded.
-- A backlog uploaded after an outage can look current for up to two minutes. The Connector still checks the printer state and refuses unsafe commands with a reason.
+- The receipt-time window for stop actions lasts up to two minutes. The Connector still checks the printer state and refuses unsafe commands with a reason.
 
 **New Connector, older server.** The older server refuses records that carry a send age (HTTP 400). The Connector then sends the same batch again without it, before anything is committed. Telemetry keeps flowing, at the cost of one extra request per batch with printer state or inventory. Server behavior is that of the old release. The same applies after rolling the application back. Once the server is upgraded, it receives the send age on the next batch, with no Connector restart.
 
-A new Connector also omits the send age when its clock stepped back past a queued report. The server treats that report like one from an older Connector.
+A new Connector uses the timestamps saved in its queue to age reports recovered after a restart. It reports at least the full queue retention window for recovered observations because elapsed time across the restart cannot be verified from the wall clock alone. Reports without a usable age are eligible only for the stop-action fallback.
 
 ## 1. Rehearse the application upgrade
 

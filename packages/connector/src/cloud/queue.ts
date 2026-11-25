@@ -575,19 +575,23 @@ export class TelemetryQueue {
     for (const id of this.ageAnchors.keys())
       if (!live.has(id)) this.ageAnchors.delete(id)
   }
-  /** Recovered records lack a trustworthy monotonic anchor and cannot prove freshness. */
   sendAge(record: TelemetryRecord, now: number): number | undefined {
     const anchor = this.ageAnchors.get(record.eventId)
-    if (!anchor || record.queuedAt > now) return undefined
+    if (record.queuedAt > now) return undefined
     const observedAt =
       record.kind === 'printer-state'
         ? record.state.observedAt
         : record.kind === 'inventory-snapshot'
           ? record.inventory.observedAt
-          : now
-    if (observedAt > now) return undefined
+          : record.queuedAt
+    if (observedAt > record.queuedAt) return undefined
+    const wallAge = now - observedAt
+    // The log persists both timestamps. Across a restart the wall clock can
+    // undercount elapsed time, so age recovered records by at least the full
+    // queue retention window. Only a live monotonic anchor can prove freshness.
+    if (!anchor) return Math.max(wallAge, MAX_AGE)
     return Math.max(
-      now - Math.min(observedAt, record.queuedAt),
+      wallAge,
       anchor.elapsed +
         Math.floor(Math.max(0, performance.now() - anchor.monotonic)),
     )

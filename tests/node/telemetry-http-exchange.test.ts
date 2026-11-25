@@ -152,8 +152,13 @@ test('lost acknowledgement retries the durable event with a new challenge and co
               })),
             )
           } else {
-            // A restart loses the monotonic anchor, so freshness is unknown.
-            assert.deepEqual(sent, records)
+            assert.deepEqual(
+              sent,
+              records.map((record) => ({
+                ...record,
+                ageAtSendMs: 86_400_000,
+              })),
+            )
           }
           return 'A'.repeat(86)
         },

@@ -4,7 +4,7 @@ import Button from '../../components/ui/Button.vue'
 import EmptyState from '../../components/ui/EmptyState.vue'
 import ErrorState from '../../components/ui/ErrorState.vue'
 import Skeleton from '../../components/ui/Skeleton.vue'
-import ColorSwatch from '../../components/spool-library/ColorSwatch.vue'
+import SpoolArt from '../../components/spool-library/SpoolArt.vue'
 import FeaturePanel from '../../components/spool-library/FeaturePanel.vue'
 import FeatureTable from '../../components/spool-library/FeatureTable.vue'
 import SpoolLibraryShell from '../../components/spool-library/SpoolLibraryShell.vue'
@@ -374,7 +374,7 @@ async function scan() {
               #{{ spool.id }} · {{ spoolDisplayTitle(spool) }}
               <span v-if="spool.archived"> (arquivada)</span>
             </td>
-            <td><ColorSwatch :filament="spool.filament" /></td>
+            <td><SpoolArt :spool="spool" :size="40" /></td>
             <td>{{ spool.filament.material ?? 'Não informado' }}</td>
             <td>{{ spool.location || 'Sem local' }}</td>
             <td>{{ grams(spool.remaining_weight) }}</td>

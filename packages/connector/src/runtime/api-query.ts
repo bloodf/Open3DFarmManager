@@ -1,3 +1,4 @@
+import { moonrakerOrigins } from '../config/moonraker.ts'
 import { z } from 'zod'
 import {
   INITIAL_COLLECTION_ATTEMPT,
@@ -97,7 +98,7 @@ export function createApiQueryReader(
       if (!printer) throw Error('Moonraker assignment unavailable')
       const selected = validateMoonrakerInput({
         assignment: printer,
-        allowedOrigins: collection.allowedOrigins,
+        allowedOrigins: moonrakerOrigins(collection),
         limits: collection.limits,
       })
       if (selected.origin !== assignment.moonraker_origin)

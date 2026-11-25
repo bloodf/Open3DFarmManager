@@ -2,6 +2,21 @@
 
 Product development was resumed by the owner on 2026-11-11. Deployment, publication of the separate local payload, DNS or credential changes, production services and hardware tests still need separate authorization. Follow the existing security, review and resource ownership rules in `AGENTS.md`.
 
+## Repository checks
+
+Both modes run every step even after a failure, list the failed steps last and exit 1. Each run uses its own `TMPDIR` under `${XDG_CACHE_HOME:-$HOME/.cache}/openfarm-checks/`, removed on exit, and Vitest is capped with `--maxWorkers=50%`.
+
+- `sh scripts/checks.sh unit [base]` checks only the committed changes in `base..HEAD` (`base` defaults to `$ORQ_BASE_SHA`, then `origin/main`): Prettier, the hex colour lint, typecheck, related Vitest tests, matching `tests/node` files and the Go tests, each only when relevant. Node tests are matched by direct imports, so commit first and do not treat this mode as the final gate.
+- `sh scripts/checks.sh final` runs lint, typecheck, the full Vitest and Node suites, the Go and RTSP tests, the build and the default Playwright suite with two workers (also the local default in `playwright.config.ts`). It does not include `test:postgres:security` or `scripts/test-local-ci-regression.mjs`; `npm run check:all` does.
+
+`sh scripts/checks.sh plan unit [base]` or `plan final` prints the commands without running them.
+
+## Docker test runs
+
+`node scripts/docker-base-image.mjs [--node-image <ref>]` builds `openfarm-test-base:<hash12>` (hash of `package-lock.json` and the Node image reference) only when it is missing, and prints the tag. `npm ci` runs only in that build (`infra/test-base/Dockerfile`), which needs the npm registry; runners call it themselves, copy its `node_modules` into their workspace and install nothing per run. `--prune` removes `openfarm-test-base:*` images older than seven days whose tag is not current, and touches no other repository. A change to the Dockerfile alone does not change the tag: remove the old image to rebuild.
+
+Runners keep writable paths under `${XDG_CACHE_HOME:-$HOME/.cache}/openfarm-docker/<run-id>` or tmpfs, use `--rm`, and remove the run directory afterwards, also on SIGINT/SIGTERM once any in-flight `docker create` has returned (`scripts/docker-run-lib.mjs`). Evidence is copied to the existing evidence directory first. `scripts/test-docker-check-*.mjs` still build `infra/check/Dockerfile`, because that image is what they test.
+
 ## CodeGraph
 
 The standalone CLI is pinned by `.codegraph-version`; it is not an application dependency. The reviewed 1.6.2 bundle can be installed on macOS or Linux by downloading and inspecting the installer at `https://raw.githubusercontent.com/colbymchenry/codegraph/f72c9d2efb14454ff4f9fd7b8460abd82f19a287/install.sh`, then running `CODEGRAPH_VERSION=v1.6.2 sh <downloaded-file>`. It requires `curl` and `tar`. Do not upgrade during feature work.

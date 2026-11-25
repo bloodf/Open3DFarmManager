@@ -13,11 +13,14 @@ import { useRoute } from 'vue-router'
 import ConfigEditorPanel from '../../components/printer-detail/ConfigEditorPanel.vue'
 import { vendorDetailCatalog } from '../../utils/compatibility/detail-panels.ts'
 import FileManagerPanel from '../../components/printer-detail/FileManagerPanel.vue'
+import FarmSpool from '../../components/spool-art/FarmSpool.vue'
 import ResinLedgerPanel from '../../components/resin/ResinLedgerPanel.vue'
 import PowerPanel from '../../components/printer-detail/PowerPanel.vue'
 import SystemServicesPanel from '../../components/printer-detail/SystemServicesPanel.vue'
 import WebcamsPanel from '../../components/printer-detail/WebcamsPanel.vue'
 import type { WebcamDetailOptions } from '../../utils/webrtc/readonly-peer.ts'
+import { useFarmSlotBindings } from '../../composables/useFarmSlotBindings.ts'
+import PrinterDetailMaterials from '../../components/printer-detail/PrinterDetailMaterials.vue'
 import PrinterDetailDashboard from '../../components/printer-detail/PrinterDetailDashboard.vue'
 import Button from '../../components/ui/Button.vue'
 import EmptyState from '../../components/ui/EmptyState.vue'
@@ -37,6 +40,8 @@ import {
 } from '../../utils/farm-control.ts'
 import { printableFile } from '../../utils/files-view.ts'
 import { kobraXInputs, kobraXMapping } from '../../utils/kobra-x-inputs.ts'
+import { activeSlotSpools, farmSlotViews } from '../../utils/slot-spools.ts'
+import { filamentLoadArgs } from '../../utils/filament-load.ts'
 import { extendedLabel } from '../../utils/farm-control-extended.ts'
 import {
   formatPrinterStateLabel,
@@ -81,11 +86,28 @@ const kobraInputs = ref(['', '', '', '', '', '', ''])
 const availableKobraInputs = computed(() =>
   kobraXInputs(state.value?.materials),
 )
-const selectedKobraInput = computed(() =>
-  availableKobraInputs.value.find(
-    (input) => String(input.id) === kobraInputs.value[0],
+const selectedKobraInputs = computed(() =>
+  kobraInputs.value.map((selection) =>
+    availableKobraInputs.value.find((input) => String(input.id) === selection),
   ),
 )
+const selectedKobraInput = computed(() => selectedKobraInputs.value[0])
+const selectedLoadInputId = ref('')
+const loadInputError = ref('')
+const selectedLoadInput = computed(() =>
+  availableKobraInputs.value.find(
+    (input) => String(input.id) === selectedLoadInputId.value,
+  ),
+)
+function loadFilament(event: Event) {
+  const args = filamentLoadArgs(selectedLoadInput.value)
+  if (!args) {
+    loadInputError.value = 'Selecione uma entrada de filamento para carregar.'
+    return
+  }
+  loadInputError.value = ''
+  control('load_filament', event, args)
+}
 const selectedKobraMapping = computed(() =>
   kobraXMapping(
     kobraInputs.value,
@@ -190,6 +212,14 @@ const {
   confirmControl,
   closePause,
 } = useFarmControls(view, dialog)
+const loadFilamentConfirmationLabel = computed(() => {
+  const target = pauseTarget.value
+  if (target?.action !== 'load_filament') return undefined
+  return (
+    availableKobraInputs.value.find((input) => input.id === target.args.tray)
+      ?.label ?? 'Não informado'
+  )
+})
 
 const row = computed(
   () =>
@@ -198,6 +228,33 @@ const row = computed(
     ) ?? null,
 )
 const state = computed(() => row.value?.observation?.state)
+const activeSpools = computed(() => {
+  const current = ready.value
+  return current?.scope && row.value
+    ? activeSlotSpools({
+        farmId: current.scope.farmId,
+        row: row.value,
+        inventory: current.spools,
+        now: now.value,
+      })
+    : []
+})
+watch(
+  availableKobraInputs,
+  (inputs) => {
+    if (selectedLoadInputId.value || !inputs.length) return
+    const active = state.value?.materials?.find((material) => material.active)
+    const activeInput = inputs.find((input) => {
+      if (!active) return false
+      const slot = /^(-1|0):([0-3])$/.exec(active.slot)
+      if (!slot) return false
+      return input.id === Number(slot[2]) + (slot[1] === '0' ? 4 : 0)
+    })
+    if (active && activeInput)
+      selectedLoadInputId.value = String(activeInput.id)
+  },
+  { immediate: true },
+)
 const age = computed(() => {
   void now.value
   const observation = row.value?.observation
@@ -211,6 +268,40 @@ const live = computed(
     !!age.value &&
     !age.value.stale,
 )
+const detailMaterials = computed(() =>
+  live.value && detailFrame.value?.printerKey === printerKey.value
+    ? detailFrame.value.detail.materials
+    : undefined,
+)
+const vendorHasMaterials = computed(
+  () => !!vendorFrame.value && !!detailMaterials.value?.length,
+)
+const displayedMaterials = computed(() =>
+  detailMaterials.value?.length
+    ? detailMaterials.value
+    : state.value?.materials,
+)
+const slotBindings = useFarmSlotBindings(
+  () => ready.value?.scope?.farmId,
+  () =>
+    !row.value?.observation?.historical && !!displayedMaterials.value?.length,
+)
+const bindings = computed(() =>
+  row.value && !row.value.observation?.historical
+    ? slotBindings(row.value.assignment.assignmentId, displayedMaterials.value)
+    : undefined,
+)
+const selectedKobraSpools = computed(() => {
+  if (row.value?.observation?.historical) return []
+  const materials = selectedKobraInputs.value.flatMap((input) =>
+    input ? [input.material] : [],
+  )
+  const spools = farmSlotViews(materials, bindings.value, activeSpools.value)
+  const bySlot = new Map(spools?.map((spool) => [spool.key, spool]))
+  return selectedKobraInputs.value.map((input) =>
+    input ? bySlot.get(input.material.slot) : undefined,
+  )
+})
 const heaters = computed(() => {
   const observed = state.value ? heatersFromObservation(state.value) : []
   const reported =
@@ -1095,23 +1186,55 @@ watch(
                 {{ input.label }}
               </option>
             </select>
+            <template
+              v-for="spool in [selectedKobraSpools[index - 1]]"
+              :key="index"
+            >
+              <FarmSpool
+                announce-level
+                v-if="spool"
+                :color="spool.color"
+                :fraction="
+                  spool.level.kind === 'known' ? spool.level.fraction : null
+                "
+                :size="32"
+              />
+            </template>
           </template>
           <Button
             v-if="state?.controls?.includes('load_filament')"
             type="button"
             :disabled="
-              !selectedKobraInput ||
-              !availability('load_filament').available ||
-              commandInFlight
+              !availability('load_filament').available || commandInFlight
             "
-            @click="
-              (event: Event) =>
-                selectedKobraInput &&
-                control('load_filament', event, { tray: selectedKobraInput.id })
-            "
+            @click="(event: Event) => loadFilament(event)"
           >
-            Carregar filamento da entrada 1
+            Carregar filamento
           </Button>
+          <label for="detail-load-filament-input">Entrada para carregar</label>
+          <select
+            id="detail-load-filament-input"
+            v-model="selectedLoadInputId"
+            :aria-describedby="
+              loadInputError ? 'detail-load-filament-error' : undefined
+            "
+            @change="loadInputError = ''"
+          >
+            <option value="">Selecione uma entrada</option>
+            <option
+              v-for="input in availableKobraInputs"
+              :key="input.id"
+              :value="String(input.id)"
+            >
+              {{ input.label }}
+            </option>
+          </select>
+          <span
+            v-if="loadInputError"
+            id="detail-load-filament-error"
+            role="alert"
+            >{{ loadInputError }}</span
+          >
           <span
             >Selecione um arquivo .3mf ou .gcode já armazenado na
             impressora.</span
@@ -1177,19 +1300,29 @@ watch(
           }}
         </Button>
       </template>
-      <template v-if="vendorFrame.detail.materials?.length">
-        <h2>Slots ACE</h2>
-        <ul>
-          <li v-for="slot in vendorFrame.detail.materials" :key="slot.slot">
-            {{ slot.slot
-            }}<template v-if="slot.materialType">
-              · {{ slot.materialType }}</template
-            >
-            <template v-if="slot.active"> · Em uso</template>
-          </li>
-        </ul>
-      </template>
+      <PrinterDetailMaterials
+        v-if="vendorHasMaterials && !row.observation?.historical"
+        :materials="detailMaterials"
+        :bindings="bindings"
+        :active-spools="activeSpools"
+        :heading="
+          vendorFrame.vendor === 'creality'
+            ? 'Slots CFS'
+            : vendorFrame.vendor === 'kobra-x'
+              ? 'Slots ACE'
+              : 'Bandejas de filamento'
+        "
+      />
     </section>
+
+    <PrinterDetailMaterials
+      v-if="!vendorHasMaterials || row?.observation?.historical"
+      :materials="displayedMaterials"
+      :bindings="bindings"
+      :active-spools="activeSpools"
+      :historical="row?.observation?.historical"
+      class="panel"
+    />
 
     <ResinLedgerPanel
       v-if="row && ready?.scope?.farmId"
@@ -1254,6 +1387,10 @@ watch(
             {{ pauseTarget.args.device }} nesta impressora.
           </template>
           <template v-else>Confirme o comando para esta impressora.</template>
+          <template v-if="pauseTarget.action === 'load_filament'">
+            Entrada selecionada:
+            <strong>{{ loadFilamentConfirmationLabel }}</strong>.
+          </template>
           Ele será enviado diretamente ao Connector e não será repetido
           automaticamente.
         </p>

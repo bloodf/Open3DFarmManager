@@ -5,7 +5,7 @@ import {
 } from '@open3dfarmmanager/farm-protocol'
 import type { z } from 'zod'
 import type { ActiveSpoolAssignment } from './active-assignments.ts'
-import { SpoolmanSpool } from './read.ts'
+import { SpoolmanSpool, spoolmanRemainingPercent } from './read.ts'
 
 type Spool = z.infer<typeof SpoolmanSpool>
 
@@ -15,13 +15,6 @@ function colorHex(value: string | null): string | undefined {
   return /^[0-9A-Fa-f]{6}$/.test(hex) ? hex.toLowerCase() : undefined
 }
 
-function remainingPercent(spool: Spool): number | undefined {
-  const remaining = spool.remaining_weight
-  const initial = spool.initial_weight
-  if (remaining === null || initial === null || initial <= 0) return undefined
-  return Math.max(0, Math.min(100, (remaining / initial) * 100))
-}
-
 function fromSpool(slot: string, spool: Spool): ActiveSpoolRow {
   const material = spool.filament.material?.slice(0, 64) ?? undefined
   const name =
@@ -29,7 +22,7 @@ function fromSpool(slot: string, spool: Spool): ActiveSpoolRow {
     spool.location?.slice(0, 32) ??
     undefined
   const remaining = spool.remaining_weight
-  const percent = remainingPercent(spool)
+  const percent = spoolmanRemainingPercent(spool)
   const color = colorHex(spool.filament.color_hex)
   return ActiveSpool.parse({
     slot,

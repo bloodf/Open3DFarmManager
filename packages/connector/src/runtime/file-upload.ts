@@ -11,7 +11,11 @@ import {
   uploadMoonrakerFile,
   MoonrakerUploadError,
 } from '../moonraker/upload.ts'
-import { uploadCrealityFile } from '../creality/files.ts'
+import {
+  resolveCrealityUploadOrigin,
+  uploadCrealityFile,
+} from '../creality/files.ts'
+import type { resolveCrealityEndpoint } from '../discovery/creality.ts'
 import type {
   createKobraLinkClient,
   PrinterBinding,
@@ -24,7 +28,12 @@ import type { PrinterBinding as LocalPrinterBinding } from '../control/printer-b
 import { uploadBambuFile } from '../bambu/ftps.ts'
 
 export type FileUploadTarget =
-  | { backend: 'creality'; origin: string }
+  | {
+      backend: 'creality'
+      origin: string
+      /** The printer's WebSocket binding; decides plain or secure upload. */
+      endpoint?: Parameters<typeof resolveCrealityEndpoint>[0]
+    }
   | { backend: 'anycubic'; binding?: LocalPrinterBinding }
   | {
       backend: 'kobralink'
@@ -94,9 +103,11 @@ export async function uploadFile(input: {
     await uploadMoonrakerFile({ ...target, ...common })
   else if (target.backend === 'bambu')
     await uploadBambuFile({ ...target, ...common })
-  else if (target.backend === 'creality')
-    await uploadCrealityFile({ ...target, ...common })
-  else if (target.backend === 'anycubic' && target.binding)
+  else if (target.backend === 'creality') {
+    const destination = await resolveCrealityUploadOrigin(target)
+    if (!input.authorize()) throw Error('unauthorized')
+    await uploadCrealityFile({ ...destination, ...common })
+  } else if (target.backend === 'anycubic' && target.binding)
     await uploadAnycubicFile({
       ...common,
       binding: target.binding,

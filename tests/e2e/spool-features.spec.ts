@@ -517,6 +517,9 @@ test('operator assigns a spool to an AMS slot, moves it, and removes it', async 
   const list = page.getByRole('list', { name: 'Slots ativos de ender-01' })
   await expect(list).toContainText('AMS 2')
   await expect(list).toContainText('#1 · Galaxy Black')
+  await expect(
+    list.getByRole('img', { name: 'Nível restante: 70%' }),
+  ).toBeVisible()
 
   // The same spool assigned to another printer moves out of the first one.
   const voron = page.getByRole('form', { name: 'Atribuir bobina a voron-02' })
@@ -813,6 +816,7 @@ test('all new /bobinas pages are axe-clean and fit at phone and desktop widths i
   await installMockFeatures(page, { role: 'owner' })
   const paths = [
     '/bobinas/slots',
+    '/bobinas/localizar',
     '/bobinas/uso',
     '/bobinas/estoque',
     '/bobinas/secagem',
@@ -837,6 +841,23 @@ test('all new /bobinas pages are axe-clean and fit at phone and desktop widths i
           await page
             .getByLabel('Escolha a bobina')
             .selectOption({ label: '#1 · Galaxy Black' })
+        if (path === '/bobinas/slots')
+          await page
+            .getByRole('form', { name: 'Atribuir bobina a ender-01' })
+            .getByLabel('Bobina')
+            .selectOption({ label: '#1 · Galaxy Black' })
+        if (
+          [
+            '/bobinas/slots',
+            '/bobinas/localizar',
+            '/bobinas/uso',
+            '/bobinas/secagem',
+            '/bobinas/etiquetas',
+          ].includes(path)
+        )
+          await expect(
+            page.getByRole('img', { name: 'Nível restante: 70%' }),
+          ).toBeVisible()
         await assertAxeClean(page, `${path} at ${width}px (${theme})`)
         const fits = await page.evaluate(
           () => document.documentElement.scrollWidth <= window.innerWidth,

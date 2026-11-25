@@ -12,8 +12,15 @@ import { createKobraXFacts, type KobraXFacts } from './facts.ts'
 import {
   createKobraXRequests,
   parseKobraXReport,
+  reportRefusal,
   type KobraXReport,
+  type KobraXReportIdentity,
 } from './requests.ts'
+import {
+  createKobraXQueryEvidence,
+  kobraXQueries as queries,
+  type KobraXQuery,
+} from './state-evidence.ts'
 import { createKobraXStatus } from './status.ts'
 import { createKobraXUsage, type KobraXJobUsage } from './usage.ts'
 
@@ -38,6 +45,7 @@ export async function connectKobraX(options: {
     report: KobraXReport,
     snapshot: ReturnType<ReturnType<typeof createKobraXStatus>['snapshot']>,
     facts: KobraXFacts,
+    source: 'query' | 'request' | 'other',
   ) => void
   /** Called once per finished job with the filament used per ACE slot. */
   onJobUsage?: (usage: KobraXJobUsage) => void
@@ -45,6 +53,8 @@ export async function connectKobraX(options: {
   resultTimeoutMs?: number
   motionResultTimeoutMs?: number
   usageSettleMs?: number
+  /** `printer-assigned` only for firmware that replaces report msgids. */
+  reportIdentity?: KobraXReportIdentity
 }) {
   const { address, clientIdentity } = options
   if (!clientIdentity?.cert || !clientIdentity.key)
@@ -53,7 +63,9 @@ export async function connectKobraX(options: {
   try {
     secureContext = createSecureContext({
       ...clientIdentity,
-      minVersion: 'TLSv1.2',
+      // The client certificate is held back until the printer passes its
+      // pin check, which needs TLS 1.3 (see `connectAnycubicTls`).
+      minVersion: 'TLSv1.3',
     })
   } catch {
     throw new Error('Kobra X client certificate or key is invalid')
@@ -82,13 +94,7 @@ export async function connectKobraX(options: {
   // Reports arrive on `printer/public` with no `slicer/` segment. Queries stay
   // on `path`.
   const reports = `anycubic/anycubicCloud/v1/printer/public/${modeId}/${deviceId}/`
-  const queries = {
-    info: 'query',
-    status: 'query',
-    print: 'query',
-    tempature: 'query',
-    multiColorBox: 'getInfo',
-  }
+  const queryEvidence = createKobraXQueryEvidence()
   let tlsEstablished = false
   const client = new MqttClient(
     () => {
@@ -96,6 +102,7 @@ export async function connectKobraX(options: {
       const socket = connectAnycubicTls(
         { host: address, port: options.mqttPort ?? 9883, secureContext },
         pin,
+        { holdClientIdentity: true },
       )
       socket.once('secureConnect', () => {
         tlsEstablished = !socket.destroyed
@@ -128,6 +135,9 @@ export async function connectKobraX(options: {
     ...(options.resultTimeoutMs !== undefined
       ? { resultTimeoutMs: options.resultTimeoutMs }
       : {}),
+    ...(options.reportIdentity
+      ? { reportIdentity: options.reportIdentity }
+      : {}),
   })
   const control = createKobraXControl({
     requests,
@@ -157,7 +167,7 @@ export async function connectKobraX(options: {
       state.disconnect()
     })
   }
-  function query(type: keyof typeof queries) {
+  function query(type: KobraXQuery) {
     if (!client.connected) return
     // The Orca LAN client sends timestamped, null-data requests for info,
     // print, and multiColorBox. Keep the supplemental query frames as-is.
@@ -165,12 +175,14 @@ export async function connectKobraX(options: {
       type === 'status' || type === 'tempature'
         ? { data: {} }
         : { timestamp: Date.now(), data: null }
+    const msgid = randomUUID()
+    queryEvidence.issue(type, msgid)
     client.publish(
       `${path}/${modeId}/${deviceId}/${type}`,
       JSON.stringify({
         type,
         action: queries[type],
-        msgid: randomUUID(),
+        msgid,
         ...envelope,
       }),
     )
@@ -203,6 +215,7 @@ export async function connectKobraX(options: {
     client.on('close', () => {
       state.disconnect()
       facts.reset()
+      queryEvidence.reset()
       options.onDisconnect?.()
       if (!ready && !accepted && tlsEstablished) {
         failed(
@@ -252,14 +265,48 @@ export async function connectKobraX(options: {
     if (!type || suffix !== 'report' || extra !== undefined) return
     try {
       const message = JSON.parse(payload.toString())
-      if (Object.hasOwn(queries, type) || type === 'fan' || type === 'light')
-        state.report(type, message)
       const report = parseKobraXReport(type, message)
       if (!report) return
-      facts.report(report)
-      usage.report(report)
-      options.onReport?.(report, state.snapshot(), facts.get())
-      requests.handleReport(report)
+      const queryMatch = queryEvidence.classify(report)
+      const source =
+        queryMatch === 'current'
+          ? 'query'
+          : requests.isPending(report)
+            ? 'request'
+            : 'other'
+      // Keep passive telemetry for firmware that generates its own IDs.
+      // Delayed replies to our queries cannot update control evidence.
+      if (queryMatch !== 'stale') {
+        if (
+          (reportRefusal(report) === null ||
+            // A printer-ended or printer-paused job carries a fault code.
+            (type === 'print' &&
+              (report.state === 'stoped' || report.state === 'paused'))) &&
+          (Object.hasOwn(queries, type) || type === 'fan' || type === 'light')
+        )
+          state.report(type, message)
+        facts.report(report)
+        usage.report(report)
+        // The observer is the caller's code. A failure in it must never keep
+        // this report from settling the request that is waiting for it: that
+        // request's command is already on the wire.
+        try {
+          options.onReport?.(report, state.snapshot(), facts.get(), source)
+        } catch (error) {
+          try {
+            options.onError?.(
+              error instanceof Error
+                ? error
+                : new Error('Kobra X report observer failed'),
+            )
+          } catch {
+            // A failing error handler is no more allowed to block settlement.
+          }
+        }
+      }
+      // A reply carrying the ID of one of our own state queries belongs to
+      // that query and never settles a command.
+      if (queryMatch === 'other') requests.handleReport(report)
     } catch {
       // Invalid telemetry is ignored.
     }
@@ -278,9 +325,12 @@ export async function connectKobraX(options: {
     snapshot: state.snapshot,
     control,
     facts: facts.get,
-    refreshControlState() {
+    refreshControlState(effectType?: string) {
+      queryEvidence.resetPending()
       query('info')
       query('print')
+      if (effectType === 'tempature' || effectType === 'multiColorBox')
+        query(effectType)
     },
     /** Unscoped telemetry hint. It confers no capture ownership and is never
      * used by the Connector's passive camera source. */

@@ -8,10 +8,15 @@ import {
   KOBRA_X_SIGNED_ACTIONS,
   openFixedKobraXControl,
 } from '../kobra-x/control-driver.ts'
+import {
+  kobraXControls,
+  kobraXResultWindowMs,
+  type KobraXControlEvidence,
+} from '../kobra-x/control-support.ts'
 import { anycubicControls } from '../anycubic/control-support.ts'
 import { readAnycubicPrinterBinding } from '../control/printer-binding.ts'
 import { openFixedCrealityControl } from '../creality/control-driver.ts'
-import { CREALITY_ACTIONS } from '../creality/commands.ts'
+import { CREALITY_ACTIONS, CREALITY_CFS_ACTIONS } from '../creality/commands.ts'
 import { readCrealityPrinterBinding } from '../control/printer-binding.ts'
 import { openFixedBambuControl } from '../bambu/control-driver.ts'
 import { openFixedSdcpControl } from '../sdcp/control-driver.ts'
@@ -78,6 +83,16 @@ export function createPauseDriverRouter(config: {
   connectKobraX?: NonNullable<
     Parameters<typeof openFixedKobraXControl>[0]['connect']
   >
+  /**
+   * What the Kobra X itself last reported (ACE, light, fan). When supplied, a
+   * Kobra X advertises only the controls that evidence supports, and
+   * `undefined` (nothing reported, or unreachable) leaves the accessory-free
+   * ones. Absent, the router offers the driver's full signed list; production
+   * composition always supplies it.
+   */
+  kobraXControlEvidence?(
+    binding: PrinterBinding,
+  ): KobraXControlEvidence | undefined
   allowedOrigins: readonly string[]
   limits: MoonrakerLimits
   clock: { monotonicNow(): number }
@@ -114,8 +129,24 @@ export function createPauseDriverRouter(config: {
     const mapping = readPrinterBinding(binding)
     if (!mapping) return []
     if (readKobraLinkPrinterBinding(binding)) return KOBRALINK_CONTROLS
-    if (readCrealityPrinterBinding(binding)) return CREALITY_ACTIONS
-    if (readKobraXPrinterBinding(binding)) return KOBRA_X_SIGNED_ACTIONS
+    const creality = readCrealityPrinterBinding(binding)
+    if (creality)
+      return creality.cfsFeed
+        ? [...CREALITY_ACTIONS, ...CREALITY_CFS_ACTIONS]
+        : CREALITY_ACTIONS
+    const kobraX = readKobraXPrinterBinding(binding)
+    if (kobraX) {
+      const offered = config.kobraXControlEvidence
+        ? kobraXControls(config.kobraXControlEvidence(binding))
+        : KOBRA_X_SIGNED_ACTIONS
+      // Printer-assigned command reports cannot prove these effects, and no
+      // correlated accessory read-back is established for this firmware.
+      return kobraX.reportIdentity === 'printer-assigned'
+        ? offered.filter(
+            (action) => action !== 'set_fan' && action !== 'set_light',
+          )
+        : offered
+    }
     if (readSdcpPrinterBinding(binding)) return SDCP_CONTROL_ACTIONS
     const anycubic = readAnycubicPrinterBinding(binding)
     if (anycubic) return anycubicControls(anycubic.modelId)
@@ -148,6 +179,11 @@ export function createPauseDriverRouter(config: {
         isDeclaredSnapmakerU1(mapping.printer_key) &&
         moonrakerObjects.get(binding)?.includes(SNAPMAKER_U1_MARKER) === true
       )
+    },
+    resultWindowMs(binding: PrinterBinding, action: ExtendedControlAction) {
+      return readKobraXPrinterBinding(binding)
+        ? kobraXResultWindowMs(action)
+        : undefined
     },
     macros: (binding: PrinterBinding) =>
       advertisedMoonrakerMacros(moonrakerObjects.get(binding)),

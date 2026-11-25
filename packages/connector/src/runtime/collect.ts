@@ -1,3 +1,4 @@
+import { moonrakerOrigins } from '../config/moonraker.ts'
 import type { ApiJobLifecycle } from './api-job-lifecycle.ts'
 import type { MoonrakerLinkHealth } from '../moonraker/subscription.ts'
 import { readMoonrakerFirmware } from '../moonraker/firmware.ts'
@@ -26,6 +27,9 @@ import { createBambuRuntimeSubscription } from '../bambu/runtime.ts'
 import type { createBambuTransport } from '../bambu/transport.ts'
 import type { RawPrinterObservation } from './farm-snapshot-provider.ts'
 import { createKobraLinkRuntimeSubscription } from '../kobralink/runtime.ts'
+import { createFlashforgeCollection } from '../flashforge/collection.ts'
+import { createPhrozenCollection } from '../phrozen/collection.ts'
+import { createQidiCollection } from './qidi-collection.ts'
 import { createPrusaLinkCollection } from './prusa-link-collection.ts'
 import {
   parseCollectorConfig,
@@ -145,6 +149,13 @@ export async function collectIntoQueue(input: {
     bindings: readonly KobraXBinding[]
     endpoints?: Parameters<typeof createKobraXCollection>[0]['endpoints']
     connect?: Parameters<typeof createKobraXCollection>[0]['connect']
+    /** Accessory evidence per printer; `undefined` once it is unreachable. */
+    onControlEvidence?: (
+      printerKey: string,
+      evidence:
+        | import('../kobra-x/control-support.ts').KobraXControlEvidence
+        | undefined,
+    ) => void
   }
   config:
     | LocalCollectorConfig
@@ -290,6 +301,9 @@ export async function collectIntoQueue(input: {
           ...(controls === undefined ? {} : { controls: [...controls] }),
         }
         const queued = machineGate.apply(current)
+        // A snapshot that cannot replace the latest row must not consume a
+        // profile change that the next eligible snapshot needs to publish.
+        if (outOfOrder) machineGate.forget(printerKey)
         const lostBeforeSnapshot = queue.storageLost
         let receipt
         try {
@@ -299,9 +313,11 @@ export async function collectIntoQueue(input: {
           throw error
         }
         const snapshotDropped = queue.storageLost !== lostBeforeSnapshot
-        if (confirmsRelease && snapshotDropped)
+        // The Farm ignores out-of-order rows, so a machine block carried by one
+        // was never recorded there; the next in-order snapshot must resend it.
+        if (outOfOrder || (confirmsRelease && snapshotDropped))
           machineGate.forget(printer.printerKey)
-        else if (!outOfOrder) {
+        if (!outOfOrder && !(confirmsRelease && snapshotDropped)) {
           latestStates.set(printer.printerKey, current)
           lastControls.set(printer.printerKey, JSON.stringify(controls ?? null))
           if (confirmsRelease && refresh?.releasedAtMonoMs === pendingRelease)
@@ -377,7 +393,7 @@ export async function collectIntoQueue(input: {
       )
       const selected = validateMoonrakerInput({
         assignment,
-        allowedOrigins: config.allowedOrigins,
+        allowedOrigins: moonrakerOrigins(config),
         limits: config.limits,
       })
       let cached: RawPrinterObservation['materialsObservation'] | undefined
@@ -448,7 +464,7 @@ export async function collectIntoQueue(input: {
         ...(input.discoverMoonrakerObjects ? { discoverObjects: true } : {}),
         jobFields: true,
         assignment,
-        allowedOrigins: config.allowedOrigins,
+        allowedOrigins: moonrakerOrigins(config),
         limits: config.limits,
         signal,
         ...(collectionRefresh
@@ -920,17 +936,27 @@ export async function collectIntoQueue(input: {
     }
     if (config.version === 8) {
       for (const binding of config.drivers) {
-        const sub = createPrusaLinkCollection({
-          binding,
+        const options = {
+          allowedOrigins: config.allowedOrigins,
           signal,
           timeoutMs: Math.min(30000, config.limits.requestTimeoutMs),
-          onObservation(value) {
-            input.onRawObservation?.(value)
-          },
-          onUnavailable(epoch) {
-            input.onRawUnavailable?.({ printerKey: binding.printerKey, epoch })
-          },
-        })
+          onObservation: (value: RawPrinterObservation) =>
+            input.onRawObservation?.(value),
+          onUnavailable: (epoch: number) =>
+            input.onRawUnavailable?.({ printerKey: binding.printerKey, epoch }),
+        }
+        const sub =
+          binding.family === 'prusa-link'
+            ? createPrusaLinkCollection({ ...options, binding })
+            : binding.family === 'flashforge'
+              ? createFlashforgeCollection({ ...options, binding })
+              : binding.family === 'phrozen'
+                ? createPhrozenCollection({ ...options, binding })
+                : createQidiCollection({
+                    ...options,
+                    binding,
+                    timeoutMs: Math.min(3000, options.timeoutMs),
+                  })
         subscriptions.push({ done: sub.done.catch(fail) })
       }
     }
@@ -990,6 +1016,12 @@ export async function collectIntoQueue(input: {
           ? { endpoints: input.kobraX.endpoints }
           : {}),
         ...(input.kobraX?.connect ? { connect: input.kobraX.connect } : {}),
+        ...(input.kobraX?.onControlEvidence
+          ? {
+              onControlEvidence: (evidence) =>
+                input.kobraX?.onControlEvidence?.(binding.printerKey, evidence),
+            }
+          : {}),
         onObservation(value) {
           input.onRawObservation?.(value)
           onEvent({ kind: 'snapshot', printer: value.printer })

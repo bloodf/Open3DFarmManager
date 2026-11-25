@@ -3,12 +3,18 @@ import { PrinterState } from '../../../farm-protocol/src/state.ts'
 import type { KobraXBinding } from '../config/kobra-x.ts'
 import { readKobraClientCertMaterial } from '../config/kobra-x-cert.ts'
 import { connectKobraX } from '../kobra-x/index.ts'
+import {
+  readKobraXControlEvidence,
+  sameKobraXEvidence,
+  type KobraXControlEvidence,
+} from '../kobra-x/control-support.ts'
 import type { RawPrinterObservation } from './farm-snapshot-provider.ts'
 
 type Adapter = Pick<
   Awaited<ReturnType<typeof connectKobraX>>,
   'snapshot' | 'identity' | 'close'
->
+> &
+  Partial<Pick<Awaited<ReturnType<typeof connectKobraX>>, 'facts'>>
 
 const POLL_MS = 500
 /** No report for this long: the observation is withdrawn, never kept as fresh. */
@@ -43,6 +49,12 @@ export function createKobraXCollection(input: {
   signal: AbortSignal
   onObservation: (value: RawPrinterObservation) => void
   onUnavailable: (epoch: number) => void
+  /**
+   * What the printer has reported it carries (ACE, light, fan), whenever that
+   * changes. `undefined` once the printer is unreachable, so nothing stale is
+   * offered. Read-only evidence: it never sends anything.
+   */
+  onControlEvidence?: (evidence: KobraXControlEvidence | undefined) => void
   connect?: typeof connectKobraX
   /** Loopback endpoints for tests. Production uses the printer's fixed ports. */
   endpoints?: { address?: string; httpPort?: number; mqttPort?: number }
@@ -67,7 +79,18 @@ export function createKobraXCollection(input: {
       fieldObservedAtMonoMs: { connection: now },
     })
   }
+  let evidence: KobraXControlEvidence | undefined
+  const publishEvidence = (next: KobraXControlEvidence | undefined) => {
+    if (sameKobraXEvidence(evidence, next)) return
+    evidence = next
+    try {
+      input.onControlEvidence?.(next)
+    } catch {
+      // An observer failure never ends status collection.
+    }
+  }
   const invalidate = () => {
+    publishEvidence(undefined)
     if (!signal.aborted) input.onUnavailable(epoch++)
   }
 
@@ -115,15 +138,20 @@ export function createKobraXCollection(input: {
       while (!signal.aborted) {
         const printer = adapter.snapshot()
         const now = performance.now()
+        const offered = () =>
+          printer.state === 'offline' || !adapter.facts
+            ? undefined
+            : readKobraXControlEvidence(adapter.facts(), printer)
         if (printer.state !== 'offline' && printer.observedAt !== lastReport) {
           lastReport = printer.observedAt
           lastSeen = now
-          withdrawn = false
           const parsed = PrinterState.safeParse({
             ...printer,
             printerKey: binding.printerKey,
           })
           if (parsed.success) {
+            withdrawn = false
+            publishEvidence(offered())
             const stamped = Object.fromEntries(
               Object.keys(parsed.data).map((key) => [key, now]),
             )
@@ -149,7 +177,11 @@ export function createKobraXCollection(input: {
         } else if (!withdrawn && now - lastSeen >= STALE_MS) {
           withdrawn = true
           invalidate()
+        } else if (!withdrawn) {
+          publishEvidence(offered())
         }
+        // Withdrawn evidence is never published again from the same reports:
+        // only a newer report (above) brings it back.
         if (now - lastSeen >= REBUILD_MS) return 'retry'
         await wait(input.pollMs ?? POLL_MS, signal)
       }

@@ -1,3 +1,4 @@
+import { moonrakerOrigins } from '../config/moonraker.ts'
 import { join } from 'node:path'
 import { readFileSync } from 'node:fs'
 import { ANYCUBIC_FILE_MODEL } from '../anycubic/files.ts'
@@ -37,6 +38,8 @@ export function createFileTargets(input: {
   assignmentId: string
   dataDirectory: string
   kobraLinkFetch?: KobraLinkFetch
+  /** Local diagnostics for a failed listing; never sent to the browser. */
+  onListFailure?: FileListOptions['onFailure']
 }): { fileTransfer: FileUploadOptions; fileList: FileListOptions } {
   const { collection, assignments } = input.config
   const controlledKey = assignments.find(
@@ -53,7 +56,7 @@ export function createFileTargets(input: {
       if (!printer || binding?.printer_key !== controlledKey) return undefined
       const { origin, limits } = validateMoonrakerInput({
         assignment: printer,
-        allowedOrigins: collection.allowedOrigins,
+        allowedOrigins: moonrakerOrigins(collection),
         limits: collection.limits,
       })
       if (origin !== binding.moonraker_origin) return undefined
@@ -127,6 +130,7 @@ export function createFileTargets(input: {
         upload: {
           backend: 'creality',
           origin: `http://${host}:${creality.httpPort ?? 80}`,
+          endpoint: creality,
         },
         list: {
           backend: 'creality',
@@ -174,6 +178,9 @@ export function createFileTargets(input: {
       directory: join(input.dataDirectory, 'file-staging'),
       targetFor: (printerKey) => forKey(printerKey)?.upload,
     },
-    fileList: { targetFor: (printerKey) => forKey(printerKey)?.list },
+    fileList: {
+      targetFor: (printerKey) => forKey(printerKey)?.list,
+      ...(input.onListFailure ? { onFailure: input.onListFailure } : {}),
+    },
   }
 }

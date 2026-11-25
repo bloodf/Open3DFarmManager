@@ -123,7 +123,14 @@ const ReadonlyAssignment = Assignment.omit({ moonraker_origin: true }).extend({
   revision: z.number().int().positive(),
 })
 const SdcpAssignment = Assignment.omit({ moonraker_origin: true }).extend({
-  backend: z.enum(['sdcp', 'formlabs', 'prusa-link']),
+  backend: z.enum([
+    'sdcp',
+    'formlabs',
+    'prusa-link',
+    'flashforge',
+    'phrozen',
+    'qidi',
+  ]),
 })
 const readonlyBindings = new WeakMap<
   PrinterBinding,

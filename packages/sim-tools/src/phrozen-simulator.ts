@@ -94,6 +94,9 @@ export async function startPhrozenSimulator(fixture: Fixture, fault?: Fault) {
       udpPort: udp.address().port,
       wsPort: (server.address() as AddressInfo).port,
       commands,
+      setFault(next?: Fault) {
+        fault = next
+      },
       close,
     }
   } catch (error) {

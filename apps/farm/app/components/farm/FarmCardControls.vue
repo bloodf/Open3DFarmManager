@@ -6,6 +6,8 @@ import CollectionHold from './CollectionHold.vue'
 import { type FarmRow, type FarmKeyState } from '../../utils/farm-view.ts'
 import { isKobraXAssignment } from '../../utils/kobralink-onboarding.ts'
 import { type ExtendedControlAction } from '../../../../../packages/farm-protocol/src/control-actions.ts'
+import type { ActiveSpool } from '../../../../../packages/farm-protocol/src/status.ts'
+import type { SlotBinding } from '../../utils/slot-spools.ts'
 defineProps<{
   row: FarmRow
   showCollection?: boolean
@@ -14,6 +16,8 @@ defineProps<{
   commandInFlight: boolean
   liveNow: () => { wall: number; mono: number }
   lastResult?: string
+  bindings?: Readonly<Record<string, SlotBinding | undefined>>
+  activeSpools?: readonly ActiveSpool[]
   availability: (row: FarmRow) => { available: boolean; reason?: string }
   openControl: (
     row: FarmRow,
@@ -40,6 +44,8 @@ defineProps<{
     :control-enabled="controlEnabled"
     :command-in-flight="commandInFlight"
     :now="liveNow()"
+    :active-spools="activeSpools"
+    :bindings="bindings"
     @action="(action, args, event) => openControl(row, action, event, args)"
   />
   <FarmExtendedControls

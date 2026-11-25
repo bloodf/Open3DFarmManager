@@ -13,6 +13,7 @@ export function kobraXInputs(materials: PrinterState['materials']) {
       {
         id: holder ? slot : slot + 4,
         label: `${holder ? 'Suporte' : 'ACE'} ${slot + 1}${material.materialType ? ` — ${material.materialType}` : ''}`,
+        material,
       },
     ]
   })
@@ -21,7 +22,7 @@ export function kobraXInputs(materials: PrinterState['materials']) {
 export function kobraXMapping(
   selections: readonly string[],
   count: number,
-  inputs: ReturnType<typeof kobraXInputs>,
+  inputs: readonly Pick<ReturnType<typeof kobraXInputs>[number], 'id'>[],
 ): number[] | undefined {
   if (!Number.isInteger(count) || count < 1 || count > 7) return undefined
   const selected = selections

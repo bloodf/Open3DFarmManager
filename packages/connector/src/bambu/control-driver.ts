@@ -15,7 +15,8 @@ import type {
   PauseDriver,
 } from '../control/pause-dispatcher.ts'
 import { readBambuCredentials } from './credentials.ts'
-import { buildBambuCommand } from './commands.ts'
+import { bambuChamberMaxC, buildBambuCommand } from './commands.ts'
+import { bambuTrayAddress } from './ams.ts'
 import { createBambuControlTransport } from './control-transport.ts'
 import {
   BambuAuthorizationRequired,
@@ -66,9 +67,14 @@ export function openFixedBambuControl(input: {
   const timeoutMs = input.timeoutMs ?? 5000
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 5000)
     throw new Error('Invalid Bambu control timeout')
+  const chamberMaxC = bambuChamberMaxC(local.model)
   let targetTemperature: number | undefined
   let nozzleTemperature: number | undefined
   let gcodeState: string | undefined
+  // Capabilities and loaded unit, from the live report only.
+  let mqttBed = false
+  let airduct = false
+  let loadedAmsId: number | undefined
   let latest: ControlObservation | undefined
   let sequence = 0
   let attempted = false
@@ -141,6 +147,34 @@ export function openFixedBambuControl(input: {
             report as { print?: { gcode_state?: unknown } }
           ).print?.gcode_state
           if (typeof reportedState === 'string') gcodeState = reportedState
+          const print = (
+            report as {
+              print?: {
+                cfg?: unknown
+                fun?: unknown
+                aux?: unknown
+                stat?: unknown
+                device?: { airduct?: unknown }
+                ams?: { tray_now?: unknown }
+              }
+            }
+          ).print
+          // BambuStudio reads `fun` and `device` only from reports of
+          // firmware that sends all of cfg, fun, aux and stat.
+          if (
+            typeof print?.cfg === 'string' &&
+            typeof print.fun === 'string' &&
+            /^[0-9a-f]{1,16}$/i.test(print.fun) &&
+            typeof print.aux === 'string' &&
+            typeof print.stat === 'string'
+          ) {
+            mqttBed = ((BigInt(`0x${print.fun}`) >> 39n) & 1n) === 1n
+            const duct = print.device?.airduct
+            if (duct !== null && typeof duct === 'object') airduct = true
+          }
+          const trayNow = print?.ams?.tray_now
+          if (typeof trayNow === 'string' && /^\d{1,3}$/.test(trayNow))
+            loadedAmsId = bambuTrayAddress(Number(trayNow))?.amsId
           if (
             typeof temperature === 'number' &&
             Number.isFinite(temperature) &&
@@ -244,6 +278,16 @@ export function openFixedBambuControl(input: {
         ...(['load_filament', 'unload_filament'].includes(next)
           ? { target_c: targetTemperature }
           : {}),
+        ...(next === 'unload_filament' && loadedAmsId !== undefined
+          ? { ams_id: loadedAmsId }
+          : {}),
+        ...(next === 'set_temperature'
+          ? {
+              mqtt_bed: mqttBed,
+              chamber_max_c: chamberMaxC,
+            }
+          : {}),
+        ...(next === 'set_fan' ? { airduct } : {}),
         ...(next === 'extrude' ? { nozzle_c: nozzleTemperature } : {}),
         ...((next as string) === 'gcode' ? { print_state: gcodeState } : {}),
         sequence_id: String(input.connectionGeneration),

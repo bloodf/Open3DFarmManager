@@ -244,7 +244,8 @@ export async function qualifyBambu(
           }
           await frameStream.return(undefined)
         } else if (camSource.kind === 'rtsps') {
-          camera.detail = 'Bambu RTSPS ingest unavailable'
+          camera.detail =
+            'Bambu RTSPS is not probed by qualify; the Connector plays it through its own TLS bridge'
         }
       } catch (err) {
         camera.detail =

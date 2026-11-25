@@ -10,6 +10,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { request as httpsRequest } from 'node:https'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import {
   expect,
@@ -193,6 +194,11 @@ export type FarmManager = Readonly<{
   openFarm(page?: Page): Promise<void>
   /** The printer's article on the open farm page. */
   printerCard(printerKey: string, page?: Page): ReturnType<Page['locator']>
+  /**
+   * True while the Connector serving the printer listens for its next signed
+   * command session. Each printer with control has its own Connector.
+   */
+  commandInboxReady(printerKey: string): boolean
   /** Outbound requests blocked so far (empty on a clean run). */
   blockedRequests(): readonly string[]
   /** Throws when any outbound request was attempted. */
@@ -386,6 +392,8 @@ async function bootFarm(
   const keys = options.printers.map(keyOf)
   if (new Set(keys).size !== keys.length)
     throw new Error('Printer keys must be unique')
+  /** Command inbox state of each printer served by an extra Connector. */
+  const commandInboxes = new Map<string, { ready: boolean }>()
 
   const liveExtras = new Map<string, MoonrakerSimulator>()
   const c1LivePrinters: { printerKey: string; origin: string }[] = []
@@ -815,7 +823,17 @@ async function bootFarm(
           },
         )
         let stderrTail = ''
-        child.stdout?.on('data', () => {})
+        // The same diagnostics the primary Connector's readiness is read from.
+        const listening = { ready: false }
+        for (const item of batch.items)
+          commandInboxes.set(item.printerKey, listening)
+        for (const input of [child.stdout, child.stderr])
+          if (input)
+            createInterface({ input }).on('line', (line) => {
+              if (line.includes('"pause-listening"')) listening.ready = true
+              else if (line.includes('"pause-terminal"'))
+                listening.ready = false
+            })
         child.stderr?.on('data', (chunk: Buffer) => {
           stderrTail = (stderrTail + chunk.toString('utf8')).slice(-1500)
         })
@@ -906,6 +924,9 @@ async function bootFarm(
       ).toBeVisible()
     },
     printerCard,
+    commandInboxReady: (printerKey: string) =>
+      commandInboxes.get(printerKey)?.ready ??
+      harness.simulatorObservation().pauseInboxReady === true,
     blockedRequests: () => guard.blocked(),
     assertNoOutbound() {
       const blocked = guard.blocked()

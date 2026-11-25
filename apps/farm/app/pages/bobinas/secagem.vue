@@ -6,6 +6,7 @@ import ErrorState from '../../components/ui/ErrorState.vue'
 import Skeleton from '../../components/ui/Skeleton.vue'
 import FeaturePanel from '../../components/spool-library/FeaturePanel.vue'
 import FeatureTable from '../../components/spool-library/FeatureTable.vue'
+import SpoolIllustration from '../../components/spool-library/SpoolIllustration.vue'
 import SpoolLibraryShell from '../../components/spool-library/SpoolLibraryShell.vue'
 import {
   featureFetch,
@@ -253,6 +254,7 @@ async function logHumidity() {
             </option>
           </select>
         </label>
+        <SpoolIllustration v-if="selected" :spool="selected" compact />
       </FeaturePanel>
 
       <template v-if="selected">

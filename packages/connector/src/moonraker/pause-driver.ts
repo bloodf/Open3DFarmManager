@@ -80,8 +80,11 @@ import {
 } from './control-timelapse.ts'
 import { z } from 'zod'
 import { decodeMoonrakerFrame } from './frame.ts'
+import { guardIdleConsole, idleConsoleQueryWire } from './console-idle.ts'
+import { klipperCommandName } from './klipper-command.ts'
 import {
   ConsoleRefusal,
+  idleConsoleClass,
   consoleQueryWire,
   consoleSupported,
   parseConsoleState,
@@ -160,6 +163,19 @@ const Snapshot = z.strictObject({
     }),
   }),
 })
+/**
+ * A builder's typed refusal says why nothing was written. Anything else the
+ * builder throws is a malformed request and stays `invalid-command`.
+ */
+function isTypedRefusal(error: unknown): error is Error {
+  const refusal = (error as { refusal?: unknown } | null)?.refusal
+  return (
+    error instanceof Error &&
+    (refusal === 'state' ||
+      refusal === 'unsupported-action' ||
+      refusal === 'invalid-command')
+  )
+}
 const U1AuditSnapshot = Snapshot.extend({
   status: Snapshot.shape.status.loose(),
 })
@@ -396,7 +412,18 @@ export function openFixedMoonrakerPause(input: {
       )
       // Side notifications cannot acknowledge a request; do not count them
       // toward the reply-frame or byte caps while waiting for a result.
-      if (SideNotification.safeParse(frame).success) return
+      // A G-code report may only prove the query in flight, never answer it.
+      const side = SideNotification.safeParse(frame)
+      if (side.success) {
+        const [message] = side.data.params
+        if (
+          side.data.method === 'notify_gcode_response' &&
+          pending?.id === 2 &&
+          typeof message === 'string'
+        )
+          u1Audit?.response?.(message)
+        return
+      }
       if (++receivedFrames > 16 || (receivedBytes += data.byteLength) > 32768)
         throw failure()
       const result = Reply.parse(frame)
@@ -635,7 +662,9 @@ export function openFixedMoonrakerPause(input: {
         method: call.method,
         ...(call.params ? { params: call.params } : {}),
       })
-    } catch {
+    } catch (error) {
+      // Keep the builder's own reason; the caller closes the attempt.
+      if (isTypedRefusal(error)) throw error
       return undefined
     }
   }
@@ -694,6 +723,7 @@ export function openFixedMoonrakerPause(input: {
                 ? 'unsupported-action'
                 : 'state',
         })
+      if (isTypedRefusal(error)) throw error
       throw error instanceof MotionRefusal ? error : failure()
     }
   }
@@ -756,7 +786,9 @@ export function openFixedMoonrakerPause(input: {
     } catch (error) {
       stop()
       await closed
-      throw error instanceof QueueRefused ? error : failure()
+      throw error instanceof QueueRefused || isTypedRefusal(error)
+        ? error
+        : failure()
     }
   }
   /**
@@ -792,7 +824,9 @@ export function openFixedMoonrakerPause(input: {
     } catch (error) {
       stop()
       await closed
-      throw error instanceof TimelapseRefused ? error : failure()
+      throw error instanceof TimelapseRefused || isTypedRefusal(error)
+        ? error
+        : failure()
     }
   }
   /**
@@ -884,7 +918,9 @@ export function openFixedMoonrakerPause(input: {
     } catch (error) {
       stop()
       await closed
-      throw error instanceof BedMeshRefused ? error : failure()
+      throw error instanceof BedMeshRefused || isTypedRefusal(error)
+        ? error
+        : failure()
     }
   }
   /**
@@ -904,36 +940,84 @@ export function openFixedMoonrakerPause(input: {
         !consoleSupported(input.objects)
       )
         throw new ConsoleRefusal('unsupported')
+      const state = parseConsoleState(
+        await request(11, consoleQueryWire(11), lifetimeDeadline).catch(
+          () => undefined,
+        ),
+      )
       const line = refuseConsole(
         args,
-        parseConsoleState(
-          await request(11, consoleQueryWire(11), lifetimeDeadline),
-        ),
+        state,
         u1
           ? ['SDCARD_PRINT_FILE_WITH_PARAMETERS', 'SDCARD_PRINT_PL_RESTORE']
           : undefined,
+        // U1 `T0`..`T3` is a classified action with its own guard below.
+        u1 ? (candidate) => /^T[0-3]$/i.test(candidate.trim()) : undefined,
       )
+      const tool = u1 ? u1ConsoleTool(line.trim(), input.objects) : undefined
+      // A macro replaces the classified command, so it is refused in every
+      // state. The U1 tool selection is a vendor macro with its own guard.
+      const command = klipperCommandName(line)
+      if (
+        !tool &&
+        input.objects?.some(
+          (name) => name.toUpperCase() === `GCODE_MACRO ${command}`,
+        )
+      )
+        throw new ConsoleRefusal('not-allowed')
       let wireArgs = args
       let cap = 5000
-      if (u1) {
-        const consoleLine = line.trim()
-        const tool = u1ConsoleTool(consoleLine, input.objects)
-        if (tool) {
-          const state = parseMotionState(
-            await request(12, motionQueryWire(12), lifetimeDeadline),
-          )
-          if (!state.ready || state.printState === 'error')
-            throw new ConsoleRefusal('unknown-state')
-          if (state.printState === 'printing' || state.printState === 'paused')
-            throw new ConsoleRefusal('not-allowed')
-          if (!['x', 'y', 'z'].every((axis) => state.homedAxes.includes(axis)))
-            throw new ConsoleRefusal('unknown-state')
-          // A0 selects the named physical tool without the current job's remap.
-          wireArgs = { line: `${consoleLine.toUpperCase()} A0` }
-          cap = U1_CONTROL_RESULT_TIMEOUT_MS
+      if (tool) {
+        const motion = parseMotionState(
+          await request(12, motionQueryWire(12), lifetimeDeadline),
+        )
+        if (!motion.ready || motion.printState === 'error')
+          throw new ConsoleRefusal('unknown-state')
+        if (motion.printState === 'printing' || motion.printState === 'paused')
+          throw new ConsoleRefusal('not-allowed')
+        if (!['x', 'y', 'z'].every((axis) => motion.homedAxes.includes(axis)))
+          throw new ConsoleRefusal('unknown-state')
+        // A0 selects the named physical tool without the current job's remap.
+        wireArgs = { line: `${line.trim().toUpperCase()} A0` }
+        cap = U1_CONTROL_RESULT_TIMEOUT_MS
+      } else if (
+        state.printState !== 'printing' &&
+        state.printState !== 'paused'
+      ) {
+        if (idleConsoleClass(line) === 'guarded') {
+          const homing = command === 'G28'
+          // Homing needs no configured bounds, only a fresh idle state.
+          const config = homing
+            ? undefined
+            : await fetchMoonrakerConfigfile({
+                origin: selected.origin,
+                limits: selected.limits,
+                signal: AbortSignal.any([ownerSignal, requested.signal]),
+              }).catch(() => undefined)
+          const live = await request(
+            12,
+            idleConsoleQueryWire(12, input.objects ?? []),
+            lifetimeDeadline,
+          ).catch(() => undefined)
+          guardIdleConsole(line, live, config)
+          if (homing) {
+            // Canonical homing runs through the structured `home` action, with
+            // the U1's own X/Y pairing and Z-only checks. An advertised `G28`
+            // macro was already refused above.
+            const parts = line.trim().toUpperCase().split(/\s+/).slice(1)
+            const axes = (parts.length ? parts : ['X', 'Y', 'Z']).map(
+              (axis) => axis.toLowerCase() as 'x' | 'y' | 'z',
+            )
+            if (u1 && axes.includes('x') !== axes.includes('y'))
+              throw new ConsoleRefusal('not-allowed')
+            takeConsoleRate(binding, input.clock.monotonicNow())
+            if (u1) return await executeU1Home({ axes }, requested, line.trim())
+            extended = 'gcode'
+            return await send(extendedWire('home', { axes }), requested, 5000)
+          }
         }
-        u1Audit = u1ConsoleAudit(consoleLine, tool)
       }
+      if (u1) u1Audit = u1ConsoleAudit(line.trim(), tool)
       const wire = extendedWire('gcode', wireArgs)
       if (wire === undefined) throw new ConsoleRefusal('invalid')
       takeConsoleRate(binding, input.clock.monotonicNow())
@@ -942,9 +1026,11 @@ export function openFixedMoonrakerPause(input: {
     } catch (error) {
       stop()
       await closed
-      if (u1 && error instanceof MotionRefusal)
+      if (error instanceof MotionRefusal || error instanceof U1ConfigRefusal)
         throw new ConsoleRefusal('unknown-state')
-      throw error instanceof ConsoleRefusal ? error : failure()
+      throw error instanceof ConsoleRefusal || isTypedRefusal(error)
+        ? error
+        : failure()
     }
   }
   const requestRead = (id: number, wire: string) =>
@@ -973,6 +1059,7 @@ export function openFixedMoonrakerPause(input: {
   async function executeU1Home(
     args: Record<string, unknown>,
     requested: Parameters<PauseDriver['pauseOnce']>[0],
+    consoleLine?: string,
   ) {
     const wire = extendedWire('home', args)
     if (wire === undefined)
@@ -992,8 +1079,11 @@ export function openFixedMoonrakerPause(input: {
       )
         throw new U1ConfigRefusal('U1 Z homing requires homed X and Y axes')
     }
-    extended = 'home'
-    u1Audit = audit
+    // A console line is confirmed as the signed `gcode` action, not as `home`.
+    extended = consoleLine ? 'gcode' : 'home'
+    u1Audit = consoleLine
+      ? u1ConsoleAudit(consoleLine, undefined, audit)
+      : audit
     return send(wire, requested, U1_CONTROL_RESULT_TIMEOUT_MS)
   }
   async function configWrite(

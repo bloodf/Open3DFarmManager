@@ -31,3 +31,32 @@ Older 5M firmware, other AD5X firmware, Creator, Guider, Finder, Adventurer 3/4 
 - Firmware analysis and protocol observations cover [5M series](https://github.com/Parallel-7/flashforge-api-docs/wiki/Adventurer-5M-Series), [AD5X](https://github.com/Parallel-7/flashforge-api-docs/wiki/AD5X), [PID assignments](https://github.com/Parallel-7/flashforge-api-docs/wiki/Printer-PIDs), [discovery](https://github.com/Parallel-7/flashforge-api-docs/wiki/Discovery-Protocol), [authentication](https://github.com/Parallel-7/flashforge-api-docs/wiki/Authentication) and [HTTP messages](https://github.com/Parallel-7/flashforge-api-docs/wiki/HTTP-REST-API).
 
 Protocol references informed the wire fields and firmware allowlist. No third-party code, firmware, or fixture captures are included.
+
+## Read-only collection activation
+
+The brand collector polls authenticated `POST /detail` every two seconds after
+each request settles. The request supplies the configured serial number and
+check code. The reply must pass the adapter's firmware allowlist above and
+match the configured model. The documented detail fixture has no echoed serial.
+On a failed poll, retire that source epoch and withdraw its status. A subsequent
+successful poll publishes a new epoch. Simulator bindings report
+`flashforge-simulated` and LAN bindings report `flashforge-unqualified`.
+
+To activate through the Connector, the farm integration must:
+
+- Register `FlashforgeBindingSchema` under the `flashforge` discriminator.
+  Configure a unique printer key, a canonical local IPv4 HTTP origin with an
+  explicit port (stock LAN port 8898), that exact origin in the collector
+  allowlist, the expected model and serial, and the simulation flag.
+- Provision an absolute path to a Connector-private JSON file containing
+  `origin`, `serialNumber` and `checkCode`. The origin and serial must match
+  the binding. Restart collection after changing credentials.
+- Start `createFlashforgeCollection` with the runtime abort signal, request
+  timeout and allowlist. Publish its observations using the Flashforge
+  monotonic field timestamps and retire the epoch on `onUnavailable`.
+- Register both status reasons in the shared state schema and display their
+  labels in the farm UI. Leave command, file and camera routes disabled for
+  this collection binding. Qualify each hardware and firmware combination
+  before claiming physical support.
+
+The v8 live snapshot advertises an empty controls list for this collector.

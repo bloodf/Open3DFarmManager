@@ -25,6 +25,8 @@ export interface CrealitySimulatorOptions {
    * pushing status while connected. Absent: frames only on change.
    */
   heartbeatMs?: number | undefined
+  /** Reply to `get boxsInfo`. Absent: the request goes unanswered (no CFS). */
+  boxsInfo?: object | undefined
   scenario?: ScenarioStep<Record<string, unknown>>[] | undefined
 }
 
@@ -214,6 +216,11 @@ export async function createCrealitySimulator(
       )
       return
     }
+    // Spec-derived, not captured: ha_creality_ws@58c00818 ws_client.py.
+    if (method === 'get' && params.boxsInfo === 1) {
+      if (options.boxsInfo) broadcast({ boxsInfo: options.boxsInfo }, [socket])
+      return
+    }
     if (
       method === 'upload' &&
       typeof params.filename === 'string' &&
@@ -281,6 +288,20 @@ export async function createCrealitySimulator(
     if (typeof params.autohome === 'string') {
       currentFrame.autohome = params.autohome
     }
+    // Spec-derived, not captured: the fields the maker device UI sends and
+    // reads back (CrealityPrint@6262848e deviceMgr D-MKTaRJ.js).
+    if (typeof params.speedMode === 'number') {
+      currentFrame.speedMode = params.speedMode
+      if (params.speedMode === 1) currentFrame.curFeedratePct = 25
+    }
+    if (typeof params.setFeedratePct === 'number') {
+      currentFrame.curFeedratePct = params.setFeedratePct
+    }
+    if (params.feedInOrOut && typeof params.feedInOrOut === 'object') {
+      // The finish code only; real feeding takes minutes and reports steps.
+      currentFrame.feedState =
+        (params.feedInOrOut as { isFeed?: unknown }).isFeed === 1 ? 3 : 14
+    }
 
     emitWithAckFault(currentFrame)
   }
@@ -341,6 +362,20 @@ export async function createCrealitySimulator(
     https.createServer(
       { key: options.secure.key, cert: options.secure.cert },
       (req, res) => {
+        // Spec-derived, not captured: the maker client uploads to a secure
+        // printer on the HTTPS endpoint (CrealityPrint@6262848e
+        // Klipper4408Interface.cpp). Drained and counted, never kept.
+        const upload = /^\/upload\/([^/?#]+)$/.exec(req.url ?? '')
+        if (req.method === 'POST' && upload) {
+          let size = 0
+          req.on('data', (chunk: Buffer) => (size += chunk.length))
+          req.on('end', () => {
+            secureUploads++
+            stored.set(decodeURIComponent(upload[1]!), size)
+            res.writeHead(200).end()
+          })
+          return
+        }
         if (req.method !== 'GET' || req.url !== '/info') {
           res.writeHead(404).end()
           return
@@ -359,6 +394,7 @@ export async function createCrealitySimulator(
     )
   let securePort: number | undefined
   let secureConnections = 0
+  let secureUploads = 0
   if (secureServer) {
     secureServer.on('upgrade', (req, socket, head) => {
       secureConnections++
@@ -436,6 +472,10 @@ export async function createCrealitySimulator(
     securePort,
     get secureConnections() {
       return secureConnections
+    },
+    /** Files received over the secure endpoint. */
+    get secureUploads() {
+      return secureUploads
     },
     /** Loopback port of the stock HTTP upload endpoint. */
     httpPort: uploadHttp.ports.default,

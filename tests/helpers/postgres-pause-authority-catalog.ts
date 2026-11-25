@@ -16,6 +16,8 @@ export async function pauseAuthorityAdvertisedControlsMigrations() {
   return [
     '0033_printer_latest_state',
     '0108_pause_authority_advertised_controls',
+    '0114_pause_authority_controls_observed_at',
+    '0115_pause_authority_controls_received_at',
   ].map((id) => {
     const migration = catalog.find((entry) => entry.id === id)
     assert.ok(migration, `Missing fixture migration ${id}`)

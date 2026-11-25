@@ -8,7 +8,10 @@ import {
   type JourneyHarness,
 } from './harness.ts'
 import { BAMBU_ACCESS_CODE } from './harness-vendors.ts'
-import { expectCameraFrames } from './discovery-page.ts'
+import {
+  expectCameraFrames,
+  expectRtspsCameraFrames,
+} from './discovery-page.ts'
 
 type BambuSim = Awaited<ReturnType<typeof startBambuSimulator>>
 const FILE = 'jornada-bambu.gcode'
@@ -584,6 +587,10 @@ if (journeyEnabled()) {
           if (camera === 'jpeg') {
             await expectCameraFrames(journey)
             expect(fixture.activeConnections()).toBeGreaterThan(0)
+          } else if (camera === 'rtsps') {
+            await expectRtspsCameraFrames(journey)
+            expect(fixture.activeConnections()).toBeGreaterThan(0)
+            expect(fixture.requests()).toBeGreaterThan(0)
           } else {
             await expect(region.getByText('Câmera indisponível.')).toBeVisible()
             await expect(
@@ -619,7 +626,23 @@ if (journeyEnabled()) {
                 helperPath: fixture.helper,
                 note: async () => {},
               })
+            if (camera === 'rtsps') {
+              await expect
+                .poll(() =>
+                  journey.ownerPage.evaluate(
+                    () =>
+                      [...document.querySelectorAll('video')].filter(
+                        (video) => video.srcObject !== null,
+                      ).length,
+                  ),
+                )
+                .toBe(0)
+              await expect(
+                region.getByText('Câmera ao vivo.', { exact: true }),
+              ).toHaveCount(0)
+            }
             await expect.poll(fixture.activeConnections).toBe(0)
+            expect((journey.vendor?.raw as BambuSim).requests).toHaveLength(0)
           } finally {
             await recoveryPage.close()
           }

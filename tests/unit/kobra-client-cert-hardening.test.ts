@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
-import { validateKobraClientCertificate } from '../../packages/farm-protocol/src/kobra-client-cert.ts'
+import { validateKobraClientCertificate } from '../../packages/shared/src/kobra-client-cert.ts'
 
 const cert = readFileSync('tests/fixtures/bambu-ftps/cert.pem', 'utf8')
 const key = readFileSync('tests/fixtures/bambu-ftps/key.pem', 'utf8')

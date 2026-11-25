@@ -83,7 +83,17 @@ export function manifestFiles(projectDir) {
 }
 
 export function buildArgs({ tag, nodeImage, context }) {
-  return ['build', '--pull=false', '--tag', tag, '--file', DOCKERFILE, context]
+  return [
+    'build',
+    '--pull=false',
+    '--build-arg',
+    `NODE_IMAGE=${nodeImage}`,
+    '--tag',
+    tag,
+    '--file',
+    DOCKERFILE,
+    context,
+  ]
 }
 
 // Build output goes to stderr so that stdout carries only the tag.

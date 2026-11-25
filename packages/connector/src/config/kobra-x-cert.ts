@@ -24,7 +24,7 @@ import {
   validateKobraClientCertificate,
   type KobraClientCertErrorReason,
   type KobraClientCertMetadata,
-} from '../../../farm-protocol/src/kobra-client-cert.ts'
+} from '../../../shared/src/kobra-client-cert.ts'
 import {
   ensurePrivateDirectory,
   removePrivateFile,

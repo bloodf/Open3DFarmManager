@@ -2,8 +2,11 @@ import { uploadMoonrakerFile } from '../moonraker/upload.ts'
 
 // Qidi ships a Moonraker fork. See https://github.com/QIDITECH/QIDI_Q1_Pro
 // HTTP contracts: https://moonraker.readthedocs.io/en/latest/external_api/
-// Q1 Pro routes its part fan through cooling_fan.
-// https://github.com/QIDITECH/QIDI_Q1_Pro/blob/main/config/gcode_macro.cfg
+// Q1 Pro defines its part fan as [fan_generic cooling_fan].
+// https://github.com/QIDITECH/QIDI_Q1_Pro/blob/main/config/printer.cfg
+// Klipper exposes its speed through get_status, read by Moonraker's object query.
+// https://github.com/Klipper3d/klipper/blob/master/klippy/extras/fan_generic.py
+// https://moonraker.readthedocs.io/en/latest/external_api/printer/#query-printer-object-status
 const namedPartFan = 'fan_generic cooling_fan'
 const objects = [
   'webhooks',

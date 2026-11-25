@@ -1,0 +1,275 @@
+/*
+ * Operations look for the integration and network screens (Spoolman,
+ * Connectors, browser devices, network, compatibility and Bambu Cloud): flat
+ * ruled panels, a compact page heading and mono data labels, all through the
+ * --ops-* tokens. A page opts in with `ops-screen` on its <main>.
+ *
+ * The doubled class outranks the scoped styles of the frames these pages share
+ * with other screens (SettingsPage, OnboardingPage, OverviewHeader, the UI
+ * kit), so those components keep their look everywhere else.
+ */
+main.ops-screen.ops-screen {
+  --ops-panel-pad: var(--ops-space-4);
+
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: var(--ops-space-4);
+  inline-size: 100%;
+  max-inline-size: 80rem;
+  padding: var(--ops-space-4);
+  color: var(--ops-text);
+  font-size: var(--ops-text-body);
+  line-height: 20px;
+}
+main.ops-screen.ops-screen p {
+  margin-block: 0;
+  line-height: 20px;
+}
+main.ops-screen.ops-screen :is(a, button, input, select, label) {
+  touch-action: manipulation;
+}
+
+/* Page heading: eyebrow, 18px title, intro and a rule above the work surface. */
+main.ops-screen.ops-screen > header {
+  display: grid;
+  gap: var(--ops-space-1);
+  padding-block-end: var(--ops-space-3);
+  border-block-end: 1px solid var(--ops-border);
+}
+main.ops-screen.ops-screen > header h1 {
+  justify-self: start;
+  max-inline-size: 100%;
+  margin: 0;
+  font-size: var(--ops-text-title);
+  line-height: 24px;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+}
+main.ops-screen.ops-screen > header :is(.eyebrow, .overview-header__eyebrow) {
+  font: 600 var(--ops-text-label) / 16px var(--ops-font-mono);
+  letter-spacing: 0.08em;
+  color: var(--ops-muted);
+}
+main.ops-screen.ops-screen
+  > header
+  :is(.intro, .overview-header__intro, .intro p) {
+  max-inline-size: 48rem;
+  color: var(--ops-muted);
+}
+
+/* Instrument panel. */
+main.ops-screen.ops-screen
+  :is(
+    .panel,
+    .settings-panel,
+    .search,
+    .product,
+    .reviewed-model,
+    .results > section,
+    section[aria-labelledby='farm-scope-heading']
+  ) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: var(--ops-space-3);
+  min-inline-size: 0;
+  margin: 0;
+  padding: var(--ops-panel-pad);
+  border: 1px solid var(--ops-border);
+  border-radius: var(--ops-radius-lg);
+  background: var(--ops-panel);
+  box-shadow: none;
+}
+
+/* Panel title bar: the heading, or the header that holds it, ruled off. */
+main.ops-screen.ops-screen
+  :is(
+    .panel,
+    .settings-panel,
+    .product,
+    .results > section,
+    section[aria-labelledby='farm-scope-heading']
+  )
+  > :is(h2, header),
+main.ops-screen.ops-screen .reviewed-model > h3 {
+  margin: calc(-1 * var(--ops-panel-pad)) calc(-1 * var(--ops-panel-pad)) 0;
+  padding: var(--ops-space-2) var(--ops-panel-pad);
+  border-block-end: 1px solid var(--ops-border);
+}
+main.ops-screen.ops-screen > section > h2,
+main.ops-screen.ops-screen
+  :is(
+    .panel,
+    .settings-panel,
+    .product,
+    .reviewed-model,
+    .results > section,
+    section[aria-labelledby='farm-scope-heading']
+  )
+  :is(h2, h3) {
+  font-size: var(--ops-text-body);
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+main.ops-screen.ops-screen
+  :is(.panel, .settings-panel, .results > section)
+  > header
+  h2 {
+  margin: 0;
+}
+
+/* Empty and error states: a dashed rule, never a raised card. */
+main.ops-screen.ops-screen .ui-card {
+  display: grid;
+  justify-items: start;
+  gap: var(--ops-space-2);
+  padding: var(--ops-space-4);
+  border: 1px dashed var(--ops-muted);
+  border-radius: var(--ops-radius-lg);
+  background: var(--ops-panel);
+  box-shadow: none;
+}
+main.ops-screen.ops-screen .ui-card > :is(h2, h3) {
+  margin: 0;
+  font-size: var(--ops-text-body);
+  line-height: 20px;
+}
+
+/* Controls. Their edges use the muted ink so the boundary stays visible. */
+main.ops-screen.ops-screen label {
+  margin: 0;
+  font-size: var(--ops-text-small);
+  font-weight: 600;
+}
+main.ops-screen.ops-screen
+  :is(input:not([type='checkbox'], [type='radio']), select) {
+  min-block-size: 2.75rem;
+  max-inline-size: 100%;
+  margin: 0;
+  padding: var(--ops-space-2) var(--ops-space-3);
+  border: 1px solid var(--ops-muted);
+  border-radius: var(--ops-radius-sm);
+  background-color: var(--ops-canvas);
+  color: var(--ops-text);
+  font: inherit;
+}
+main.ops-screen.ops-screen :is(input[type='checkbox'], input[type='radio']) {
+  accent-color: var(--ops-action);
+}
+main.ops-screen.ops-screen button {
+  min-block-size: 2.75rem;
+  padding: var(--ops-space-2) var(--ops-space-3);
+  border: 1px solid var(--ops-muted);
+  border-radius: var(--ops-radius-sm);
+  background: var(--ops-panel);
+  color: var(--ops-text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+main.ops-screen.ops-screen button:not(:disabled):hover {
+  border-color: var(--ops-action);
+  background: var(--ops-raised);
+}
+main.ops-screen.ops-screen button:is(.ops-primary, [type='submit']) {
+  border-color: var(--ops-action);
+  background: var(--ops-action);
+  color: var(--ops-on-action);
+}
+main.ops-screen.ops-screen
+  button:is(.ops-primary, [type='submit']):not(:disabled):hover {
+  background: color-mix(in srgb, var(--ops-action) 88%, var(--ops-text));
+}
+main.ops-screen.ops-screen button.danger {
+  border-color: var(--ops-fault);
+  color: var(--ops-fault);
+}
+main.ops-screen.ops-screen button.danger:not(:disabled):hover {
+  background: var(--ops-fault-bg);
+}
+/* Segmented choice: the pressed one is filled, bold and underlined. */
+main.ops-screen.ops-screen button[aria-pressed='true'],
+main.ops-screen.ops-screen button[aria-pressed='true']:not(:disabled):hover {
+  border-color: var(--ops-text);
+  background: var(--ops-text);
+  color: var(--ops-panel);
+  text-decoration: underline;
+}
+main.ops-screen.ops-screen button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+main.ops-screen.ops-screen a {
+  color: var(--ops-action);
+}
+main.ops-screen.ops-screen a:hover {
+  text-decoration-thickness: 2px;
+}
+main.ops-screen.ops-screen
+  :is(a, button, input, select, [tabindex]):focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: var(--focus-offset-compact);
+}
+
+/* Links that act as page-level actions. */
+main.ops-screen.ops-screen :is(.chips a, a.cta, .ui-card a) {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: 2.75rem;
+  padding: var(--ops-space-2) var(--ops-space-3);
+  border: 1px solid var(--ops-border);
+  border-radius: var(--ops-radius-sm);
+  background: var(--ops-panel);
+  font-weight: 600;
+  text-decoration: none;
+}
+main.ops-screen.ops-screen :is(.chips a, a.cta, .ui-card a):hover {
+  border-color: var(--ops-action);
+}
+
+/* Measurements and identifiers. */
+main.ops-screen.ops-screen dt {
+  font: 600 var(--ops-text-label) / 16px var(--ops-font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ops-muted);
+}
+main.ops-screen.ops-screen :is(.ops-data, code, .opaque) {
+  font-family: var(--ops-font-mono);
+  font-size: var(--ops-text-small);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* Tables scroll inside their own labelled region. */
+main.ops-screen.ops-screen th {
+  padding: var(--ops-space-2);
+  border-block-end: 1px solid var(--ops-border);
+  background: var(--ops-raised);
+  color: var(--ops-muted);
+  font: 600 var(--ops-text-label) / 16px var(--ops-font-mono);
+  letter-spacing: 0.06em;
+  text-align: start;
+  text-transform: uppercase;
+}
+main.ops-screen.ops-screen td {
+  padding: var(--ops-space-2);
+  border-block-end: 1px solid var(--ops-border);
+  font-size: var(--ops-text-body);
+}
+
+/* Touch screens: 16px text keeps iOS from zooming into a focused field. */
+@media (pointer: coarse) {
+  main.ops-screen.ops-screen
+    :is(input:not([type='checkbox'], [type='radio']), select) {
+    font-size: 1rem;
+  }
+}
+@media (max-width: 30rem) {
+  main.ops-screen.ops-screen {
+    --ops-panel-pad: var(--ops-space-3);
+
+    padding: var(--ops-space-3);
+  }
+}

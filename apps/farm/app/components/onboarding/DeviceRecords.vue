@@ -76,7 +76,7 @@ function date(value: number) {
         <dl>
           <div>
             <dt>Conta titular</dt>
-            <dd>{{ device.accountId }}</dd>
+            <dd class="ops-data">{{ device.accountId }}</dd>
           </div>
           <div>
             <dt>Impressão digital</dt>
@@ -95,16 +95,17 @@ function date(value: number) {
           </div>
           <div>
             <dt>Criado em</dt>
-            <dd>{{ date(device.createdAt) }}</dd>
+            <dd class="ops-data">{{ date(device.createdAt) }}</dd>
           </div>
           <div v-if="device.pendingExpiresAt">
             <dt>Prazo do pedido</dt>
-            <dd>{{ date(device.pendingExpiresAt) }}</dd>
+            <dd class="ops-data">{{ date(device.pendingExpiresAt) }}</dd>
           </div>
         </dl>
         <div v-if="admin" class="actions">
           <Button
             v-if="device.status === 'pending'"
+            class="ops-primary"
             :disabled="
               busy ||
               device.proofAt === null ||
@@ -134,11 +135,9 @@ function date(value: number) {
 </template>
 
 <style scoped>
-.mono,
-code {
-  font-family: ui-monospace, monospace;
+.mono {
+  font-family: var(--ops-font-mono);
 }
-code,
 dd {
   overflow-wrap: anywhere;
 }
@@ -150,32 +149,26 @@ dd {
 }
 li {
   display: grid;
-  gap: var(--space-3);
-  padding-block: var(--space-4);
-  border-block-end: 1px solid var(--color-border);
+  gap: var(--ops-space-3);
+  padding-block: var(--ops-space-3);
+  border-block-start: 1px solid var(--ops-border);
   min-width: 0;
-}
-li:first-child {
-  padding-block-start: 0;
 }
 li:last-child {
   padding-block-end: 0;
-  border-block-end: 0;
 }
 dl {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
-  gap: var(--space-3) var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: var(--ops-space-3) var(--ops-space-4);
   margin: 0;
 }
 dl > div {
   display: grid;
-  gap: var(--space-1);
+  align-content: start;
+  justify-items: start;
+  gap: var(--ops-space-1);
   min-width: 0;
-}
-dt {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-muted);
 }
 dd {
   margin: 0;
@@ -183,10 +176,7 @@ dd {
 .actions {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2) var(--space-4);
-}
-.danger {
-  --accent: var(--state-error-color);
+  gap: var(--ops-space-2);
 }
 @media (max-width: 30rem) {
   .actions :deep(.ui-button) {

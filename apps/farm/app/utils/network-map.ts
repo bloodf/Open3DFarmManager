@@ -55,37 +55,37 @@ export const statusInfo: Record<
     label: 'Conectado',
     glyph: '✓',
     dash: '',
-    tone: 'var(--printer-idle)',
+    tone: 'var(--ops-action)',
   },
   degraded: {
     label: 'Degradado',
     glyph: '!',
     dash: '8 3 2 3',
-    tone: 'var(--printer-paused)',
+    tone: 'var(--ops-attention)',
   },
   reconnecting: {
     label: 'Reconectando',
     glyph: '↻',
     dash: '8 4',
-    tone: 'var(--printer-stale)',
+    tone: 'var(--ops-attention)',
   },
   offline: {
     label: 'Offline',
     glyph: '×',
     dash: '2 4',
-    tone: 'var(--printer-error)',
+    tone: 'var(--ops-offline)',
   },
   pending: {
     label: 'Pendente',
     glyph: '…',
     dash: '2 4',
-    tone: 'var(--printer-offline)',
+    tone: 'var(--ops-attention)',
   },
   discovered: {
     label: 'Descoberta',
     glyph: '?',
     dash: '4 4',
-    tone: 'var(--printer-offline)',
+    tone: 'var(--ops-muted)',
   },
 }
 

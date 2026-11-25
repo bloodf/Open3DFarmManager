@@ -152,7 +152,7 @@ for (const version of [1, 2, 3]) {
         DROP INDEX pause_active_printer;
         CREATE UNIQUE INDEX pause_active_assignment ON pause_commands(assignment_id) WHERE status IN ('claimed','write-started','outcome-unknown');
         CREATE UNIQUE INDEX pause_active_printer ON pause_commands(farm_id,printer_key) WHERE status IN ('claimed','write-started','outcome-unknown');
-        DROP TABLE control_tool_temperature_args; DROP TABLE control_command_actions;
+        DROP TABLE control_command_restarts; DROP TABLE control_tool_temperature_args;DROP TABLE control_command_actions;
       `)
       if (version !== 1) {
         raw.exec(

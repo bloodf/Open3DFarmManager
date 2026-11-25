@@ -75,7 +75,8 @@ export type CommandJournalOutcome = 'not-sent' | 'applied' | 'outcome-unknown'
  * reported back (`state-unconfirmed`). They are shown as an unknown result, yet
  * must not hold the printer's single active row: nothing later depends on them
  * the way it depends on an unconfirmed pause, cancel, emergency stop or
- * firmware restart, and the journal keeps no other way to clear a row.
+ * firmware restart. Of those, only the firmware restart hold is ever released
+ * (see FIRMWARE_RESTART_HOLD_MS).
  */
 const holdsPrinterWhenUnconfirmed = new Set([
   'pause',
@@ -85,6 +86,14 @@ const holdsPrinterWhenUnconfirmed = new Set([
   'firmware_restart',
 ])
 const actionlessCommands = new Set(['confirm_collection'])
+/**
+ * How long an unconfirmed `firmware_restart` keeps its printer busy (#938).
+ * The restart drops the state read-back, so its outcome is usually never
+ * learned. It matches the Service restart window, so the release never admits an
+ * earlier second restart. Releasing authorizes nothing: every later command
+ * still needs fresh ready state, and the restart itself is never retried.
+ */
+export const FIRMWARE_RESTART_HOLD_MS = 60_000
 /**
  * Accepted claims per printer in one minute. Every action shares this allowance
  * except `exclude_object`, which has its own of the same size.
@@ -449,6 +458,21 @@ function clockStep(state: State, observedWall = sample(state)): number | null {
     .run(now)
   return now
 }
+/**
+ * Settles unconfirmed firmware restarts finished by `finishedBy`, in the form
+ * every released row takes: kept for replay protection and the restart cap,
+ * read back as an unknown outcome, and no longer excluding other commands.
+ */
+function releaseFirmwareRestarts(
+  database: DatabaseSyncType,
+  finishedBy: number,
+): void {
+  database
+    .prepare(
+      "UPDATE pause_commands SET status='applied',reason='state-unconfirmed',write_started_at=COALESCE(write_started_at,finished_at),retain_until=finished_at+? WHERE status='outcome-unknown' AND finished_at<=? AND cmd_id IN (SELECT cmd_id FROM control_command_actions WHERE action='firmware_restart')",
+    )
+    .run(RETENTION_MS, finishedBy)
+}
 function transaction<T>(state: State, run: () => T): T {
   privateStorage(state)
   state.database.exec('BEGIN IMMEDIATE')
@@ -714,6 +738,8 @@ export function openCommandJournal(input: {
           "UPDATE pause_commands SET status='outcome-unknown', reason='outcome-unknown', finished_at=COALESCE(write_started_at, claimed_at), retain_until=NULL WHERE writer_id<>? AND status IN ('claimed','write-started')",
         )
         .run(writerId)
+      // The firmware restart hold never outlives the Connector that sent it.
+      releaseFirmwareRestarts(database, Number.MAX_SAFE_INTEGER)
       database.exec('COMMIT')
     } catch (error) {
       try {
@@ -843,6 +869,7 @@ function claimRow(
             .get(command.cmd_id, command.key_id, command.nonce)
         )
           return { ok: false, reason: 'replay' }
+        releaseFirmwareRestarts(state.database, now - FIRMWARE_RESTART_HOLD_MS)
         if (
           command.action !== 'emergency_stop' &&
           state.database

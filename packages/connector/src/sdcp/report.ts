@@ -103,6 +103,27 @@ export function decodeSdcpStatus(
   }
 }
 
+/** The response `Data.Data` of one request, matched by id and command. */
+export function decodeSdcpResponse(
+  raw: string,
+  mainboardId: string,
+  requestId: string,
+  cmd: number,
+): Record<string, unknown> | undefined {
+  const message = parse(raw) as any
+  if (
+    message?.Topic !== `sdcp/response/${mainboardId}` ||
+    message.Data?.RequestID !== requestId ||
+    message.Data.MainboardID !== mainboardId ||
+    message.Data.Cmd !== cmd
+  )
+    return
+  const data = message.Data.Data
+  return data && typeof data === 'object' && !Array.isArray(data)
+    ? data
+    : undefined
+}
+
 /** The command acknowledgement of one request; `0` is accepted. */
 export function decodeSdcpAck(
   raw: string,

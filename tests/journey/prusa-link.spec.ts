@@ -1,19 +1,31 @@
 import { expect, test } from '@playwright/test'
+import { PRUSA_LINK_MODELS } from '../../packages/connector/src/prusa/models.ts'
 import { journeyEnabled, startJourneyHarness } from './harness.ts'
 import type { startPrusaLinkJourneyFixture } from './prusa-link-fixture.ts'
 
-if (journeyEnabled())
-  test('PrusaLink status becomes unavailable and recovers read-only', async ({
+// One journey per wire identity: models sharing a printer type look the same.
+const identities = new Map<string, string[]>()
+for (const { model, binding } of PRUSA_LINK_MODELS)
+  if (binding.status === 'bindable')
+    identities.set(binding.printerType, [
+      ...(identities.get(binding.printerType) ?? []),
+      model,
+    ])
+
+for (const [printerType, models] of journeyEnabled() ? identities : [])
+  test(`PrusaLink ${models.join(' / ')} status becomes unavailable and recovers read-only`, async ({
     browser,
   }) => {
     const journey = await startJourneyHarness({
       browser,
       simulator: 'prusa-link',
+      printerModel: models[0]!,
     })
     try {
       const fixture = journey.vendor?.raw as Awaited<
         ReturnType<typeof startPrusaLinkJourneyFixture>
       >
+      expect(fixture.printerType).toBe(printerType)
       const row = await journey.openFarm()
       await journey.ownerPage
         .getByRole('button', { name: /^Inspecionar journey-prusa-link\b/ })

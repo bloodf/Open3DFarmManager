@@ -25,7 +25,7 @@ export function useShellRecords(
       spools.value = []
       spoolTruncated.value = false
       spoolState.value = 'idle'
-      if (!farm || !open) return
+      if (!farm || !open || !term.trim()) return
       const request = (spoolRequest = new AbortController())
       spoolState.value = 'loading'
       void $fetch<SpoolLibraryListResponse<SpoolItem>>(

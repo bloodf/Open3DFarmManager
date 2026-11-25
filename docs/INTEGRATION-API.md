@@ -432,8 +432,12 @@ A library replay uses the same endpoint with `libraryVersionId` (and an
 optional `plate`) instead of a URL. The grant needs `jobs:start` and
 `jobs:write`. `GET /library` and `GET /library/{itemId}` (`library:read`)
 return the farm's storage mode. `POST /library` stores the file in that mode,
-and `PATCH /library/settings` (`library:write`) changes it. The Connector
-prints the stored file and refuses a printer the file does not fit.
+and `PATCH /library/settings` (`library:write`) changes it. Server mode needs
+the server's library directory and Connector mode needs the Connector online;
+an upload that cannot keep the bytes answers 503 `service-unavailable`.
+Uploading the same bytes again restores a missing file. The Connector prints
+the stored file and refuses a printer the file does not fit. Operator approval
+of a held replay sends the same `start_library_print` command.
 
 ### Resin artifacts
 

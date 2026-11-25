@@ -94,7 +94,7 @@ async function submit() {
 </script>
 
 <template>
-  <main id="conteudo" class="ops-screen invite-page">
+  <main id="conteudo" class="ops-account invite-page">
     <header class="page-header">
       <p class="eyebrow">Open3DFarmManager</p>
       <h1>Convidar pessoa</h1>

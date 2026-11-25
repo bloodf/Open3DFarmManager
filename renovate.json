@@ -4,9 +4,26 @@
   "packageRules": [
     {
       "description": "Keep the qualified Node.js runtime and types on major 24 while allowing compatible updates.",
-      "matchManagers": ["npm", "nvm", "dockerfile", "github-actions"],
+      "matchManagers": [
+        "npm",
+        "nvm",
+        "dockerfile",
+        "github-actions",
+        "docker-compose"
+      ],
       "matchDepNames": ["node", "@types/node"],
       "allowedVersions": "<25"
+    },
+    {
+      "description": "Keep the Node.js 22 compatibility jobs on Node 22.",
+      "matchManagers": ["github-actions"],
+      "matchDepNames": ["node"],
+      "matchFileNames": [
+        ".github/workflows/ci.yml",
+        ".github/workflows/sim.yml"
+      ],
+      "matchCurrentVersion": "/^22\\./",
+      "allowedVersions": "<23"
     },
     {
       "description": "Keep farm TypeScript below 7 while vue-tsc uses the legacy compiler entry point and Volar requires TypeScript <7.",

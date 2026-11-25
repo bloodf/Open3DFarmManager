@@ -26,16 +26,21 @@
 //   exits non-zero on any failure.
 //
 // Isolation, as in the per-screen runners it generalizes
-// - Each tree is exported with `git archive` into an owned temp directory,
-//   installed offline from the npm cache and built with this Node 22 process.
+// - Each tree is exported with `git archive` into the run directory under
+//   ${XDG_CACHE_HOME:-~/.cache}/openfarm-docker/ and built, offline, in the
+//   dependency image of its own lockfile (scripts/docker-base-image.mjs, built
+//   once from `openfarm-e2e-node<.nvmrc>`); nothing is installed per run.
 // - Each build is served by a pinned node:22 container with no network at all.
 // - Playwright runs in the Playwright image with the Node 22 binary from that
 //   node:22 image mounted over its own node, sharing the app container's
 //   network namespace: the app is reached on 127.0.0.1 and nothing else is.
-// - Screenshots live in a temp directory outside git (kept, path printed).
-//   Containers and the build temp directory are removed on exit, success or not.
+// - Containers are `--rm` and write only to the run directory or tmpfs.
+//   Screenshots are copied to a temp directory outside git (kept, path printed).
+//   Containers and the run directory are removed on exit, success or not, and on
+//   SIGINT/SIGTERM.
 import { spawnSync } from 'node:child_process'
 import {
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -48,7 +53,25 @@ import { dirname, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { USAGE, parseRunnerArgs } from './polish-runner-lib/args.mjs'
-import { createDocker } from './polish-runner-lib/docker.mjs'
+import {
+  createDocker,
+  nodeExtractorArgs,
+  polishAppArgs,
+  polishPlaywrightArgs,
+  treeRunArgs,
+} from './polish-runner-lib/docker.mjs'
+import {
+  browserNodeImage,
+  ensureBaseImage,
+  seedNodeModules,
+} from '../../scripts/docker-base-image.mjs'
+import {
+  asCreate,
+  createLifecycle,
+  createRunDir,
+  followLogs,
+  removeRunDir,
+} from '../../scripts/docker-run-lib.mjs'
 
 const NODE_IMAGE =
   'node@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee'
@@ -75,7 +98,10 @@ if (options.help) {
 const { screen } = options
 const root = resolve(fileURLToPath(new URL('../..', import.meta.url)))
 const evidence = mkdtempSync(join(tmpdir(), `openfarm-${screen}-evidence-`))
-const work = mkdtempSync(join(tmpdir(), `openfarm-${screen}-trees-`))
+const work = createRunDir(`polish-${screen}`)
+const output = join(work, 'evidence')
+mkdirSync(output)
+const sourceImage = browserNodeImage(root)
 const id = `${screen}-evidence-${randomUUID()}`
 const nodeBin = join(work, 'node22')
 const commands = []
@@ -83,89 +109,86 @@ const cleanup = []
 const env = {
   ...process.env,
   PATH: `${dirname(process.execPath)}:${process.env.PATH}`,
-  NUXT_TELEMETRY_DISABLED: '1',
-  npm_config_update_notifier: 'false',
 }
-const { run, read, docker, containers } = createDocker({ root, env, commands })
+const { run, read, docker } = createDocker({ root, env, commands })
+const lifecycle = createLifecycle()
+let baseImage
 
-function exportTree(phase, sha) {
+async function create(args) {
+  commands.push(['docker', ...asCreate(args)].join(' '))
+  return lifecycle.create(asCreate(args))
+}
+
+async function foreground(args) {
+  commands.push(['docker', ...args].join(' '))
+  const result = await lifecycle.run(args, { inherit: true })
+  if (result.status !== 0)
+    throw new Error(`docker run failed (${result.status})`)
+}
+
+async function exportTree(phase, sha) {
   const tree = join(work, phase)
   const archive = join(work, `${phase}.tar`)
   mkdirSync(tree)
   run('git', ['archive', '--format=tar', '-o', archive, sha])
   run('tar', ['-xf', archive, '-C', tree])
   rmSync(archive)
-  run(
-    'npm',
-    ['ci', '--offline', '--ignore-scripts', '--no-audit', '--no-fund'],
-    { cwd: tree },
+  // One image per lockfile: a baseline with the same lockfile reuses it.
+  const image = ensureBaseImage({ projectDir: tree, nodeImage: sourceImage })
+  if (phase === 'after') baseImage = image
+  await foreground(
+    treeRunArgs({
+      name: `${id}-${phase}-build`,
+      image,
+      tree,
+      command: [
+        'sh',
+        '-ec',
+        [
+          'mkdir -p "$HOME"',
+          seedNodeModules('/work'),
+          'npm run build -w @open3dfarmmanager/farm',
+        ].join('\n'),
+      ],
+    }),
   )
-  run('npm', ['run', 'build', '-w', '@open3dfarmmanager/farm'], { cwd: tree })
   return tree
 }
 
 async function startApp(phase, tree) {
   const name = `${id}-${phase}-app`
-  docker([
-    'create',
-    '--pull=never',
-    '--name',
-    name,
-    '--network',
-    'none',
-    '-v',
-    `${join(tree, 'apps/farm/.output')}:/app:ro`,
-    '-w',
-    '/app',
-    '-e',
-    'NITRO_HOST=0.0.0.0',
-    '-e',
-    'NITRO_PORT=3000',
-    NODE_IMAGE,
-    'node',
-    'server/index.mjs',
-  ])
-  containers.add(name)
-  docker(['start', name])
+  const containerId = await create(
+    polishAppArgs({
+      name,
+      image: NODE_IMAGE,
+      output: join(tree, 'apps/farm/.output'),
+    }),
+  )
+  docker(['start', containerId])
+  const logs = followLogs(containerId)
   const probe =
     "fetch('http://127.0.0.1:3000/healthz').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
   for (let attempt = 0; attempt < 120; attempt++) {
     const result = spawnSync('docker', ['exec', name, 'node', '-e', probe])
-    if (result.status === 0) return name
+    if (result.status === 0) return { name, containerId }
     await new Promise((done) => setTimeout(done, 1000))
   }
-  docker(['logs', name])
+  console.error(logs())
   throw new Error(`${phase} application did not become healthy`)
 }
 
-function playwright(phase, app, testsTree, script) {
-  const name = `${id}-${phase}-playwright`
-  containers.add(name)
-  docker([
-    'run',
-    '--rm',
-    '--pull=never',
-    '--name',
-    name,
-    '--network',
-    `container:${app}`,
-    '--shm-size=1g',
-    '-v',
-    `${nodeBin}:/usr/local/bin/node:ro`,
-    '-v',
-    `${testsTree}:/work`,
-    '-v',
-    `${evidence}:/evidence`,
-    '-w',
-    '/work',
-    '-e',
-    'CI=1',
-    PLAYWRIGHT_IMAGE,
-    'sh',
-    '-ec',
-    script,
-  ])
-  containers.delete(name)
+async function playwright(phase, app, testsTree, script) {
+  await foreground(
+    polishPlaywrightArgs({
+      name: `${id}-${phase}-playwright`,
+      image: PLAYWRIGHT_IMAGE,
+      app,
+      nodeBin,
+      tree: testsTree,
+      evidence: output,
+      script,
+    }),
+  )
 }
 
 // The shell steps run inside the Playwright container for one phase.
@@ -196,6 +219,23 @@ const manifest = {
   cleanup,
 }
 let failure
+// Finalizers run last-added first: keep the evidence, then drop the run.
+lifecycle.finalizer(() => {
+  manifest.finishedAt = new Date().toISOString()
+  manifest.result = failure ? `failed: ${failure.message}` : 'passed'
+  if (existsSync(evidence))
+    writeFileSync(
+      join(evidence, 'manifest.json'),
+      `${JSON.stringify(manifest, null, 2)}\n`,
+    )
+  console.log(`Evidence kept at ${evidence}`)
+})
+lifecycle.finalizer(async () => {
+  await removeRunDir(work, { image: sourceImage })
+  cleanup.push(`removed ${work}`)
+})
+lifecycle.finalizer(() => cpSync(output, evidence, { recursive: true }))
+lifecycle.installSignals()
 try {
   console.log(`Evidence: ${evidence}`)
   const baseline = read('git', ['rev-parse', `${options.baseline}^{commit}`])
@@ -218,20 +258,19 @@ try {
   manifest.shas = { baseline, after }
 
   // Linux Node 22 binary from the pinned node:22 image for the test runner.
-  const extractor = `${id}-node22`
-  docker(['create', '--pull=never', '--name', extractor, NODE_IMAGE, 'true'])
-  containers.add(extractor)
+  const extractor = await create(
+    nodeExtractorArgs({ name: `${id}-node22`, image: NODE_IMAGE }),
+  )
   docker(['cp', `${extractor}:/usr/local/bin/node`, nodeBin])
-  docker(['rm', '-f', extractor])
-  containers.delete(extractor)
+  await lifecycle.remove(extractor)
 
   const trees = {
-    before: exportTree('before', baseline),
-    after: exportTree('after', after),
+    before: await exportTree('before', baseline),
+    after: await exportTree('after', after),
   }
   for (const phase of ['before', 'after'])
     writeFileSync(
-      join(evidence, `playwright-${phase}.config.mjs`),
+      join(output, `playwright-${phase}.config.mjs`),
       `export default ${JSON.stringify({
         testDir: '/work/tests/e2e',
         timeout: 30000,
@@ -244,8 +283,8 @@ try {
     )
   manifest.containerNode = {}
   for (const phase of ['before', 'after']) {
-    mkdirSync(join(evidence, phase), { recursive: true })
-    const app = await startApp(phase, trees[phase])
+    mkdirSync(join(output, phase, 'shots'), { recursive: true })
+    const { name: app, containerId } = await startApp(phase, trees[phase])
     manifest.ownedResources.containers.push(app, `${id}-${phase}-playwright`)
     manifest.containerNode[`${phase}-app`] = read('docker', [
       'exec',
@@ -254,50 +293,43 @@ try {
       '-v',
     ])
     try {
-      playwright(phase, app, trees.after, phaseSteps(phase))
+      await playwright(phase, app, trees.after, phaseSteps(phase))
     } finally {
-      docker(['rm', '-f', app])
-      containers.delete(app)
+      await lifecycle.remove(containerId)
       cleanup.push(`removed container ${app}`)
     }
-    const shotsDir = join(evidence, phase, 'shots')
+    const shotsDir = join(output, phase, 'shots')
     const shots = existsSync(shotsDir)
       ? readdirSync(shotsDir).filter((name) => name.endsWith('.png'))
       : []
     const minimum =
       phase === 'before' ? options.minBeforeShots : options.minShots
-    console.log(`${phase} screenshots (${shots.length}): ${shotsDir}`)
+    console.log(
+      `${phase} screenshots (${shots.length}): ${join(evidence, phase, 'shots')}`,
+    )
     if (shots.length < minimum)
       throw new Error(
         `${phase}: ${shots.length} shots, need at least ${minimum}`,
       )
     manifest[`${phase}Shots`] = shots.length
   }
-  // Extra vitest runs for the screen (--unit), on this Node 22, offline. They
-  // use an in-process mock API on 127.0.0.1 and the bundled Chromium; their
-  // native bindings are host-platform, so they cannot run in the Linux
-  // containers. No application service runs outside Docker.
+  // Extra vitest runs for the screen (--unit): offline, in the dependency image
+  // of the after tree. They use an in-process mock API on 127.0.0.1 and the
+  // bundled Chromium. No application service runs outside Docker.
   const vitest = 'node_modules/vitest/vitest.mjs'
-  const unitEnv = { ...env, OPENFARM_BROWSER: 'bundled' }
-  for (const unit of options.units)
-    run('node', [vitest, 'run', ...unit], { cwd: trees.after, env: unitEnv })
+  for (const [index, unit] of options.units.entries())
+    await foreground(
+      treeRunArgs({
+        name: `${id}-unit-${index}`,
+        image: baseImage,
+        tree: trees.after,
+        command: ['node', vitest, 'run', ...unit],
+      }),
+    )
 } catch (error) {
   failure = error
 } finally {
-  for (const name of containers) {
-    spawnSync('docker', ['rm', '-f', name], { stdio: 'inherit' })
-    cleanup.push(`removed container ${name}`)
-  }
-  rmSync(work, { recursive: true, force: true })
-  cleanup.push(`removed ${work}`)
-  manifest.finishedAt = new Date().toISOString()
-  manifest.result = failure ? `failed: ${failure.message}` : 'passed'
-  if (existsSync(evidence))
-    writeFileSync(
-      join(evidence, 'manifest.json'),
-      `${JSON.stringify(manifest, null, 2)}\n`,
-    )
-  console.log(`Evidence kept at ${evidence}`)
+  await lifecycle.cleanup()
 }
 if (failure) {
   console.error(failure.message)

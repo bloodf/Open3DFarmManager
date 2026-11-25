@@ -271,7 +271,7 @@ function onRevoke(invite: FarmInvite) {
 </script>
 
 <template>
-  <main id="conteudo" class="ops-screen members-page">
+  <main id="conteudo" class="ops-account members-page">
     <header class="page-header">
       <p class="eyebrow">Open3DFarmManager</p>
       <h1>Membros e convites</h1>

@@ -1,12 +1,10 @@
+import { DriverRefusalError } from '../control/driver-refusal.ts'
 import { z } from 'zod'
 import { FileOperation } from '../../../farm-protocol/src/control-actions.ts'
 
-export class FileOperationRefused extends Error {
-  readonly refusal: 'state' | 'invalid-command' | 'unsupported-action'
-
-  constructor(refusal: FileOperationRefused['refusal']) {
-    super(`File operation refused: ${refusal}`)
-    this.refusal = refusal
+export class FileOperationRefused extends DriverRefusalError {
+  constructor(refusal: DriverRefusalError['refusal']) {
+    super(refusal, `File operation refused: ${refusal}`)
   }
 }
 

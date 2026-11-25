@@ -1,5 +1,7 @@
+import { DriverRefusalError } from '../control/driver-refusal.ts'
 import { z } from 'zod'
 import { GcodeLine } from '../../../farm-protocol/src/control-actions.ts'
+import { klipperCommandName } from './klipper-command.ts'
 
 /**
  * Moonraker adapter for the signed `gcode` console action. One validated line
@@ -15,9 +17,11 @@ export type ConsoleRefusalCode =
   | 'unknown-state'
   | 'not-allowed'
   | 'rate'
+  | 'unhomed'
+  | 'limit'
 /**
- * The dispatcher reads `refusal` and reports a not-sent result with that
- * reason: a refusal wrote nothing, so it must never read as an unknown outcome.
+ * The dispatcher reports a not-sent result with this reason: a refusal wrote
+ * nothing, so it must never read as an unknown outcome.
  */
 const DISPATCH_REASON: Readonly<
   Record<ConsoleRefusalCode, 'state' | 'unsupported-action' | 'invalid-command'>
@@ -28,15 +32,26 @@ const DISPATCH_REASON: Readonly<
   unsupported: 'unsupported-action',
   'unknown-state': 'state',
   rate: 'state',
+  unhomed: 'state',
+  limit: 'invalid-command',
 }
-export class ConsoleRefusal extends Error {
+const REFUSAL_MESSAGE: Record<ConsoleRefusalCode, string> = {
+  invalid: 'Linha de G-code inválida.',
+  disabled: 'Console de G-code desativado.',
+  unsupported: 'Console de G-code indisponível para esta impressora.',
+  'unknown-state': 'Não foi possível confirmar o estado da impressora.',
+  'not-allowed': 'Comando de G-code não permitido ou não reconhecido.',
+  rate: 'Limite de comandos do console atingido.',
+  unhomed: 'Eixo não referenciado.',
+  limit: 'Comando excede os limites de segurança.',
+}
+
+export class ConsoleRefusal extends DriverRefusalError {
   readonly code: ConsoleRefusalCode
-  readonly refusal: 'state' | 'unsupported-action' | 'invalid-command'
   constructor(code: ConsoleRefusalCode) {
-    super(`Console refused: ${code}`)
+    super(DISPATCH_REASON[code], REFUSAL_MESSAGE[code])
     this.name = 'ConsoleRefusal'
     this.code = code
-    this.refusal = DISPATCH_REASON[code]
   }
 }
 
@@ -86,7 +101,9 @@ export function consoleAllowedWhilePrinting(line: string): boolean {
   const parts = tokens(line)
   if (!parts) return false
   const [word, ...params] = parts
-  const command = word!.toUpperCase()
+  const command = klipperCommandName(line)
+  // The tuning rules only validate whitespace-separated parameters.
+  if (word!.toUpperCase() !== command) return false
   switch (command) {
     case 'M220':
     case 'M221':
@@ -119,15 +136,63 @@ export function consoleAllowedWhilePrinting(line: string): boolean {
   }
 }
 
-/** Any line the console may send while the printer is stopped. */
+/** Classify only effects that can be bounded or are on the tuning allow-list. */
+export function idleConsoleClass(line: string): 'safe' | 'guarded' | 'refused' {
+  const parts = tokens(line)
+  if (!parts) return 'refused'
+  const command = klipperCommandName(line)
+  // QUERY_* is a legacy active-print rule. At idle, an arbitrary name with
+  // that prefix could be a macro, so only known query commands qualify.
+  if (
+    (!command.startsWith('QUERY_') ||
+      [
+        'QUERY_ENDSTOPS',
+        'QUERY_PROBE',
+        'QUERY_FILAMENT_SENSOR',
+        'QUERY_ADC',
+      ].includes(command)) &&
+    consoleAllowedWhilePrinting(line)
+  )
+    return 'safe'
+  if (
+    command === 'M118' &&
+    parts[0]!.toUpperCase() === command &&
+    parts.length > 1
+  )
+    return 'safe'
+  if (
+    [
+      'G0',
+      'G1',
+      'G28',
+      'BED_MESH_CALIBRATE',
+      'M104',
+      'M109',
+      'M140',
+      'M190',
+    ].includes(command)
+  )
+    return 'guarded'
+  return 'refused'
+}
+
+/**
+ * Any line the console may send while the printer is stopped. `classified`
+ * admits a line the caller has its own guard for (the U1 tool selection).
+ */
 export function consoleAllowedWhenStopped(
   line: string,
   additionalRefused?: readonly string[],
+  classified?: (line: string) => boolean,
 ): boolean {
   const parts = tokens(line)
   if (!parts) return false
-  const command = parts[0]!.toUpperCase()
-  return !ALWAYS_REFUSED.has(command) && !additionalRefused?.includes(command)
+  const command = klipperCommandName(line)
+  return (
+    !ALWAYS_REFUSED.has(command) &&
+    !additionalRefused?.includes(command) &&
+    (idleConsoleClass(line) !== 'refused' || classified?.(line) === true)
+  )
 }
 
 const PrintState = z.enum([
@@ -176,12 +241,13 @@ export function parseConsoleState(result: unknown): ConsoleState {
 
 /**
  * Throws a ConsoleRefusal unless the line may be sent in this state: any valid
- * line when stopped, the tuning allow-list while printing or paused.
+ * classified line when stopped, the tuning allow-list while printing or paused.
  */
 export function refuseConsole(
   args: Record<string, unknown>,
   state: ConsoleState | undefined,
   additionalRefused?: readonly string[],
+  classified?: (line: string) => boolean,
 ): string {
   const parsed = z.strictObject({ line: GcodeLine }).safeParse(args)
   if (!parsed.success) throw new ConsoleRefusal('invalid')
@@ -193,7 +259,7 @@ export function refuseConsole(
   if (
     !(active
       ? consoleAllowedWhilePrinting(line)
-      : consoleAllowedWhenStopped(line, additionalRefused))
+      : consoleAllowedWhenStopped(line, additionalRefused, classified))
   )
     throw new ConsoleRefusal('not-allowed')
   return line

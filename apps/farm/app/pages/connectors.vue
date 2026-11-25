@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import '../assets/css/ops-screen.css'
 import { useFarmRoute } from '../composables/useFarmRoute.ts'
 import { fetchFarmSelectionPage } from '../composables/useFarmMemberships.ts'
 import { resolveFarmScope } from '../utils/farm-scope.ts'
@@ -225,12 +226,12 @@ onBeforeRouteLeave(() => {
 </script>
 
 <template>
-  <main id="conteudo" class="connectors-page">
+  <main id="conteudo" class="connectors-page ops-screen">
     <header class="page-header">
       <p class="eyebrow">Open3DFarmManager</p>
       <h1 ref="heading" tabindex="-1">Connectors da farm</h1>
       <nav aria-label="Conta">
-        <ul class="nav-links">
+        <ul class="nav-links chips">
           <li><NuxtLink to="/">Início</NuxtLink></li>
           <li><NuxtLink to="/parear">Aprovar Connector</NuxtLink></li>
           <li><NuxtLink to="/sair">Sair da conta</NuxtLink></li>
@@ -357,13 +358,17 @@ onBeforeRouteLeave(() => {
         <li v-for="connector in connectors" :key="connector.agentId">
           <dl class="facts">
             <dt>Connector</dt>
-            <dd class="wrap">{{ connector.agentId }}</dd>
+            <dd class="ops-data">{{ connector.agentId }}</dd>
             <dt>Impressão digital</dt>
-            <dd class="wrap">{{ connector.fingerprint }}</dd>
+            <dd class="ops-data">{{ connector.fingerprint }}</dd>
             <dt>Versão do Connector</dt>
-            <dd class="wrap">{{ versionFor(connector.agentId).version }}</dd>
+            <dd class="ops-data">
+              {{ versionFor(connector.agentId).version }}
+            </dd>
             <dt>Revisão do protocolo</dt>
-            <dd>{{ versionFor(connector.agentId).revision }}</dd>
+            <dd class="ops-data">
+              {{ versionFor(connector.agentId).revision }}
+            </dd>
             <dt>Estado do registro</dt>
             <dd>
               <StatusBadge
@@ -426,11 +431,11 @@ onBeforeRouteLeave(() => {
       <div v-if="recoveryTarget" class="target">
         <dl class="facts">
           <dt>Farm</dt>
-          <dd class="wrap">{{ farmId }}</dd>
+          <dd class="ops-data">{{ farmId }}</dd>
           <dt>Connector</dt>
-          <dd class="wrap">{{ recoveryTarget.agentId }}</dd>
+          <dd class="ops-data">{{ recoveryTarget.agentId }}</dd>
           <dt>Impressão digital</dt>
-          <dd class="wrap">{{ recoveryTarget.fingerprint }}</dd>
+          <dd class="ops-data">{{ recoveryTarget.fingerprint }}</dd>
         </dl>
         <label class="check"
           ><input
@@ -472,25 +477,6 @@ onBeforeRouteLeave(() => {
 </template>
 
 <style scoped>
-.connectors-page {
-  display: grid;
-  gap: var(--space-4);
-  align-content: start;
-}
-.page-header {
-  display: grid;
-  gap: var(--space-2);
-}
-.eyebrow {
-  margin: 0;
-  font-size: var(--font-size-sm);
-  letter-spacing: 0.04em;
-  color: var(--color-text-muted);
-}
-.page-header h1 {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
 .page-header h1 {
   justify-self: start;
   max-width: 100%;
@@ -498,129 +484,81 @@ onBeforeRouteLeave(() => {
 .page-header h1:focus-visible {
   outline: var(--focus-ring-width) solid var(--color-focus-ring);
   outline-offset: var(--focus-ring-offset);
-  border-radius: var(--radius-sm);
-}
-.intro {
-  margin: 0;
-  max-width: 44rem;
-  color: var(--color-text-muted);
+  border-radius: var(--ops-radius-sm);
 }
 .nav-links {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-1) var(--space-4);
-  margin: 0;
+  gap: var(--ops-space-2);
+  margin: var(--ops-space-1) 0 0;
   padding: 0;
   list-style: none;
-}
-.nav-links a {
-  display: inline-flex;
-  align-items: center;
-  min-height: 2.75rem;
 }
 .alert:focus-visible {
   outline: var(--focus-ring-width) solid var(--color-focus-ring);
   outline-offset: var(--focus-ring-offset);
-  border-radius: var(--radius-md);
+  border-radius: var(--ops-radius-lg);
 }
 .alert:empty {
   display: none;
 }
-.panel {
-  display: grid;
-  gap: var(--space-3);
-  align-content: start;
-  margin: 0;
-  padding: var(--space-5);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-raised);
-  min-width: 0;
-}
 .panel > * {
   margin-block: 0;
 }
-.loading p {
-  margin: 0;
-}
-h2 {
-  margin: 0;
-  font-size: var(--font-size-lg);
-  line-height: var(--line-height-tight);
-}
 .field {
   display: grid;
-  gap: var(--space-1);
+  gap: var(--ops-space-1);
   min-width: 0;
   max-width: 38rem;
 }
-label {
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
-}
 select {
   width: 100%;
-  min-height: 2.75rem;
-  padding: var(--space-2) var(--space-3);
-  font: inherit;
-  color: inherit;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-}
-select:focus-visible,
-input:focus-visible,
-a:focus-visible {
-  outline: var(--focus-ring-width) solid var(--color-focus-ring);
-  outline-offset: var(--focus-ring-offset);
-}
-select:disabled {
-  opacity: 0.6;
 }
 .hint {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-muted);
+  font-size: var(--ops-text-small);
+  color: var(--ops-muted);
 }
 .warning {
-  color: var(--color-text);
+  color: var(--ops-attention);
 }
 .notice {
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
+  padding: var(--ops-space-2) var(--ops-space-3);
+  border: 1px solid var(--ops-border);
+  border-inline-start: 3px solid var(--ops-action);
+  border-radius: var(--ops-radius-sm);
+}
+.notice:empty {
+  display: none;
 }
 .actions {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2) var(--space-3);
+  gap: var(--ops-space-2) var(--ops-space-3);
   align-items: center;
 }
 .connector-list {
   display: grid;
-  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 30rem), 1fr));
+  gap: var(--ops-space-2);
   margin: 0;
   padding: 0;
   list-style: none;
 }
 .connector-list > li {
   display: grid;
-  gap: var(--space-3);
-  padding: var(--space-4);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
+  align-content: start;
+  gap: var(--ops-space-3);
+  padding: var(--ops-space-3);
+  border: 1px solid var(--ops-border);
+  border-radius: var(--ops-radius-md);
   min-width: 0;
 }
 .facts {
   display: grid;
   grid-template-columns: minmax(8rem, max-content) minmax(0, 1fr);
-  gap: var(--space-2) var(--space-4);
+  gap: var(--ops-space-2) var(--ops-space-4);
+  align-items: baseline;
   margin: 0;
-}
-.facts dt {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-muted);
 }
 .facts dd {
   margin: 0;
@@ -628,43 +566,31 @@ select:disabled {
 }
 .target {
   display: grid;
-  gap: var(--space-3);
+  gap: var(--ops-space-3);
+  padding: var(--ops-space-3);
+  border: 1px solid var(--ops-fault);
+  border-radius: var(--ops-radius-md);
 }
-.check {
+.connectors-page .check {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--ops-space-2);
   min-height: 2.75rem;
-  font-size: var(--font-size-base);
+  font-size: var(--ops-text-body);
   font-weight: 400;
 }
 .check input {
   flex: 0 0 auto;
   width: 1.25rem;
   height: 1.25rem;
-  accent-color: var(--color-accent);
-}
-.notice:empty {
-  display: none;
-}
-.connectors-page :deep(.danger) {
-  border-color: var(--printer-error);
-  color: var(--printer-error);
-}
-.connectors-page :deep(.ui-card) {
-  border: 1px solid var(--color-border);
-  box-shadow: none;
 }
 @media (max-width: 30rem) {
-  .panel {
-    padding: var(--space-4);
-  }
   .facts {
     grid-template-columns: minmax(0, 1fr);
     gap: 0;
   }
   .facts dd {
-    margin-bottom: var(--space-2);
+    margin-bottom: var(--ops-space-2);
   }
 }
 </style>

@@ -74,10 +74,15 @@ test('Kobra X does not settle a request from a report msgid belonging to another
 })
 
 test('Kobra X still settles by type/action when the printer chooses its own report msgid', async () => {
+  let requestId = ''
   const requests = createKobraXRequests({
     topic: (type) => type,
-    publish() {},
+    publish(_topic, payload) {
+      requestId = (JSON.parse(payload) as { msgid: string }).msgid
+    },
     resultTimeoutMs: 200,
+    // Firmware that replaces report ids (docs/compatibility/kobra-x-lan.md).
+    reportIdentity: 'printer-assigned',
   })
   const pending = requests.send({
     type: 'file',
@@ -86,6 +91,7 @@ test('Kobra X still settles by type/action when the printer chooses its own repo
   })
   // S1 printers acknowledge with the request msgid, then answer on /report
   // with a printer-chosen msgid — type+action must still confirm.
+  requests.handleAck({ msgid: requestId, code: 0 })
   requests.handleReport(
     report({
       type: 'file',
@@ -98,16 +104,21 @@ test('Kobra X still settles by type/action when the printer chooses its own repo
 })
 
 test('Kobra X falls back to type/action when the report has no msgid', async () => {
+  let requestId = ''
   const requests = createKobraXRequests({
     topic: (type) => type,
-    publish() {},
+    publish(_topic, payload) {
+      requestId = (JSON.parse(payload) as { msgid: string }).msgid
+    },
     resultTimeoutMs: 200,
+    reportIdentity: 'printer-assigned',
   })
   const pending = requests.send({
     type: 'print',
     action: 'stop',
     beforeSend: () => true,
   })
+  requests.handleAck({ msgid: requestId, code: 0 })
   requests.handleReport(
     report({
       type: 'print',

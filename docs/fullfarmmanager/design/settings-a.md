@@ -6,9 +6,9 @@ Capturas dentro do shell, com respostas sintéticas, pt-BR e movimento reduzido,
 
 Somente a aparência; comportamento, rotas e textos permanecem.
 
-- `apps/farm/app/assets/css/ops-screen.css` aplica o contrato `--ops-*` a `main#conteudo.ops-screen`: título compacto com régua, painéis planos com barra de título, rótulos de instrumento, campos com borda visível, ação principal preenchida, ação destrutiva e avisos nas cores de estado, identificadores em fonte monoespaçada.
+- `apps/farm/app/assets/css/ops-account.css` aplica o contrato `--ops-*` a `main#conteudo.ops-account`: título compacto com régua, painéis planos com barra de título, rótulos de instrumento, campos com borda visível, ação principal preenchida, ação destrutiva e avisos nas cores de estado, identificadores em fonte monoespaçada.
 - `/conta` usa duas colunas a partir de 75rem, na mesma ordem de leitura; `/convites` põe farm, papel e botão na mesma linha a partir de 64rem.
-- `rede.vue` e o painel de aprovações em `farm.vue` não recebem a classe e não mudam.
+- `rede.vue` e o painel de aprovações em `farm.vue` não recebem a classe. As telas de integração e rede usam a folha própria `ops-screen.css` (ver [settings-b.md](settings-b.md)).
 
 ## Pares
 

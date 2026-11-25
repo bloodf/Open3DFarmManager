@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import '../assets/css/ops-screen.css'
 import { useFarmRoute } from '../composables/useFarmRoute.ts'
 import { readFarmSelectionPage, resolveFarmScope } from '../utils/farm-scope.ts'
 import {
@@ -267,7 +268,11 @@ onBeforeRouteLeave(clear)
 </script>
 
 <template>
-  <OnboardingPage ref="shell" title="Dispositivos do navegador">
+  <OnboardingPage
+    ref="shell"
+    class="ops-screen"
+    title="Dispositivos do navegador"
+  >
     <template #intro>
       <p>
         Cadastre uma chave deste navegador para sua conta e farm. A consulta não
@@ -275,7 +280,7 @@ onBeforeRouteLeave(clear)
         com impressoras.
       </p>
     </template>
-    <nav class="links" aria-label="Conta">
+    <nav class="links chips" aria-label="Conta">
       <NuxtLink to="/">Início</NuxtLink>
       <NuxtLink to="/sair">Sair da conta</NuxtLink>
     </nav>
@@ -347,35 +352,34 @@ onBeforeRouteLeave(clear)
 .links {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2) var(--space-4);
+  gap: var(--ops-space-2);
 }
 .alert:focus-visible {
   outline: var(--focus-ring-width) solid var(--color-focus-ring);
   outline-offset: var(--focus-ring-offset);
-  border-radius: var(--radius-md);
+  border-radius: var(--ops-radius-lg);
 }
 .alert:empty {
   display: none;
 }
-.alert :deep(.ui-card) {
-  border: 1px solid var(--color-border);
-  box-shadow: none;
-}
 .status {
   margin: 0;
-  color: var(--color-text-muted);
+  color: var(--ops-muted);
 }
 .status:empty {
   display: none;
 }
 .skeletons {
   display: grid;
-  gap: var(--space-3);
+  gap: var(--ops-space-3);
 }
 .actions {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2) var(--space-4);
+  gap: var(--ops-space-2);
+}
+select {
+  max-width: 38rem;
 }
 @media (max-width: 30rem) {
   .actions :deep(.ui-button) {

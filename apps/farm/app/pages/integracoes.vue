@@ -379,7 +379,7 @@ function grantDraft(appId: string) {
 <template>
   <main
     id="conteudo"
-    class="ops-screen integrations-page"
+    class="ops-account integrations-page"
     :aria-busy="loading || pending"
   >
     <header class="page-header">

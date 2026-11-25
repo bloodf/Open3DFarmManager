@@ -252,6 +252,17 @@ export function parseLibraryJobRequest(
   return { libraryVersionId: id.toLowerCase(), plate: input.plate }
 }
 
+/** What starts a library version: the Connector fetches it by hash only. */
+export function libraryReplayAction(file: { sha256: string; plate?: number }) {
+  return ApiEnvelopeAction.parse({
+    action: 'start_library_print',
+    args: {
+      sha256: file.sha256,
+      ...(file.plate !== undefined ? { plate: file.plate } : {}),
+    },
+  })
+}
+
 export function resinReplayAction(file: JobFile) {
   return ApiResinReplay.parse({
     action: 'start_library_print',
@@ -553,14 +564,9 @@ export class IntegrationJobsService {
             : libraryRequest
               ? {
                   kind: 'action',
-                  action: ApiEnvelopeAction.parse({
-                    action: 'start_library_print',
-                    args: {
-                      sha256: record.sha256,
-                      ...(file.plate !== undefined
-                        ? { plate: file.plate }
-                        : {}),
-                    },
+                  action: libraryReplayAction({
+                    sha256: record.sha256,
+                    ...(file.plate !== undefined ? { plate: file.plate } : {}),
                   }),
                 }
               : {

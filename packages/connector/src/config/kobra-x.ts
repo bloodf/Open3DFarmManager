@@ -29,6 +29,14 @@ export const KobraXBinding = z.strictObject({
   deviceId: z.string().regex(/^[\w-]{1,128}$/),
   clientCertFile: z.string().min(1).max(4096),
   pinSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  /**
+   * Per-printer qualification flag for firmware that answers on
+   * `<type>/report` with its own `msgid`, or none (see `KobraXReportIdentity`
+   * in kobra-x/requests.ts). Set it only after qualification showed that this
+   * printer's firmware does not echo the request ID. Onboarding never writes
+   * it: absent means exact IDs.
+   */
+  reportIdentity: z.literal('printer-assigned').optional(),
 })
 export type KobraXBinding = z.infer<typeof KobraXBinding>
 

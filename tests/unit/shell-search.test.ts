@@ -127,3 +127,46 @@ it('scrolls the newly active keyboard option into the dialog viewport', async ()
     await opened.close()
   }
 })
+
+it('skips empty spool searches and exposes only nonempty, noninteractive options', async () => {
+  const queries: string[] = []
+  const requests: string[] = []
+  const routes = shellRoutes(queries)
+  routes[`GET /api/farms/${farmId}/spool-library/spools`] = ({ url }) => {
+    requests.push(url.searchParams.get('q') ?? '')
+    return reply({ items: [], total: 0 })
+  }
+  const opened = await harness.open('farm', routes, {
+    layout: true,
+    route: { path: '/farm', query: { farm: farmId } },
+  })
+  try {
+    const input = await openPalette(opened.page)
+    await pw(
+      opened.page.locator('#shell-search-results [role=option]').first(),
+    ).toBeVisible()
+    await pw(input).toHaveValue('')
+    await pw(
+      opened.page.getByText('Há mais bobinas.', { exact: false }),
+    ).toHaveCount(0)
+    await pw(opened.page.locator('[role="group"]')).not.toHaveCount(0)
+    pw(
+      await opened.page
+        .locator('[role="group"]')
+        .evaluateAll((groups) =>
+          groups.every((group) => !!group.querySelector('[role="option"]')),
+        ),
+    ).toBe(true)
+    await pw(
+      opened.page.locator('[role="option"] a, [role="option"] button'),
+    ).toHaveCount(0)
+    pw(requests).toEqual([])
+    await opened.page
+      .locator('#shell-search-results [role=option]')
+      .first()
+      .click()
+    await pw(input).toHaveCount(0)
+  } finally {
+    await opened.close()
+  }
+})

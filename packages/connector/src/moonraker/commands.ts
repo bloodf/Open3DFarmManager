@@ -1,3 +1,4 @@
+import { DriverRefusalError } from '../control/driver-refusal.ts'
 import {
   bedMeshScript,
   bedMeshSupported,
@@ -152,11 +153,34 @@ export function supportedMoonrakerActions(
 /**
  * Build Moonraker JSON-RPC call from extended action, arguments, and printer.objects.list.
  * Never composes G-code from unvalidated strings: whitelists heater/fan/pin names from objects.
+ * Building writes nothing, so every failure is a `DriverRefusalError`; one that
+ * is not already typed means the arguments were rejected.
  */
 export function buildMoonrakerCommand(
   action: string,
   args: Record<string, unknown> = {},
   objects: readonly string[] = [],
+): MoonrakerRpcCall {
+  try {
+    return composeMoonrakerCommand(action, args, objects)
+  } catch (error) {
+    if (error instanceof DriverRefusalError) throw error
+    throw new DriverRefusalError(
+      'invalid-command',
+      error instanceof Error ? error.message : 'Invalid command',
+      { cause: error },
+    )
+  }
+}
+
+/** The printer does not list what the command needs. */
+const unavailable = (message: string) =>
+  new DriverRefusalError('unsupported-action', message)
+
+function composeMoonrakerCommand(
+  action: string,
+  args: Record<string, unknown>,
+  objects: readonly string[],
 ): MoonrakerRpcCall {
   const u1 = objects.includes(SNAPMAKER_U1_MARKER)
   if (u1 && !snapmakerU1Controls(objects).some((control) => control === action))
@@ -167,7 +191,9 @@ export function buildMoonrakerCommand(
     if (parsed.action !== action) throw new Error('Invalid tool temperature')
     const { tool, target_c } = parsed.args
     const heater = U1_TOOL_OBJECTS[tool]
-    if (!objects.includes(heater) || target_c > U1_MAX_TOOL_C)
+    if (!objects.includes(heater))
+      throw unavailable('U1 tool temperature unavailable')
+    if (target_c > U1_MAX_TOOL_C)
       throw new Error('U1 tool temperature unavailable')
     return {
       method: 'printer.gcode.script',
@@ -198,7 +224,7 @@ export function buildMoonrakerCommand(
       (action === 'run_macro' &&
         !advertisedMoonrakerMacros(objects)?.includes(name))
     )
-      throw new Error('Macro unavailable')
+      throw unavailable('Macro unavailable')
     let script: string
     try {
       script = buildMacroScript(
@@ -229,7 +255,7 @@ export function buildMoonrakerCommand(
   }
   if (action === 'power') return powerCommand(args, objects)
   if (action === 'queue_op') {
-    if (!queueSupported(objects)) throw new Error('Queue unavailable')
+    if (!queueSupported(objects)) throw unavailable('Queue unavailable')
     return parseQueueOp(args).call
   }
   if (action === 'gcode') {
@@ -250,7 +276,7 @@ export function buildMoonrakerCommand(
   if (action === 'start_print') {
     const parsed = ControlArguments.parse({ action, args })
     if (parsed.action !== 'start_print' || !objects.includes('virtual_sdcard'))
-      throw Error('File printing unavailable')
+      throw unavailable('File printing unavailable')
     return {
       method: 'printer.print.start',
       params: { filename: PrinterGcodePath.parse(parsed.args.file) },
@@ -268,11 +294,11 @@ export function buildMoonrakerCommand(
 
   if (action === 'service') {
     if (!supportedMoonrakerActions(objects).includes(action))
-      throw new Error('Service control unavailable')
+      throw unavailable('Service control unavailable')
     return serviceCommand(args)
   }
   if (action === 'timelapse') {
-    if (!timelapseSupported(objects)) throw new Error('Timelapse unavailable')
+    if (!timelapseSupported(objects)) throw unavailable('Timelapse unavailable')
     return parseTimelapseOp(args).call
   }
 
@@ -369,12 +395,12 @@ export function buildMoonrakerCommand(
         throw new Error('Extruder temperature exceeds maximum limit')
       }
       if (u1 && !objects.includes('extruder'))
-        throw new Error("Heater 'extruder' not found in printer objects")
+        throw unavailable("Heater 'extruder' not found in printer objects")
       if (
         objects.length > 0 &&
         !objects.some((obj) => obj === 'extruder' || obj.startsWith('extruder'))
       ) {
-        throw new Error("Heater 'extruder' not found in printer objects")
+        throw unavailable("Heater 'extruder' not found in printer objects")
       }
       return {
         method: 'printer.gcode.script',
@@ -389,7 +415,7 @@ export function buildMoonrakerCommand(
         throw new Error('Bed temperature exceeds maximum limit')
       }
       if (objects.length > 0 && !objects.includes('heater_bed')) {
-        throw new Error("Heater 'heater_bed' not found in printer objects")
+        throw unavailable("Heater 'heater_bed' not found in printer objects")
       }
       return {
         method: 'printer.gcode.script',
@@ -407,7 +433,7 @@ export function buildMoonrakerCommand(
       const hasHeaterGeneric = objects.includes('heater_generic chamber')
       const hasTempFan = objects.includes('temperature_fan chamber')
       if (objects.length > 0 && !hasHeaterGeneric && !hasTempFan) {
-        throw new Error('Chamber heater not found in printer objects')
+        throw unavailable('Chamber heater not found in printer objects')
       }
 
       if (hasHeaterGeneric || (!hasTempFan && objects.length === 0)) {
@@ -569,8 +595,10 @@ export function buildMoonrakerCommand(
       }
     }
 
-    throw new Error('No supported light or caselight found in printer objects')
+    throw unavailable(
+      'No supported light or caselight found in printer objects',
+    )
   }
 
-  throw new Error(`Unsupported Moonraker action '${action}'`)
+  throw unavailable(`Unsupported Moonraker action '${action}'`)
 }

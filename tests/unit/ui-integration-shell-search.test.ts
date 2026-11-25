@@ -103,7 +103,9 @@ it('scrolls the newly active keyboard option into the dialog viewport', async ()
     })
     const input = await openPalette(page)
     await input.fill('a')
+    await pw(page.getByRole('option', { name: 'PLA Azul · #42' })).toBeVisible()
     await pw.poll(() => page.getByRole('option').count()).toBeGreaterThan(1)
+    const previousActiveId = await input.getAttribute('aria-activedescendant')
     await input.press('ArrowUp')
     await pw
       .poll(async () =>
@@ -115,6 +117,7 @@ it('scrolls the newly active keyboard option into the dialog viewport', async ()
       )
       .toBeGreaterThan(0)
     const activeId = await input.getAttribute('aria-activedescendant')
+    pw(activeId).not.toBe(previousActiveId)
     const scrollCall = await page.evaluate(() =>
       (
         window as unknown as {

@@ -126,16 +126,30 @@ async function submit() {
 <style scoped>
 .auth-page {
   display: grid;
-  gap: var(--space-4);
+  gap: var(--ops-space-4);
   align-content: start;
-  max-width: 30rem;
+  max-width: 26rem;
+  padding: var(--ops-space-5) var(--ops-space-4);
+  font-size: var(--ops-text-body);
+  line-height: 20px;
 }
+
 .links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ops-space-2) var(--ops-space-5);
   margin: 0;
+  padding-block-start: var(--ops-space-2);
+  border-block-start: 1px solid var(--ops-border);
 }
 .links a {
   display: inline-flex;
   align-items: center;
   min-height: 2.75rem;
+  color: var(--ops-action);
+}
+.links a:focus-visible {
+  outline: var(--focus-ring-width) solid var(--ops-action);
+  outline-offset: 2px;
 }
 </style>

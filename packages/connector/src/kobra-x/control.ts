@@ -5,6 +5,7 @@ import {
   type ExtendedControlAction,
 } from '../../../farm-protocol/src/control-actions.ts'
 import { createKobraXAce } from './ace.ts'
+import { KOBRA_X_START_WATCH_MS } from './control-support.ts'
 import { createKobraXActions } from './actions.ts'
 import type { KobraXCall, KobraXControlContext } from './context.ts'
 import { createKobraXFiles } from './files.ts'
@@ -129,9 +130,9 @@ export function createKobraXControl(input: {
                   requireReportedHolder: true,
                 }
               : {}),
-            // The signed dispatcher has a five-second total deadline. Watch
-            // past the documented one-second invalid-start failure before returning.
-            watchMs: 1500,
+            // Watch past the documented one-second invalid-start failure
+            // before returning. The dispatcher's result window counts it.
+            watchMs: KOBRA_X_START_WATCH_MS,
           },
           call,
         )

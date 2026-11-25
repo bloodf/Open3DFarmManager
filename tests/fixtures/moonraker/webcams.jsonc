@@ -1,0 +1,35 @@
+// reference-derived, not captured. `server.webcams.list` reply in the entry
+// shape of Arksine/moonraker b559b9a81161f958a43c2f527b6ad96f73310d5d,
+// docs/external_api/webcams.md (List Webcams, Webcam Entry): root-relative or
+// complete URLs, and an empty `snapshot_url` when a camera has no snapshot.
+// The names, uids and the loopback RTSP address are synthetic.
+{
+  "result": {
+    "webcams": [
+      {
+        "uid": "synthetic-snapshot",
+        "name": "synthetic-snapshot",
+        "enabled": true,
+        "service": "mjpegstreamer",
+        "target_fps": 15,
+        "stream_url": "/webcam/?action=stream",
+        "snapshot_url": "/webcam/?action=snapshot",
+        "flip_horizontal": false,
+        "flip_vertical": true,
+        "rotation": 90,
+      },
+      {
+        "uid": "synthetic-rtsp",
+        "name": "synthetic-rtsp",
+        "enabled": true,
+        "service": "synthetic-rtsp",
+        "target_fps": 15,
+        "stream_url": "rtsp://127.0.0.1:8554/test",
+        "snapshot_url": "",
+        "flip_horizontal": false,
+        "flip_vertical": false,
+        "rotation": 0,
+      },
+    ],
+  },
+}

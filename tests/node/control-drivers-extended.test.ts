@@ -767,19 +767,19 @@ const bambuCases: Array<{
     action: 'set_temperature',
     args: { heater: 'extruder', target_c: 220 },
     command: 'gcode_line',
-    state: { M104: 220 },
+    state: { M104: 220, nozzle_target_temper: 220 },
   },
   {
     action: 'set_temperature',
     args: { heater: 'bed', target_c: 65 },
     command: 'gcode_line',
-    state: { M140: 65 },
+    state: { M140: 65, bed_target_temper: 65 },
   },
   {
     action: 'set_fan',
     args: { fan: 'aux', percent: 100 },
     command: 'gcode_line',
-    state: { 'M106 P2': 255 },
+    state: { 'M106 P2': 255, big_fan1_speed: '15' },
   },
   {
     action: 'home',

@@ -279,8 +279,9 @@ export async function testPostgresPauseAuthority(
         printerKey,
       })
     }
-    await admin`INSERT INTO farm.printer_latest_state (farm_id, agent_id, printer_key, observed_at, state)
-      VALUES (${farm}::uuid, ${pc.challenge.agent_id}::uuid, ${printerKey}, ${await databaseNow()},
+    const receivedAt = await databaseNow()
+    await admin`INSERT INTO farm.printer_latest_state (farm_id, agent_id, printer_key, observed_at, received_at, age_at_send_ms, state)
+      VALUES (${farm}::uuid, ${pc.challenge.agent_id}::uuid, ${printerKey}, ${receivedAt}, ${receivedAt}, 0,
         ${admin.json({ controls: ['pause', 'set_temperature', 'future_action'] })})`
     assert.equal(
       (
@@ -962,8 +963,11 @@ export async function testPostgresPauseAuthority(
         ).ok,
       )
       const alternateAssignment = randomUUID(),
+        alternatePrinterKey = 'synthetic-' + kind + '-' + randomUUID(),
         assignedAt = await databaseNow()
-      await admin`INSERT INTO farm.printer_assignments(id,farm_id,agent_id,printer_key,created_at,created_by) VALUES (${alternateAssignment}::uuid,${farm}::uuid,${binding.agent_id}::uuid,${'synthetic-' + kind + '-' + randomUUID()},${assignedAt},${account})`
+      await admin`INSERT INTO farm.printer_assignments(id,farm_id,agent_id,printer_key,created_at,created_by) VALUES (${alternateAssignment}::uuid,${farm}::uuid,${binding.agent_id}::uuid,${alternatePrinterKey},${assignedAt},${account})`
+      await admin`INSERT INTO farm.printer_latest_state (farm_id, agent_id, printer_key, observed_at, received_at, age_at_send_ms, state)
+        VALUES (${farm}::uuid, ${binding.agent_id}::uuid, ${alternatePrinterKey}, ${assignedAt}, ${assignedAt}, 0, ${admin.json({ controls: ['pause'] })})`
       const nowBinding = await databaseNow(),
         b = {
           ...binding,

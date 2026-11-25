@@ -12,7 +12,9 @@ test('builds AMS load and unload requests and validates inputs', () => {
   assert.deepEqual(buildBambuFilamentCommand(15, 220, '1'), {
     print: {
       command: 'ams_change_filament',
+      ams_id: 3,
       target: 15,
+      slot_id: 3,
       curr_temp: 220,
       tar_temp: 220,
       sequence_id: '1',
@@ -59,7 +61,8 @@ test('simulator applies load and unload', async () => {
         i++
       )
         await new Promise((resolve) => setTimeout(resolve, 10))
-      assert.deepEqual(peer.extendedState.ams, { tray_now: String(target) })
+      const ams = peer.extendedState.ams as { tray_now?: string }
+      assert.equal(ams.tray_now, String(target))
     }
   } finally {
     socket.destroy()

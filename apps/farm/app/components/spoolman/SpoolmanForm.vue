@@ -11,11 +11,16 @@ defineProps<{ busy: boolean; connectorCount: number }>()
 const emit = defineEmits<{ submit: [] }>()
 const serviceIdError = ref('')
 
-watch(serviceId, () => {
-  serviceIdError.value = ''
-})
+watch(
+  serviceId,
+  () => {
+    serviceIdError.value = ''
+  },
+  { flush: 'sync' },
+)
 
 function validateServiceId() {
+  serviceId.value = serviceId.value.trim()
   serviceIdError.value =
     serviceId.value &&
     !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
@@ -47,7 +52,7 @@ function validateServiceId() {
     <input
       id="spoolman-service-id"
       v-model="serviceId"
-      maxlength="36"
+      maxlength="256"
       autocomplete="off"
       spellcheck="false"
       :aria-invalid="serviceIdError ? 'true' : undefined"

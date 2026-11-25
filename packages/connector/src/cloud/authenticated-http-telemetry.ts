@@ -8,6 +8,25 @@ import { TelemetryProofChallenge } from '../../../farm-protocol/src/telemetry-pr
 import type { ConnectorIdentity } from '../identity/store.ts'
 import type { TelemetrySender } from './drain.ts'
 
+class RequestRefused extends Error {}
+
+/**
+ * A server older than the send age parses records strictly and refuses the
+ * whole batch. This returns the same batch without it, or null if it has none.
+ */
+function withoutSendAge(body: string): string | null {
+  let found = false
+  const records = TelemetryBatch.parse(
+    parseBoundedJson(body, TELEMETRY_BATCH_JSON_LIMITS),
+  ).map((record) => {
+    if (!('ageAtSendMs' in record)) return record
+    found = true
+    const { ageAtSendMs: _age, ...rest } = record
+    return rest
+  })
+  return found ? JSON.stringify(records) : null
+}
+
 /** Explicit trusted configuration; no fallback to the unauthenticated prototype. */
 export function createAuthenticatedTelemetrySender(options: {
   endpoint: string
@@ -68,7 +87,7 @@ export function createAuthenticatedTelemetrySender(options: {
     const timer = setTimeout(() => controller.abort(), timeoutMs)
     try {
       if (signal.aborted) throw new Error()
-      const bytes = new TextEncoder().encode(body)
+      let bytes = new TextEncoder().encode(body)
       TelemetryBatch.parse(parseBoundedJson(body, TELEMETRY_BATCH_JSON_LIMITS))
       async function post(
         path: string,
@@ -83,6 +102,10 @@ export function createAuthenticatedTelemetrySender(options: {
           cache: 'no-store',
           headers: requestHeaders,
         })
+        if (response.status === 400) {
+          await response.body?.cancel().catch(() => {})
+          throw new RequestRefused()
+        }
         if (
           ![200, 429].includes(response.status) ||
           !/^application\/json(?:\s*;|\s*$)/i.test(
@@ -160,11 +183,21 @@ export function createAuthenticatedTelemetrySender(options: {
         }
         throw new Error()
       }
-      const reply = await requestWithRetry(
-        endpoint + '/challenge',
-        headers,
-        deadlineAt,
-      )
+      const requestChallenge = () =>
+        requestWithRetry(endpoint + '/challenge', headers, deadlineAt)
+      let reply: unknown
+      try {
+        reply = await requestChallenge()
+      } catch (error) {
+        // Nothing is committed by a refused challenge, so asking again with
+        // the older record shape is safe. Each batch tries the age first, so
+        // an upgraded server receives it without a Connector restart.
+        const older =
+          error instanceof RequestRefused ? withoutSendAge(body) : null
+        if (older === null) throw error
+        bytes = new TextEncoder().encode(older)
+        reply = await requestChallenge()
+      }
       if (
         !reply ||
         typeof reply !== 'object' ||

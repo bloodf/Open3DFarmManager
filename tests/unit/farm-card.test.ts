@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import AxeBuilder from '@axe-core/playwright'
 import { parse } from 'vue/compiler-sfc'
 import { expect, it } from 'vitest'
-import { renderFarmComponent } from '../../apps/farm/app/components/farm/render-farm-component.ts'
+import { renderFarmComponent } from '../helpers/render-farm-component.ts'
 import type { FarmObservation } from '../../apps/farm/app/utils/farm-view.ts'
 import { startHttpMock } from '../../packages/sim-tools/src/mocks/http-mock.ts'
 import { launchBrowser } from '../helpers/browser.ts'
@@ -107,9 +107,12 @@ it('renders wall details and passes axe at 320, 768 and 1280 px', async () => {
     'miniatura.svg',
     'Cor #FF4400',
     'Em uso',
-    '0% restante',
+    '<strong>0% restante</strong>',
+    'aria-valuenow="0"',
     'ace:0:1',
-    '65% restante',
+    '<strong>65% restante</strong>',
+    'aria-valuenow="65"',
+    'aria-label="Filamento restante"',
     'PLA laranja',
     'Filamento acabando',
     'há 2 s',

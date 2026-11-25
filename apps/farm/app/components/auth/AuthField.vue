@@ -34,34 +34,41 @@ const described = computed(
 <style scoped>
 .auth-field {
   display: grid;
-  gap: var(--space-1);
+  gap: var(--ops-space-1);
   min-width: 0;
 }
 label {
-  font-size: var(--font-size-sm);
+  font-size: var(--ops-text-small);
   font-weight: var(--font-weight-semibold);
 }
 input {
   width: 100%;
   min-height: 2.75rem;
-  padding: var(--space-2) var(--space-3);
+  padding: var(--ops-space-2) var(--ops-space-3);
   font: inherit;
   color: inherit;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  background: var(--ops-canvas);
+  border: 1px solid color-mix(in srgb, var(--ops-muted) 70%, var(--ops-panel));
+  border-radius: var(--ops-radius-md);
 }
 input:focus-visible {
-  outline: var(--focus-ring-width) solid var(--color-focus-ring);
-  outline-offset: var(--focus-ring-offset);
+  outline: var(--focus-ring-width) solid var(--ops-action);
+  outline-offset: 2px;
 }
 input:disabled {
   opacity: 0.6;
 }
 .help {
   margin: 0;
-  font-size: var(--font-size-sm);
-  color: var(--color-text-muted);
+  font-size: var(--ops-text-small);
+  line-height: 18px;
+  color: var(--ops-muted);
   overflow-wrap: anywhere;
+}
+/* Below 16px, touch browsers zoom the page when a field takes focus. */
+@media (pointer: coarse) {
+  input {
+    font-size: 1rem;
+  }
 }
 </style>

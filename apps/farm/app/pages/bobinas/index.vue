@@ -7,6 +7,7 @@ import Meter from '../../components/ui/Meter.vue'
 import Skeleton from '../../components/ui/Skeleton.vue'
 import StatusBadge from '../../components/ui/StatusBadge.vue'
 import ColorSwatch from '../../components/spool-library/ColorSwatch.vue'
+import SpoolArt from '../../components/spool-library/SpoolArt.vue'
 import ConfirmDeleteDialog from '../../components/spool-library/ConfirmDeleteDialog.vue'
 import SpoolFormDialog from '../../components/spool-library/SpoolFormDialog.vue'
 import SpoolLibraryShell from '../../components/spool-library/SpoolLibraryShell.vue'
@@ -438,14 +439,6 @@ watch(
   { flush: 'sync' },
 )
 
-watch(
-  () => route.query.q,
-  (query) => {
-    filters.q = typeof query === 'string' ? query : ''
-    void loadSpools()
-  },
-)
-
 onBeforeUnmount(() => {
   listController?.abort()
   scopeController.abort()
@@ -650,7 +643,7 @@ onBeforeUnmount(() => {
         >
           <header class="card-head">
             <div class="card-title-group">
-              <ColorSwatch :filament="spool.filament" :show-label="false" />
+              <SpoolArt :spool="spool" :size="64" />
               <div class="card-title-text">
                 <h3>
                   {{ spoolDisplayTitle(spool) }}
@@ -682,6 +675,9 @@ onBeforeUnmount(() => {
               label="Bobina com pouco material"
             />
             <div class="stock-numbers">
+              <span v-if="spoolRemainingPercent(spool) === null" class="muted"
+                >Nível restante desconhecido</span
+              >
               <strong>
                 Restante: {{ formatSpoolWeight(spool.remaining_weight) }}
               </strong>

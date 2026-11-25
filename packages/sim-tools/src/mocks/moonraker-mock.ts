@@ -175,6 +175,8 @@ export interface MoonrakerMockOptions {
   /** Axes homed at start, such as `xyz` or `` for none. Defaults to `xyz`. */
   homedAxes?: string | undefined
   gcodeHelp?: Record<string, string> | undefined
+  /** False acknowledges built-in query commands without sending their report. */
+  gcodeQueryReports?: boolean | undefined
   temperatureStoreLength?: number | undefined
   auth?: MoonrakerAuthConfig | undefined
   firmware?:
@@ -1258,6 +1260,43 @@ export async function startMoonrakerMock(
     }
   }
 
+  /**
+   * Reference-derived (not captured) built-in query reports, in the formats of
+   * Klipper c9559fa04ec6b11fb1a9a1610903546319fcf310: klippy/gcode.py
+   * (cmd_M115), klippy/extras/heaters.py (cmd_M105),
+   * klippy/extras/gcode_move.py (cmd_M114, cmd_GET_POSITION) and
+   * klippy/extras/query_endstops.py. Values are simulated.
+   */
+  function queryReport(command: string): string | undefined {
+    const [x, y, z, e] = toolheadPosition.map((value) => value.toFixed(3))
+    switch (command) {
+      case 'M105':
+        return `B:${model.bed.toFixed(1)} /${model.bedTarget.toFixed(1)} T0:${model.extruder.toFixed(1)} /${model.extruderTarget.toFixed(1)}`
+      case 'M114':
+        return `X:${x} Y:${y} Z:${z} E:${e}`
+      case 'M115':
+        return '// FIRMWARE_NAME:Klipper FIRMWARE_VERSION:v0.12.0-sim'
+      case 'GET_POSITION': {
+        const xyz = `X:${x} Y:${y} Z:${z}`
+        return [
+          'mcu: stepper_x:0 stepper_y:0 stepper_z:0',
+          `stepper: stepper_x:${x} stepper_y:${y} stepper_z:${z}`,
+          `kinematic: ${xyz}`,
+          `toolhead: ${xyz} E:${e}`,
+          `gcode: ${xyz} E:${e}`,
+          `gcode base: ${xyz} E:0.000`,
+          `gcode homing: ${xyz}`,
+        ]
+          .map((line) => `// ${line}`)
+          .join('\n')
+      }
+      case 'QUERY_ENDSTOPS':
+        return 'x:open y:open z:open'
+      default:
+        return undefined
+    }
+  }
+
   function executeGcode(script: string) {
     macroCalls.push({ script, timestamp: Date.now() })
     gcodeScripts.push(script)
@@ -1546,6 +1585,12 @@ export async function startMoonrakerMock(
         probeZ = 0.01
         responses.push('// Bed mesh calibrate complete')
         statusDirty = true
+        continue
+      }
+
+      const report = queryReport(upper)
+      if (report !== undefined) {
+        if (options.gcodeQueryReports !== false) responses.push(report)
         continue
       }
 

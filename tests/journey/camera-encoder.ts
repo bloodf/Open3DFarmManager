@@ -207,17 +207,16 @@ async function pinned(path: string) {
     .digest('hex')
 }
 
-async function standIn(): Promise<JourneyCameraEncoder> {
+async function standIn(
+  source: string = STAND_IN_SOURCE,
+): Promise<JourneyCameraEncoder> {
   const node = process.execPath
   if (!isAbsolute(node) || /[\s'"$`\\]/.test(node))
     throw new Error('Journey camera stand-in needs a plain absolute Node path')
   if (!existsSync(LAUNCHER))
     throw new Error(`Journey camera stand-in needs ${LAUNCHER}`)
   const gop = decoded(GOP_BASE64, GOP_SHA256, 'H264')
-  const body = STAND_IN_SOURCE.replace(
-    '__GOP__',
-    JSON.stringify(gop.toString('base64')),
-  )
+  const body = source.replace('__GOP__', JSON.stringify(gop.toString('base64')))
   if (body.includes("'"))
     throw new Error('Journey camera stand-in body must not contain a quote')
   const directory = await mkdtemp(join(tmpdir(), 'journey-camera-encoder-'))
@@ -269,4 +268,58 @@ export function createJourneyCameraEncoder(): Promise<JourneyCameraEncoder> {
   return process.env[FFMPEG_QUALIFICATION_ENV] === '1'
     ? realFfmpeg()
     : standIn()
+}
+
+/**
+ * Stand-in for the FLV copy path (`-f flv -i pipe:0 -c:v copy ... -f h264
+ * pipe:1`): one access unit of the same clip per FLV video tag. It reads only
+ * tag headers, so the simulator's placeholder payloads are enough.
+ */
+const FLV_STAND_IN_SOURCE = String.raw`
+const args = process.argv.slice(1)
+const fail = (code) => process.exit(code)
+const expect = (flag, value) => {
+  const at = args.indexOf(flag)
+  if (at < 0 || args[at + 1] !== value) fail(65)
+}
+if (!args.includes("-nostdin") || !args.includes("-an")) fail(65)
+expect("-f", "flv")
+expect("-i", "pipe:0")
+expect("-c:v", "copy")
+const tail = args.slice(-3)
+if (tail[0] !== "-f" || tail[1] !== "h264" || tail[2] !== "pipe:1") fail(65)
+
+const gop = Buffer.from(__GOP__, "base64")
+const units = []
+for (let i = 0; i + 4 < gop.length; i++)
+  if (gop[i] === 0 && gop[i + 1] === 0 && gop[i + 2] === 0 &&
+      gop[i + 3] === 1 && (gop[i + 4] & 31) === 9) units.push(i)
+const access = units.map((start, n) => gop.subarray(start, units[n + 1] ?? gop.length))
+
+let pending = Buffer.alloc(0)
+let header = true
+let frames = 0
+process.stdin.on("data", (chunk) => {
+  pending = Buffer.concat([pending, chunk])
+  if (header) {
+    if (pending.length < 13) return
+    if (pending.toString("latin1", 0, 3) !== "FLV") fail(66)
+    pending = pending.subarray(13)
+    header = false
+  }
+  while (pending.length >= 11) {
+    const size = 11 + pending.readUIntBE(1, 3) + 4
+    if (pending.length < size) return
+    if (pending[0] === 9) process.stdout.write(access[frames++ % access.length])
+    pending = pending.subarray(size)
+  }
+})
+process.stdin.on("end", () => process.stdout.end(() => process.exit(0)))
+`
+
+/** Stand-in by default; the real encoder only under the explicit opt-in. */
+export function createJourneyFlvEncoder(): Promise<JourneyCameraEncoder> {
+  return process.env[FFMPEG_QUALIFICATION_ENV] === '1'
+    ? realFfmpeg()
+    : standIn(FLV_STAND_IN_SOURCE)
 }

@@ -29,6 +29,7 @@ import { startFormlabsJourneyFixture } from './formlabs-fixture.ts'
 import { startSdcpFixture } from './sdcp-fixture.ts'
 import { startPrusaLinkJourneyFixture } from './prusa-link-fixture.ts'
 import { startStatusFixture } from './status-fixtures.ts'
+import { startAnycubicResinFixture } from './anycubic-resin-fixture.ts'
 import { createJourneyCameraEncoder, realFfmpeg } from './camera-encoder.ts'
 import { startBambuCameraFixture } from './bambu-camera-fixture.ts'
 import { startKobraBridgeSimulator } from './harness-kobralink-bridge.ts'
@@ -44,6 +45,7 @@ export type VendorName =
   | 'qidi'
   | 'flashforge'
   | 'phrozen'
+  | 'anycubic-resin'
 
 /** What a spec can do to the running simulated print. */
 export type VendorControls = Readonly<{
@@ -145,6 +147,8 @@ export const VENDOR_DESCRIPTIONS: Readonly<Record<VendorName, string>> = {
   qidi: 'Loopback Qidi status simulator',
   flashforge: 'Loopback Flashforge status simulator',
   phrozen: 'Loopback Phrozen status simulator',
+  'anycubic-resin':
+    'Loopback synthetic Photon P1 Max (packages/sim-tools), pinned TLS broker and FLV camera, printing at 25 %',
   formlabs: 'Loopback Formlabs PreForm status simulator',
   sdcp: 'Loopback SDCP status simulator',
   bambu:
@@ -354,6 +358,32 @@ export async function startVendorSimulator(
           limits: { staleAfterMs: 5000 },
         },
         assignment: { ...localAssignment(scope), backend: name },
+      })
+    } else if (name === 'anycubic-resin') {
+      const fixture = await startAnycubicResinFixture()
+      undo.push(fixture.close)
+      raw = fixture
+      const unsupported = () => {
+        throw new Error('The resin journey drives its simulator directly')
+      }
+      controls = {
+        setProgress: unsupported,
+        finishPrint: unsupported,
+        failPrint: unsupported,
+      }
+      runtime = async (scope) => ({
+        version: 8,
+        collection: {
+          version: 8,
+          allowedOrigins: [fixture.origin],
+          printers: [],
+          drivers: [{ ...fixture.binding, printerKey: scope.printerKey }],
+          limits: { staleAfterMs: 5000 },
+        },
+        assignment: { ...localAssignment(scope), backend: name },
+        camera: fixture.camera,
+        // Leaves the shared credential proof slot free for both inboxes.
+        telemetryIdleMs: 5000,
       })
     } else if (name === 'prusa-link') {
       const fixture = await startPrusaLinkJourneyFixture(options.printerModel)

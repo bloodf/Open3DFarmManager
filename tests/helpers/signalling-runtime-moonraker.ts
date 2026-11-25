@@ -127,6 +127,8 @@ export async function createRuntimeMoonrakerFixture() {
         agentId: string
         printerKey: string
       }[]
+      /** Test-only Connector entry replacing the packaged `cli.js`. */
+      entry?: string
       /** Locally declared Moonraker model for the journey printer. */
       model?: string
       camera?: Record<string, unknown>
@@ -331,7 +333,7 @@ export async function createRuntimeMoonrakerFixture() {
         const child = spawn(
           process.execPath,
           [
-            entry.pathname,
+            input.entry ?? entry.pathname,
             'run',
             '--config',
             configPath,

@@ -1,3 +1,4 @@
+import { DriverRefusalError } from '../control/driver-refusal.ts'
 import { z } from 'zod'
 import { PowerArguments } from '../../../farm-protocol/src/control-actions.ts'
 import { fields } from './detail-normalize.ts'
@@ -28,7 +29,8 @@ export async function readPowerDevices(
 }
 
 export function powerCommand(args: unknown, objects: readonly string[]) {
-  if (!objects.includes(POWER_MARKER)) throw new Error('Power unavailable')
+  if (!objects.includes(POWER_MARKER))
+    throw new DriverRefusalError('unsupported-action', 'Power unavailable')
   const { device, on } = PowerArguments.parse(args)
   return {
     method: 'machine.device_power.post_device',
@@ -36,12 +38,9 @@ export function powerCommand(args: unknown, objects: readonly string[]) {
   }
 }
 
-export class PowerRefused extends Error {
-  readonly refusal: 'state' | 'unsupported-action' | 'invalid-command'
-
-  constructor(refusal: 'state' | 'unsupported-action' | 'invalid-command') {
-    super(`Power operation refused: ${refusal}`)
-    this.refusal = refusal
+export class PowerRefused extends DriverRefusalError {
+  constructor(refusal: DriverRefusalError['refusal']) {
+    super(refusal, `Power operation refused: ${refusal}`)
   }
 }
 

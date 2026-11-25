@@ -1,3 +1,4 @@
+import { DriverRefusalError } from '../control/driver-refusal.ts'
 import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
 import type { ToolHeaters } from '../../../farm-protocol/src/state.ts'
 
@@ -45,9 +46,8 @@ export function snapmakerU1Controls(
 export const SNAPMAKER_U1_MARKER = 'openfarm:snapmaker-u1'
 
 /** Typed refusal: the driver wrote nothing and says why. */
-export class SnapmakerU1CommandRefused extends Error {
-  readonly refusal = 'unsupported-action' as const
+export class SnapmakerU1CommandRefused extends DriverRefusalError {
   constructor(command: string) {
-    super(`Snapmaker U1 command unavailable: ${command}`)
+    super('unsupported-action', `Snapmaker U1 command unavailable: ${command}`)
   }
 }

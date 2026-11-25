@@ -1,3 +1,4 @@
+import { DriverRefusalError } from '../control/driver-refusal.ts'
 import { advertisedMoonrakerMacros } from '../control/macro-support.ts'
 import { openFixedKobraLinkControl } from '../kobralink/control-driver.ts'
 import { KOBRALINK_CONTROLS } from '../kobralink/extended-control.ts'
@@ -319,13 +320,20 @@ export function createPauseDriverRouter(config: {
       if (!attempt)
         return Promise.reject(new Error('No prepared pause attempt'))
       // Both checks precede the driver, so a refusal can never reach a printer.
+      const advertised =
+        controls(input.binding).includes(action) &&
+        !!attempt.driver.driver.execute
       if (
-        !controls(input.binding).includes(action) ||
-        !controlWithinLimits(action, args, config.controlLimits) ||
-        !attempt.driver.driver.execute
+        !advertised ||
+        !controlWithinLimits(action, args, config.controlLimits)
       )
-        return Promise.reject(new Error('Control action unavailable'))
-      return attempt.driver.driver.execute(action, args, input)
+        return Promise.reject(
+          new DriverRefusalError(
+            advertised ? 'invalid-command' : 'unsupported-action',
+            'Control action unavailable',
+          ),
+        )
+      return attempt.driver.driver.execute!(action, args, input)
     },
     pauseOnce(input: Parameters<PreparedPauseDriver['pauseOnce']>[0]) {
       const attempt = attempts.get(input.binding)

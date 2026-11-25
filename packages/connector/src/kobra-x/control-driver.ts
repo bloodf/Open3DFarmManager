@@ -1,3 +1,4 @@
+import { DriverRefusalError } from '../control/driver-refusal.ts'
 import {
   controlSourceState,
   type ExtendedControlAction,
@@ -183,15 +184,14 @@ export function openFixedKobraXControl(input: {
         outcome.stage === 'local' &&
         outcome.reason !== 'not-authorized'
       )
-        throw Object.assign(failure(), {
-          refusal: /^(?:invalid-|unknown-slot|tray-required)/.test(
-            outcome.reason,
-          )
+        throw new DriverRefusalError(
+          /^(?:invalid-|unknown-slot|tray-required)/.test(outcome.reason)
             ? 'invalid-command'
             : /^unsupported-/.test(outcome.reason)
               ? 'unsupported-action'
               : 'state',
-        })
+          failure().message,
+        )
       return { acknowledged: false }
     }
     // Telemetry that changed because the command worked is expected here and

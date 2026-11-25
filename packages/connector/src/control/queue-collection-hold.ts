@@ -1,3 +1,4 @@
+import { DriverRefusalError } from './driver-refusal.ts'
 import {
   CollectionArguments,
   type ExtendedControlAction,
@@ -26,10 +27,10 @@ export interface PlateStartGuard {
 }
 
 function refused(message: string, awaiting: boolean): Error {
-  return Object.assign(new Error(message), {
-    refusal: 'state' as const,
-    ...(awaiting ? { resultCode: 'awaiting-collection' as const } : {}),
-  })
+  return Object.assign(
+    new DriverRefusalError('state', message),
+    awaiting ? { resultCode: 'awaiting-collection' as const } : {},
+  )
 }
 
 /**

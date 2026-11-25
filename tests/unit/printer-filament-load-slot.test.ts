@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { expect, it } from 'vitest'
 import { filamentLoadArgs } from '../../apps/farm/app/utils/filament-load.ts'
 import { kobraXMapping } from '../../apps/farm/app/utils/kobra-x-inputs.ts'
-import { renderFarmComponent } from '../../apps/farm/app/components/farm/render-farm-component.ts'
+import { renderFarmComponent } from '../helpers/render-farm-component.ts'
 
 it('keeps the load slot separate from the print mapping', async () => {
   const inputs = [

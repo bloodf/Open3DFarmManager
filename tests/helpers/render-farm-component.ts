@@ -10,7 +10,10 @@ import { compileScript, parse } from 'vue/compiler-sfc'
 /**
  * The directory the components of the farm interface live in.
  */
-const componentDir = new URL('./', import.meta.url)
+const componentDir = new URL(
+  '../../apps/farm/app/components/farm/',
+  import.meta.url,
+)
 
 /**
  * The Vue runtime of the application, resolved from this module so the

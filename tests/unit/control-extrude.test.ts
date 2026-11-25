@@ -27,7 +27,7 @@ import {
 import { controlWithinLimits } from '../../packages/connector/src/runtime/control-limits.ts'
 import { createPauseDriverRouter } from '../../packages/connector/src/runtime/pause-driver-router.ts'
 import { actionsForControlRole } from '../../apps/farm/server/utils/pause-authority/role-policy.ts'
-import { renderFarmComponent } from '../../apps/farm/app/components/farm/render-farm-component.ts'
+import { renderFarmComponent } from '../helpers/render-farm-component.ts'
 import { pauseFixture } from '../../packages/connector/test/moonraker-pause-fixture.ts'
 
 // Loopback fixture only (127.0.0.1, port 0). The authority, capability and

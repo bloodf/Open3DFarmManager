@@ -33,7 +33,7 @@ import {
 import { buildMoonrakerCommand } from '../../packages/connector/src/moonraker/commands.ts'
 import { moonrakerControls } from '../../packages/connector/src/moonraker/control-support.ts'
 import { openFixedMoonrakerPause } from '../../packages/connector/src/moonraker/pause-driver.ts'
-import { renderFarmComponent } from '../../apps/farm/app/components/farm/render-farm-component.ts'
+import { renderFarmComponent } from '../helpers/render-farm-component.ts'
 import {
   babystepDelta,
   factorRequest,

@@ -16,6 +16,8 @@ Browser commands stay WebRTC-only with no TURN or HTTP fallback; API-originated 
 
 API-originated commands travel via the integration API (`/api/integrations/v1`) and are delivered to the Connector as issuer-signed envelopes. The Connector enforces local safety and authorization independently before dispatching any command to a printer driver. An offline or isolated Connector fails closed on expired or unverified authority.
 
+Verified resin artifact starts are not yet available in the production Connector: no qualified resin dispatch capability is wired into its runtime. Requests are refused unless such a capability is explicitly supplied; the existing synthetic test capability does not enable real printers.
+
 When receiving an API-originated command envelope, the Connector executes the following checks in order and refuses any failing command with an explicit reason code:
 
 1. **Envelope framing and canonical shape (`invalid-command`, `invalid-envelope`):**

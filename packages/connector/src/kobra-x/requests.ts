@@ -60,6 +60,16 @@ export function parseKobraXReport(
 /** A code other than 0 or 200, or a `failed` state, is a refusal (spec outcome table). */
 export function reportRefusal(report: KobraXReport): number | 'failed' | null {
   if (report.state === 'failed') return report.code ?? 'failed'
+  // A stop the printer carried out can answer 10601 "user initiated"
+  // (bloodf/kobracontrol@c414db4f36d4c96f2b232c368ad6cfe56e3d0408
+  // src/kobracontrol/kobra.py, `succeeded`). Only a stop's own answer.
+  if (
+    report.type === 'print' &&
+    report.action === 'stop' &&
+    report.state === 'stoped' &&
+    report.code === 10601
+  )
+    return null
   if (report.code !== undefined && report.code !== 0 && report.code !== 200)
     return report.code
   return null

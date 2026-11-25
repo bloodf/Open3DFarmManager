@@ -279,7 +279,9 @@ export async function connectKobraX(options: {
       if (queryMatch !== 'stale') {
         if (
           (reportRefusal(report) === null ||
-            (type === 'print' && report.state === 'stoped')) &&
+            // A printer-ended or printer-paused job carries a fault code.
+            (type === 'print' &&
+              (report.state === 'stoped' || report.state === 'paused'))) &&
           (Object.hasOwn(queries, type) || type === 'fan' || type === 'light')
         )
           state.report(type, message)

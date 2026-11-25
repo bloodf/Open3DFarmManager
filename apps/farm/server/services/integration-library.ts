@@ -102,12 +102,12 @@ export interface IntegrationLibraryStore {
   version(versionId: string): Promise<ResolvedLibraryVersion | null>
   /** Where a connector-mode upload is stored. Null when the farm has no Connector. */
   agentFor(farmId: string): Promise<string | null>
-  /** Server mode keeps the bytes. Connector mode keeps none. */
+  /** Stores a version's bytes: server disk, or the target Connector. */
   retain(
     sha256: string,
     bytes: Uint8Array,
     mode: StorageMode,
-    target?: { farmId: string; agentId: string | null },
+    target: { farmId: string; agentId: string | null },
   ): Promise<void>
   addVersion(version: NewLibraryVersion): Promise<LibraryItemView>
   insertAudit(entry: LibraryAudit, now: number): Promise<void>
@@ -202,8 +202,9 @@ function itemOf(row: LibraryItemView): LibraryItemView {
 
 /**
  * Farm library for integration apps. Reads return the farm's storage mode.
- * Uploads are stored in that mode: server keeps the bytes, connector keeps
- * only the hash and metadata. Nothing here is tied to one consumer app.
+ * Uploads are stored in that mode: on the server's disk, or on the Connector
+ * while the server keeps only the hash and metadata. Nothing here is tied to
+ * one consumer app.
  */
 export class IntegrationLibraryService {
   readonly audits: LibraryAudit[] = []
@@ -363,12 +364,10 @@ export class IntegrationLibraryService {
           : await ingest(kind, sourceOf(input.bytes))
       if (!parsed.ok) return fail('validation-failed')
       const sha256 = createHash('sha256').update(input.bytes).digest('hex')
-      await this.store.retain(
-        sha256,
-        input.bytes,
-        mode,
-        resin ? { farmId: input.farmId, agentId } : undefined,
-      )
+      await this.store.retain(sha256, input.bytes, mode, {
+        farmId: input.farmId,
+        agentId,
+      })
 
       const now = this.now()
       const existing = (

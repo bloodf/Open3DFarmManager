@@ -77,6 +77,8 @@ export type JourneyOptions = Readonly<{
   /** Bambu only: opt the printer binding in to control commands. */
   control?: boolean
   bambuCamera?: BambuCameraScenario
+  /** PrusaLink only: the catalog model to simulate. */
+  printerModel?: string
   /**
    * Enables the signed control path for the assigned printer: the Connector
    * trusts the app's pause issuer and opens its control inbox, so the page
@@ -444,6 +446,7 @@ export async function startJourneyHarness(
       vendor = await startVendorSimulator(simulator as VendorName, {
         printerKey,
         ...(options.bambuCamera ? { bambuCamera: options.bambuCamera } : {}),
+        ...(options.printerModel ? { printerModel: options.printerModel } : {}),
         ...(options.control === undefined ? {} : { control: options.control }),
         ...(options.secure === undefined ? {} : { secure: options.secure }),
       })

@@ -64,6 +64,8 @@ export type VendorOptions = Readonly<{
   /** Bambu only: opt the binding in to control commands (default false). */
   control?: boolean
   bambuCamera?: BambuCameraScenario
+  /** PrusaLink only: the catalog model to simulate (default Prusa MK4). */
+  printerModel?: string
   /** Bambu simulator FTPS port; zero selects an ephemeral loopback port. */
   ftpsPort?: number
   /** Bambu simulator address for its browser onboarding journey. */
@@ -354,7 +356,7 @@ export async function startVendorSimulator(
         assignment: { ...localAssignment(scope), backend: name },
       })
     } else if (name === 'prusa-link') {
-      const fixture = await startPrusaLinkJourneyFixture()
+      const fixture = await startPrusaLinkJourneyFixture(options.printerModel)
       undo.push(fixture.close)
       raw = fixture
       const unsupported = () => {
@@ -382,7 +384,10 @@ export async function startVendorSimulator(
               printerKey: scope.printerKey,
               origin: fixture.simulator.endpoint,
               apiKeyFile,
-              expect: { serial: 'SIM-PRUSA', printerType: '1.4.0' },
+              expect: {
+                serial: fixture.serial,
+                printerType: fixture.printerType,
+              },
             },
           ],
           limits: { staleAfterMs: 5000 },

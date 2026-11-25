@@ -137,7 +137,11 @@ export function createPrusaLink(
   return {
     async discover() {
       const version = await json(await request('/api/version', [200]))
-      if (typeof version.api !== 'string' || !/^1\./.test(version.api))
+      // The published spec example says 1.0.0, but both vendor servers answer
+      // 2.0.0: Prusa-Firmware-Buddy @ b1043d68be188ad27ea72a14e160140e30e589f0
+      // lib/WUI/link_content/basic_gets.h (PL_VERSION_STRING), and Prusa-Link
+      // @ 58a0ab1703680c32d39c76684e906c8f2ea91464 prusa/link/web/main.py.
+      if (typeof version.api !== 'string' || !/^[12]\./.test(version.api))
         throw new Error('Unsupported PrusaLink API version')
       const info = await json(await request('/api/v1/info', [200]))
       return { version, info }

@@ -26,12 +26,17 @@ export default defineEventHandler(async (event) => {
     const sql = integrationAuthPool()
     const now = Date.now()
     const appId = (event.context.integrationAuth as IntegrationPrincipal).appId
-    const alerts = await sql`SELECT lifecycle.id, kind, label, message,
-      (opened_at > ${now}) AS "timestampSkewed", CASE WHEN opened_at <= ${now} THEN opened_at::float8 ELSE NULL END AS "openedAt", CASE WHEN resolved_at <= ${now} THEN resolved_at::float8 ELSE NULL END AS "resolvedAt",
+    const alerts =
+      await sql`WITH read_clock AS (SELECT ${now}::bigint AS read_at)
+      SELECT lifecycle.id, kind, label, message,
+      (opened_at > read_at) AS "timestampSkewed",
+      CASE WHEN opened_at <= read_at THEN opened_at::float8 END AS "openedAt",
+      CASE WHEN resolved_at <= read_at THEN resolved_at::float8 END AS "resolvedAt",
       actions.acknowledged_at::float8 AS "acknowledgedAt", actions.silenced_until::float8 AS "silencedUntil",
       (raised AND farm.integration_alert_enabled(assignment.farm_id, kind)
-        AND resolved_at IS NULL AND acknowledged_at IS NULL AND COALESCE(silenced_until <= ${now}, true)) AS "needsAttention"
+        AND resolved_at IS NULL AND acknowledged_at IS NULL AND COALESCE(silenced_until <= read_at, true)) AS "needsAttention"
       FROM farm.integration_alert_lifecycle lifecycle
+      CROSS JOIN read_clock
       JOIN farm.printer_assignments assignment ON assignment.id = lifecycle.printer_id
       LEFT JOIN LATERAL (
         SELECT MIN(acted_at) FILTER (WHERE action = 'acknowledge') AS acknowledged_at,

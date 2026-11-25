@@ -199,16 +199,21 @@ function dateLabel(time: number) {
           direta.
         </p>
         <ActiveSpoolAssign
-          v-if="farmId && !row.observation.historical"
+          v-if="farmId"
           :farm-id="farmId"
           :printer-key="row.assignment.printerKey"
           :slots="activeSpoolSlots(row)"
           :busy="
             row.connection !== 'authenticated' ||
+            row.observation.historical ||
             observationAge(row.observation, liveNow()).stale
           "
           :moonraker-managed="moonrakerActiveSpool(row)"
-          :materials="row.observation.state.materials"
+          :materials="
+            row.observation.historical
+              ? undefined
+              : row.observation.state.materials
+          "
           :bindings="bindings"
         />
         <FarmEnvironment

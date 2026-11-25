@@ -201,7 +201,7 @@ async function issue(
       ])
       return advertised === undefined
         ? []
-        : [{ controls: advertised, observed_at: now }]
+        : [{ controls: advertised, observed_at: now, received_at: now }]
     }
     assert.fail(`Unexpected fixture query: ${statement}`)
   }

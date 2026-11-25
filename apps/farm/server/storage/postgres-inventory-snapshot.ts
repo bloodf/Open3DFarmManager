@@ -1,3 +1,4 @@
+import { MAX_FUTURE_OBSERVATION_MS } from './telemetry-clock-skew.ts'
 import { ApiSpoolMembership } from '../../../../packages/farm-protocol/src/api-query.ts'
 import type { Sql, TransactionSql } from 'postgres'
 import {
@@ -16,10 +17,6 @@ export function parseInventorySnapshot(row: InventoryRow) {
     ? parsed.data
     : null
 }
-
-// Allow modest Connector clock skew without letting a far-future report
-// become the ordering watermark for this Connector.
-const MAX_FUTURE_OBSERVATION_MS = 30_000
 
 export async function recordInventorySnapshot(
   tx: TransactionSql,

@@ -22,6 +22,16 @@ case $mode in
   *) usage ;;
 esac
 
+script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd) || exit 2
+case ${ORQ_CHANGED_FILES-} in
+  '' | /*) ;;
+  *) ORQ_CHANGED_FILES=$PWD/$ORQ_CHANGED_FILES ;;
+esac
+case ${ORQ_DELETED_FILES-} in
+  '' | /*) ;;
+  *) ORQ_DELETED_FILES=$PWD/$ORQ_DELETED_FILES ;;
+esac
+
 root=$(git rev-parse --show-toplevel) || exit 2
 cd "$root" || exit 2
 
@@ -67,11 +77,30 @@ setup_env() {
 
 unit() {
   base=${1:-${ORQ_BASE_SHA:-origin/main}}
-  if ! git rev-parse --verify --quiet "$base^{commit}" >/dev/null; then
-    echo "checks: unknown base: $base" >&2
-    exit 2
+  changed=
+  deleted=
+  full=0
+  unknown_base=0
+  if git rev-parse --verify --quiet "$base^{commit}" >/dev/null; then
+    known_base=1
+  else
+    known_base=0
   fi
-  changed=$(git -c core.quotePath=false diff --name-only --diff-filter=d "$base" HEAD) || exit 2
+  if [ "${ORQ_CHANGED_FILES+x}" = x ]; then
+    changed=$(cat -- "$ORQ_CHANGED_FILES") || exit 2
+  elif [ "$known_base" = 1 ]; then
+    changed=$(git -c core.quotePath=false diff --no-renames --name-only --diff-filter=d "$base" HEAD) || exit 2
+  else
+    echo "checks: unknown base: $base; running the full unit suite" >&2
+    unknown_base=1
+    full=1
+  fi
+  if [ "${ORQ_DELETED_FILES+x}" = x ]; then
+    deleted=$(cat -- "$ORQ_DELETED_FILES") || exit 2
+  elif [ "$known_base" = 1 ]; then
+    deleted=$(git -c core.quotePath=false diff --no-renames --name-only --diff-filter=D "$base" HEAD) || exit 2
+  fi
+  [ -z "$deleted" ] || full=1
   setup_env
 
   present=
@@ -79,7 +108,11 @@ unit() {
   code=
   typed=0
   go=0
-  for file in $changed; do
+  migrations=0
+  for file in $changed $deleted; do
+    case $file in
+      infra/db/migrations/*) migrations=1 ;;
+    esac
     case $file in
       tools/rtsp-ingest/*.md) ;;
       tools/rtsp-ingest/*) go=1 ;;
@@ -102,63 +135,56 @@ unit() {
     esac
   done
 
-  # Node tests live outside Vitest: pick the changed ones and the importers.
   node_tests=
-  extra_tests="tests/unit/pause-authority-tooling.test.ts${nl}tests/unit/pause-authority-timeout.test.ts${nl}tests/helpers/kobralink-rtc/cdp-body.test.ts"
-  all_node_tests=$(git ls-files -- ':(glob)tests/node/*.test.ts')
-  all_node_tests="$all_node_tests$nl$extra_tests"
-  for file in $code; do
-    for candidate in $all_node_tests; do
-      if [ "$candidate" = "$file" ]; then
-        node_tests=$(add "$candidate" "$node_tests")
-      fi
-    done
+  vitest_tests=
+  if [ "$full" = 0 ] && [ -n "$present" ]; then
+    if affected=$(node "$script_dir/checks-affected.mjs" $present); then
+      for entry in $affected; do
+        case $entry in
+          node:*) node_tests=$(add "${entry#node:}" "$node_tests") ;;
+          vitest:*) vitest_tests=$(add "${entry#vitest:}" "$vitest_tests") ;;
+        esac
+      done
+    else
+      echo 'checks: affected test selection failed; running the full unit suite' >&2
+      full=1
+    fi
+  fi
 
-    # How a test under tests/<dir>/ spells this path.
-    case $file in
-      tests/node/*) relative=./${file#tests/node/} ;;
-      tests/*) relative=../${file#tests/} ;;
-      *) relative=../../$file ;;
-    esac
-    set -- -e "'$relative'" -e "\"$relative\"" -e "'$file'" -e "\"$file\""
-    # Workspace packages are also imported by name.
-    case $file in
-      packages/*/src/*)
-        package=${file#packages/}
-        package=@open3dfarmmanager/${package%%/*}
-        set -- "$@" -e "'$package'" -e "\"$package\""
-        ;;
-    esac
-    for candidate in $all_node_tests; do
-      if [ -f "$candidate" ] && grep -qF "$@" -- "$candidate"; then
-        node_tests=$(add "$candidate" "$node_tests")
-      fi
-    done
-    case $file in
-      tests/helpers/kobralink-rtc/*)
-        node_tests=$(add tests/helpers/kobralink-rtc/cdp-body.test.ts "$node_tests")
-        ;;
-    esac
-  done
-
-  # $present, $styles, $code and $node_tests split on newlines only.
   if [ -n "$present" ]; then
     step prettier npx prettier --check --ignore-unknown -- $present
   fi
   if [ -n "$styles" ]; then
     step hex-colours node apps/farm/app/assets/lint-hex-colours.mjs $styles
   fi
-  if [ "$typed" = 1 ]; then
+  if [ "$unknown_base" = 1 ]; then
+    step lint npm run lint
+  fi
+  if [ "$full" = 1 ]; then
     step typecheck npm run typecheck
+    step vitest npx vitest run --maxWorkers=50%
+    step test:node npm run test:node
+  else
+    if [ "$typed" = 1 ]; then
+      step typecheck npm run typecheck
+    fi
+    if [ -n "$code" ]; then
+      step vitest npx vitest related --run --maxWorkers=50% --passWithNoTests $code
+    fi
+    if [ -n "$vitest_tests" ]; then
+      step vitest-data npx vitest run --maxWorkers=50% $vitest_tests
+    fi
+    if [ -n "$node_tests" ]; then
+      # Same flags as `npm run test:node`.
+      step node-tests node --test --test-concurrency=1 --test-timeout=120000 --test-force-exit $node_tests
+    fi
   fi
-  if [ -n "$code" ]; then
-    step vitest npx vitest related --run --maxWorkers=50% --passWithNoTests $code
+  if [ "$migrations" = 1 ] || [ "$unknown_base" = 1 ]; then
+    if [ -f scripts/test-postgres.ts ]; then
+      step test:postgres npm run test:postgres
+    fi
   fi
-  if [ -n "$node_tests" ]; then
-    # Same flags as `npm run test:node`.
-    step node-tests node --test --test-concurrency=1 --test-timeout=120000 --test-force-exit $node_tests
-  fi
-  if [ "$go" = 1 ]; then
+  if [ "$go" = 1 ] || [ "$unknown_base" = 1 ]; then
     step test:go npm run test:go
   fi
 }

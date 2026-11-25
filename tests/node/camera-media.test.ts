@@ -19,6 +19,7 @@ import {
   type CameraRuntimeConfig,
 } from '../../packages/connector/src/config/camera.ts'
 import { startCameraMock } from '../../packages/sim-tools/src/camera-mock.ts'
+import { createCrealityWebRtcCameraSimulator } from '../../packages/sim-tools/src/creality-webrtc-camera-sim.ts'
 import { startBambuCameraFixture } from '../journey/bambu-camera-fixture.ts'
 import {
   createFakeEncoder,
@@ -547,3 +548,50 @@ test('selects the target camera when another assigned camera appears first', asy
   await until(() => f.track.sent.length === 3)
   assert.deepEqual(f.opened, ['rtsp-sim'])
 })
+
+test(
+  'runtime routes a Creality webrtc_local camera to the browser track without an encoder',
+  { timeout: 20000 },
+  async (t) => {
+    const simulator = await createCrealityWebRtcCameraSimulator()
+    t.after(() => simulator.close())
+    const assignmentId = randomUUID()
+    const config = parseCameraRuntimeConfig(
+      {
+        helper: { path: '/nonexistent/rtsp-ingest', sha256: 'a'.repeat(64) },
+        cameras: [
+          {
+            cameraId: 'cam-1',
+            assignmentId,
+            source: {
+              kind: 'creality-webrtc',
+              address: '127.0.0.1',
+              port: simulator.port,
+            },
+          },
+        ],
+      },
+      [assignmentId],
+    )
+    const f = await fixture({ runtime: { config, assignmentId } })
+    t.after(() => f.media.stop())
+    f.activate()
+    const statement = await countersign(f)
+    assert.equal(simulator.offers.length, 0, 'no printer contact before proof')
+    f.channel.deliver(
+      await signCameraPurposeProof(
+        statement,
+        'browser',
+        f.browserKeys.privateKey,
+      ),
+    )
+    await until(() => f.track.sent.length >= 2)
+    assert.equal(simulator.offers.length, 1)
+    // The keyframe leads with the parameter sets, as Annex-B.
+    assert.deepEqual(
+      f.track.sent[0]!.subarray(0, 5),
+      Buffer.from([0, 0, 0, 1, 0x67]),
+    )
+    assert.deepEqual(f.violations, [])
+  },
+)

@@ -3,6 +3,7 @@ import {
   selectCrealityCamera,
   streamCrealityJpegs,
 } from '../creality/camera.ts'
+import { openCrealityWebRtcSource } from '../creality/camera-webrtc.ts'
 import { openAnycubicCameraSource } from '../anycubic/camera-media.ts'
 import {
   selectAnycubicCamera,
@@ -217,6 +218,15 @@ export async function createCameraMediaFactory(input: {
       return [handle, Object.freeze({ host, port })] as const
     }),
   )
+  const crealityWebRtc = new Map(
+    config.cameras.flatMap((camera, index) => {
+      const source = camera.source
+      if (!('kind' in source) || source.kind !== 'creality-webrtc') return []
+      const { address: host, port } = source
+      selectCrealityCamera({ host, port })
+      return [['camera-' + index, Object.freeze({ host, port })] as const]
+    }),
+  )
   const configuredAnycubic = new Map(
     config.cameras.flatMap((camera, index) => {
       const entry = camera.source
@@ -399,6 +409,27 @@ export async function createCameraMediaFactory(input: {
           return openAnycubicCameraSource({
             source: anycubicSource,
             ffmpeg: anycubicFfmpeg ?? helper,
+            isCurrent,
+            signal: AbortSignal.any([
+              signal,
+              AbortSignal.timeout(
+                Math.max(1, Math.ceil(expiresAtMonoMs - performance.now())),
+              ),
+            ]),
+          })
+        }
+        const webRtc = crealityWebRtc.get(handle)
+        if (webRtc) {
+          if (
+            !isCurrent() ||
+            signal.aborted ||
+            expiresAtMonoMs <= performance.now() ||
+            expiresAtMonoMs - performance.now() > 30000
+          )
+            throw Error('Creality camera admission expired')
+          // The printer already sends H.264: no encoder process.
+          return openCrealityWebRtcSource({
+            ...webRtc,
             isCurrent,
             signal: AbortSignal.any([
               signal,

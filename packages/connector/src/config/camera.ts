@@ -49,7 +49,9 @@ const Source = z.strictObject({
 })
 // Vendor MJPEG cameras (`/?action=stream`): literal local address and port
 // only; the path is fixed by the vendor adapter and never configurable.
-const MjpegSource = (kind: 'creality-mjpeg' | 'anycubic-rinkhals') =>
+const MjpegSource = (
+  kind: 'creality-mjpeg' | 'anycubic-rinkhals' | 'flashforge-mjpeg',
+) =>
   z.strictObject({
     kind: z.literal(kind),
     address: z.string().refine(localAddress),
@@ -105,6 +107,10 @@ const CameraRuntime = z.strictObject({
               .max(128)
               .refine((model) => sdcpProfile(model)?.camera === true),
           }),
+          // Parallel-7/flashforge-api-docs wiki, Adventurer-5M-Pro-Features:
+          // MJPEG at :8080/?action=stream. This source only reads; starting the
+          // stream is the signed, gated `set_camera_stream` command.
+          MjpegSource('flashforge-mjpeg'),
           // Creality `webrtc_local` signalling; the path is fixed. Encrypted
           // signalling on the advertised videoPort is not implemented.
           z.strictObject({

@@ -1,6 +1,7 @@
 import type { ToolHeaters } from '../../../../packages/farm-protocol/src/state.ts'
 import {
   ControlArguments,
+  FILAMENT_SLOT_MATERIALS,
   SpeedMode,
   ToolTemperatureArgs,
   type ExtendedControlAction,
@@ -15,7 +16,43 @@ export const extendedActions = [
   'set_speed',
   'firmware_restart',
   'emergency_stop',
+  'set_camera_stream',
+  'set_filament_slot',
 ] as const
+/** Model-specific writes: shown when advertised, never listed as missing. */
+const ADVERTISED_ONLY: ReadonlySet<ExtendedControlAction> = new Set([
+  'set_tool_temperature',
+  'set_camera_stream',
+  'set_filament_slot',
+])
+export const slotMaterials = FILAMENT_SLOT_MATERIALS
+/** The signed slot record, or nothing while the form is incomplete. */
+export function buildFilamentSlotArgs(
+  tray: string,
+  material: string,
+  color: string,
+): Record<string, unknown> | undefined {
+  const args = {
+    tray: tray === '' ? NaN : Number(tray),
+    material,
+    color: color.toUpperCase(),
+  }
+  return ControlArguments.safeParse({ action: 'set_filament_slot', args })
+    .success
+    ? args
+    : undefined
+}
+/** What a printer setting write will change, said before it is signed. */
+export function writeDialogDescription(
+  action: ExtendedControlAction,
+  args: Record<string, unknown>,
+): string | undefined {
+  const once = 'O comando não será repetido automaticamente.'
+  if (action === 'set_camera_stream')
+    return `${args.on === true ? 'Ligar' : 'Desligar'} a transmissão da câmera da impressora. ${once}`
+  if (action === 'set_filament_slot')
+    return `Registrar no compartimento ${Number(args.tray) + 1}: material ${String(args.material)}, cor ${String(args.color)}. Nenhum filamento será movido. ${once}`
+}
 export type FarmExtendedAction = (typeof extendedActions)[number]
 const labels: Partial<Record<ExtendedControlAction, string>> = {
   config_write: 'Editar configuração',
@@ -46,6 +83,8 @@ const labels: Partial<Record<ExtendedControlAction, string>> = {
   queue_op: 'Gerenciar fila de impressão',
   gcode: 'Enviar G-code',
   confirm_collection: 'Confirmar placa livre',
+  set_camera_stream: 'Controlar transmissão da câmera',
+  set_filament_slot: 'Salvar material do compartimento',
 }
 export function extendedLabel(action: ExtendedControlAction): string {
   return labels[action] ?? action
@@ -70,7 +109,7 @@ export function unsupportedExtended(
     'unload_filament',
   ]
   return known.filter(
-    (action) => action !== 'set_tool_temperature' && !actions.includes(action),
+    (action) => !ADVERTISED_ONLY.has(action) && !actions.includes(action),
   )
 }
 export function buildExtendedArgs(
@@ -95,6 +134,7 @@ export function buildExtendedArgs(
       args = { axes: ['x', 'y', 'z'] }
       break
     case 'set_light':
+    case 'set_camera_stream':
       args = { on: choice === 'on' }
       if (!['on', 'off'].includes(choice)) return
       break

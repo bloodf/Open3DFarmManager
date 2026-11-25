@@ -2,6 +2,12 @@ import { randomUUID } from 'node:crypto'
 import { createSocket } from 'node:dgram'
 import { request } from 'node:http'
 import { isIPv4 } from 'node:net'
+import { FILAMENT_SLOT_MATERIALS } from '../../../farm-protocol/src/control-actions.ts'
+import { DriverRefusalError } from '../control/driver-refusal.ts'
+import {
+  flashforgeWritesQualified,
+  type FlashforgeQualification,
+} from './qualification.ts'
 
 // https://github.com/Parallel-7/flashforge-api-docs/wiki/Printer-PIDs
 function model(pid: unknown) {
@@ -136,6 +142,23 @@ type Mutation =
   | { kind: 'upload'; filename: string; content: Uint8Array }
   | { kind: 'temperature'; heater: 'nozzle' | 'bed'; celsius: number }
   | { kind: 'fan'; percent: number }
+  | { kind: 'slot-load'; slot: number }
+  | { kind: 'slot-config'; slot: number; material: string; color: string }
+  | { kind: 'camera'; on: boolean }
+
+/** Whether a slot report shows this record; `#` and letter case may differ. */
+export function flashforgeSlotMatches(
+  slot: { material: string | undefined; color: string | undefined },
+  material: string,
+  color: string,
+) {
+  const hex = (value: string) => value.replace(/^#/, '').toUpperCase()
+  return (
+    slot.material === material &&
+    slot.color !== undefined &&
+    hex(slot.color) === hex(color)
+  )
+}
 
 // The caller owns signed authorization, material limits and the start interlock.
 // Recheck that authority and the fresh observation immediately before each write.
@@ -144,6 +167,8 @@ export function createFlashforgeAdapter(
     serialNumber: string
     checkCode: string
     cameraPort?: number
+    /** Only the signed control driver provisions a qualification list. */
+    qualifiedWrites?: readonly FlashforgeQualification[]
   },
 ) {
   const { host, port, timeoutMs } = endpoint(input)
@@ -253,7 +278,10 @@ export function createFlashforgeAdapter(
       station && Array.isArray(station.slotInfos)
         ? station.slotInfos.map((entry: unknown) => {
             const slot = object(entry)
-            const id = reading(slot.slotId, 0, 3)
+            // AD5X-IFS-Material-Station.md numbers slots 1-4; the example in
+            // AD5X.md shows 0 (flashforge-api-docs wiki @ 885702f). Reads
+            // accept both; a slot write requires 1-4 numbering.
+            const id = reading(slot.slotId, 0, 4)
             if (
               id === undefined ||
               !Number.isInteger(id) ||
@@ -274,7 +302,17 @@ export function createFlashforgeAdapter(
       firmware,
       status,
       cameraUrl,
+      // Endpoint files: `cameraStreamUrl` is empty while the camera is off.
+      ...(detail.cameraStreamUrl === '' ? { cameraDisabled: true } : {}),
       slots,
+      ...(station
+        ? {
+            station: {
+              stateAction: reading(station.stateAction, 0, 3),
+              currentSlot: reading(station.currentSlot, 0, 4),
+            },
+          }
+        : {}),
       filename: label(detail.printFileName),
       progress: reading(detail.printProgress, 0, 1),
       nozzle: {
@@ -341,6 +379,34 @@ export function createFlashforgeAdapter(
     })
   }
 
+  /** `cumulative*` fields in `/detail` are lifetime totals, not job records. */
+  async function readHistory(): Promise<never> {
+    throw new Error(
+      'Flashforge job history unavailable: no documented LAN history endpoint',
+    )
+  }
+
+  /** A slot write needs the station idle and its own 1-4 numbering. */
+  function idleSlot(
+    observation: Awaited<ReturnType<typeof readStatus>>,
+    id: number,
+  ) {
+    const { slots, station, status } = observation
+    const slot = slots?.find((entry) => entry.id === id)
+    if (
+      observation.model !== 'AD5X' ||
+      status !== 'ready' ||
+      station?.stateAction !== 0 ||
+      !Number.isInteger(id) ||
+      id < 1 ||
+      id > 4 ||
+      !slot ||
+      slots!.some((entry) => entry.id === 0)
+    )
+      return undefined
+    return { slot, station }
+  }
+
   function fanState(value: unknown) {
     return value === 'open' || value === 'close' ? value : undefined
   }
@@ -364,8 +430,36 @@ export function createFlashforgeAdapter(
     try {
       const observation = await readStatus()
       const { status } = observation
-      if (observation.model === 'AD5X')
-        throw new Error('Flashforge writes unavailable on AD5X')
+      const requiresQualification =
+        input.qualifiedWrites !== undefined ||
+        observation.model === 'AD5X' ||
+        action.kind === 'camera' ||
+        action.kind === 'slot-load' ||
+        action.kind === 'slot-config'
+      if (
+        requiresQualification &&
+        (input.qualifiedWrites === undefined ||
+          !flashforgeWritesQualified(
+            observation.model,
+            observation.firmware,
+            input.qualifiedWrites,
+          ))
+      ) {
+        throw new DriverRefusalError(
+          'unsupported-action',
+          observation.model === 'AD5X' && input.qualifiedWrites === undefined
+            ? 'Flashforge writes unavailable on AD5X'
+            : 'Flashforge writes unavailable on this model and firmware',
+        )
+      }
+      // A multi-tool file needs a tool-to-slot mapping no signed start carries.
+      if (
+        observation.model === 'AD5X' &&
+        (action.kind === 'start' || action.kind === 'upload')
+      )
+        throw new Error(
+          'Flashforge AD5X start and upload refused: tool-to-slot mapping unsupported',
+        )
       const allowed = () => {
         if (authorize(observation) !== true)
           throw new Error('Flashforge action denied')
@@ -412,6 +506,60 @@ export function createFlashforgeAdapter(
           }
           await control('printerCtl_cmd', { coolingFan: action.percent })
           break
+        // https://github.com/Parallel-7/flashforge-api-docs/wiki/AD5X-IFS-Material-Station#loadunload-commands
+        // Unload needs a heated extruder and no source gives the temperature,
+        // so only load (action 0) is sent.
+        case 'slot-load': {
+          const target = idleSlot(observation, action.slot)
+          if (
+            target?.slot.loaded !== true ||
+            target.station.currentSlot === undefined ||
+            target.station.currentSlot === action.slot
+          ) {
+            throw new Error('Flashforge slot load denied')
+          }
+          await control('ms_cmd', { slot: action.slot, action: 0 })
+          break
+        }
+        // https://github.com/Parallel-7/flashforge-api-docs/wiki/AD5X-IFS-Material-Station#slot-configuration-commands
+        case 'slot-config': {
+          const target = idleSlot(observation, action.slot)
+          if (
+            !target ||
+            !(FILAMENT_SLOT_MATERIALS as readonly string[]).includes(
+              action.material,
+            ) ||
+            !/^#[0-9A-F]{6}$/.test(action.color) ||
+            // An unchanged record could not be told apart from an ignored write.
+            flashforgeSlotMatches(target.slot, action.material, action.color)
+          ) {
+            throw new Error('Flashforge slot record denied')
+          }
+          // The station page gives `rgb` without the `#` prefix.
+          await control('msConfig_cmd', {
+            slot: action.slot,
+            mt: action.material,
+            rgb: action.color.slice(1),
+          })
+          break
+        }
+        // https://github.com/Parallel-7/flashforge-api-docs/wiki/Adventurer-5M-Pro-Features#stream-control
+        case 'camera': {
+          // Capability-Matrix lists streamCtrl_cmd as "No" for the AD5X.
+          if (
+            observation.model === 'AD5X' ||
+            typeof action.on !== 'boolean' ||
+            !(action.on
+              ? observation.cameraDisabled
+              : observation.cameraUrl !== undefined)
+          ) {
+            throw new Error('Flashforge camera action denied')
+          }
+          await control('streamCtrl_cmd', {
+            action: action.on ? 'open' : 'close',
+          })
+          break
+        }
         case 'start':
         case 'upload': {
           if (
@@ -468,5 +616,5 @@ export function createFlashforgeAdapter(
       writing = false
     }
   }
-  return { readStatus, listFiles, openCamera, execute }
+  return { readStatus, listFiles, openCamera, readHistory, execute }
 }

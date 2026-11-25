@@ -119,6 +119,18 @@ const Observation = z.strictObject({
         observedMono: mono,
       }),
       z.strictObject({
+        kind: z.literal('camera-stream'),
+        on: z.boolean(),
+        observedMono: mono,
+      }),
+      z.strictObject({
+        kind: z.literal('filament-slot'),
+        tray: z.number().int().min(0).max(3),
+        material: z.string().max(16),
+        color: z.string().max(7),
+        observedMono: mono,
+      }),
+      z.strictObject({
         kind: z.literal('filament'),
         tray: z.number().int().min(0).max(15).nullable(),
         observedMono: mono,
@@ -194,6 +206,15 @@ export function controlEffectMatches(
       return effect.kind === 'excluded-object' && effect.name === args.name
     case 'set_light':
       return effect.kind === 'light' && effect.on === args.on
+    case 'set_camera_stream':
+      return effect.kind === 'camera-stream' && effect.on === args.on
+    case 'set_filament_slot':
+      return (
+        effect.kind === 'filament-slot' &&
+        effect.tray === args.tray &&
+        effect.material === args.material &&
+        effect.color === args.color
+      )
     case 'load_filament':
       return effect.kind === 'filament' && effect.tray === args.tray
     case 'unload_filament':

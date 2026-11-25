@@ -67,6 +67,7 @@ import {
 import {
   readBambuPrinterBinding,
   readCrealityPrinterBinding,
+  readFlashforgePrinterBinding,
   readSdcpPrinterBinding,
 } from '../control/printer-binding.ts'
 import {
@@ -647,6 +648,13 @@ async function runConnectorAgentOnce(
             )
               return []
             return controlsFor?.(id)
+          },
+          // Only a Flashforge binding opted in to control advertises any.
+          readOnlyControlsFor: (id) => {
+            const local = config.bindingFor(id)
+            return local && readFlashforgePrinterBinding(local)
+              ? controlsFor?.(id)
+              : []
           },
           macrosFor: (id) => macrosFor?.(id),
           macroParamsFor: (id) => macroParamsFor?.(id),

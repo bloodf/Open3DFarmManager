@@ -37,6 +37,8 @@ export const FlashforgeBindingSchema = z.strictObject({
     model: z.enum(['Adventurer 5M', 'Adventurer 5M Pro', 'AD5X']),
   }),
   simulated: z.boolean(),
+  /** Local command opt-in, needed together with the `pause.control` entry. */
+  control: z.literal(true).optional(),
 })
 export type FlashforgeBinding = z.infer<typeof FlashforgeBindingSchema>
 

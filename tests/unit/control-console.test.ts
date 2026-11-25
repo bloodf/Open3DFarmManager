@@ -539,6 +539,7 @@ describe('command journal', () => {
         ).sql
         expect(sql).toContain("'set_pin','gcode'")
         const v14 = sql
+          .replace(",'set_camera_stream','set_filament_slot'", '')
           .replace(",'set_tool_temperature'", '')
           .replace(",'start_library_print'", '')
           .replace(",'config_write'", '')

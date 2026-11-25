@@ -38,6 +38,9 @@ const trays = computed(() => {
   )
 })
 const tray = ref('')
+/** A material station loads only a named slot: it has no automatic choice. */
+const station = computed(() => trays.value.some((item) => item.station))
+const slotRequired = computed(() => station.value && tray.value === '')
 const selected = computed(() =>
   trays.value.find((item) => String(item.id) === tray.value),
 )
@@ -66,7 +69,8 @@ function run(name: string, event: Event) {
   if (args && available('run_macro')) emit('action', 'run_macro', args, event)
 }
 function load(event: Event) {
-  if (!available('load_filament') || trayMissing.value) return
+  if (!available('load_filament') || trayMissing.value || slotRequired.value)
+    return
   emit(
     'action',
     'load_filament',
@@ -92,14 +96,16 @@ function load(event: Event) {
     </button>
     <template v-if="actions.load">
       <label v-if="trays.length || trayMissing"
-        >Bandeja AMS
+        >{{ station ? 'Compartimento' : 'Bandeja AMS' }}
         <select
           v-model="tray"
           :disabled="!available('load_filament')"
           :aria-invalid="trayMissing ? 'true' : undefined"
           :aria-describedby="trayMissing ? trayMissingId : undefined"
         >
-          <option value="">Seleção automática</option>
+          <option value="">
+            {{ station ? 'Escolha um compartimento' : 'Seleção automática' }}
+          </option>
           <option v-if="trayMissing" :value="tray" disabled>
             Bandeja indisponível
           </option>
@@ -125,7 +131,7 @@ function load(event: Event) {
       </p>
       <button
         type="button"
-        :disabled="!available('load_filament') || trayMissing"
+        :disabled="!available('load_filament') || trayMissing || slotRequired"
         :aria-describedby="trayMissing ? trayMissingId : undefined"
         @click="load"
       >

@@ -74,8 +74,10 @@ export type JourneyOptions = Readonly<{
   browser: Browser
   simulator?: SimulatorName
   printerKey?: string
-  /** Bambu only: opt the printer binding in to control commands. */
+  /** Bambu and Flashforge: opt the printer binding in to control commands. */
   control?: boolean
+  /** Flashforge control only: the test-only write qualification. */
+  flashforgeQualified?: boolean
   bambuCamera?: BambuCameraScenario
   /** PrusaLink only: the catalog model to simulate. */
   printerModel?: string
@@ -448,6 +450,9 @@ export async function startJourneyHarness(
         ...(options.bambuCamera ? { bambuCamera: options.bambuCamera } : {}),
         ...(options.printerModel ? { printerModel: options.printerModel } : {}),
         ...(options.control === undefined ? {} : { control: options.control }),
+        ...(options.flashforgeQualified === undefined
+          ? {}
+          : { flashforgeQualified: options.flashforgeQualified }),
         ...(options.secure === undefined ? {} : { secure: options.secure }),
       })
       const started = vendor

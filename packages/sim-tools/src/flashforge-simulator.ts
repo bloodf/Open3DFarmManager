@@ -56,16 +56,34 @@ export async function startFlashforgeSimulator(
   }
 }
 
-// Original stateful fixtures for https://github.com/Parallel-7/flashforge-api-docs/wiki/HTTP-REST-API
-export function startStatefulFlashforgeSimulator(fixture: {
+// Original stateful fixture. Wire reference: Parallel-7/flashforge-api-docs
+// wiki at 885702f, HTTP-REST-API.md and AD5X-IFS-Material-Station.md.
+function temperatureTarget(value: unknown, maximum: number) {
+  if (value === -100) return 0
+  if (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= 0 &&
+    value <= maximum
+  )
+    return value
+}
+export async function startStatefulFlashforgeSimulator(fixture: {
   pid: number
   detail: Record<string, unknown>
   files: readonly string[]
 }) {
   const detail = { ...fixture.detail }
   const files = new Set(fixture.files)
+  let loadingSlot: number | undefined
+  /** Paths of every request and every authenticated write, in arrival order. */
+  const requests: string[] = []
+  const writes: { path: string; payload?: unknown }[] = []
+  /** `/control` acknowledges commands it ignores (wiki HTTP-REST-API). */
+  const faults = { ignoreControl: false }
 
-  return startFlashforgeSimulator(async (req, res, body) => {
+  const simulator = await startFlashforgeSimulator(async (req, res, body) => {
+    requests.push(`${req.method} ${req.url}`)
     const send = (payload: object) => res.end(JSON.stringify(payload))
     const reject = () => {
       send({ code: 1 })
@@ -118,6 +136,18 @@ export function startStatefulFlashforgeSimulator(fixture: {
       return reject()
     if (req.url === '/detail') {
       send({ code: 0, detail })
+      // The load shows as running once, then completes and returns to idle
+      // (wiki AD5X-IFS-Material-Station, "State Codes").
+      if (loadingSlot !== undefined) {
+        detail.matlStationInfo = {
+          ...(detail.matlStationInfo as object),
+          stateAction: 0,
+          stateStep: 0,
+          currentSlot: loadingSlot,
+          currentLoadSlot: 0,
+        }
+        loadingSlot = undefined
+      }
       return
     }
     if (req.url === '/gcodeList') {
@@ -133,9 +163,16 @@ export function startStatefulFlashforgeSimulator(fixture: {
       )
       return
     }
-    if (fixture.pid !== 35 && fixture.pid !== 36) return reject()
+    writes.push({ path: req.url ?? '', payload: data.payload })
+    if (req.url === '/control' && faults.ignoreControl) {
+      send({ code: 0 })
+      return
+    }
+    if (![35, 36, 38].includes(fixture.pid)) return reject()
     if (
       req.url === '/printGcode' &&
+      // The AD5X multi-material start is not simulated: the adapter refuses it.
+      fixture.pid !== 38 &&
       detail.status === 'ready' &&
       files.has(data.fileName) &&
       data.levelingBeforePrint === true
@@ -170,26 +207,94 @@ export function startStatefulFlashforgeSimulator(fixture: {
               return reject()
           }
           break
-        case 'temperatureCtl_cmd':
-          if (typeof args.rightNozzle === 'number')
-            detail.rightTargetTemp =
-              args.rightNozzle === -100 ? 0 : args.rightNozzle
-          else if (typeof args.platform === 'number')
-            detail.platTargetTemp = args.platform === -100 ? 0 : args.platform
-          else return reject()
+        case 'temperatureCtl_cmd': {
+          const nozzle = temperatureTarget(args.rightNozzle, 265)
+          const bed = temperatureTarget(args.platform, 100)
+          if (nozzle === undefined && bed === undefined) return reject()
+          if (nozzle !== undefined) detail.rightTargetTemp = nozzle
+          if (bed !== undefined) detail.platTargetTemp = bed
           break
+        }
         case 'printerCtl_cmd':
           if (
             detail.status !== 'printing' ||
-            typeof args.coolingFan !== 'number'
+            typeof args.coolingFan !== 'number' ||
+            !Number.isInteger(args.coolingFan) ||
+            args.coolingFan < 0 ||
+            args.coolingFan > 100
           )
             return reject()
           detail.coolingFanSpeed = args.coolingFan
           break
+        case 'streamCtrl_cmd':
+          // The AD5X does not document this command.
+          if (
+            fixture.pid === 38 ||
+            (args.action !== 'open' && args.action !== 'close')
+          )
+            return reject()
+          detail.cameraStreamUrl =
+            args.action === 'open' ? 'http://127.0.0.1:8080/?action=stream' : ''
+          break
+        case 'msConfig_cmd': {
+          const station = detail.matlStationInfo as
+            | { stateAction?: number; slotInfos: { slotId: number }[] }
+            | undefined
+          if (
+            fixture.pid !== 38 ||
+            detail.status !== 'ready' ||
+            station?.stateAction !== 0 ||
+            !station.slotInfos.some((slot) => slot.slotId === args.slot) ||
+            typeof args.mt !== 'string' ||
+            typeof args.rgb !== 'string' ||
+            !/^[0-9A-F]{6}$/.test(args.rgb)
+          )
+            return reject()
+          detail.matlStationInfo = {
+            ...station,
+            slotInfos: station.slotInfos.map((slot) =>
+              slot.slotId === args.slot
+                ? {
+                    ...slot,
+                    materialName: args.mt,
+                    materialColor: `#${args.rgb}`,
+                  }
+                : slot,
+            ),
+          }
+          break
+        }
+        case 'ms_cmd': {
+          const station = detail.matlStationInfo as
+            | {
+                stateAction?: number
+                slotInfos: { slotId: number; hasFilament: boolean }[]
+              }
+            | undefined
+          if (
+            fixture.pid !== 38 ||
+            detail.status !== 'ready' ||
+            args.action !== 0 ||
+            station?.stateAction !== 0 ||
+            !station.slotInfos.some(
+              (slot) => slot.slotId === args.slot && slot.hasFilament,
+            )
+          )
+            return reject()
+          loadingSlot = args.slot
+          detail.matlStationInfo = {
+            ...station,
+            stateAction: 1,
+            stateStep: 2,
+            currentLoadSlot: args.slot,
+          }
+          break
+        }
         default:
           return reject()
       }
     } else return reject()
     send({ code: 0 })
   }, fixture.pid)
+  return Object.assign(simulator, { detail, requests, writes, faults })
 }

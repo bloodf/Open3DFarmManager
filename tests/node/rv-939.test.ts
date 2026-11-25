@@ -16,13 +16,13 @@ test('a newer journal is refused without changing its version', (t) => {
   closeCommandJournal(journal)
   const path = join(directory, 'pause-commands.sqlite')
   const database = new DatabaseSync(path)
-  database.exec('PRAGMA user_version=20')
+  database.exec('PRAGMA user_version=21')
   database.close()
   assert.throws(
     () => openCommandJournal({ directory, clock: () => 100_000 }),
     /Unknown command journal version/,
   )
   const reopened = new DatabaseSync(path)
-  assert.equal(reopened.prepare('PRAGMA user_version').get()?.user_version, 20)
+  assert.equal(reopened.prepare('PRAGMA user_version').get()?.user_version, 21)
   reopened.close()
 })

@@ -2,6 +2,7 @@ import { KobraLinkRuntimeBinding } from '../kobralink/configuration.ts'
 import { AnycubicBinding } from '../config/anycubic.ts'
 import { KobraXBinding } from '../config/kobra-x.ts'
 import { CrealityBinding } from '../config/creality.ts'
+import { FlashforgeBindingSchema } from '../flashforge/config.ts'
 import { sdcpProfile } from '../sdcp/models.ts'
 import { parseBambuBinding, type BambuBinding } from '../bambu/configuration.ts'
 import { z } from 'zod'
@@ -183,7 +184,46 @@ export function readRuntimePrinterBinding(binding: PrinterBinding) {
       backend: 'sdcp' as const,
     }
   }
+  if (mapping && flashforgeBindings.has(binding)) {
+    const { assignment_id, farm_id, agent_id, printer_key } = mapping
+    return {
+      assignment_id,
+      farm_id,
+      agent_id,
+      printer_key,
+      backend: 'flashforge' as const,
+    }
+  }
   return mapping ?? readonlyBindings.get(binding) ?? null
+}
+
+const flashforgeBindings = new WeakMap<
+  PrinterBinding,
+  Readonly<z.infer<typeof FlashforgeBindingSchema>>
+>()
+/** Explicit local command opt-in; other Flashforge handles stay read-only. */
+export function provisionFlashforgePrinter(
+  assignmentInput: unknown,
+  bindingInput: unknown,
+): PrinterBinding {
+  const local = Object.freeze(FlashforgeBindingSchema.parse(bindingInput))
+  const scope = Assignment.omit({ moonraker_origin: true }).parse(
+    assignmentInput,
+  )
+  if (scope.printer_key !== local.printerKey)
+    throw new Error('Flashforge assignment mismatch')
+  const binding = new BoundPrinter()
+  bindings.set(binding, {
+    assignment: Object.freeze({ ...scope, moonraker_origin: '' }),
+    active: true,
+  })
+  flashforgeBindings.set(binding, local)
+  return binding
+}
+export function readFlashforgePrinterBinding(binding: PrinterBinding) {
+  return readPrinterBinding(binding)
+    ? (flashforgeBindings.get(binding) ?? null)
+    : null
 }
 
 const SdcpControlBinding = z.strictObject({

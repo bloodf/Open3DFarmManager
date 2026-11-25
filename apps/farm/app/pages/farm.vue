@@ -50,7 +50,10 @@ import {
   actionDialogDescription,
   actionDialogTitle,
 } from '../utils/farm-control.ts'
-import { extendedLabel } from '../utils/farm-control-extended.ts'
+import {
+  extendedLabel,
+  writeDialogDescription,
+} from '../utils/farm-control-extended.ts'
 import { COLLECTION_DIALOG_DESCRIPTION } from '../components/farm/collection-hold-view.ts'
 import { farmViewErrorText } from '../utils/farm-view-error.ts'
 import Button from '../components/ui/Button.vue'
@@ -709,7 +712,11 @@ function cancelPause(event: Event) {
                 )
               : pauseTarget.action === 'confirm_collection'
                 ? COLLECTION_DIALOG_DESCRIPTION
-                : 'Confirme o comando para esta impressora. Ele será enviado diretamente ao Connector e não será repetido automaticamente.'
+                : (writeDialogDescription(
+                    pauseTarget.action,
+                    pauseTarget.args,
+                  ) ??
+                  'Confirme o comando para esta impressora. Ele será enviado diretamente ao Connector e não será repetido automaticamente.')
           }}
         </p>
         <p

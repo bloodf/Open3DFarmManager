@@ -50,7 +50,7 @@ if (
 const RETENTION_MS = 600_000
 const MAX_CAPACITY = 10_000
 const APPLICATION_ID = 0x4f334450
-const SCHEMA_VERSION = 19
+const SCHEMA_VERSION = 20
 const MAX_CLOCK_STEP_MS = RETENTION_MS + 1_000
 const reasons = [
   'guard-denied',
@@ -313,9 +313,13 @@ const v17ActionSchema = configWriteActionSchema.replace(
   "'config_write'",
   "'config_write','start_library_print'",
 )
-const actionSchema = v17ActionSchema.replace(
+const v19ActionSchema = v17ActionSchema.replace(
   "'start_library_print'",
   "'start_library_print','set_tool_temperature'",
+)
+const actionSchema = v19ActionSchema.replace(
+  "'set_tool_temperature'",
+  "'set_tool_temperature','set_camera_stream','set_filament_slot'",
 )
 const toolArgsSchema = `CREATE TABLE control_tool_temperature_args (cmd_id TEXT PRIMARY KEY, tool INTEGER NOT NULL CHECK(tool BETWEEN 0 AND 3), target_c INTEGER NOT NULL CHECK(target_c >= 0)) STRICT`
 /**
@@ -388,16 +392,30 @@ const schema = [
   `CREATE INDEX pause_recent_printer ON pause_commands(farm_id,printer_key,claimed_at)`,
   `CREATE INDEX pause_terminal_retention ON pause_commands(retain_until) WHERE status IN ('not-sent','applied')`,
 ]
-const v18Schema = schema.filter((sql) => sql !== restartSchema)
+const v19Schema = schema.map((sql) =>
+  sql === actionSchema ? v19ActionSchema : sql,
+)
+const v18Schema = v19Schema.filter((sql) => sql !== restartSchema)
 const v17Schema = v18Schema
   .filter((sql) => sql !== toolArgsSchema)
-  .map((sql) => (sql === actionSchema ? v17ActionSchema : sql))
+  .map((sql) => (sql === v19ActionSchema ? v17ActionSchema : sql))
 const previousSchema = v17Schema.map((sql) =>
   sql.replace(
     'CREATE INDEX pause_active_',
     'CREATE UNIQUE INDEX pause_active_',
   ),
 )
+/** Replaces the action allow-list, keeping every journaled action. */
+function rebuildActions(database: DatabaseSyncType): void {
+  database.exec(
+    'ALTER TABLE control_command_actions RENAME TO legacy_control_command_actions',
+  )
+  database.exec(actionSchema)
+  database.exec(
+    'INSERT INTO control_command_actions(cmd_id,action) SELECT cmd_id,action FROM legacy_control_command_actions',
+  )
+  database.exec('DROP TABLE legacy_control_command_actions')
+}
 function privateEntry(path: string, directory: boolean) {
   const stat = lstatSync(path)
   if (
@@ -560,6 +578,7 @@ export function openCommandJournal(input: {
         16,
         17,
         18,
+        19,
         SCHEMA_VERSION,
       ].includes(Number(initialVersion)) ||
         initialApplication !== APPLICATION_ID)
@@ -646,19 +665,20 @@ export function openCommandJournal(input: {
           )!,
         )
         database.exec(`PRAGMA user_version=${SCHEMA_VERSION}`)
-      } else if (version === 18 && app === APPLICATION_ID) {
+      } else if ((version === 18 || version === 19) && app === APPLICATION_ID) {
         const definitions = database
           .prepare(
             "SELECT sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY sql",
           )
           .all()
           .map((row) => row.sql)
-        const expected = [...v18Schema].sort()
+        const expected = [...(version === 18 ? v18Schema : v19Schema)].sort()
         if (
           definitions.length !== expected.length ||
           definitions.some((sql, index) => sql !== expected[index])
         )
           throw new Error('Invalid command journal schema')
+        rebuildActions(database)
         database.exec(`PRAGMA user_version=${SCHEMA_VERSION}`)
       } else if (
         Object.hasOwn(previousActionSchemas, Number(version)) &&
@@ -707,10 +727,10 @@ export function openCommandJournal(input: {
         database.exec(`PRAGMA user_version=${SCHEMA_VERSION}`)
       } else if (version !== SCHEMA_VERSION || app !== APPLICATION_ID)
         throw new Error('Unknown command journal version')
-      // Every upgrade gains the restart table. A restart action claimed just
-      // before the upgrade still counts; old rows never kept a config write's
-      // `restart` flag.
-      if (!created && version !== SCHEMA_VERSION) {
+      // Every upgrade from before v19 gains the restart table. A restart action
+      // claimed just before the upgrade still counts; old rows never kept a
+      // config write's `restart` flag.
+      if (!created && version !== 19 && version !== SCHEMA_VERSION) {
         database.exec(restartSchema)
         database.exec(
           "INSERT INTO control_command_restarts(cmd_id) SELECT cmd_id FROM control_command_actions WHERE action IN ('firmware_restart','service')",

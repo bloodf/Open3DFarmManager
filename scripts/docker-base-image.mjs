@@ -5,11 +5,11 @@
 //   node scripts/docker-base-image.mjs [--node-image <ref>]   build if missing, print the tag
 //   node scripts/docker-base-image.mjs --prune                drop stale openfarm-test-base:* images
 //
-// The tag is `openfarm-test-base:<hash12>`, the hash covering package-lock.json
-// and the source Node image reference. `npm ci` runs only while the image is
-// built (infra/test-base/Dockerfile); that build is the one step that needs the
-// npm registry. Runners copy the preinstalled node_modules into their own
-// writable workspace with `seedNodeModules`.
+// The tag is `openfarm-test-base:<hash12>`, covering the lockfile, source Node
+// image reference, Dockerfile and npm config. `npm ci` runs only while the image
+// is built; that build is the one step that needs the npm registry. Runners copy
+// the preinstalled node_modules into their own writable workspace with
+// `seedNodeModules`.
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
@@ -44,22 +44,30 @@ export function normalizeImageRef(ref) {
   return ref.includes('@') || /:[^/]*$/.test(ref) ? ref : `${ref}:latest`
 }
 
-export function lockfileHash(lockfile, nodeImage) {
+export function lockfileHash(lockfile, nodeImage, dockerfile = '', npmrc = '') {
   return createHash('sha256')
     .update(lockfile)
     .update('\0')
     .update(normalizeImageRef(nodeImage))
+    .update('\0')
+    .update(dockerfile)
+    .update('\0')
+    .update(npmrc)
     .digest('hex')
 }
 
-export function baseImageTag(lockfile, nodeImage) {
-  return `${REPOSITORY}:${lockfileHash(lockfile, nodeImage).slice(0, 12)}`
+export function baseImageTag(lockfile, nodeImage, dockerfile = '', npmrc = '') {
+  return `${REPOSITORY}:${lockfileHash(lockfile, nodeImage, dockerfile, npmrc).slice(0, 12)}`
 }
 
 export function projectImageTag(projectDir, nodeImage) {
   return baseImageTag(
     readFileSync(join(projectDir, 'package-lock.json')),
     nodeImage,
+    readFileSync(join(projectDir, 'infra/test-base/Dockerfile')),
+    existsSync(join(projectDir, '.npmrc'))
+      ? readFileSync(join(projectDir, '.npmrc'))
+      : '',
   )
 }
 
@@ -75,17 +83,7 @@ export function manifestFiles(projectDir) {
 }
 
 export function buildArgs({ tag, nodeImage, context }) {
-  return [
-    'build',
-    '--pull=false',
-    '--build-arg',
-    `NODE_IMAGE=${nodeImage}`,
-    '--tag',
-    tag,
-    '--file',
-    DOCKERFILE,
-    context,
-  ]
+  return ['build', '--pull=false', '--tag', tag, '--file', DOCKERFILE, context]
 }
 
 // Build output goes to stderr so that stdout carries only the tag.

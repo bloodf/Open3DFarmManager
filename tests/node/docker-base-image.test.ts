@@ -36,6 +36,10 @@ test('the tag hashes the lockfile and the Node image reference', () => {
     .update('lock')
     .update('\0')
     .update('node:22')
+    .update('\0')
+    .update('')
+    .update('\0')
+    .update('')
     .digest('hex')
     .slice(0, 12)
   assert.equal(
@@ -59,6 +63,8 @@ test('the tag hashes the lockfile and the Node image reference', () => {
     image.baseImageTag(
       readFileSync(join(repo, 'package-lock.json')),
       'node:22',
+      readFileSync(join(repo, 'infra/test-base/Dockerfile')),
+      readFileSync(join(repo, '.npmrc')),
     ),
   )
 })
@@ -88,7 +94,6 @@ test('the image is built only when missing, from manifests alone', () => {
     docker: docker((ref) => ref === 'node:22'),
   })
   const build = calls.find((call) => call[0] === 'build')!
-  assert.ok(build.includes('NODE_IMAGE=node:22'))
   assert.ok(build.includes(reused))
   assert.ok(context.includes('package-lock.json'))
   assert.ok(!context.includes('scripts') && !context.includes('node_modules'))
@@ -106,6 +111,28 @@ test('the image is built only when missing, from manifests alone', () => {
     readFileSync(join(repo, 'infra/test-base/Dockerfile'), 'utf8'),
     /RUN npm ci /,
   )
+  assert.match(
+    readFileSync(join(repo, 'infra/test-base/Dockerfile'), 'utf8'),
+    /^FROM node:\d+\.\d+\.\d+-[\w.-]+@sha256:[a-f0-9]{64}$/m,
+  )
+})
+
+test('the project tag hashes the Dockerfile and optional .npmrc', () => {
+  const root = join(lib.runRoot(), 'base-tag-inputs')
+  const dockerfile = join(root, 'infra/test-base/Dockerfile')
+  mkdirSync(join(root, 'infra/test-base'), { recursive: true })
+  writeFileSync(join(root, 'package-lock.json'), 'lock')
+  writeFileSync(dockerfile, 'FROM node:22\n')
+  try {
+    const baseline = image.projectImageTag(root, 'node:22')
+    writeFileSync(dockerfile, 'FROM node:23\n')
+    assert.notEqual(image.projectImageTag(root, 'node:22'), baseline)
+    writeFileSync(dockerfile, 'FROM node:22\n')
+    writeFileSync(join(root, '.npmrc'), 'ignore-scripts=true\n')
+    assert.notEqual(image.projectImageTag(root, 'node:22'), baseline)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })
 
 test('the seed copies every node_modules tree and nothing else', () => {

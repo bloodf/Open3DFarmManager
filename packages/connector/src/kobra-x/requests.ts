@@ -85,6 +85,13 @@ export interface KobraXRequestSpec<T = undefined> {
 /**
  * How a printer names its reports.
  *
+ * Wire format: the ack on `<deviceId>/response` carries the request's `msgid`;
+ * the answer on `<type>/report` was observed with a `msgid` the printer made
+ * (firmware 2.0.2.8; bloodf/kobracontrol@c414db4f36d4c96f2b232c368ad6cfe56e3d0408
+ * docs/protocol.md, "Requests and replies"). The request envelope is
+ * bloodf/OrcaSlicer@d0a76d08d3493352c6c575ee242e2d71356e400e
+ * src/slic3r/Utils/KobraX.cpp, `request`.
+ *
  * - `exact` (default): a report settles a request only with the request's own
  *   `msgid`, `type` and `action`.
  * - `printer-assigned`: for firmware that answers on `<type>/report` with its
@@ -98,7 +105,8 @@ export interface KobraXRequestSpec<T = undefined> {
  *   request on that type and action that ended without a result in the last
  *   `lateReportMs`, because its report may still arrive. A report the printer sent for
  *   another client that fits all of this cannot be told apart, so this mode
- *   is opt-in and never the default.
+ *   is opt-in per printer (`KobraXBinding.reportIdentity`) and never the
+ *   default.
  */
 export type KobraXReportIdentity = 'exact' | 'printer-assigned'
 

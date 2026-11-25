@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test, type TestContext } from 'node:test'
+import {
+  importKobraClientCertFromInput,
+  writeKobraClientCertFile,
+} from '../../packages/connector/src/config/kobra-x-cert.ts'
 import { provisionKobraXPrinter } from '../../packages/connector/src/control/printer-binding.ts'
 import type { ControlObservation } from '../../packages/connector/src/control/pause-dispatcher.ts'
 import { openFixedKobraXControl } from '../../packages/connector/src/kobra-x/control-driver.ts'
-import type { connectKobraX } from '../../packages/connector/src/kobra-x/index.ts'
+import { connectKobraX } from '../../packages/connector/src/kobra-x/index.ts'
 import { createKobraXFacts } from '../../packages/connector/src/kobra-x/facts.ts'
 import {
   createKobraXRequests,
@@ -19,6 +23,11 @@ import {
   createKobraXQueryEvidence,
   createKobraXStateEvidence,
 } from '../../packages/connector/src/kobra-x/state-evidence.ts'
+import { startKobraXMock } from '../../packages/sim-tools/src/mocks/kobra-x-mock.ts'
+import {
+  installNetworkGuard,
+  uninstallNetworkGuard,
+} from '../../packages/sim-tools/src/mocks/network-guard.ts'
 import {
   mqttPublish,
   mqttReader,
@@ -89,6 +98,25 @@ test('by default a printer-chosen or missing ID never settles a command', async 
     requests.handleReport(frame('print', 'stop', msgid))
     assert.equal((await result).kind, 'received')
   }
+})
+
+test('by default a failed report without an ID neither refuses nor confirms', async () => {
+  let id = ''
+  const requests = createKobraXRequests({
+    topic: (type) => type,
+    publish(_topic, payload) {
+      id = JSON.parse(payload).msgid
+    },
+    resultTimeoutMs: 20,
+  })
+  const result = requests.send({
+    type: 'print',
+    action: 'stop',
+    beforeSend: () => true,
+  })
+  requests.handleAck({ msgid: id, code: 0 })
+  requests.handleReport(frame('print', 'stop', '', {}, 'failed', 500))
+  assert.deepEqual(await result, { kind: 'received' })
 })
 
 test('a report owned by another pending request cannot settle a command', async () => {
@@ -210,6 +238,7 @@ function driverFixture(
   initiallyPrinting = false,
   refreshedTask = 'existing',
   settledBy: 'exact' | 'type-action' = 'exact',
+  qualification: { reportIdentity?: 'printer-assigned' } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), 'kobra-x-command-evidence-'))
   t.after(() => rmSync(directory, { recursive: true, force: true }))
@@ -246,8 +275,10 @@ function driverFixture(
       deviceId: 'synthetic',
       clientCertFile: cert,
       pinSha256: fingerprint,
+      ...qualification,
     },
   )
+  let reportIdentity: string | undefined
   const facts = createKobraXFacts()
   const signal = new AbortController().signal
   let mono = 1
@@ -271,6 +302,7 @@ function driverFixture(
     },
     async connect(options) {
       onReport = options.onReport!
+      reportIdentity = options.reportIdentity
       report(
         frame('info', 'report', 'initial', {
           state: initiallyPrinting ? 'busy' : 'free',
@@ -373,6 +405,7 @@ function driverFixture(
     ...command,
     report,
     sends: () => sends,
+    reportIdentity: () => reportIdentity,
     published: () => published,
     request: { binding, signal, beforeSend: () => true },
     cursor: () => ({
@@ -492,4 +525,128 @@ test('a fresh correlated state read-back confirms a control the fallback settled
     { acknowledged: true },
   )
   assert.equal(fixture.sends(), 1)
+})
+
+test('the driver leaves exact report IDs only for a qualified binding', async (t) => {
+  const production = driverFixture(t)
+  await production.prepare()
+  assert.equal(production.reportIdentity(), undefined)
+  const qualified = driverFixture(t, false, 'existing', 'exact', {
+    reportIdentity: 'printer-assigned',
+  })
+  await qualified.prepare()
+  assert.equal(qualified.reportIdentity(), 'printer-assigned')
+})
+
+/**
+ * The real driver and MQTT client against the loopback mock. The mock's
+ * printer-chosen IDs are synthetic and reference-derived, not captured.
+ */
+async function loopbackDriver(
+  t: TestContext,
+  printerChosenReportIds: 'commands' | 'all',
+  qualification: { reportIdentity?: 'printer-assigned' },
+) {
+  installNetworkGuard()
+  t.after(uninstallNetworkGuard)
+  const printer = await startKobraXMock({
+    ssdp: false,
+    camera: false,
+    reportIntervalMs: 0,
+    printerChosenReportIds,
+  })
+  t.after(() => printer.close())
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), 'kx-report-id-')))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const clientCertFile = join(directory, 'client-cert.json')
+  const imported = await importKobraClientCertFromInput({
+    kind: 'inline',
+    format: 'pem',
+    certificate_pem: printer.tls.clientCert.toString(),
+    key_pem: printer.tls.clientKey.toString(),
+  })
+  assert.ok(imported.ok)
+  writeKobraClientCertFile(clientCertFile, imported.cert)
+  const binding = provisionKobraXPrinter(
+    {
+      assignment_id: randomUUID(),
+      farm_id: randomUUID(),
+      agent_id: randomUUID(),
+      printer_key: 'synthetic',
+    },
+    {
+      printerKey: 'synthetic',
+      host: '127.0.0.1',
+      modelId: printer.credentials.modeId,
+      deviceId: printer.credentials.deviceId,
+      clientCertFile,
+      pinSha256: printer.tls.serverFingerprintSha256!,
+      ...qualification,
+    },
+  )
+  const signal = new AbortController().signal
+  const command = openFixedKobraXControl({
+    binding,
+    connectionGeneration: 1,
+    clock: { monotonicNow: () => performance.now() },
+    signal,
+    publish() {},
+    connect: (options) =>
+      connectKobraX({
+        ...options,
+        httpPort: printer.httpPort,
+        mqttPort: printer.mqttPort,
+        resultTimeoutMs: 400,
+      }),
+  })
+  t.after(() => command.close())
+  return {
+    ...command,
+    request: { binding, signal, beforeSend: () => true },
+    writes: (type: string, action: string) =>
+      printer.calls.all.filter(
+        ({ topic, payload }) =>
+          topic.endsWith(`/${type}`) &&
+          JSON.parse(String(payload)).action === action,
+      ).length,
+  }
+}
+
+for (const [label, qualification, acknowledged] of [
+  ['production default', {}, false],
+  ['qualified printer', { reportIdentity: 'printer-assigned' }, true],
+] as const) {
+  test(`${label}: a printer-chosen command report ID, then a state read-back`, async (t) => {
+    const fixture = await loopbackDriver(t, 'commands', qualification)
+    await fixture.prepare()
+    assert.deepEqual(
+      await fixture.driver.execute!(
+        'set_temperature',
+        { heater: 'extruder', target_c: 190 },
+        fixture.request,
+      ),
+      { acknowledged },
+    )
+    assert.equal(fixture.writes('tempature', 'set'), 1)
+  })
+}
+
+test('a qualified fallback match alone never proves a light command', async (t) => {
+  const fixture = await loopbackDriver(t, 'commands', {
+    reportIdentity: 'printer-assigned',
+  })
+  await fixture.prepare()
+  assert.deepEqual(
+    await fixture.driver.execute!('set_light', { on: true }, fixture.request),
+    { acknowledged: false },
+  )
+  assert.equal(fixture.writes('light', 'control'), 1)
+})
+
+test('a printer that echoes no query ID never becomes ready, even when qualified', async (t) => {
+  const fixture = await loopbackDriver(t, 'all', {
+    reportIdentity: 'printer-assigned',
+  })
+  await assert.rejects(fixture.prepare(), /Kobra X control unavailable/)
+  assert.equal(fixture.writes('light', 'control'), 0)
 })

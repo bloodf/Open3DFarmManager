@@ -166,6 +166,13 @@ export function openFixedKobraXControl(input: {
         baseline = stateEvidence.get()
         sent = request.beforeSend()
         commandSent = sent
+        // A report from before the write says nothing about its effect. On a
+        // printer-assigned printer no exact report replaces it, and a stale
+        // query reply would hide the read-back.
+        if (sent) {
+          effectReports.clear()
+          otherEffects.clear()
+        }
         return sent
       },
     })
@@ -350,6 +357,12 @@ export function openFixedKobraXControl(input: {
         printerKey,
         pinSha256: local.pinSha256,
         expectedIdentity: local,
+        // Only a binding qualified for it leaves exact report IDs. The
+        // fallback settles the transport wait; confirmation below still needs
+        // state read back with our own query IDs.
+        ...(local.reportIdentity
+          ? { reportIdentity: local.reportIdentity }
+          : {}),
         clientIdentity: {
           cert: identity.cert.certificatePem,
           key: identity.cert.keyPem,

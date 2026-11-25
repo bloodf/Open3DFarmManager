@@ -130,6 +130,33 @@ test('Kobra X falls back to type/action when the report has no msgid', async () 
   assert.equal((await pending).kind, 'confirmed')
 })
 
+for (const [label, msgid] of [
+  ['printer-chosen', 'printer-chosen-msgid'],
+  ['missing', ''],
+] as const) {
+  test(`Kobra X production default ignores an acknowledged request's ${label} report ID`, async () => {
+    // Same exchange as the two qualified cases above, without the flag.
+    let requestId = ''
+    const requests = createKobraXRequests({
+      topic: (type) => type,
+      publish(_topic, payload) {
+        requestId = (JSON.parse(payload) as { msgid: string }).msgid
+      },
+      resultTimeoutMs: 40,
+    })
+    const pending = requests.send({
+      type: 'file',
+      action: 'listLocal',
+      beforeSend: () => true,
+    })
+    requests.handleAck({ msgid: requestId, code: 0 })
+    requests.handleReport(
+      report({ type: 'file', action: 'listLocal', msgid, code: 200 }),
+    )
+    assert.equal((await pending).kind, 'received')
+  })
+}
+
 test(
   'Anycubic camera resets reconnect attempts after a healthy stream',
   { timeout: 10000 },

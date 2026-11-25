@@ -76,6 +76,21 @@ export function createKobraXStatus(printerKey: string, address: string) {
         }
       }
     }
+    // A full `info/report` (it names `state`) lists what the printer carries,
+    // so an accessory missing from it is no longer evidence. Other reports are
+    // partial and clear nothing. `fan_speed_pct` is an optional `info` field in
+    // bloodf/OrcaSlicer@d0a76d08d3493352c6c575ee242e2d71356e400e
+    // src/slic3r/Utils/KobraX.cpp (`on_info`); `light/report` is read in
+    // `State::apply` there. No cited source documents the `info.lights` array:
+    // its absence withdraws the light, which fails closed.
+    const fullInfo =
+      type === 'info' &&
+      (message.action === 'report' || message.action === 'query') &&
+      (data.state === 'free' || data.state === 'busy')
+    if (fullInfo) {
+      delete next.fans
+      delete next.light
+    }
     if (type !== 'multiColorBox') {
       if (type === 'info' || type === 'print' || type === 'fan') {
         const percent =

@@ -12,6 +12,9 @@ import {
   MoonrakerUploadError,
 } from '../moonraker/upload.ts'
 import { uploadCrealityFile } from '../creality/files.ts'
+import { uploadSdcpFile } from '../sdcp/files.ts'
+import { sdcpFileName } from '../sdcp/commands.ts'
+import { readSdcpPrinterBinding } from '../control/printer-binding.ts'
 import type {
   createKobraLinkClient,
   PrinterBinding,
@@ -25,6 +28,7 @@ import { uploadBambuFile } from '../bambu/ftps.ts'
 
 export type FileUploadTarget =
   | { backend: 'creality'; origin: string }
+  | { backend: 'sdcp'; binding: LocalPrinterBinding }
   | { backend: 'anycubic'; binding?: LocalPrinterBinding }
   | {
       backend: 'kobralink'
@@ -69,6 +73,14 @@ export function supportsFileUpload(
   name: string,
   standalone = false,
 ): boolean {
+  if (target.backend === 'sdcp') {
+    const local = readSdcpPrinterBinding(target.binding)
+    try {
+      return !!local && !!sdcpFileName(local.model, name)
+    } catch {
+      return false
+    }
+  }
   if (target.backend === 'anycubic')
     return standalone && !!target.binding && supportsAnycubicUpload(name)
   return (
@@ -96,6 +108,12 @@ export async function uploadFile(input: {
     await uploadBambuFile({ ...target, ...common })
   else if (target.backend === 'creality')
     await uploadCrealityFile({ ...target, ...common })
+  else if (target.backend === 'sdcp')
+    await uploadSdcpFile({
+      ...common,
+      binding: target.binding,
+      authorized: input.authorize,
+    })
   else if (target.backend === 'anycubic' && target.binding)
     await uploadAnycubicFile({
       ...common,

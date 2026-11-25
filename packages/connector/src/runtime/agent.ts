@@ -65,6 +65,7 @@ import {
 import {
   readBambuPrinterBinding,
   readCrealityPrinterBinding,
+  readSdcpPrinterBinding,
 } from '../control/printer-binding.ts'
 import {
   moonrakerAuthHeaders,
@@ -606,11 +607,14 @@ async function runConnectorAgentOnce(
               )
             )
               return []
+            // SDCP advertises controls only for a local control opt-in.
+            const local = config.bindingFor(id)
             if (
               config.collection.version === 6 &&
               config.collection.sdcp.printers.some(
                 (printer) => printer.printerKey === ref?.printerKey,
-              )
+              ) &&
+              !(local && readSdcpPrinterBinding(local))
             )
               return []
             return controlsFor?.(id)

@@ -118,7 +118,7 @@ export interface JobView {
   farmId: string
   printerId: string
   status: JobStatus
-  refusal?: { code: string; detail?: string }
+  refusal?: { code: string; detail?: string; message?: string }
   displayName: string
   fileUrl: string
   sha256: string
@@ -192,6 +192,7 @@ export function jobView(
       view.refusal = {
         code: envelope.refusalCode,
         ...(envelope.resultDetail ? { detail: envelope.resultDetail } : {}),
+        ...(envelope.resultMessage ? { message: envelope.resultMessage } : {}),
       }
     if (envelope.historyEntryId) view.historyEntryId = envelope.historyEntryId
   }

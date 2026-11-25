@@ -7,6 +7,12 @@ import {
 } from '../../../../../packages/farm-protocol/src/file-list.ts'
 import { z } from 'zod'
 import {
+  hasSdpLine,
+  REFUSAL_MESSAGE_ANSWER_LINE,
+  REFUSAL_MESSAGE_OFFER_LINE,
+  withSdpLine,
+} from '../../../../../packages/farm-protocol/src/pause-channel.ts'
+import {
   CHUNK_SIZE,
   parseOffer,
 } from '../../../../../packages/farm-protocol/src/file-transfer.ts'
@@ -341,9 +347,12 @@ export class PauseBrowserPeer {
         local,
         this.#peer.remoteDescription,
       )
-      this.#answer = local.sdp
+      // Advertised only to a Connector that offered to read it.
+      this.#answer = hasSdpLine(offer, REFUSAL_MESSAGE_OFFER_LINE)
+        ? withSdpLine(local.sdp, REFUSAL_MESSAGE_ANSWER_LINE)
+        : local.sdp
       this.start()
-      return local.sdp
+      return this.#answer
     } catch (error) {
       this.close('answer-failed')
       throw error

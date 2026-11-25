@@ -70,6 +70,9 @@ class MemoryLibrary {
   items: { id: string; title: string; createdAt: number }[] = []
   versions: Record<string, unknown>[] = []
   uploads = 0
+  // No upload here shares its bytes with a record.
+  discardUnused = async (_file: unknown, discard: () => Promise<void>) =>
+    discard()
   uploadContext = async () => ({
     ok: true as const,
     settings: {

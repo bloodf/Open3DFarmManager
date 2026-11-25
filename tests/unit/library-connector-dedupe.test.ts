@@ -230,6 +230,21 @@ function createFakeSql(state: DbState): Sql {
           purgedAt: b.purgedAt,
         }))
     }
+    if (text.startsWith('SELECT 1 FROM farm.library_blobs')) {
+      // discardUnused: a server file by hash alone, a Connector file per host.
+      const [farmId, sha256, agentId] = params as [string, string, string?]
+      const server = text.includes("storage_location='server'")
+      return state.blobs.filter((b) =>
+        server
+          ? b.sha256 === farmId &&
+            b.storageLocation === 'server' &&
+            b.purgedAt === null
+          : b.farmId === farmId &&
+            b.sha256 === sha256 &&
+            b.agentId === agentId &&
+            b.purgedAt === null,
+      )
+    }
     if (text.includes('COALESCE(sum(size_bytes), 0)')) {
       const farmId = params[0] as string
       const used = state.blobs
@@ -853,6 +868,7 @@ describe('Connector-mode deduplication per location', () => {
     const mismatchedStore: LibraryStore = {
       ...(runtime.store as unknown as Record<string, unknown>),
       uploadContext: runtime.store.uploadContext.bind(runtime.store),
+      discardUnused: runtime.store.discardUnused.bind(runtime.store),
       addVersion: async () => ({
         ok: true,
         item: {

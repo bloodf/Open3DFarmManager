@@ -152,7 +152,19 @@ export async function registerPhysicalSpool(
     if (existing) {
       if (existing.request_hash !== hash)
         return { outcome: 'key-reused' as const }
-      const { spoolman: _binding, ...spool } = existing.response
+      const { spoolman: bound, ...spool } = existing.response
+      // A receipt outlives its spool. Never replay a deleted one as registered.
+      // A reused spool number does not carry the old binding.
+      const [current] = bound
+        ? await tx`
+            SELECT 1 FROM farm.integration_physical_spool_bindings
+            WHERE farm_id = ${access.farmId}::uuid AND spool_id = ${spool.spoolId}
+              AND spoolman_service_id = ${bound.serviceId}::uuid
+              AND spoolman_spool_id = ${bound.spoolId}`
+        : await tx`
+            SELECT 1 FROM farm.spools
+            WHERE farm_id = ${access.farmId}::uuid AND id = ${spool.spoolId}`
+      if (!current) return { outcome: 'deleted' as const }
       return { outcome: 'registered' as const, spool }
     }
     const [filament] = await tx`
@@ -161,17 +173,17 @@ export async function registerPhysicalSpool(
       FOR KEY SHARE`
     if (!filament) return null
     if (input.spoolman) {
-      const binding = { farmId: access.farmId, spoolman: input.spoolman }
       const lock = JSON.stringify([
-        binding.farmId,
-        binding.spoolman.serviceId,
-        binding.spoolman.spoolId,
+        access.farmId,
+        input.spoolman.serviceId,
+        input.spoolman.spoolId,
       ])
       await tx`SELECT pg_advisory_xact_lock(hashtextextended(${'physical-spool-binding:' + lock}, 0))`
       const [duplicate] = await tx`
-        SELECT 1 FROM farm.integration_physical_spool_registrations
-        WHERE response @> ${tx.json(binding)}::jsonb
-        LIMIT 1`
+        SELECT 1 FROM farm.integration_physical_spool_bindings
+        WHERE farm_id = ${access.farmId}::uuid
+          AND spoolman_service_id = ${input.spoolman.serviceId}::uuid
+          AND spoolman_spool_id = ${input.spoolman.spoolId}`
       if (duplicate) return { outcome: 'already-bound' as const }
       if (
         !(await hasCurrentSpoolObservation(
@@ -199,7 +211,12 @@ export async function registerPhysicalSpool(
       RETURNING id::float8 AS id, location, xmin::text || ':' || ctid::text AS revision`
     if (!row) throw new Error('Spool allocation returned no row')
     const spool = physicalSpool(access.farmId, row)
-    // The insert-only registration record preserves the binding after app revocation.
+    if (input.spoolman)
+      await tx`INSERT INTO farm.integration_physical_spool_bindings
+        (farm_id, spool_id, spoolman_service_id, spoolman_spool_id)
+        VALUES (${access.farmId}::uuid, ${row.id},
+          ${input.spoolman.serviceId}::uuid, ${input.spoolman.spoolId})`
+    // The insert-only receipt serves idempotent replay only.
     const receipt = input.spoolman
       ? { ...spool, spoolman: input.spoolman }
       : spool

@@ -521,10 +521,14 @@ describe('HTTP boundary', () => {
 
 test('migration 0116 reverses and reapplies', async () => {
   const catalog = await loadMigrationCatalog()
-  const through = catalog.slice(
-    0,
-    catalog.findIndex((entry) => entry.id === '0116_spool_moves') + 1,
-  )
+  const position = catalog.findIndex((entry) => entry.id === '0116_spool_moves')
+  const through = catalog.slice(0, position + 1)
+  // Newer migrations come off first: only the last applied one can reverse.
+  for (let last = catalog.length - 1; last > position; last--)
+    await runMigrations(root, catalog.slice(0, last + 1), {
+      kind: 'down',
+      expectedLastId: catalog[last]!.id,
+    })
   await runMigrations(root, through, {
     kind: 'down',
     expectedLastId: '0116_spool_moves',
@@ -534,4 +538,5 @@ test('migration 0116 reverses and reapplies', async () => {
   expect({ ...gone[0] }).toEqual({ moves: null, identities: null })
   await runMigrations(root, through, { kind: 'up' })
   expect(await journalSize()).toBe(0)
+  await runMigrations(root, catalog, { kind: 'up' })
 }, 60_000)

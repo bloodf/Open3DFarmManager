@@ -112,6 +112,8 @@ export const SignallingServerControl = z
       wire: envelopeWire,
       scope: ApiInboxScope,
       confirmed_at: timestamp,
+      // Sent only to a Connector that asked: this server accepts a refusal `message`.
+      refusal_message: z.literal(true).optional(),
     }),
     // Current-authority confirmation for the Connector's offline tracker. Sent
     // only on the credential-authenticated Connector inbox, after the server

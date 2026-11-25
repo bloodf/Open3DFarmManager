@@ -9,6 +9,7 @@ import {
   type ApiQueryReply,
   type ApiQueryRequest,
 } from '../../../../packages/farm-protocol/src/api-query.ts'
+import { API_REFUSAL_MESSAGE_SUPPORT_HEADER } from '../../../../packages/farm-protocol/src/api-envelope.ts'
 import type {
   EnvelopeInbox,
   IntegrationDeliveryService,
@@ -152,6 +153,7 @@ interface Connection {
   lastSample: SignallingClockSample
   readonly supportsApiQueries: boolean
   readonly supportsDispatchQueries: boolean
+  readonly acceptsRefusalMessage: boolean
   readonly supportsSpoolQueries: boolean
   readonly inboxId: string
   inboxGeneration: number
@@ -288,6 +290,7 @@ export class SignallingRuntime {
       wire,
       scope: authority.scope,
       confirmed_at: authority.confirmedAt,
+      ...(connection.acceptsRefusalMessage ? { refusal_message: true } : {}),
     })
     return 'sent'
   }
@@ -527,6 +530,9 @@ export class SignallingRuntime {
           role === 'connector' &&
           mode === 'read-only' &&
           inspected.headers.get(API_QUERY_SUPPORT_HEADER) === '1',
+        acceptsRefusalMessage:
+          role === 'connector' &&
+          inspected.headers.get(API_REFUSAL_MESSAGE_SUPPORT_HEADER) === '1',
         supportsSpoolQueries:
           inspected.headers.get(API_SPOOL_QUERY_SUPPORT_HEADER) === '1',
         supportsDispatchQueries:

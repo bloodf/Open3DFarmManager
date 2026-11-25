@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { canonicalize } from './canonical.ts'
+import { REFUSAL_TEXT_PATTERN } from './string-bounds.ts'
 import { parseBoundedJson } from './json.ts'
 import { BrowserDeviceUuid } from './browser-device-proof.ts'
 import {
@@ -25,6 +26,30 @@ const MAX_INNER_BYTES = Math.max(
 )
 export const MAX_PAUSE_CHANNEL_WIRE_BYTES = 2 * MAX_INNER_BYTES + 1024
 export const MAX_PAUSE_CHANNEL_SEQUENCE = 255
+/**
+ * `control.result.message` goes only to a browser that asks for it, because
+ * older bundles parse the frame strictly and would close the session. The
+ * Connector adds the offer line; a browser that reads the field then adds the
+ * answer line. The names differ so a peer that merely echoes the offer never
+ * counts as asking. Older peers ignore both, and the signed session binding
+ * covers the SDP exactly as transmitted.
+ */
+export const REFUSAL_MESSAGE_OFFER_LINE =
+  'a=x-open3dfarm-refusal-message-offer:1'
+export const REFUSAL_MESSAGE_ANSWER_LINE = 'a=x-open3dfarm-refusal-message:1'
+/** The SDP to transmit; unchanged when the line would exceed the SDP limit. */
+export function withSdpLine(sdp: string, line: string): string {
+  const extended = `${sdp}${line}\r\n`
+  return new TextEncoder().encode(extended).byteLength > 7000 ? sdp : extended
+}
+export function hasSdpLine(sdp: string, line: string): boolean {
+  return sdp.split(/\r?\n/).includes(line)
+}
+export const PauseRefusalMessage = z
+  .string()
+  .min(1)
+  .max(256)
+  .regex(REFUSAL_TEXT_PATTERN)
 const base = {
   v: z.literal(1),
   transport_id: BrowserDeviceUuid,
@@ -67,7 +92,7 @@ export const PauseChannelFrame = z
       command_id: BrowserDeviceUuid,
       outcome: z.enum(['rejected', 'not-sent', 'applied', 'outcome-unknown']),
       code: ControlResultCode.optional(),
-      message: z.string().min(1).max(256).optional(),
+      message: PauseRefusalMessage.optional(),
     }),
     z.strictObject({
       ...base,

@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { canonicalize } from './canonical.ts'
 import { parseBoundedJson } from './json.ts'
+import { REFUSAL_TEXT_PATTERN } from './string-bounds.ts'
 import { base64url, decodeBase64url } from './encoding.ts'
 import { BrowserDeviceUuid } from './browser-device-proof.ts'
 import { CollectionArguments, ControlArguments } from './control-actions.ts'
@@ -284,6 +285,18 @@ export const API_ENVELOPE_OUTCOMES = [
   'cancelled',
   'failed',
 ] as const
+/**
+ * Operator text of a refusal. Older servers parse results strictly, so a
+ * Connector sends it only for a command the server marked `refusal_message`.
+ */
+export const ApiRefusalMessage = z
+  .string()
+  .min(1)
+  .max(MAX_API_ENVELOPE_DETAIL_CHARS)
+  .regex(REFUSAL_TEXT_PATTERN)
+/** Connector inbox upgrade header asking the server for that per-command mark. */
+export const API_REFUSAL_MESSAGE_SUPPORT_HEADER =
+  'open3dfarm-api-refusal-message'
 /** What the Connector reports for an envelope it received. */
 export const ApiEnvelopeResultFrame = z
   .strictObject({
@@ -295,9 +308,9 @@ export const ApiEnvelopeResultFrame = z
     detail: z
       .string()
       .max(MAX_API_ENVELOPE_DETAIL_CHARS)
-      .regex(/^[^\x00-\x08\x0b\x0c\x0e-\x1f\x7f]*$/)
+      .regex(REFUSAL_TEXT_PATTERN)
       .optional(),
-    message: z.string().min(1).max(MAX_API_ENVELOPE_DETAIL_CHARS).optional(),
+    message: ApiRefusalMessage.optional(),
     /** Job history entry once a print has ended (decimal, up to 19 digits). */
     history_entry_id: z
       .string()
@@ -357,6 +370,17 @@ export function decodeApiEnvelopeResultFrame(
   if (encodeApiEnvelopeResultFrame(parsed) !== wire)
     throw new Error('Canonical API envelope result required')
   return parsed
+}
+/** The same result for a server that does not accept `message`. */
+export function withoutRefusalMessage(wire: string): string {
+  let frame: ApiEnvelopeResultFrame
+  try {
+    frame = decodeApiEnvelopeResultFrame(wire)
+  } catch {
+    return wire
+  }
+  const { message: _message, ...rest } = frame
+  return encodeApiEnvelopeResultFrame(rest)
 }
 export function apiEnvelopePayload(input: unknown): Uint8Array<ArrayBuffer> {
   return new TextEncoder().encode(

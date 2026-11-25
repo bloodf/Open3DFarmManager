@@ -1,6 +1,9 @@
 /** Length of a decoded telemetry string, measured in UTF-16 code units. */
 export const PRINTER_STRING_MAX_UNITS = 128
 
+/** Free text without control characters; tab, line feed and return are kept. */
+export const REFUSAL_TEXT_PATTERN = /^[^\x00-\x08\x0b\x0c\x0e-\x1f\x7f]*$/
+
 // With the Unicode flag, the range matches lone surrogate units only.
 const loneSurrogate = /[\uD800-\uDFFF]/u
 

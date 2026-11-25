@@ -19,6 +19,7 @@ import {
   scopeForApiCommand,
   decodeApiEnvelopeFrame,
   encodeApiEnvelopeResultFrame,
+  ApiRefusalMessage,
   verifyApiEnvelope,
   type ApiEnvelopeRefusalCode,
   type ApiEnvelopeV1,
@@ -250,7 +251,8 @@ export function createApiCommandRunner(config: {
           outcome,
           ...(code ? { refusal_code: code } : {}),
           ...(detail ? { detail } : {}),
-          ...(message ? { message } : {}),
+          // Invalid text is left out; it never costs the refusal itself.
+          ...(ApiRefusalMessage.safeParse(message).success ? { message } : {}),
           at: config.clock.wallNow(),
         }),
       )

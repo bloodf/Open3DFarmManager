@@ -389,8 +389,6 @@ export function createPauseDispatcher(config: {
   const slots = new Set<string>()
   /** Slots held only by a pre-claim readiness read: emergency stop takes them. */
   const probes = new Map<string, () => Promise<void>>()
-  // Allow one stop to authenticate while a probe owns its slot.
-  const probingStops = new Set<string>()
   const stopAttempts = new Set<() => void>()
   const pending = new Set<Promise<void>>()
   let resolveSettled: () => void = () => {}
@@ -554,18 +552,15 @@ export function createPauseDispatcher(config: {
       let observationVersion: object | undefined
       let generationInstalled = false
       const assignmentId = mapping.assignment_id
+      // Stops authenticate independently while the readiness probe owns the slot.
       const probe =
         command.action === 'emergency_stop'
           ? probes.get(assignmentId)
           : undefined
-      if (
-        probingStops.has(assignmentId) ||
-        (!probe && (slots.size >= 8 || slots.has(assignmentId)))
-      )
+      if (!probe && (slots.size >= 8 || slots.has(assignmentId)))
         return Promise.resolve({ kind: 'rejected', reason: 'busy' })
       let ownsSlot = !probe
-      if (probe) probingStops.add(assignmentId)
-      else slots.add(assignmentId) // Keep the slot until asynchronous work settles.
+      if (ownsSlot) slots.add(assignmentId) // Keep the slot until asynchronous work settles.
       let settleWork: () => void = () => {}
       const work = new Promise<void>((resolve) => {
         settleWork = resolve
@@ -578,7 +573,6 @@ export function createPauseDispatcher(config: {
       const start = sample()
       if (!start) {
         if (ownsSlot) slots.delete(assignmentId)
-        else probingStops.delete(assignmentId)
         settleWork()
         return Promise.resolve({ kind: 'rejected', reason: 'expired' })
       }
@@ -877,7 +871,6 @@ export function createPauseDispatcher(config: {
           slotFreed = resolve
         })
         probes.set(mapping.assignment_id, () => {
-          probes.delete(mapping.assignment_id)
           preempted.abort()
           return freed
         })
@@ -929,7 +922,13 @@ export function createPauseDispatcher(config: {
                 once: true,
               })
               timeout = setTimeout(() => {
-                finalize('rejected', 'busy', 'guard-denied')
+                finalize(
+                  'rejected',
+                  'busy',
+                  'guard-denied',
+                  undefined,
+                  'A parada de emergência não foi enviada porque a verificação da impressora demorou demais.',
+                )
                 resolve()
               }, STOP_PROBE_WAIT_MS)
             }),
@@ -1319,7 +1318,6 @@ export function createPauseDispatcher(config: {
             }
           }
           if (ownsSlot) slots.delete(assignmentId)
-          if (probe) probingStops.delete(assignmentId)
           slotFreed()
           clearTimeout(timer)
           if (terminal) resolveResult(terminal)

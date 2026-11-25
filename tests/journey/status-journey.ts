@@ -1,6 +1,7 @@
 import { expect, test, type Locator } from '@playwright/test'
 import { journeyEnabled, startJourneyHarness } from './harness.ts'
 import { recordJourneyDiagnostics } from './journey-diagnostics.ts'
+import { qidiVariant } from '../fixtures/qidi/variants.ts'
 import type { startStatusFixture, StatusVendor } from './status-fixtures.ts'
 
 const ROW_CONTROLS = /pausar|retomar|cancelar|iniciar impressão/i
@@ -128,10 +129,7 @@ export function statusJourney(name: StatusVendor) {
 
         if (name === 'qidi') {
           expect(new Set<string | number>([...fixture.requests])).toEqual(
-            new Set([
-              'GET /server/info',
-              'GET /printer/objects/query?webhooks&print_stats&virtual_sdcard&extruder&heater_bed&fan',
-            ]),
+            new Set(['GET /server/info', `GET ${qidiVariant('Q1 Pro').query}`]),
           )
         } else if (name === 'flashforge') {
           expect(new Set<string | number>([...fixture.requests])).toEqual(

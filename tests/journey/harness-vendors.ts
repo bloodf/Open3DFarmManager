@@ -338,7 +338,11 @@ export async function startVendorSimulator(
     let runtime: VendorSimulator['runtime']
 
     if (name === 'qidi' || name === 'flashforge' || name === 'phrozen') {
-      const fixture = await startStatusFixture(name, directory)
+      const fixture = await startStatusFixture(
+        name,
+        directory,
+        options.printerModel,
+      )
       undo.push(fixture.close)
       raw = fixture
       const unsupported = () => {

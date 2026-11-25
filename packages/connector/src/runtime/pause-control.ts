@@ -185,6 +185,14 @@ type PauseControlInput = {
   resinCapabilities?: Parameters<
     typeof receiveApiCommand
   >[0]['resinCapabilities']
+  /** Open Photon resin sessions, shared with the status collection. */
+  photonResinSessions?: Parameters<
+    typeof createPauseDriverRouter
+  >[0]['photonResinSessions']
+  /** Test seam; production composition never sets it. */
+  photonResinQualifiedWrites?: Parameters<
+    typeof createPauseDriverRouter
+  >[0]['photonResinQualifiedWrites']
   /** True while local storage is degraded: commands are refused with `storage`. */
   storageDegraded?: () => boolean
   /** Latest Kobra X accessory evidence from its status collection. */
@@ -385,6 +393,8 @@ async function runAssignmentControl(
       ],
       limits: config.collection.limits,
       clock,
+      photonResinSessions: input.photonResinSessions,
+      photonResinQualifiedWrites: input.photonResinQualifiedWrites,
       kobraXControlEvidence(binding) {
         const mapping =
           binding === printerBinding ? readPrinterBinding(binding) : null

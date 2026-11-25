@@ -14,11 +14,21 @@ export type TelemetrySender = (
   body: string,
   signal: AbortSignal,
 ) => Promise<unknown>
+/**
+ * The server refused this batch for good (HTTP 409: an event ID is already
+ * stored with other content), so sending it again can never succeed.
+ */
+export class TelemetryBatchRefused extends Error {
+  constructor() {
+    super('Telemetry batch refused')
+  }
+}
 export type DrainResult =
   | { status: 'uncertain'; reason: 'queue'; loss?: QueueLoss }
   | { status: 'empty'; loss: QueueLoss }
   | { status: 'dropped'; loss: QueueLoss }
   | { status: 'delivered'; count: number; loss: QueueLoss }
+  | { status: 'refused'; count: number; loss: QueueLoss }
   | {
       status: 'retained'
       reason: 'busy' | 'cancelled' | 'transport' | 'acknowledgement'
@@ -74,7 +84,9 @@ function fittingPrefix(
 
 /**
  * One bounded attempt. Sender returns the exact ordered event-ID array only after
- * authenticated durable acceptance. No command payloads, implicit retries or HTTP client.
+ * authenticated durable acceptance. A `TelemetryBatchRefused` rejection drops
+ * the batch so newer records can drain; any other failure retains it.
+ * No command payloads, implicit retries or HTTP client.
  * Caller supplies a deadline-bearing signal; server deduplication by event ID is required.
  */
 export async function drainTelemetryOnce(
@@ -83,6 +95,8 @@ export async function drainTelemetryOnce(
   now: () => number,
   signal: AbortSignal,
   onDrop: () => void = () => console.warn('telemetry-entry-dropped'),
+  onRefused: (records: number) => void = (records) =>
+    console.warn('telemetry-batch-refused', records),
 ): Promise<DrainResult> {
   if (active.has(queue)) return { status: 'retained', reason: 'busy' }
   if (signal.aborted) return { status: 'retained', reason: 'cancelled' }
@@ -160,7 +174,16 @@ export async function drainTelemetryOnce(
       // until it actually settles. Handle late rejection without acknowledging data.
       void delivery.then(settled, settled)
       accepted = await Promise.race([delivery, cancelled])
-    } catch {
+    } catch (error) {
+      if (error instanceof TelemetryBatchRefused && !signal.aborted) {
+        try {
+          queue.acknowledge(ids, now())
+        } catch {
+          return { status: 'uncertain', reason: 'queue', loss }
+        }
+        onRefused(ids.length)
+        return { status: 'refused', count: ids.length, loss }
+      }
       return {
         status: 'retained',
         reason: signal.aborted ? 'cancelled' : 'transport',

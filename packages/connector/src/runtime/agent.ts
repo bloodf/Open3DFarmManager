@@ -118,6 +118,7 @@ type AgentDiagnostic =
   | { kind: 'delivery'; status: 'delivered' | 'retained'; count: number }
   | { kind: 'drain-loss'; expired: number; capacity: number }
   | { kind: 'telemetry-entry-dropped' }
+  | { kind: 'telemetry-batch-refused'; records: number; total: number }
   | { kind: 'storage-degraded'; lost: number }
   | { kind: 'storage-recovered'; lost: number }
   | {
@@ -274,6 +275,8 @@ async function runConnectorAgentOnce(
     capacity: 0,
     credentialExpired: false,
   }
+  /** Records dropped since start because the server refused their batch. */
+  let refusedRecords = 0
   function diagnostic(value: AgentDiagnostic) {
     if (value.kind === 'drain-loss') {
       logger.warn('queue-loss', { ...value })
@@ -281,6 +284,11 @@ async function runConnectorAgentOnce(
       logger.warn('storage-degraded', { lost: value.lost })
     } else if (value.kind === 'telemetry-entry-dropped') {
       logger.warn('telemetry-entry-dropped')
+    } else if (value.kind === 'telemetry-batch-refused') {
+      logger.warn('telemetry-batch-refused', {
+        records: value.records,
+        total: value.total,
+      })
     }
     if (value.kind === 'summary' || diagnosticBudget-- > 0)
       input.onDiagnostic(value)
@@ -1080,6 +1088,14 @@ async function runConnectorAgentOnce(
             () => clock.now(),
             attemptSignal,
             () => diagnostic({ kind: 'telemetry-entry-dropped' }),
+            (records) => {
+              refusedRecords += records
+              diagnostic({
+                kind: 'telemetry-batch-refused',
+                records,
+                total: refusedRecords,
+              })
+            },
           )
         } finally {
           // Drain may return cancelled before its sender releases the active slot.
@@ -1106,7 +1122,11 @@ async function runConnectorAgentOnce(
         )
           throw new Error('Telemetry drain requires operator review')
         if (signal.aborted) return
-        if (result.status === 'delivered') {
+        if (result.status === 'refused') {
+          // The refused batch is gone; newer records are due at once.
+          backoff = config.telemetry.retryMinMs
+          notBefore = 0
+        } else if (result.status === 'delivered') {
           diagnostic({
             kind: 'delivery',
             status: 'delivered',

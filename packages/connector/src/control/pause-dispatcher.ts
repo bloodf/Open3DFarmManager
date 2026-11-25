@@ -715,7 +715,7 @@ export function createPauseDispatcher(config: {
         return liveAt(sample())
       }
       // Pure local state only. Time-only authority expiry does not prevent a readonly result audit.
-      function postSendCurrent(): boolean {
+      function postSendCurrent(allowRestartDisconnect = false): boolean {
         const observation = observations.get(printerBinding)
         return (
           !boundaryClosed &&
@@ -725,14 +725,15 @@ export function createPauseDispatcher(config: {
           !contractBroken &&
           !clockBroken &&
           !skewBroken &&
-          observationVersions.get(printerBinding) === observationVersion &&
           !!capability &&
           readPrinterBinding(printerBinding) === mapping &&
           verifier.inspectLifecycle(authorityHandle) &&
-          !!observation &&
-          observation.assignmentId === mapping.assignment_id &&
-          observation.printerKey === mapping.printer_key &&
-          observation.connectionGeneration === connectionGeneration
+          (allowRestartDisconnect ||
+            (observationVersions.get(printerBinding) === observationVersion &&
+              !!observation &&
+              observation.assignmentId === mapping.assignment_id &&
+              observation.printerKey === mapping.printer_key &&
+              observation.connectionGeneration === connectionGeneration))
         )
       }
       /** Set by eligible() when the shared idle-only rule refused the command. */
@@ -961,7 +962,12 @@ export function createPauseDispatcher(config: {
             finalize('not-sent', 'guard-denied', 'guard-denied')
             return
           }
-          if (!postSendCurrent()) {
+          if (
+            !postSendCurrent(
+              command.action === 'config_write' &&
+                command.args.restart === true,
+            )
+          ) {
             finalize(
               'outcome-unknown',
               'state-unconfirmed',
@@ -989,6 +995,7 @@ export function createPauseDispatcher(config: {
             command.action === 'confirm_collection'
           ) {
             if (command.action === 'config_write') {
+              cleanup()
               finalize('applied', 'applied', 'applied', now.wall)
               return
             }

@@ -137,6 +137,8 @@ The Service restart cap covers every printer restart the Connector sends: `servi
 
 Refused commands do not use up the Service restart cap: a claim recorded as not sent restarted nothing. A claim counts while it is in progress, once sent, and whenever its outcome is unknown, including a refusal that happens after the first write (for a save with restart, after the backup write starts, even if the restart itself was never requested). API envelopes cannot carry a restart action, so only browser commands use this cap.
 
+An unconfirmed `firmware_restart` (in progress is not affected) keeps its printer busy for 60 seconds from the time its outcome is recorded as unknown, because the restart drops the state read-back. During that time only `emergency_stop` is admitted. The hold is then released, and a Connector restart releases it at once. The result stays `outcome-unknown`, the restart is never retried, it still counts against the Service restart cap, and every later command still needs fresh ready printer state. Other unconfirmed commands that hold a printer are not released this way.
+
 | Rate class      | Maximum per minute | Uses the shared allowance | Covers                                                                |
 | --------------- | ------------------ | ------------------------- | --------------------------------------------------------------------- |
 | Shared          | 10                 | Yes                       | every other action                                                    |

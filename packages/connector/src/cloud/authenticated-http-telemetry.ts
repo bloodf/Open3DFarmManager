@@ -6,7 +6,7 @@ import {
 } from '@open3dfarmmanager/farm-protocol'
 import { TelemetryProofChallenge } from '../../../farm-protocol/src/telemetry-proof.ts'
 import type { ConnectorIdentity } from '../identity/store.ts'
-import type { TelemetrySender } from './drain.ts'
+import { TelemetryBatchRefused, type TelemetrySender } from './drain.ts'
 
 class RequestRefused extends Error {}
 
@@ -117,6 +117,11 @@ export function createAuthenticatedTelemetrySender(options: {
         if (response.status === 400) {
           await response.body?.cancel().catch(() => {})
           throw new RequestRefused()
+        }
+        // Only the commit compares event IDs, so only its 409 is permanent.
+        if (response.status === 409 && path === endpoint) {
+          await response.body?.cancel().catch(() => {})
+          throw new TelemetryBatchRefused()
         }
         if (
           ![200, 429].includes(response.status) ||
@@ -262,7 +267,8 @@ export function createAuthenticatedTelemetrySender(options: {
       )
         throw new Error()
       return result.acceptedEventIds
-    } catch {
+    } catch (error) {
+      if (error instanceof TelemetryBatchRefused) throw error
       throw new Error('Telemetry transport failed')
     } finally {
       clearTimeout(timer)

@@ -119,6 +119,8 @@ export async function seedSandbox(
         'files:read',
         'jobs:read',
         'jobs:start',
+        'library:read',
+        'library:write',
         'control:basic',
         'control:extended',
       ],

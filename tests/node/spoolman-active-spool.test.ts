@@ -11,13 +11,22 @@ import type { RawPrinterObservation } from '../../packages/connector/src/runtime
 test(
   'disconnect clears offline materials without publishing a fresh online row',
   { timeout: 10000 },
-  async () => {
+  async (t) => {
     const fixture = await moonrakerSpoolmanFixture()
     const dir = mkdtempSync(join(tmpdir(), 'active-spool-disconnect-'))
     const queue = new TelemetryQueue(join(dir, 'queue'), Date.now())
     const controller = new AbortController()
+    const realSetTimeout = setTimeout
+    // Drive status through the fixture and leave periodic queries paused.
+    t.mock.timers.enable({ apis: ['setTimeout'] })
     let invalidationRowCount: number | undefined
     let inventoryReady = false
+    let before: number | undefined
+    let readsBefore: number | undefined
+    const reads = () =>
+      fixture.requests.filter(
+        (request) => request.path === '/server/spoolman/spool_id',
+      ).length
     const states = () =>
       queue
         .batch(Date.now())
@@ -49,7 +58,17 @@ test(
       onInventory(value) {
         inventoryReady = value.kind === 'observed'
       },
-      onRawObservation() {},
+      onRawObservation(value) {
+        if (
+          before !== undefined ||
+          value.materialsObservation?.materials[0]?.materialType !== 'PLA'
+        )
+          return
+        // The material read queues its state before notifying observers.
+        before = states().length
+        readsBefore = reads()
+        fixture.disconnect()
+      },
       onRawUnavailable() {
         invalidationRowCount = states().length
       },
@@ -59,21 +78,16 @@ test(
       while (!predicate()) {
         if (Date.now() > deadline)
           throw Error('Timed out waiting for collection')
-        await new Promise((resolve) => setTimeout(resolve, 10))
+        // Let Spoolman's zero-delay initial inventory read start.
+        t.mock.timers.tick(0)
+        await new Promise((resolve) => realSetTimeout(resolve, 10))
       }
     }
     try {
       await waitFor(() => inventoryReady && states().length > 0)
-      fixture.update()
-      await waitFor(
-        () => states().at(-1)?.materials?.[0]?.materialType === 'PLA',
-      )
-      const before = states().length
-      const readsBefore = fixture.requests.filter(
-        (request) => request.path === '/server/spoolman/spool_id',
-      ).length
-      fixture.disconnect()
+      if (before === undefined) fixture.update()
       await waitFor(() => states().at(-1)?.state === 'offline')
+      assert.ok(before !== undefined && before > 0)
       assert.equal(invalidationRowCount, before)
       assert.deepEqual(
         states()
@@ -81,13 +95,9 @@ test(
           .map((state) => state.state),
         ['offline'],
       )
+      assert.equal(states().at(before - 1)?.materials?.[0]?.materialType, 'PLA')
       assert.equal(states().at(-1)?.materials, undefined)
-      assert.equal(
-        fixture.requests.filter(
-          (request) => request.path === '/server/spoolman/spool_id',
-        ).length,
-        readsBefore,
-      )
+      assert.equal(reads(), readsBefore)
     } finally {
       controller.abort()
       await done

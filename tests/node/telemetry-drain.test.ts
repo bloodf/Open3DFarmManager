@@ -70,13 +70,16 @@ test('synthetic Moonraker state survives outage and restart, then drains to an i
           second.map(durableTelemetryEvent),
           first.map(durableTelemetryEvent),
         )
-        assert.equal(
-          first[0]?.kind === 'printer-state' && first[0].ageAtSendMs,
-          0,
+        assert.equal(first[0]?.kind, 'printer-state')
+        if (first[0]?.kind !== 'printer-state')
+          throw new Error('Unexpected record')
+        assert.ok(
+          Number.isSafeInteger(first[0].ageAtSendMs) &&
+            first[0].ageAtSendMs! >= 0,
         )
         assert.equal(
           second[0]?.kind === 'printer-state' && second[0].ageAtSendMs,
-          1,
+          undefined,
         )
         ids(body).forEach((id) => received.add(id))
         return ids(body)

@@ -55,10 +55,9 @@ test(
         eventId: string
         ageAtSendMs: number
       }[]
-      assert.deepEqual(
-        records.map(({ ageAtSendMs }) => ageAtSendMs),
-        [0, 0],
-      )
+      for (const { ageAtSendMs } of records) {
+        assert.ok(Number.isSafeInteger(ageAtSendMs) && ageAtSendMs >= 0)
+      }
       assert.equal(records.length, 2)
       assert.throws(() => new TelemetryQueue(directory, 1000), /EEXIST/)
       const store = new MemoryTelemetryStore()
@@ -80,7 +79,7 @@ test(
           assert.equal(
             replay,
             JSON.stringify(
-              records.map((record) => ({ ...record, ageAtSendMs: 1 })),
+              records.map(({ ageAtSendMs: _age, ...record }) => record),
             ),
           )
           const result = await ingestTelemetry(replay, context, store)

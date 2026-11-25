@@ -86,7 +86,10 @@ describe('migration 0093 pause authority confirm_collection', () => {
       .split(',')
       .map((value) => value.trim().replaceAll("'", ''))
       .filter(Boolean)
-    expect([...stored].sort()).toEqual([...elevated].sort())
+    // Actions added by later migrations are checked against the latest one.
+    expect([...stored].sort()).toEqual(
+      elevated.filter((action) => allowList(up).includes(action)).sort(),
+    )
     for (const action of ownerOnly)
       expect(up).toContain(`capability->'actions' ? '${action}'`)
     // A default-tier action carries no extra role rule.
@@ -129,6 +132,21 @@ test('the latest capability allow-list and action bound match the signed control
   )
   expect(constraint).toContain(
     `BETWEEN 1 AND ${ExtendedControlAction.options.length}`,
+  )
+  const elevated = constraint.match(/\?\| ARRAY\[([^\]]*)\]/)?.[1] ?? ''
+  expect(
+    elevated
+      .split(',')
+      .map((value) => value.trim().replaceAll("'", ''))
+      .sort(),
+  ).toEqual(
+    ExtendedControlAction.options
+      .filter(
+        (action) =>
+          !controlRoleAllowed('operator', action) &&
+          controlRoleAllowed('admin', action),
+      )
+      .sort(),
   )
   expect(ExtendedControlAction.options).toContain('confirm_collection')
   expect(ExtendedControlAction.options).toContain('set_tool_temperature')

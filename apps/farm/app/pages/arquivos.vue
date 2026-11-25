@@ -13,6 +13,7 @@ import {
 import Button from '../components/ui/Button.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import ErrorState from '../components/ui/ErrorState.vue'
+import PageHeader from '../components/ui/PageHeader.vue'
 import Skeleton from '../components/ui/Skeleton.vue'
 import StaleNotice from '../components/ui/StaleNotice.vue'
 import { useFarmView } from '../composables/useFarmView.ts'
@@ -308,16 +309,19 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main id="conteudo" class="files-page">
-    <header class="page-header">
-      <p class="eyebrow">Open3DFarmManager</p>
-      <h1>Arquivos</h1>
-      <p class="intro">
-        Envie um arquivo ou escolha um arquivo da impressora para iniciar a
-        impressão pela conexão direta.
-      </p>
-    </header>
-    <div v-if="state.kind === 'loading'" aria-busy="true" class="loading panel">
+  <main id="conteudo" class="files-page ops-library">
+    <div class="ops-heading">
+      <p class="ops-wordmark" translate="no">Open3DFarmManager</p>
+      <PageHeader
+        title="Arquivos"
+        description="Envie um arquivo ou escolha um arquivo da impressora para iniciar a impressão pela conexão direta."
+      />
+    </div>
+    <div
+      v-if="state.kind === 'loading'"
+      aria-busy="true"
+      class="loading ops-panel"
+    >
       <p role="status">Carregando farms…</p>
       <Skeleton /><Skeleton /><Skeleton />
     </div>
@@ -337,8 +341,8 @@ onBeforeUnmount(() => {
       </ErrorState>
     </div>
     <template v-else>
-      <section class="panel" aria-labelledby="files-target-title">
-        <h2 id="files-target-title">Destino</h2>
+      <section class="ops-panel" aria-labelledby="files-target-title">
+        <h2 id="files-target-title" class="ops-title">Destino</h2>
         <div class="field-grid">
           <div class="field">
             <label for="files-farm">Farm</label>
@@ -464,8 +468,12 @@ onBeforeUnmount(() => {
           title="Conexão direta indisponível"
           :description="`${availability.reason} O modo degradado permite somente leitura.`"
         />
-        <section class="panel" aria-labelledby="upload-title" :aria-busy="busy">
-          <h2 id="upload-title">Enviar arquivo</h2>
+        <section
+          class="ops-panel"
+          aria-labelledby="upload-title"
+          :aria-busy="busy"
+        >
+          <h2 id="upload-title" class="ops-title">Enviar arquivo</h2>
           <form class="stack" @submit.prevent="send">
             <div class="field">
               <label for="files-upload"
@@ -482,6 +490,7 @@ onBeforeUnmount(() => {
             <div class="actions">
               <Button
                 type="submit"
+                class="ops-primary"
                 :disabled="
                   busy ||
                   !availability.available ||
@@ -500,8 +509,8 @@ onBeforeUnmount(() => {
             aria-label="Progresso do envio"
           />
         </section>
-        <section class="panel" aria-labelledby="list-title">
-          <h2 id="list-title">Arquivos da impressora</h2>
+        <section class="ops-panel" aria-labelledby="list-title">
+          <h2 id="list-title" class="ops-title">Arquivos da impressora</h2>
           <div class="actions">
             <Button :disabled="busy || !availability.available" @click="list">
               Consultar arquivos
@@ -580,6 +589,7 @@ onBeforeUnmount(() => {
             <div class="actions">
               <Button
                 type="submit"
+                class="ops-primary"
                 :disabled="
                   busy ||
                   !availability.available ||
@@ -632,6 +642,7 @@ onBeforeUnmount(() => {
             <div class="actions">
               <Button
                 type="submit"
+                class="ops-primary"
                 :disabled="
                   busy ||
                   !availability.available ||
@@ -666,149 +677,99 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .files-page {
-  display: grid;
-  gap: var(--space-4);
-  align-content: start;
   max-width: 52rem;
   overflow-wrap: anywhere;
 }
-.page-header {
-  display: grid;
-  gap: var(--space-2);
-}
-.eyebrow {
-  margin: 0;
-  font-size: var(--font-size-sm);
-  letter-spacing: 0.04em;
-  color: var(--color-text-muted);
-}
-.page-header h1 {
-  margin: 0;
-}
-.intro,
 .note {
   margin: 0;
-  color: var(--color-text-muted);
-}
-.panel {
-  display: grid;
-  gap: var(--space-3);
-  margin: 0;
-  padding: var(--space-5);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-raised);
-  min-width: 0;
-}
-.panel > * {
-  min-width: 0;
-}
-h2 {
-  margin: 0;
-  font-size: var(--font-size-lg);
-  line-height: var(--line-height-tight);
+  color: var(--ops-muted);
 }
 .field-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
-  gap: var(--space-3) var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: var(--ops-space-3);
+  align-items: end;
 }
 .field {
   display: grid;
-  gap: var(--space-1);
+  align-content: start;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ops-space-1);
   min-width: 0;
 }
 label {
-  font-weight: var(--font-weight-semibold);
+  font-weight: 600;
 }
 .hint {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-muted);
+  font-size: var(--ops-text-small);
+  color: var(--ops-muted);
 }
 .field-error {
-  font-size: var(--font-size-sm);
-  color: var(--state-error-color);
+  font-size: var(--ops-text-small);
+  color: var(--ops-fault);
 }
 .stack {
   display: grid;
-  gap: var(--space-3);
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ops-space-3);
 }
 .actions {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2) var(--space-4);
+  gap: var(--ops-space-2) var(--ops-space-4);
   align-items: center;
-}
-.loading {
-  display: grid;
-  gap: var(--space-3);
 }
 .loading p {
   margin: 0;
 }
-select,
-input[type='text'],
-input[type='file'] {
-  width: 100%;
-  min-height: 2.75rem;
-  min-width: 0;
-  padding: var(--space-2) var(--space-3);
-  font: inherit;
-  color: inherit;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-}
-input[type='file'] {
-  padding: var(--space-2);
-}
-select:disabled,
-input:disabled {
-  opacity: 0.6;
-}
-:is(select, input):focus-visible,
-a:focus-visible,
 [role='alert']:focus-visible {
-  outline: var(--focus-ring-width) solid var(--color-focus-ring);
-  outline-offset: var(--focus-ring-offset);
+  border-radius: var(--ops-radius-lg);
 }
+/* Starting a print needs a person: the confirmation stands apart. */
 .confirmation {
-  font-weight: normal;
   display: flex;
-  gap: var(--space-3);
+  gap: var(--ops-space-3);
   align-items: flex-start;
+  padding: var(--ops-space-3);
+  font-weight: normal;
+  border: 1px solid var(--ops-attention);
+  border-radius: var(--ops-radius-md);
 }
-.confirmation input {
+.confirmation input[type='checkbox'] {
   flex: none;
   inline-size: 1.5rem;
   block-size: 1.5rem;
-  margin: 0.1rem 0 0;
-  accent-color: var(--color-accent);
+  margin: 0;
 }
 progress {
   width: 100%;
-  accent-color: var(--color-accent);
+  accent-color: var(--ops-action);
 }
 .thumbs {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 8rem), 1fr));
-  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 9rem), 1fr));
+  gap: var(--ops-space-3);
 }
 .thumbs li {
   display: grid;
-  gap: var(--space-2);
+  gap: var(--ops-space-2);
   justify-items: center;
+  align-content: start;
+  min-width: 0;
+  padding: var(--ops-space-2);
+  border: 1px solid var(--ops-border);
+  border-radius: var(--ops-radius-md);
   text-align: center;
-  font-size: var(--font-size-sm);
+  font: var(--ops-text-small) / 16px var(--ops-font-mono);
 }
 .thumbs img {
   object-fit: contain;
   max-inline-size: 100%;
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
+  border-radius: var(--ops-radius-sm);
+  background: var(--ops-raised);
 }
 .operation:not(.active) {
   position: absolute;
@@ -819,19 +780,25 @@ progress {
 }
 .operation.active {
   position: sticky;
-  inset-block-end: var(--space-3);
+  inset-block-end: max(var(--ops-space-3), env(safe-area-inset-bottom));
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2) var(--space-4);
+  gap: var(--ops-space-2) var(--ops-space-4);
   align-items: center;
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--color-accent);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-raised);
+  padding: var(--ops-space-3) var(--ops-space-4);
+  border: 1px solid var(--ops-muted);
+  border-radius: var(--ops-radius-lg);
+  background: var(--ops-panel);
   box-shadow: var(--elevation-2);
+  font-variant-numeric: tabular-nums;
+}
+.operation.done.active {
+  border-color: var(--ops-action);
 }
 .operation.error.active {
-  border-color: var(--state-error-color);
+  color: var(--ops-fault);
+  background: var(--ops-fault-bg);
+  border-color: var(--ops-fault);
 }
 .operation p {
   margin: 0;
@@ -840,14 +807,8 @@ progress {
 .files-page :deep(.stale strong) {
   display: block;
 }
-/* Same bordered surface as the panels. */
-.files-page :deep(.ui-card) {
-  border: 1px solid var(--color-border);
-  box-shadow: none;
-}
-@media (max-width: 30rem) {
-  .panel {
-    padding: var(--space-4);
-  }
+/* An operation bar stuck at the bottom must not cover the focused control. */
+.files-page :deep(:is(input, select, button, a)) {
+  scroll-margin-block-end: 6rem;
 }
 </style>

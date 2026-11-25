@@ -6,6 +6,7 @@ import Dialog from '../ui/Dialog.vue'
 import Button from '../ui/Button.vue'
 import DataTable from '../ui/DataTable.vue'
 import ErrorState from '../ui/ErrorState.vue'
+import StatusBadge from '../ui/StatusBadge.vue'
 import Skeleton from '../ui/Skeleton.vue'
 import {
   formatBytes,
@@ -98,6 +99,12 @@ const columns = [
   { id: 'status', label: 'Situação' },
   { id: 'actions', label: 'Ações' },
 ]
+/** A removed or deleted file reads as unavailable; the label says which. */
+const statusTone = (id: string) => {
+  const version = versions.value.find((v) => v.id === id)
+  if (version?.purgedAt != null) return 'offline'
+  return version?.deletedAt != null ? 'attention' : 'idle'
+}
 let loadRequest = 0
 const rows = computed(() =>
   versions.value.map((v) => ({
@@ -221,7 +228,18 @@ async function uploaded() {
         e valem para todas as placas.
       </p>
       <LibraryMetadata :metadata="current.metadata" />
-      <DataTable caption="Histórico de versões" :columns="columns" :rows="rows">
+      <DataTable
+        class="versions"
+        caption="Histórico de versões"
+        :columns="columns"
+        :rows="rows"
+      >
+        <template #status="{ row }">
+          <StatusBadge
+            :tone="statusTone(row.id)"
+            :label="String(row.cells.status)"
+          />
+        </template>
         <template #actions="{ row }">
           <Button
             v-if="
@@ -239,11 +257,14 @@ async function uploaded() {
             "
           >
             <template v-if="pendingDelete === row.id">
-              <Button @click="remove(row.id)">Confirmar exclusão</Button>
+              <Button class="ops-danger" @click="remove(row.id)"
+                >Confirmar exclusão</Button
+              >
               <Button @click="pendingDelete = ''">Cancelar</Button>
             </template>
             <Button
               v-else
+              class="ops-danger"
               :aria-label="`Excluir versão ${row.cells.number}`"
               @click="pendingDelete = row.id"
               >Excluir</Button
@@ -287,13 +308,41 @@ async function uploaded() {
 <style scoped>
 .field {
   display: grid;
-  gap: var(--space-1);
+  gap: var(--ops-space-1);
   max-inline-size: 16rem;
 }
+.field label {
+  font-weight: 600;
+}
 .note {
-  color: var(--text-muted);
+  color: var(--ops-muted);
 }
 .error {
-  color: var(--printer-error);
+  color: var(--ops-fault);
+}
+.versions {
+  margin-block-start: var(--ops-space-4);
+}
+.versions :deep(caption) {
+  padding-block-end: var(--ops-space-2);
+}
+.versions :deep(th) {
+  color: var(--ops-muted);
+  font: 600 var(--ops-text-label) / 16px var(--ops-font-mono);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.versions :deep(td) {
+  vertical-align: top;
+  /* The region scrolls sideways, so dates and sizes never split mid-word. */
+  overflow-wrap: normal;
+  font-variant-numeric: tabular-nums;
+}
+.versions :deep(.badge) {
+  white-space: nowrap;
+}
+.versions :deep(td .ui-button) {
+  margin: 0 var(--ops-space-2) var(--ops-space-2) 0;
+  white-space: nowrap;
 }
 </style>

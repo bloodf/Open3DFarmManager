@@ -224,7 +224,11 @@ function confirmPrinterChecked() {
           :aria-label="GROUP_LABELS[level]"
         >
           <h3>{{ GROUP_LABELS[level] }}</h3>
-          <div v-for="entry in groups[level]" :key="entry.printer.key">
+          <div
+            v-for="entry in groups[level]"
+            :key="entry.printer.key"
+            class="printer"
+          >
             <input
               :id="`replay-printer-${entry.printer.key}`"
               v-model="selectedKey"
@@ -247,7 +251,7 @@ function confirmPrinterChecked() {
         </section>
       </template>
 
-      <div v-if="bambu && source.plateCount > 0">
+      <div v-if="bambu && source.plateCount > 0" class="choice">
         <label for="replay-plate">Placa</label>
         <select id="replay-plate" v-model.number="plate">
           <option v-for="n in source.plateCount" :key="n" :value="n">
@@ -258,7 +262,7 @@ function confirmPrinterChecked() {
 
       <section v-if="ams && selected" aria-label="Mapeamento do AMS">
         <h3>Filamentos e slots do AMS</h3>
-        <div v-for="(tool, index) in tools" :key="index">
+        <div v-for="(tool, index) in tools" :key="index" class="choice">
           <label :for="`replay-slot-${index}`">
             Filamento {{ index + 1 }}:
             {{ tool.filamentType ?? 'material não informado' }}
@@ -292,7 +296,7 @@ function confirmPrinterChecked() {
         </div>
       </section>
 
-      <div>
+      <div class="bed">
         <input id="replay-bed" v-model="bedClear" type="checkbox" />
         <label for="replay-bed"
           >Confirmo que a mesa está limpa e livre de objetos.</label
@@ -306,6 +310,8 @@ function confirmPrinterChecked() {
     </p>
     <div
       v-if="result"
+      class="outcome"
+      :data-outcome="result.outcome"
       :role="result.outcome === 'applied' ? 'status' : 'alert'"
     >
       <p>{{ outcome }}</p>
@@ -329,19 +335,98 @@ function confirmPrinterChecked() {
         >Confirmei que a impressão não começou</Button
       >
     </div>
-    <Button :disabled="!!problem || sending || result !== null" @click="confirm"
+    <Button
+      class="ops-primary confirm"
+      :disabled="!!problem || sending || result !== null"
+      @click="confirm"
       >Imprimir de novo</Button
     >
   </Dialog>
 </template>
 
 <style scoped>
+/* Self-contained: this dialog also opens from the job history page. */
 fieldset {
+  min-inline-size: 0;
+  margin: 0;
   border: 0;
   padding: 0;
 }
+legend {
+  font-weight: 600;
+}
+h3 {
+  font-size: var(--ops-text-body);
+}
+/* The group heading names the level; the edge colour only repeats it. */
+section[data-group] {
+  padding-inline-start: var(--ops-space-3);
+  border-inline-start: 3px solid var(--ops-action);
+}
+section[data-group='warn'] {
+  border-inline-start-color: var(--ops-attention);
+}
+section[data-group='blocked'] {
+  border-inline-start-color: var(--ops-fault);
+}
+.printer {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: var(--ops-space-2);
+}
+.printer label {
+  display: flex;
+  align-items: center;
+  min-block-size: 2.75rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.printer ul {
+  grid-column: 2;
+}
+.printer ul:empty {
+  display: none;
+}
 ul {
-  margin-block: 0 var(--space-2);
-  color: var(--text-muted);
+  margin-block: 0 var(--ops-space-2);
+  color: var(--ops-muted);
+}
+.choice {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ops-space-2);
+  margin-block-end: var(--ops-space-3);
+}
+.choice select {
+  min-block-size: 2.75rem;
+  max-inline-size: 100%;
+}
+.bed {
+  display: flex;
+  align-items: center;
+  margin-block-start: var(--ops-space-3);
+  padding-inline: var(--ops-space-3);
+  border: 1px solid var(--ops-attention);
+  border-radius: var(--ops-radius-md);
+}
+.bed input {
+  flex: none;
+}
+.bed label {
+  flex: 1;
+  padding: var(--ops-space-3) var(--ops-space-2);
+}
+.outcome {
+  padding-inline: var(--ops-space-3);
+  border: 1px solid var(--ops-attention);
+  border-radius: var(--ops-radius-md);
+}
+.outcome[data-outcome='applied'] {
+  border-color: var(--ops-action);
+}
+.confirm {
+  margin-block-end: var(--ops-space-3);
+  margin-inline-end: var(--ops-space-2);
 }
 </style>

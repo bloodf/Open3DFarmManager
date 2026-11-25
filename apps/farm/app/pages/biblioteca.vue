@@ -9,6 +9,7 @@ import Card from '../components/ui/Card.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import ErrorState from '../components/ui/ErrorState.vue'
 import Field from '../components/ui/Field.vue'
+import PageHeader from '../components/ui/PageHeader.vue'
 import Skeleton from '../components/ui/Skeleton.vue'
 import StaleNotice from '../components/ui/StaleNotice.vue'
 import LibraryDetail from '../components/library/LibraryDetail.vue'
@@ -248,15 +249,14 @@ onBeforeUnmount(() => controller?.abort())
 </script>
 
 <template>
-  <main id="conteudo" class="library">
-    <header class="page-header">
-      <p class="eyebrow">Open3DFarmManager</p>
-      <h1>Biblioteca</h1>
-      <p class="intro">
-        Arquivos .gcode e .3mf da farm, com versões e dados lidos do próprio
-        arquivo.
-      </p>
-    </header>
+  <main id="conteudo" class="library ops-library">
+    <div class="ops-heading">
+      <p class="ops-wordmark" translate="no">Open3DFarmManager</p>
+      <PageHeader
+        title="Biblioteca"
+        description="Arquivos .gcode e .3mf da farm, com versões e dados lidos do próprio arquivo."
+      />
+    </div>
     <p v-if="status" role="status" class="notice">{{ status }}</p>
 
     <p v-if="modeError" role="alert" class="notice error">{{ modeError }}</p>
@@ -288,14 +288,14 @@ onBeforeUnmount(() => controller?.abort())
 
     <template v-if="farmId">
       <form
-        class="filters panel"
+        class="filters ops-panel"
         role="search"
         aria-labelledby="library-filters-title"
         :aria-busy="loading"
         novalidate
         @submit.prevent="search()"
       >
-        <h2 id="library-filters-title" class="panel-title">Filtros</h2>
+        <h2 id="library-filters-title" class="ops-title">Filtros</h2>
         <div class="filter-grid">
           <Field label="Título">
             <template #default="{ control }">
@@ -350,13 +350,13 @@ onBeforeUnmount(() => controller?.abort())
           </Field>
         </div>
         <div class="actions">
-          <Button type="submit">Buscar</Button>
+          <Button type="submit" class="ops-primary">Buscar</Button>
           <Button v-if="filtered" @click="clearFilters">Limpar filtros</Button>
         </div>
       </form>
 
       <div class="toolbar">
-        <div role="group" aria-label="Modo de exibição">
+        <div class="segmented" role="group" aria-label="Modo de exibição">
           <Button :aria-pressed="view === 'grid'" @click="view = 'grid'"
             >Grade</Button
           >
@@ -376,10 +376,10 @@ onBeforeUnmount(() => controller?.abort())
       <section
         v-if="showUpload && settings"
         id="library-upload"
-        class="panel"
+        class="ops-panel"
         aria-labelledby="library-upload-title"
       >
-        <h2 id="library-upload-title" class="panel-title">Enviar arquivo</h2>
+        <h2 id="library-upload-title" class="ops-title">Enviar arquivo</h2>
         <LibraryUpload
           :farm-id="farmId"
           :mode="settings.storageMode"
@@ -402,7 +402,7 @@ onBeforeUnmount(() => controller?.abort())
         <Button @click="search()">Tentar novamente</Button>
       </StaleNotice>
 
-      <div v-if="loading" aria-busy="true" class="loading panel">
+      <div v-if="loading" aria-busy="true" class="loading ops-panel">
         <p role="status">Carregando a biblioteca…</p>
         <Skeleton /><Skeleton /><Skeleton />
       </div>
@@ -462,6 +462,7 @@ onBeforeUnmount(() => controller?.abort())
                   Etiquetas: {{ item.tags.join(', ') }}
                 </p>
                 <Button
+                  class="details"
                   :aria-label="`Ver detalhes de ${item.title}`"
                   @click="openItem(item)"
                 >
@@ -482,6 +483,7 @@ onBeforeUnmount(() => controller?.abort())
 
       <LibraryStorage
         v-if="settings"
+        class="ops-panel"
         :mode="settings.storageMode"
         :quota-bytes="settings.quotaBytes"
         :retention-days="settings.retentionDays"
@@ -509,91 +511,81 @@ onBeforeUnmount(() => controller?.abort())
 </template>
 
 <style scoped>
-.library {
-  display: grid;
-  gap: var(--space-4);
-  align-content: start;
-}
-.library > * {
-  min-width: 0;
-}
 [role='alert']:focus-visible {
-  outline: var(--focus-ring-width) solid var(--color-focus-ring);
-  outline-offset: var(--focus-ring-offset);
-  border-radius: var(--radius-md);
-}
-.page-header {
-  display: grid;
-  gap: var(--space-2);
-}
-.eyebrow {
-  margin: 0;
-  font-size: var(--font-size-sm);
-  letter-spacing: 0.04em;
-  color: var(--color-text-muted);
-}
-.page-header h1 {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-.intro {
-  margin: 0;
-  color: var(--color-text-muted);
-}
-.panel {
-  margin: 0;
-  padding: var(--space-5);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-raised);
-  min-width: 0;
-}
-.panel-title {
-  margin: 0 0 var(--space-3);
+  border-radius: var(--ops-radius-lg);
 }
 .notice {
   margin: 0;
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--color-accent);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-raised);
+  max-width: none;
+  padding: var(--ops-space-3) var(--ops-space-4);
+  border: 1px solid var(--ops-action);
+  border-radius: var(--ops-radius-lg);
+  background: var(--ops-panel);
 }
 .notice.error {
-  border-color: var(--state-error-color);
-}
-.filters {
-  display: grid;
-  gap: var(--space-4);
+  color: var(--ops-fault);
+  background: var(--ops-fault-bg);
+  border-color: var(--ops-fault);
 }
 .filter-grid {
   align-items: start;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
-  gap: var(--space-3) var(--space-4);
+  gap: var(--ops-space-3);
+}
+.filter-grid :deep(.field) {
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+}
+.filter-grid :deep(.field span) {
+  color: var(--ops-muted);
+  font-size: var(--ops-text-small);
+  line-height: 16px;
+}
+.filter-grid :deep(.field span.error) {
+  color: var(--ops-fault);
 }
 .actions,
 .toolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2) var(--space-4);
+  gap: var(--ops-space-2) var(--ops-space-4);
   align-items: center;
 }
 .toolbar {
   justify-content: space-between;
 }
-.toolbar [role='group'] {
+/* Exclusive view modes read as one segmented control. */
+.segmented {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2);
 }
-.toolbar [aria-pressed='true'] {
-  color: var(--color-on-accent);
-  background: var(--color-accent);
+.segmented :deep(button.ui-button) {
+  min-width: 5rem;
+  border-radius: 0;
+}
+.segmented :deep(button.ui-button:first-child) {
+  border-start-start-radius: var(--ops-radius-md);
+  border-end-start-radius: var(--ops-radius-md);
+}
+.segmented :deep(button.ui-button:last-child) {
+  margin-inline-start: -1px;
+  border-start-end-radius: var(--ops-radius-md);
+  border-end-end-radius: var(--ops-radius-md);
+}
+.segmented :deep(button.ui-button[aria-pressed='true']) {
+  color: var(--ops-on-action);
+  background: var(--ops-action);
+  border-color: var(--ops-action);
+}
+.segmented :deep(button.ui-button:focus-visible) {
+  position: relative;
 }
 .count {
   margin: 0;
-  font-size: var(--font-size-sm);
-  color: var(--color-text-muted);
+  color: var(--ops-muted);
+  font: var(--ops-text-small) / 16px var(--ops-font-mono);
+  font-variant-numeric: tabular-nums;
 }
 .count:empty {
   display: none;
@@ -603,104 +595,94 @@ onBeforeUnmount(() => controller?.abort())
   margin: 0;
   padding: 0;
   display: grid;
-  gap: var(--space-3);
+  gap: var(--ops-space-3);
 }
 .items.grid {
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr));
 }
 .items li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
+}
+.items :deep(.ui-card) {
+  overflow: hidden;
+  padding: 0;
 }
 .item {
   display: flex;
-  gap: var(--space-3);
   flex-wrap: wrap;
+  gap: var(--ops-space-3);
+  block-size: 100%;
+  padding: var(--ops-space-3);
 }
 .grid .item {
   flex-direction: column;
+  flex-wrap: nowrap;
+  padding: 0;
 }
 .body {
+  display: flex;
   flex: 1 1 14rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--ops-space-2);
   min-width: 0;
 }
-h2 {
-  font-size: var(--font-size-lg);
-  line-height: var(--line-height-tight);
-  margin: 0 0 var(--space-2);
+.grid .body {
+  flex: 1 0 auto;
+  padding: var(--ops-space-3);
+}
+.body > :deep(.meta) {
+  align-self: stretch;
+}
+.item h2 {
+  margin: 0;
+  font-size: var(--ops-text-body);
+  line-height: 20px;
   overflow-wrap: anywhere;
 }
 img,
 .no-thumb {
+  flex: none;
   inline-size: 6rem;
   block-size: 6rem;
   object-fit: contain;
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
+  border-radius: var(--ops-radius-md);
+  background: var(--ops-raised);
+}
+.grid img,
+.grid .no-thumb {
+  inline-size: 100%;
+  block-size: 8rem;
+  border-radius: 0;
+  border-block-end: 1px solid var(--ops-border);
 }
 .no-thumb {
   display: grid;
   place-items: center;
-  color: var(--color-text-muted);
+  color: var(--ops-muted);
+  font: 600 var(--ops-text-title) var(--ops-font-mono);
 }
 .line {
-  margin: 0 0 var(--space-2);
+  margin: 0;
+  color: var(--ops-muted);
+  font-size: var(--ops-text-small);
+  font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
 }
-.loading {
-  display: grid;
-  gap: var(--space-3);
+.details {
+  margin-block-start: auto;
 }
 .loading p {
   margin: 0;
 }
-input,
-select {
-  inline-size: 100%;
-  min-height: 2.75rem;
-  min-width: 0;
-  padding: var(--space-2) var(--space-3);
-  font: inherit;
-  color: inherit;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-}
-:is(input, select):focus-visible {
-  outline: var(--focus-ring-width) solid var(--color-focus-ring);
-  outline-offset: var(--focus-ring-offset);
-}
-/* Child forms (upload, storage) share the page's control look. */
 .library :deep(.stale strong) {
   display: block;
 }
-.library :deep(select),
-.library :deep(textarea),
-.library :deep(input:not([type='file'], [type='checkbox'], [type='radio'])) {
-  min-height: 2.75rem;
-  max-inline-size: 100%;
-  padding: var(--space-2) var(--space-3);
-  font: inherit;
-  color: inherit;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-}
-.library :deep(#library-storage ~ * select),
-.library :deep(section[aria-labelledby='library-storage'] select) {
-  margin-inline: var(--space-2);
-}
-.library :deep(:is(select, textarea, input):focus-visible) {
-  outline: var(--focus-ring-width) solid var(--color-focus-ring);
-  outline-offset: var(--focus-ring-offset);
-}
-/* Same bordered surface as the panels. */
-.library :deep(.ui-card) {
-  border: 1px solid var(--color-border);
-  box-shadow: none;
-}
-@media (max-width: 30rem) {
-  .panel {
-    padding: var(--space-4);
-  }
+/* The version history needs more room than the kit's default dialog. */
+.library :deep(dialog[aria-labelledby]) {
+  inline-size: min(56rem, calc(100% - 2 * var(--ops-space-4)));
+  max-inline-size: min(56rem, calc(100% - 2 * var(--ops-space-4)));
 }
 </style>

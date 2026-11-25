@@ -201,7 +201,15 @@ async function issue(
       ])
       return advertised === undefined
         ? []
-        : [{ controls: advertised, age_at_send_ms: 0, received_at: now }]
+        : [
+            {
+              // An older Connector's record: no send age was ever stored.
+              controls: advertised,
+              age_at_send_ms: null,
+              observed_at: now,
+              received_at: now,
+            },
+          ]
     }
     assert.fail(`Unexpected fixture query: ${statement}`)
   }

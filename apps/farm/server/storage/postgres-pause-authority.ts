@@ -87,14 +87,29 @@ export type PauseChallengeDecision =
 export type PauseCapabilityDecision =
   { ok: true; capability: SignedPauseCapabilityV1 } | PauseAuthorityFailure
 const denied = (): PauseAuthorityFailure => ({ ok: false, reason: 'denied' })
-/** An issuer may only grant controls from a current telemetry observation. */
+/** How far ahead of its receipt an observation without a send age may claim to be. */
+const MAX_FUTURE_OBSERVATION_MS = 30_000
+/** Actions that start a job. They always need a send age. */
+const SEND_AGE_REQUIRED: ReadonlySet<ExtendedControlAction> = new Set([
+  'start_print',
+  'start_library_print',
+  'queue_op',
+])
+/**
+ * An issuer may only grant controls from a current telemetry observation.
+ * An older Connector sends no age (SQL NULL): freshness then counts from the
+ * database receipt, the observation may not be far ahead of it, and job starts
+ * are withheld. A present but invalid age grants nothing.
+ */
 export function freshAdvertisedActions(
   controls: unknown,
   ageAtSendMs: unknown,
   receivedAt: unknown,
   now: number,
+  observedAt?: unknown,
 ): ExtendedControlAction[] {
-  const sendAge = time.safeParse(ageAtSendMs)
+  const withoutAge = ageAtSendMs === null || ageAtSendMs === undefined
+  const sendAge = time.safeParse(withoutAge ? 0 : ageAtSendMs)
   const received = time.safeParse(receivedAt)
   if (
     !sendAge.success ||
@@ -104,9 +119,18 @@ export function freshAdvertisedActions(
     !Array.isArray(controls)
   )
     return []
+  if (withoutAge) {
+    const observed = time.safeParse(observedAt)
+    if (
+      !observed.success ||
+      observed.data > received.data + MAX_FUTURE_OBSERVATION_MS
+    )
+      return []
+  }
   const advertised = new Set<unknown>(controls)
-  return ExtendedControlAction.options.filter((action) =>
-    advertised.has(action),
+  return ExtendedControlAction.options.filter(
+    (action) =>
+      advertised.has(action) && !(withoutAge && SEND_AGE_REQUIRED.has(action)),
   )
 }
 type Current = {
@@ -458,9 +482,10 @@ export class PostgresPauseAuthority {
         controls: unknown
         age_at_send_ms: number | null
         received_at: number | null
+        observed_at: number
       }[]
     >`
-      SELECT controls, age_at_send_ms::float8 AS age_at_send_ms, received_at::float8 AS received_at FROM farm.pause_authority_advertised_controls
+      SELECT controls, age_at_send_ms::float8 AS age_at_send_ms, received_at::float8 AS received_at, observed_at::float8 AS observed_at FROM farm.pause_authority_advertised_controls
       WHERE farm_id=${binding.farm_id}::uuid AND agent_id=${binding.agent_id}::uuid
         AND printer_key=${printerKey}`
     return freshAdvertisedActions(
@@ -468,6 +493,7 @@ export class PostgresPauseAuthority {
       latest?.age_at_send_ms,
       latest?.received_at,
       now,
+      latest?.observed_at,
     )
   }
   async issueChallenge(input: unknown): Promise<PauseChallengeDecision> {

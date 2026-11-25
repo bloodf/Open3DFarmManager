@@ -53,6 +53,19 @@ async function fitsQuota(sql: Sql, file: LibraryFile) {
   return !basis || checkQuota(file.mode, basis, file.sizeBytes).ok
 }
 
+/** Transaction lock: the one every upload of a farm takes before its quota check. */
+function lockLibraryFarm(tx: Sql, farmId: string) {
+  return tx`SELECT pg_advisory_xact_lock(hashtextextended(${'library:' + farmId}, 0))`
+}
+
+/** Files recorded on one Connector. */
+function keptOn(tx: Sql, farmId: string, agentId: string) {
+  return tx<{ sha256: string; sizeBytes: number }[]>`
+    SELECT sha256, size_bytes::float8 AS "sizeBytes" FROM farm.library_blobs
+    WHERE farm_id = ${farmId}::uuid AND storage_location = 'connector'
+      AND agent_id = ${agentId}::uuid AND purged_at IS NULL`
+}
+
 /** Records a stored file, or revives the record retention marked purged. */
 function keepBlob(sql: Sql, file: LibraryFile, createdAt: number) {
   return sql`
@@ -221,12 +234,36 @@ export class PostgresIntegrationLibrary implements IntegrationLibraryStore {
       mode: 'connector',
       agentId,
     }
-    const there = await this.sql`
-      SELECT 1 FROM farm.library_blobs
-      WHERE farm_id = ${farmId}::uuid AND sha256 = ${sha256} AND storage_location = 'connector'
-        AND agent_id = ${agentId}::uuid AND purged_at IS NULL`
-    if (there.length > 0) return 'ready'
-    if (!(await fitsQuota(this.sql, copy))) return 'quota-exceeded'
+    // The Connector's last report and what was recorded on it at that moment.
+    const before = await this.sql.begin(async (tx) => {
+      await lockLibraryFarm(tx as unknown as Sql, farmId)
+      return {
+        basis: await quotaBasis(
+          tx as unknown as Sql,
+          farmId,
+          'connector',
+          agentId,
+          0,
+        ),
+        kept: new Set(
+          (await keptOn(tx as unknown as Sql, farmId, agentId)).map(
+            (file) => file.sha256,
+          ),
+        ),
+      }
+    })
+    if (before.kept.has(sha256)) return 'ready'
+    const fits = (extraBytes: number) =>
+      !before.basis ||
+      checkQuota(
+        'connector',
+        {
+          usedBytes: before.basis.usedBytes + extraBytes,
+          quotaBytes: before.basis.quotaBytes,
+        },
+        sizeBytes,
+      ).ok
+    if (!fits(0)) return 'quota-exceeded'
 
     const { libraryRuntime } = await import('../utils/library/runtime.ts')
     const { relay } = await libraryRuntime()
@@ -253,11 +290,25 @@ export class PostgresIntegrationLibrary implements IntegrationLibraryStore {
     })
     if (stored.sha256 !== sha256 || stored.size !== sizeBytes)
       throw new Error('Library storage unavailable')
-    await this.sql.begin(async (tx) => {
+    // Checked again under the farm lock: files recorded while these bytes moved
+    // are not in the report yet, so concurrent copies are added to it here. The
+    // earlier report is used because a newer one may already count this file.
+    return this.sql.begin(async (tx) => {
+      await lockLibraryFarm(tx as unknown as Sql, farmId)
       await lockLibraryBlob(tx as unknown as Sql, sha256)
+      const kept = await keptOn(tx as unknown as Sql, farmId, agentId)
+      if (kept.some((file) => file.sha256 === sha256)) return 'ready' as const
+      const added = kept
+        .filter((file) => !before.kept.has(file.sha256))
+        .reduce((sum, file) => sum + file.sizeBytes, 0)
+      if (!fits(added)) {
+        if (stored.created)
+          await relay.discard({ farmId, agentId, sha256 }).catch(() => {})
+        return 'quota-exceeded' as const
+      }
       await keepBlob(tx as unknown as Sql, copy, Date.now())
+      return 'ready' as const
     })
-    return 'ready'
   }
 
   async retain(
@@ -284,7 +335,7 @@ export class PostgresIntegrationLibrary implements IntegrationLibraryStore {
       throw new Error('Library storage unavailable')
   }
 
-  async addVersion(version: NewLibraryVersion) {
+  async addVersion(version: NewLibraryVersion, rewrite?: () => Promise<void>) {
     const file: LibraryFile = {
       farmId: version.farmId,
       sha256: version.sha256,
@@ -302,7 +353,15 @@ export class PostgresIntegrationLibrary implements IntegrationLibraryStore {
       await tx`
         INSERT INTO farm.library_items (id, farm_id, title, tags, created_by, created_at)
         VALUES (${version.itemId}::uuid, ${version.farmId}::uuid, ${version.title}, '{}', 'integration', ${version.createdAt})`
+      const purged = await tx`
+        SELECT 1 FROM farm.library_blobs
+        WHERE farm_id = ${file.farmId}::uuid AND sha256 = ${file.sha256} AND storage_location = ${file.mode}
+          AND agent_id IS NOT DISTINCT FROM ${file.agentId}::uuid AND purged_at IS NOT NULL`
       await keepBlob(tx as unknown as Sql, file, version.createdAt)
+      // Retention may have removed the file after `retain` and before these
+      // locks, so write it again while no purge can run. A server file is shared
+      // across farms: another farm's purge can take it before this farm has a row.
+      if (file.mode === 'server' || purged.length > 0) await rewrite?.()
       // The existing kind constraint only permits G-code and 3MF. The
       // immutable profile in version metadata identifies the resin artifact.
       const storedKind = version.kind === 'resin' ? '3mf' : version.kind

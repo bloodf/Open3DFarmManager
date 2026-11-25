@@ -305,6 +305,7 @@ async function upload(
   let stored: { sha256: string; size: number; created: boolean }
   let source: RangeSource
   let discard: () => Promise<void>
+  let confirmFile: () => Promise<void>
   try {
     if (mode === 'server') {
       const blobs = runtime.blobs
@@ -314,6 +315,10 @@ async function upload(
       const sha256 = stored.sha256
       discard = async () => {
         await blobs.remove(sha256)
+      }
+      // Opening a missing file throws.
+      confirmFile = async () => {
+        ;(await blobs.read(sha256)).stream.destroy()
       }
     } else {
       const relay = runtime.relay
@@ -332,6 +337,10 @@ async function upload(
           relay.read({ ...common, sha256, offset, length }),
       }
       discard = () => relay.discard({ ...common, sha256 })
+      // Reading a missing file throws.
+      confirmFile = async () => {
+        await relay.read({ ...common, sha256, offset: 0, length: 1 })
+      }
     }
   } catch (error) {
     if (error instanceof BlobStoreError && error.code === 'too-large')
@@ -351,6 +360,7 @@ async function upload(
     if (!result.ok) throw createError({ status: 422, message: result.reason })
     const added = await runtime.store.addVersion({
       ...authority,
+      confirmFile,
       version: {
         ...(q.itemId
           ? { itemId: q.itemId }

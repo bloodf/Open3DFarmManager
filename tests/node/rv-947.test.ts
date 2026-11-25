@@ -59,6 +59,8 @@ async function dispatcherFixture(
     /** The next read never answers; only an abort ends it. */
     hang: false,
     reading: () => {},
+    holdPrepareOpen: undefined as Promise<void> | undefined,
+    holdCloseOpen: undefined as Promise<void> | undefined,
   }
   const open = async (now: number) => {
     const d = await openV2Dispatch(authority, {
@@ -95,11 +97,12 @@ async function dispatcherFixture(
               if (printer.hang) {
                 printer.hang = false
                 printer.reading()
-                await new Promise((_, reject) =>
-                  signal.addEventListener('abort', () =>
-                    reject(new Error('aborted')),
-                  ),
-                )
+                await (printer.holdPrepareOpen ??
+                  new Promise((_, reject) =>
+                    signal.addEventListener('abort', () =>
+                      reject(new Error('aborted')),
+                    ),
+                  ))
               }
               current = undefined
               ready = printer.ready && printer.notReadyReads === 0
@@ -107,7 +110,9 @@ async function dispatcherFixture(
               observe(binding, observation())
               return { connectionGeneration: 1 }
             },
-            async closeAttempt() {},
+            async closeAttempt() {
+              await printer.holdCloseOpen
+            },
             async execute(action, _args, { beforeSend }) {
               if (!beforeSend()) return { acknowledged: false }
               sent.push(action)
@@ -230,6 +235,35 @@ test('emergency stop preempts the readiness read of another command', async (t) 
   assert.equal(await pause, 'rejected:busy')
   assert.deepEqual(f.sent, ['firmware_restart', 'emergency_stop'])
 })
+
+for (const stalledStep of ['holdPrepareOpen', 'holdCloseOpen'] as const) {
+  test(`emergency stop returns busy when the readiness probe stalls in ${stalledStep}`, async (t) => {
+    const { f, c } = await held(t, ['firmware_restart'])
+    c.d.advance(5000)
+    f.printer.hang = true
+    const stalled = Promise.withResolvers<void>()
+    f.printer[stalledStep] = stalled.promise
+    const reading = Promise.withResolvers<void>()
+    f.printer.reading = reading.resolve
+    const pause = c.send('pause')
+    await reading.promise
+    let watchdog: ReturnType<typeof setTimeout> | undefined
+    try {
+      const stop = await Promise.race([
+        c.send('emergency_stop'),
+        new Promise<string>((resolve) => {
+          watchdog = setTimeout(() => resolve('still pending'), 750)
+        }),
+      ])
+      assert.equal(stop, 'rejected:busy')
+      assert.deepEqual(f.sent, ['firmware_restart'])
+    } finally {
+      clearTimeout(watchdog)
+      stalled.resolve()
+      await pause
+    }
+  })
+}
 
 test('an emergency stop outside a restart holds until the operator clears it', async (t) => {
   const f = await dispatcherFixture(t)

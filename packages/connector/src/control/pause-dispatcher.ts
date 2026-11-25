@@ -122,6 +122,11 @@ const Observation = z.strictObject({
         tray: z.number().int().min(0).max(15).nullable(),
         observedMono: mono,
       }),
+      z.strictObject({
+        kind: z.literal('speed'),
+        level: z.enum(['silent', 'standard', 'sport', 'ludicrous']),
+        observedMono: mono,
+      }),
     ])
     .optional(),
 })
@@ -192,6 +197,8 @@ export function controlEffectMatches(
       return effect.kind === 'filament' && effect.tray === args.tray
     case 'unload_filament':
       return effect.kind === 'filament' && effect.tray === null
+    case 'set_speed':
+      return effect.kind === 'speed' && effect.level === args.level
     default:
       return false
   }

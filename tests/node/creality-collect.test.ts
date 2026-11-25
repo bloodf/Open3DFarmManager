@@ -167,6 +167,7 @@ test(
         filename: 'part.gcode',
         currentLayer: 3,
         toolTemperatureCelsius: 210,
+        speedModes: ['silent', 'standard', 'sport'],
         observedAt: observations[0]?.printer.observedAt,
       })
       assert.equal(f.binding.commands_enabled, false)
@@ -291,6 +292,7 @@ test('Creality snapshots advertise only the wired driver actions', () => {
       'home',
       'set_light',
       'start_print',
+      'set_speed',
     ])
   } finally {
     f.source.close()

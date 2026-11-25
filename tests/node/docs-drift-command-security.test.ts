@@ -296,11 +296,11 @@ test('every journey path named in DRIVER-EVIDENCE.md exists', () => {
 })
 
 test('journey operations are not overclaimed', () => {
-  // These specs only watch status through a connection loss.
+  // These specs only watch status through a connection loss. phrozen.spec.ts
+  // also drives a test-only qualified pair and has its own exact wording.
   const statusOnly = [
     'flashforge',
     'formlabs',
-    'phrozen',
     'prusa-link',
     'qidi',
     'sdcp',
@@ -312,7 +312,13 @@ test('journey operations are not overclaimed', () => {
     if (spec === 'not found') {
       assert.equal(run, 'no', label)
       assert.match(operations!, /^no journey\b/, label)
-    } else if (statusOnly.includes(spec!))
+    } else if (spec === 'phrozen.spec.ts')
+      assert.equal(
+        operations,
+        'read-only status, connection loss and recovery; with a test-only qualification: signed pause, resume and cancel',
+        label,
+      )
+    else if (statusOnly.includes(spec!))
       assert.equal(
         operations,
         'read-only status, connection loss and recovery',

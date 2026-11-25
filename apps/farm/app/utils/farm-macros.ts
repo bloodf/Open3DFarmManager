@@ -1,5 +1,5 @@
 import { ControlArguments } from '../../../../packages/farm-protocol/src/control-actions.ts'
-import { amsTrayIndex, farmSlotLabel } from './slot-spools.ts'
+import { amsTrayIndex, farmSlotLabel, stationTrayIndex } from './slot-spools.ts'
 import type { PrinterState } from '../../../../packages/farm-protocol/src/state.ts'
 
 export function macroActions(state: PrinterState | undefined) {
@@ -25,12 +25,17 @@ export function macroArgs(state: PrinterState | undefined, name: string) {
  */
 export function filamentTrays(state: PrinterState | undefined) {
   return (state?.materials ?? []).flatMap((material) => {
-    const id = amsTrayIndex(material.slot)
+    const station = stationTrayIndex(material.slot)
+    const id = station ?? amsTrayIndex(material.slot)
     if (id === undefined) return []
-    const name = id >= 128 ? farmSlotLabel(material.slot) : material.slot
+    const name =
+      station !== undefined || id >= 128
+        ? farmSlotLabel(material.slot)
+        : material.slot
     return [
       {
         id,
+        ...(station === undefined ? {} : { station: true }),
         label: `${name}${material.materialType ? ` — ${material.materialType}` : ''}`,
         material,
       },

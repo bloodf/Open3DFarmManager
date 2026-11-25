@@ -4,6 +4,7 @@ import {
   provisionBambuPrinter,
   provisionAnycubicPrinter,
   provisionCrealityPrinter,
+  provisionFlashforgePrinter,
 } from '../control/printer-binding.ts'
 import { isAbsolute } from 'node:path'
 import { z } from 'zod'
@@ -202,6 +203,17 @@ export function readAgentRuntimeConfig(
           )
             throw Error('Read-only driver assignment mismatch')
           const readonly = provisionReadonlyPrinter(value)
+          if (driver.family === 'flashforge' && driver.control) {
+            const { assignment_id, farm_id, agent_id, printer_key } =
+              readRuntimePrinterBinding(readonly)!
+            // The binding flag and the pause entry are both local opt-ins.
+            if (!pause?.control?.assignmentIds.includes(assignment_id))
+              return readonly
+            return provisionFlashforgePrinter(
+              { assignment_id, farm_id, agent_id, printer_key },
+              driver,
+            )
+          }
           if (driver.family !== 'anycubic-resin') return readonly
           const assignment = readRuntimePrinterBinding(readonly)!
           // Resin job stop is a local opt-in per assignment.

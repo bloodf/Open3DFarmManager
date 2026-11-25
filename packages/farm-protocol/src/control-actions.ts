@@ -80,6 +80,8 @@ export const ExtendedControlAction = z.enum([
   'gcode',
   'confirm_collection',
   'clear_hold',
+  'set_camera_stream',
+  'set_filament_slot',
 ])
 export type ExtendedControlAction = z.infer<typeof ExtendedControlAction>
 /** Optional, advisory detail of a command result. It never changes the outcome. */
@@ -263,6 +265,34 @@ export const BedMeshArguments = z
       ? profile === undefined
       : op === 'calibrate' || profile !== undefined,
   )
+/** Starts or stops the printer's own camera stream server. */
+export const CameraStreamArguments = z.strictObject({ on: z.boolean() })
+/**
+ * Material names a slot record may carry. Source: the AD5X material station
+ * reference, Parallel-7/flashforge-api-docs wiki @ 885702f.
+ */
+export const FILAMENT_SLOT_MATERIALS = [
+  'PLA',
+  'PLA-CF',
+  'ABS',
+  'PETG',
+  'PETG-CF',
+  'TPU',
+  'SILK',
+  'PA-CF',
+  'PC',
+  'PC-ABS',
+  'PET-CF',
+  'PPS-CF',
+  'PA',
+  'PAHT-CF',
+] as const
+/** What the printer records for one slot. It moves no filament. */
+export const FilamentSlotArguments = z.strictObject({
+  tray: z.number().int().min(0).max(3),
+  material: z.enum(FILAMENT_SLOT_MATERIALS),
+  color: z.string().regex(/^#[0-9A-F]{6}$/),
+})
 /** Scope an API grant needs for `start_library_print`; roles follow `start_print`. */
 export function controlRoleAllowed(
   role: string,
@@ -305,7 +335,8 @@ export function controlSourceState(
   state: string,
 ): boolean {
   if (controlPrinterBusy(action, state)) return false
-  if (action === 'set_tool_temperature') return state === 'idle'
+  if (action === 'set_tool_temperature' || action === 'set_filament_slot')
+    return state === 'idle'
   if (action === 'exclude_object')
     return state === 'printing' || state === 'paused'
   // `clear_hold` never reaches the printer: the operator has checked it.
@@ -462,6 +493,14 @@ export const CollectionArguments = z.strictObject({
 })
 export const ControlArguments = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('file_op'), args: FileOperation }),
+  z.strictObject({
+    action: z.literal('set_camera_stream'),
+    args: CameraStreamArguments,
+  }),
+  z.strictObject({
+    action: z.literal('set_filament_slot'),
+    args: FilamentSlotArguments,
+  }),
   z.strictObject({
     action: z.literal('config_write'),
     args: ConfigWriteArguments,

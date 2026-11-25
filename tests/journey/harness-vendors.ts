@@ -34,6 +34,7 @@ import {
 } from './sdcp-control-fixture.ts'
 import { startPrusaLinkJourneyFixture } from './prusa-link-fixture.ts'
 import { startStatusFixture } from './status-fixtures.ts'
+import { startFlashforgeControlFixture } from './flashforge-control-fixture.ts'
 import { startAnycubicResinFixture } from './anycubic-resin-fixture.ts'
 import { createJourneyCameraEncoder, realFfmpeg } from './camera-encoder.ts'
 import { startBambuCameraFixture } from './bambu-camera-fixture.ts'
@@ -68,8 +69,10 @@ export type VendorOptions = Readonly<{
   printerKey: string
   /** Optional unique device suffix when sharing a Connector with siblings. */
   deviceId?: string
-  /** Bambu: opt in to commands. SDCP: use the control simulator. */
+  /** Bambu and Flashforge: opt in to commands. SDCP: use the control simulator. */
   control?: boolean
+  /** Flashforge control only: the test-only write qualification. */
+  flashforgeQualified?: boolean
   bambuCamera?: BambuCameraScenario
   /** PrusaLink only: the catalog model to simulate (default Prusa MK4). */
   printerModel?: string
@@ -283,7 +286,7 @@ function testFrame(ffmpeg: string): Buffer {
  * qualification is requested (see ./camera-encoder.ts).
  */
 async function startCamera(
-  kind: 'creality-mjpeg' | 'anycubic-rinkhals',
+  kind: 'creality-mjpeg' | 'anycubic-rinkhals' | 'flashforge-mjpeg',
   undo: Closer[],
 ) {
   const encoder = await createJourneyCameraEncoder()
@@ -341,7 +344,41 @@ export async function startVendorSimulator(
     let controls: VendorControls
     let runtime: VendorSimulator['runtime']
 
-    if (name === 'qidi' || name === 'flashforge' || name === 'phrozen') {
+    if (name === 'flashforge' && options.control) {
+      const fixture = await startFlashforgeControlFixture({
+        directory,
+        model: options.printerModel ?? 'Adventurer 5M Pro',
+        qualified: options.flashforgeQualified === true,
+      })
+      undo.push(fixture.close)
+      raw = fixture
+      const unsupported = () => {
+        throw new Error('Flashforge journey drives the simulator directly')
+      }
+      controls = {
+        setProgress: unsupported,
+        finishPrint: unsupported,
+        failPrint: unsupported,
+      }
+      const flashforgeCamera = await startCamera('flashforge-mjpeg', undo)
+      camera = flashforgeCamera.camera
+      cameraSection = flashforgeCamera.section
+      runtime = async (scope) => {
+        await fixture.prepareBuild()
+        return {
+          ...(cameraSection ? { camera: cameraSection } : {}),
+          version: 8,
+          collection: {
+            version: 8,
+            allowedOrigins: [fixture.origin],
+            printers: [],
+            drivers: [{ ...fixture.binding, printerKey: scope.printerKey }],
+            limits: { staleAfterMs: 5000 },
+          },
+          assignment: { ...localAssignment(scope), backend: name },
+        }
+      }
+    } else if (name === 'qidi' || name === 'flashforge' || name === 'phrozen') {
       const fixture = await startStatusFixture(
         name,
         directory,

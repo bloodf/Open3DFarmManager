@@ -134,6 +134,13 @@ export function createFarmSnapshotSource(input: {
     assignmentId: string,
   ) => readonly ExtendedControlAction[] | undefined
   localWebUiOriginFor?: (assignmentId: string) => string | undefined
+  /**
+   * Controls of a read-only-collected printer with a local command binding.
+   * `controlsFor` never applies to these vendors.
+   */
+  readOnlyControlsFor?: (
+    assignmentId: string,
+  ) => readonly ExtendedControlAction[] | undefined
 }) {
   if (input.assignmentRefs.length < 1 || input.assignmentRefs.length > 16)
     throw Error('Configured assignment bound')
@@ -282,7 +289,7 @@ export function createFarmSnapshotSource(input: {
         : undefined
       const provenance = entry.fieldObservedAtMonoMs
       const controls = readOnlyFamily(provenance)
-        ? []
+        ? (input.readOnlyControlsFor?.(ref.assignmentId) ?? [])
         : input.controlsFor?.(ref.assignmentId)
       const advertisedControls =
         controls !== undefined ? { controls: [...controls] } : {}
@@ -315,7 +322,8 @@ export function createFarmSnapshotSource(input: {
           if (stamp + 5000 <= now) delete printer[field]
           else if (
             field === 'alarms' ||
-            'anycubic' in entry.fieldObservedAtMonoMs
+            'anycubic' in entry.fieldObservedAtMonoMs ||
+            'flashforge' in entry.fieldObservedAtMonoMs
           )
             wakeAt = Math.min(wakeAt, stamp + 5000)
           else until = Math.min(until, stamp + 5000)

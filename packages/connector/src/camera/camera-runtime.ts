@@ -224,7 +224,9 @@ export async function createCameraMediaFactory(input: {
   )
   // Vendor MJPEG cameras from the runtime file reuse the same local encoder.
   const configured = config.cameras.flatMap((camera, index) =>
-    'kind' in camera.source && camera.source.kind === 'creality-mjpeg'
+    'kind' in camera.source &&
+    (camera.source.kind === 'creality-mjpeg' ||
+      camera.source.kind === 'flashforge-mjpeg')
       ? [
           {
             handle: 'camera-' + index,

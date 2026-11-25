@@ -63,6 +63,12 @@ export class LibraryQuotaExceeded extends Error {
     super('Library quota exceeded')
   }
 }
+/** Another change holds the farm's library locks: the same upload can retry. */
+export class LibraryBusy extends Error {
+  constructor() {
+    super('Library busy')
+  }
+}
 export interface LibraryAudit {
   farmId: string
   appId: string
@@ -134,8 +140,9 @@ export interface IntegrationLibraryStore {
   /** Makes a version's file available on the Connector that will print it. */
   placeOn(versionId: string, agentId: string): Promise<LibraryPlacement>
   /**
-   * Throws `LibraryQuotaExceeded` when the file no longer fits. `rewrite` stores
-   * the bytes again under the retention locks when a purge may have removed them.
+   * Throws `LibraryQuotaExceeded` when the file no longer fits and `LibraryBusy`
+   * when the farm's locks are not free in time. `rewrite` stores the bytes again
+   * under the retention locks when the file is no longer there.
    */
   addVersion(
     version: NewLibraryVersion,
@@ -487,6 +494,12 @@ export class IntegrationLibraryService {
       }
     } catch (error) {
       if (error instanceof LibraryQuotaExceeded) return quotaExceeded
+      if (error instanceof LibraryBusy)
+        return {
+          ok: false,
+          problem: 'service-unavailable',
+          reason: 'library-busy',
+        }
       return fail('service-unavailable')
     }
   }

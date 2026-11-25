@@ -1,6 +1,7 @@
 import { Readable } from 'node:stream'
 import type { Sql } from 'postgres'
 import {
+  LibraryBusy,
   LibraryQuotaExceeded,
   type IntegrationLibraryStore,
   type LibraryAudit,
@@ -335,6 +336,29 @@ export class PostgresIntegrationLibrary implements IntegrationLibraryStore {
       throw new Error('Library storage unavailable')
   }
 
+  /** Whether the file is still where it was written. */
+  private async holds({ farmId, sha256, mode, agentId }: LibraryFile) {
+    const { libraryRuntime } = await import('../utils/library/runtime.ts')
+    const { blobs, relay } = await libraryRuntime()
+    try {
+      // Reading a missing file throws.
+      if (mode === 'server') {
+        ;(await blobs!.read(sha256)).stream.destroy()
+        return true
+      }
+      await relay!.read({
+        farmId,
+        agentId: agentId!,
+        sha256,
+        offset: 0,
+        length: 1,
+      })
+      return true
+    } catch {
+      return false
+    }
+  }
+
   async addVersion(version: NewLibraryVersion, rewrite?: () => Promise<void>) {
     const file: LibraryFile = {
       farmId: version.farmId,
@@ -343,7 +367,9 @@ export class PostgresIntegrationLibrary implements IntegrationLibraryStore {
       mode: version.storageLocation,
       agentId: version.agentId,
     }
-    await this.sql.begin(async (tx) => {
+    const record = this.sql.begin(async (tx) => {
+      // A busy farm is a retryable refusal, never an open-ended wait.
+      await tx`SET LOCAL lock_timeout = '1000ms'`
       // The same locks as the farm library and retention: quota stays exact and
       // a purge cannot run between reviving a record and adding its version.
       await tx`SELECT pg_advisory_xact_lock(hashtextextended(${'library:' + version.farmId}, 0))`
@@ -353,21 +379,33 @@ export class PostgresIntegrationLibrary implements IntegrationLibraryStore {
       await tx`
         INSERT INTO farm.library_items (id, farm_id, title, tags, created_by, created_at)
         VALUES (${version.itemId}::uuid, ${version.farmId}::uuid, ${version.title}, '{}', 'integration', ${version.createdAt})`
-      const purged = await tx`
+      const live = await tx`
         SELECT 1 FROM farm.library_blobs
         WHERE farm_id = ${file.farmId}::uuid AND sha256 = ${file.sha256} AND storage_location = ${file.mode}
-          AND agent_id IS NOT DISTINCT FROM ${file.agentId}::uuid AND purged_at IS NOT NULL`
+          AND agent_id IS NOT DISTINCT FROM ${file.agentId}::uuid AND purged_at IS NULL`
       await keepBlob(tx as unknown as Sql, file, version.createdAt)
-      // Retention may have removed the file after `retain` and before these
-      // locks, so write it again while no purge can run. A server file is shared
-      // across farms: another farm's purge can take it before this farm has a row.
-      if (file.mode === 'server' || purged.length > 0) await rewrite?.()
+      // Retention or a refused copy may have removed the file after `retain` and
+      // before these locks. A server file is shared across farms, so it is
+      // always checked. Only a missing file is written again: other uploads of
+      // the farm wait on these locks.
+      if (
+        rewrite &&
+        (file.mode === 'server' || live.length === 0) &&
+        !(await this.holds(file))
+      )
+        await rewrite()
       // The existing kind constraint only permits G-code and 3MF. The
       // immutable profile in version metadata identifies the resin artifact.
       const storedKind = version.kind === 'resin' ? '3mf' : version.kind
       await tx`
         INSERT INTO farm.library_versions (id, farm_id, item_id, version_number, sha256, size_bytes, storage_location, agent_id, original_name, kind, plate_count, metadata, notes, uploaded_by, created_at)
         VALUES (${version.id}::uuid, ${version.farmId}::uuid, ${version.itemId}::uuid, ${version.versionNumber}, ${version.sha256}, ${version.sizeBytes}, ${version.storageLocation}, ${version.agentId}, ${version.originalName}, ${storedKind}, ${version.plateCount}, ${tx.json(version.resinProfile === undefined ? {} : { resinProfile: version.resinProfile })}, '', 'integration', ${version.createdAt})`
+    })
+    await record.catch((error: unknown) => {
+      // 55P03: lock_not_available.
+      if ((error as { code?: unknown }).code === '55P03')
+        throw new LibraryBusy()
+      throw error
     })
     const item = await this.getItem(version.itemId)
     if (!item) throw new Error('library version was not stored')

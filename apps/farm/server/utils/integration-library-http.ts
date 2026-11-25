@@ -267,11 +267,13 @@ export async function uploadIntegrationLibrary(
             ? [
                 {
                   pointer:
-                    result.reason === 'profile-mismatch'
-                      ? '/resinProfile'
-                      : result.reason === 'quota-exceeded'
-                        ? '/contentBase64'
-                        : '/name',
+                    result.reason === 'library-busy'
+                      ? ''
+                      : result.reason === 'profile-mismatch'
+                        ? '/resinProfile'
+                        : result.reason === 'quota-exceeded'
+                          ? '/contentBase64'
+                          : '/name',
                   detail: result.reason,
                 },
               ]

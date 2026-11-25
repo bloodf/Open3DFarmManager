@@ -14,6 +14,7 @@
  * on what the printer reported on the connection that sends them.
  */
 
+import { DriverRefusalError } from '../control/driver-refusal.ts'
 import { crealityGcodePath } from './gcode-path.ts'
 
 export const CREALITY_ACTIONS = [
@@ -46,12 +47,10 @@ export interface CrealitySetFrame {
 }
 
 /** Nothing was sent; `refusal` reaches the signed command result. */
-export class CrealityRefused extends Error {
-  readonly refusal: 'state' | 'unsupported-action' | 'invalid-command'
-  constructor(refusal: CrealityRefused['refusal'], message: string) {
-    super(message)
+export class CrealityRefused extends DriverRefusalError {
+  constructor(refusal: DriverRefusalError['refusal'], message: string) {
+    super(refusal, message)
     this.name = 'CrealityRefused'
-    this.refusal = refusal
   }
 }
 

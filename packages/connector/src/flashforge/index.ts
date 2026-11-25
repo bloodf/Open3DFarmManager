@@ -161,6 +161,7 @@ export function createFlashforgeAdapter(
     path: string,
     fields: object = {},
     upload?: { body: Buffer; headers: Record<string, string> },
+    signal?: AbortSignal,
   ) {
     const body =
       upload?.body ??
@@ -173,6 +174,7 @@ export function createFlashforgeAdapter(
           path,
           method: 'POST',
           agent: false,
+          ...(signal ? { signal } : {}),
           headers: {
             'content-type': 'application/json',
             'content-length': body.length,
@@ -217,8 +219,9 @@ export function createFlashforgeAdapter(
     return reply
   }
 
-  async function readStatus() {
-    const detail = object((await post('/detail')).detail)
+  async function readStatus(signal?: AbortSignal) {
+    const reply = await post('/detail', {}, undefined, signal)
+    const detail = object(reply.detail)
     const printerModel = model(detail.pid)
     const firmware = label(detail.firmwareVersion)?.replace(/^v/i, '')
     const supported =

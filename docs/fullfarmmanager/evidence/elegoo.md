@@ -32,7 +32,31 @@ it an SDCP assignment stays read-only. A non-zero `Ack`, a missing `Ack` or a
 missing state change ends the attempt; nothing is retried. Identity (board ID
 and model) is rediscovered before every command session and upload.
 
+## Start qualification
+
+Cmd 128 is neither offered nor sent unless the exact model and firmware pair is
+in `SDCP_QUALIFIED_STARTS` (`packages/connector/src/sdcp/models.ts`). **The
+list is empty, so no printer is offered a start** through the browser or the
+API. Pause, resume, cancel and upload are unaffected. A supervised run on idle
+hardware, recorded here, is required before a pair is added. Neither the wire
+nor the local runtime file can add one.
+
+With a listed model, the Connector reads the firmware when control starts and
+offers start only on an exact match. If that read fails, start stays off until
+control starts again. The driver checks the firmware again against the identity
+it rediscovers for each command session.
+
+Even on a qualified pair, a resin file (`.ctb`, `.goo`) is never started by
+name: its name cannot show which resin model it was sliced for. The browser
+path now applies the API path's rule
+(`resin-artifact-requires-library-version`). The validated resin library
+dispatch is a separate path, and this driver does not provide it, so resin
+models currently have no start through this driver.
+
 ## Per model
+
+In this table, "start" means documented on the wire and built by the Connector.
+It is subject to the qualification and resin rules above.
 
 | Catalog model                       | Control and upload                                              | Evidence                                                                                                                  | Limits and gaps                                                                                                                                                 |
 | ----------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -71,6 +95,9 @@ Neptune and OrangeStorm Giga models are Klipper machines, outside SDCP.
 | Plate or AMS mapping arguments                                         | Rejected before sending. Canvas mapping is not implemented.                                |
 | File listing and deletion (Cmd 258, 259)                               | Not implemented.                                                                           |
 | File name with a path, quote, or another model's extension             | Rejected before any request.                                                               |
+| Start on a model and firmware pair that is not qualified               | Not advertised; refused as `unsupported-action` if sent anyway.                            |
+| Start of a `.ctb` or `.goo` file by name, on the browser or API path   | Refused before sending. An API job is refused before its file is fetched.                  |
+| Printer still busy when the idle wait before start ends                | Not sent, reason `state` (or `deadline` if the dispatcher's result window ends first).     |
 | Print state in transition or unrecognised                              | Decoded as unknown: permits no command and confirms none.                                  |
 | Changed board ID or model behind the address                           | No WebSocket command and no upload.                                                        |
 
@@ -83,14 +110,24 @@ source documents the effect of an upload during a resin print.
 applies Cmd 128 to 131 to a printer model, answers the `Ack`, reports the
 resulting status (resin and Carbon shapes), stores a chunked upload after
 checking offsets and MD5, and can ignore or refuse a command or reject a chunk.
-An unknown command or payload shape drops the connection.
+An unknown command or payload shape drops the connection. The shipped
+qualification list is empty, so start tests pass their own list in code.
 
-- `tests/node/sdcp-control.test.ts`: every operation on all four controllable
-  models, asserted from reported state; signed dispatch; refusals; no retry;
-  runtime opt-in; Carbon status collection.
+Every refusal before the write is typed (`DriverRefusalError`), so it is
+recorded as not sent with a reason and does not block later commands. After the
+write, a failure is still an unknown outcome.
+
+- `tests/node/sdcp-control.test.ts`: pause, resume and cancel on all four
+  controllable models and start on a test-qualified Carbon, asserted from
+  reported state; the resin frame shape and refusal of a bare resin start;
+  signed dispatch; refusals; no retry; runtime opt-in; Carbon status
+  collection.
+- `tests/node/rv-elegoo-safety.test.ts`: start refused on unqualified pairs
+  through the browser and API paths; the resin file rule; invalid commands and
+  idle-wait timeouts ending as not sent with a reason.
 - `tests/node/sdcp-upload.test.ts`: chunking and stored content on all four
-  models, start of the stored file, rejected chunk, revoked authority, changed
-  identity, file-type limits.
+  models, start of the stored file on the Carbon (resin refuses a bare start),
+  rejected chunk, revoked authority, changed identity, file-type limits.
 
 Not covered: real firmware timing (heating, levelling and resin preheat),
 transitional frames from hardware, upload speed, connection limits, the browser

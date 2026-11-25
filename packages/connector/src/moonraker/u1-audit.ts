@@ -1,3 +1,4 @@
+import { DriverRefusalError } from '../control/driver-refusal.ts'
 import { z } from 'zod'
 import { ControlArguments } from '../../../farm-protocol/src/control-actions.ts'
 import type { ControlObservation } from '../control/pause-dispatcher.ts'
@@ -14,8 +15,10 @@ export type U1Audit = {
   response?: (message: string) => void
 }
 
-export class U1ConfigRefusal extends Error {
-  readonly refusal = 'state' as const
+export class U1ConfigRefusal extends DriverRefusalError {
+  constructor(message: string) {
+    super('state', message)
+  }
 }
 
 const ConfigSettings = z.object({
@@ -107,9 +110,7 @@ export function u1HomeAudit(
   const { axes } = parsed.args
   // The firmware always homes both XY axes if either is requested.
   if (axes.includes('x') !== axes.includes('y'))
-    throw Object.assign(Error('U1 homes X and Y together'), {
-      refusal: 'invalid-command',
-    })
+    throw new DriverRefusalError('invalid-command', 'U1 homes X and Y together')
   return {
     zOnly: axes.length === 1 && axes[0] === 'z',
     objects: { toolhead: ['homed_axes'] },

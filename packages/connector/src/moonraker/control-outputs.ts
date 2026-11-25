@@ -1,3 +1,4 @@
+import { DriverRefusalError } from '../control/driver-refusal.ts'
 import {
   OutputName,
   SetLedArguments,
@@ -10,11 +11,9 @@ export type OutputRefusalReason = 'unsupported-action' | 'invalid-command'
  * Thrown before any write. The dispatcher reads `refusal` and reports a
  * not-sent result with that reason instead of an unknown outcome.
  */
-export class OutputRefused extends Error {
-  readonly refusal: OutputRefusalReason
+export class OutputRefused extends DriverRefusalError {
   constructor(refusal: OutputRefusalReason) {
-    super(`Output refused: ${refusal}`)
-    this.refusal = refusal
+    super(refusal, `Output refused: ${refusal}`)
   }
 }
 

@@ -162,10 +162,10 @@ Unproven or missing:
 
 - No recorded AMS HT, expanded AMS or H2D report exists in this repository. Firmware behaviour, including incremental pushes that replace arrays whole, is taken from the client source only.
 - BambuStudio has no separate tray-select request: selecting is a load, or `ams_mapping` at print start. The `ams_mapping2` form is not implemented.
-- The signed `load_filament` action accepts trays 0-15, so an AMS HT load is built and simulated but cannot be requested by a browser or the API. `set_tool_temperature` is likewise not advertised for Bambu.
+- The signed `load_filament` action accepts trays 0-15 and AMS HT unit ids 128-135. AMS HT loading has only been simulated. `set_tool_temperature` is not advertised for Bambu.
 - Loading the external spool, filament-switcher `extruder_id` and air-duct mode selection (`set_airduct`) are not implemented. `set_fan` percentages are sent as given; BambuStudio sends steps of 10.
 - `PrinterState.materials` holds 17 entries: beyond that, the last AMS slots are omitted and external spools are kept.
-- The farm UI shows AMS HT slot ids (`ams:128:0`) and the second external spool (`external:254`) unformatted, and does not display `machine.materialUnits`.
+- The farm UI does not display `machine.materialUnits`.
 - `machine.materialUnits` is new in the strict telemetry schema: the server must be updated before a Connector that sends it.
 
 ## Gaps by owner

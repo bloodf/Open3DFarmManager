@@ -1,7 +1,7 @@
 import { createSocket } from 'node:dgram'
 import { isIPv4 } from 'node:net'
 import { createPhrozenOperations } from './operations.ts'
-import { exchange, object, parse } from './transport.ts'
+import { exchange, object, parse, type PhrozenSession } from './transport.ts'
 
 // Phrozen demonstrates ChituManager on the Revo 14K with V138:
 // https://www.youtube.com/watch?v=ngnSR3nWJGw
@@ -49,6 +49,8 @@ export async function connectPhrozen(
     confirmTimeoutMs = 15_000,
     pollMs = 500,
     uploadTimeoutMs = 30_000,
+    signal = undefined as AbortSignal | undefined,
+    session = undefined as PhrozenSession | undefined,
   } = {},
 ) {
   if (!isIPv4(host))
@@ -71,6 +73,7 @@ export async function connectPhrozen(
 
   const device = await new Promise<ReturnType<typeof identity>>(
     (resolve, reject) => {
+      signal?.throwIfAborted()
       const socket = createSocket('udp4')
       let settled = false
       const timer = setTimeout(
@@ -78,10 +81,14 @@ export async function connectPhrozen(
         timeoutMs,
       )
 
+      const abort = () => finish(new Error('Phrozen discovery aborted'))
+      signal?.addEventListener('abort', abort, { once: true })
+
       function finish(error?: Error, result?: ReturnType<typeof identity>) {
         if (settled) return
         settled = true
         clearTimeout(timer)
+        signal?.removeEventListener('abort', abort)
         socket.close()
         if (result) resolve(result)
         else reject(error)
@@ -134,6 +141,7 @@ export async function connectPhrozen(
           return status
         },
       },
+      { session, signal },
     )
     if (ack !== 0) throw new Error(`Phrozen denied status (Ack ${ack})`)
     return pushed as Record<string, unknown>

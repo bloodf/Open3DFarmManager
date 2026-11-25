@@ -66,32 +66,33 @@ describe('spool illustration surfaces', () => {
             .getByRole('img', { name: 'Nível restante: 25%' })
             .getAttribute('data-level'),
         ).toBe('6')
-        const ace = page.getByRole('region', { name: 'Slots ACE' })
+        const aceSlots = page.getByRole('region', { name: 'Slots ACE' })
         expect(
-          await ace
+          await aceSlots
             .getByRole('img', { name: 'Filamento restante: desconhecido' })
             .getAttribute('data-unknown'),
         ).toBe('true')
         expect(
-          await ace
+          await aceSlots
             .locator('.farm-spool[data-unknown="true"]')
             .getAttribute('data-level'),
         ).toBe('1')
         const wallSlots = page.getByRole('list', { name: 'Slots de filamento' })
-        for (const [percent, frame] of [
-          ['25', '6'],
-          ['0', '8'],
-        ]) {
-          const meter = page
-            .getByRole('meter', { name: 'Filamento restante' })
-            .and(page.locator(`[aria-valuenow="${percent}"]`))
-          const slot = wallSlots.getByRole('listitem').filter({ has: meter })
+        for (const [material, percent, level] of [
+          ['PLA', '25', '6'],
+          ['PETG', '0', '8'],
+        ] as const) {
+          const slot = wallSlots
+            .getByRole('listitem')
+            .filter({ hasText: material })
           expect(
-            await slot.getByRole('meter').getAttribute('aria-valuenow'),
+            await slot
+              .getByRole('meter', { name: 'Filamento restante' })
+              .getAttribute('aria-valuenow'),
           ).toBe(percent)
           expect(
             await slot.locator('.farm-spool').getAttribute('data-level'),
-          ).toBe(frame)
+          ).toBe(level)
         }
         await page.getByRole('button', { name: 'Tabela', exact: true }).click()
         expect(

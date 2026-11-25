@@ -239,10 +239,15 @@ async function unassign(item: SlotAssignment, printer: PrinterRef) {
               </option>
             </select>
           </label>
+          <p :id="`slot-number-help-${printer.assignmentId}`" class="muted">
+            Bambu: para AMS HT 1 a 8, use o tipo AMS e os números 129 a 136.
+            Para a bobina externa 2, use o tipo Impressora e o número 2.
+          </p>
           <label class="feature-field">
             Número do slot
             <input
               v-model="drafts[printer.assignmentId]!.index"
+              :aria-describedby="`slot-number-help-${printer.assignmentId}`"
               type="number"
               min="1"
               max="1025"

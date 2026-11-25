@@ -322,6 +322,19 @@ type PrinterOperationalState = Pick<
   'state' | 'statusReason' | 'preformStatus' | 'statusMessage'
 >
 
+const simulatedSource = 'dados de simulador'
+const unqualifiedSource = 'somente leitura, não qualificada em hardware'
+const statusSourceLabel: Partial<
+  Record<NonNullable<PrinterState['statusReason']>, string>
+> = {
+  'flashforge-simulated': simulatedSource,
+  'flashforge-unqualified': unqualifiedSource,
+  'phrozen-simulated': simulatedSource,
+  'phrozen-unqualified': unqualifiedSource,
+  'qidi-simulated': simulatedSource,
+  'qidi-unqualified': unqualifiedSource,
+}
+
 export function formatPrinterOperationalStateLabel(
   printer: PrinterOperationalState,
 ): string {
@@ -336,7 +349,10 @@ export function formatPrinterOperationalStateLabel(
   ) {
     return 'Certificado do cliente ausente (client certificate missing)'
   }
-  return printerStateLabel[printer.state]
+  const source = printer.statusReason && statusSourceLabel[printer.statusReason]
+  return source
+    ? `${printerStateLabel[printer.state]} — ${source}`
+    : printerStateLabel[printer.state]
 }
 
 export function formatPrinterAlarmLabel(

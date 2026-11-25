@@ -3683,6 +3683,7 @@ components:
               client-certificate-missing,
               prusa-link-unqualified,
               firmware-shutdown,
+              printer-fault,
             ]
           description: Specific reason for the observed status, when known.
         progress:
@@ -5089,9 +5090,14 @@ components:
               additionalProperties: false
               properties:
                 tray:
-                  type: integer
-                  minimum: 0
-                  maximum: 15
+                  description: AMS tray (0-15) or AMS HT unit id (128-135).
+                  anyOf:
+                    - type: integer
+                      minimum: 0
+                      maximum: 15
+                    - type: integer
+                      minimum: 128
+                      maximum: 135
     Action:
       type: object
       required:

@@ -1,3 +1,4 @@
+import { DriverRefusalError } from '../control/driver-refusal.ts'
 import { randomUUID } from 'node:crypto'
 import { openAsBlob, readFileSync } from 'node:fs'
 import { z } from 'zod'
@@ -344,11 +345,12 @@ export interface AnycubicFileTransport {
   publish(topic: string, payload: string, signal: AbortSignal): Promise<void>
 }
 
-export class AnycubicStartRefused extends Error {
-  readonly refusal: 'unsupported-action' | 'invalid-command'
-  constructor(refusal: AnycubicStartRefused['refusal'], message: string) {
-    super(message)
-    this.refusal = refusal
+export class AnycubicStartRefused extends DriverRefusalError {
+  constructor(
+    refusal: 'unsupported-action' | 'invalid-command',
+    message: string,
+  ) {
+    super(refusal, message)
   }
 }
 

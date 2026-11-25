@@ -1,3 +1,4 @@
+import { DriverRefusalError } from '../control/driver-refusal.ts'
 import { moonrakerAuthHeaders } from '../config/moonraker.ts'
 import { fetchMoonrakerConfigfile } from '../machine-profile/moonraker-fetch.ts'
 import {
@@ -163,19 +164,6 @@ const Snapshot = z.strictObject({
     }),
   }),
 })
-/**
- * A builder's typed refusal says why nothing was written. Anything else the
- * builder throws is a malformed request and stays `invalid-command`.
- */
-function isTypedRefusal(error: unknown): error is Error {
-  const refusal = (error as { refusal?: unknown } | null)?.refusal
-  return (
-    error instanceof Error &&
-    (refusal === 'state' ||
-      refusal === 'unsupported-action' ||
-      refusal === 'invalid-command')
-  )
-}
 const U1AuditSnapshot = Snapshot.extend({
   status: Snapshot.shape.status.loose(),
 })
@@ -589,9 +577,21 @@ export function openFixedMoonrakerPause(input: {
       throw failure()
     }
   }
+  /**
+   * What a failed command path throws. Until the single command starts only
+   * reads ran, so any failure is a refusal; afterwards the outcome is unknown.
+   */
+  function dispatchError(error: unknown): Error {
+    if (error instanceof DriverRefusalError) return error
+    return attempted
+      ? failure()
+      : new DriverRefusalError('state', 'Printer state unavailable', {
+          cause: error,
+        })
+  }
   /** The single command of this attempt; `wire` is always built locally. */
   function send(
-    wire: string | undefined,
+    wire: string,
     {
       binding: requested,
       beforeSend,
@@ -600,13 +600,7 @@ export function openFixedMoonrakerPause(input: {
     cap?: number,
     accepts: (result: unknown) => boolean = (result) => result === 'ok',
   ) {
-    if (
-      requested !== binding ||
-      !prepared ||
-      attempted ||
-      terminal ||
-      wire === undefined
-    ) {
+    if (requested !== binding || !prepared || attempted || terminal) {
       stop()
       return closed.then(() => {
         throw failure()
@@ -649,24 +643,23 @@ export function openFixedMoonrakerPause(input: {
         throw failure()
       })
   }
+  /** Throws the builder's typed refusal; nothing has been written. */
   function extendedWire(
     action: ExtendedControlAction,
     args: Record<string, unknown>,
-  ): string | undefined {
-    if (!commandObjects) return undefined
-    try {
-      const call = buildMoonrakerCommand(action, args, commandObjects)
-      return JSON.stringify({
-        jsonrpc: '2.0',
-        id: 2,
-        method: call.method,
-        ...(call.params ? { params: call.params } : {}),
-      })
-    } catch (error) {
-      // Keep the builder's own reason; the caller closes the attempt.
-      if (isTypedRefusal(error)) throw error
-      return undefined
-    }
+  ): string {
+    if (!commandObjects)
+      throw new DriverRefusalError(
+        'unsupported-action',
+        'Printer objects unknown',
+      )
+    const call = buildMoonrakerCommand(action, args, commandObjects)
+    return JSON.stringify({
+      jsonrpc: '2.0',
+      id: 2,
+      method: call.method,
+      ...(call.params ? { params: call.params } : {}),
+    })
   }
   async function readU1Settings(signal: AbortSignal) {
     // Installed config can exceed the fixed command socket's reply ceiling.
@@ -696,7 +689,6 @@ export function openFixedMoonrakerPause(input: {
         throw new MotionRefusal('unsupported')
       // Same builder as the send; it also rejects malformed arguments.
       const wire = extendedWire(action, args)
-      if (wire === undefined) throw new MotionRefusal('invalid')
       if (motionNeedsState(action)) {
         const state = parseMotionState(
           await request(11, motionQueryWire(11), lifetimeDeadline),
@@ -713,18 +705,7 @@ export function openFixedMoonrakerPause(input: {
     } catch (error) {
       stop()
       await closed
-      if (u1 && error instanceof U1ConfigRefusal) throw error
-      if (u1 && error instanceof MotionRefusal)
-        throw Object.assign(error, {
-          refusal:
-            error.code === 'invalid'
-              ? 'invalid-command'
-              : error.code === 'unsupported'
-                ? 'unsupported-action'
-                : 'state',
-        })
-      if (isTypedRefusal(error)) throw error
-      throw error instanceof MotionRefusal ? error : failure()
+      throw dispatchError(error)
     }
   }
   /**
@@ -769,7 +750,6 @@ export function openFixedMoonrakerPause(input: {
         throw new QueueRefused('unsupported-action')
       const { op } = parseQueueOp(args)
       const wire = extendedWire('queue_op', args)
-      if (wire === undefined) throw new QueueRefused('invalid-command')
       refuseQueueOp(
         op,
         queueNeedsStatus(op)
@@ -786,9 +766,7 @@ export function openFixedMoonrakerPause(input: {
     } catch (error) {
       stop()
       await closed
-      throw error instanceof QueueRefused || isTypedRefusal(error)
-        ? error
-        : failure()
+      throw dispatchError(error)
     }
   }
   /**
@@ -809,7 +787,6 @@ export function openFixedMoonrakerPause(input: {
         throw new TimelapseRefused('unsupported-action')
       const { op } = parseTimelapseOp(args)
       const wire = extendedWire('timelapse', args)
-      if (wire === undefined) throw new TimelapseRefused('invalid-command')
       refuseTimelapseOp(
         op,
         parseTimelapseStatus(
@@ -824,9 +801,7 @@ export function openFixedMoonrakerPause(input: {
     } catch (error) {
       stop()
       await closed
-      throw error instanceof TimelapseRefused || isTypedRefusal(error)
-        ? error
-        : failure()
+      throw dispatchError(error)
     }
   }
   /**
@@ -845,9 +820,7 @@ export function openFixedMoonrakerPause(input: {
     } catch (error) {
       stop()
       await closed
-      throw error instanceof OutputRefused
-        ? error
-        : new OutputRefused('invalid-command')
+      throw dispatchError(error)
     }
     extended = action
     return send(extendedWire(action, args), request, 5000)
@@ -906,7 +879,6 @@ export function openFixedMoonrakerPause(input: {
         throw new BedMeshRefused('unsupported-action')
       // Same builder as the send; it also rejects malformed arguments.
       const wire = extendedWire('bed_mesh', args)
-      if (wire === undefined) throw new BedMeshRefused('invalid-command')
       refuseBedMesh(
         args,
         parseBedMeshState(
@@ -918,9 +890,7 @@ export function openFixedMoonrakerPause(input: {
     } catch (error) {
       stop()
       await closed
-      throw error instanceof BedMeshRefused || isTypedRefusal(error)
-        ? error
-        : failure()
+      throw dispatchError(error)
     }
   }
   /**
@@ -1019,7 +989,6 @@ export function openFixedMoonrakerPause(input: {
       }
       if (u1) u1Audit = u1ConsoleAudit(line.trim(), tool)
       const wire = extendedWire('gcode', wireArgs)
-      if (wire === undefined) throw new ConsoleRefusal('invalid')
       takeConsoleRate(binding, input.clock.monotonicNow())
       extended = 'gcode'
       return await send(wire, requested, cap)
@@ -1028,9 +997,7 @@ export function openFixedMoonrakerPause(input: {
       await closed
       if (error instanceof MotionRefusal || error instanceof U1ConfigRefusal)
         throw new ConsoleRefusal('unknown-state')
-      throw error instanceof ConsoleRefusal || isTypedRefusal(error)
-        ? error
-        : failure()
+      throw dispatchError(error)
     }
   }
   const requestRead = (id: number, wire: string) =>
@@ -1041,10 +1008,6 @@ export function openFixedMoonrakerPause(input: {
     requested: Parameters<PauseDriver['pauseOnce']>[0],
   ) {
     const wire = extendedWire(action, args)
-    if (wire === undefined)
-      throw Object.assign(Error('Invalid U1 heater arguments'), {
-        refusal: 'invalid-command',
-      })
     const audit = u1TemperatureAudit(action, args)
     if (audit.target !== 0)
       requireU1HeaterLimit(
@@ -1062,10 +1025,6 @@ export function openFixedMoonrakerPause(input: {
     consoleLine?: string,
   ) {
     const wire = extendedWire('home', args)
-    if (wire === undefined)
-      throw Object.assign(Error('Invalid U1 home arguments'), {
-        refusal: 'invalid-command',
-      })
     const audit = u1HomeAudit(args)
     if (audit.zOnly) {
       const state = await request(11, motionQueryWire(11), lifetimeDeadline)
@@ -1102,9 +1061,7 @@ export function openFixedMoonrakerPause(input: {
       !input.objects?.includes('configfile') ||
       !input.objects.includes('print_stats')
     )
-      throw Object.assign(Error('Invalid config command'), {
-        refusal: 'invalid-command',
-      })
+      throw new DriverRefusalError('invalid-command', 'Invalid config command')
     let editor = editors.get(binding)
     if (!editor) {
       editor = createMoonrakerConfigEditor(
@@ -1113,8 +1070,8 @@ export function openFixedMoonrakerPause(input: {
       )
       editors.set(binding, editor)
     }
-    current()
-    attempted = true
+    // The editor calls the guard before its first write.
+    let guarded = false
     const config = parsed.data
     const options = {
       ...config,
@@ -1123,9 +1080,14 @@ export function openFixedMoonrakerPause(input: {
         current()
         return stillAuthorized()
       },
-      beforeWrite: request.beforeSend,
+      beforeWrite() {
+        guarded = true
+        return request.beforeSend()
+      },
     }
     try {
+      current()
+      attempted = true
       if ('backup' in config)
         await editor.restore({ ...options, backup: config.backup })
       else {
@@ -1141,11 +1103,10 @@ export function openFixedMoonrakerPause(input: {
       now()
       return { acknowledged: true }
     } catch (error) {
-      if (error instanceof ConfigWriteRefused)
-        throw Object.assign(error, {
-          refusal: error.reason === 'state' ? 'state' : 'invalid-command',
-        })
-      throw error
+      if (guarded || error instanceof DriverRefusalError) throw error
+      throw new DriverRefusalError('state', 'Configuration state unavailable', {
+        cause: error,
+      })
     }
   }
 
@@ -1214,8 +1175,17 @@ export function openFixedMoonrakerPause(input: {
       if (action === 'timelapse') return timelapse(args, request)
       if (action === 'set_fan' || action === 'set_led' || action === 'set_pin')
         return output(action, args, request)
+      let wire: string
+      try {
+        wire = extendedWire(action, args)
+      } catch (error) {
+        stop()
+        return closed.then(() => {
+          throw dispatchError(error)
+        })
+      }
       extended = action
-      return send(extendedWire(action, args), request, 5000)
+      return send(wire, request, 5000)
     },
     pauseOnce(request: Parameters<PauseDriver['pauseOnce']>[0]) {
       if (u1 && !u1Controls?.includes(request.action ?? 'pause'))

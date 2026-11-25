@@ -60,6 +60,8 @@ export function createAnycubicCollection(input: {
   let estimateActive = false
   let activeJob = false
   let activeFilename: string | undefined
+  // A stopped job's progress is gone; an idle printer then reports from zero.
+  let progressReset = false
   // Repeated in every observation until the next job starts, so a telemetry
   // batch that misses the transition report still carries the finished job.
   let lastJob: PrinterState['lastJob']
@@ -74,6 +76,7 @@ export function createAnycubicCollection(input: {
     estimateActive = false
     activeJob = false
     activeFilename = undefined
+    progressReset = false
     alert = undefined
     clearTimeout(timer)
     values = {}
@@ -121,6 +124,8 @@ export function createAnycubicCollection(input: {
       )
         alert = undefined
       const printing = state === 'printing' || state === 'paused'
+      // Set when this report stops the job; its old numbers no longer apply.
+      let stopped = false
       // An explicit phase can withdraw the estimate without ending the job.
       if (state !== undefined || estimateBlocked) estimateActive = printing
       if (printing) {
@@ -144,6 +149,11 @@ export function createAnycubicCollection(input: {
           endedAt: Date.now(),
           ...(activeFilename ? { filename: activeFilename } : {}),
         }
+        // A failure without the printer's own reason keeps its numbers: the
+        // report would otherwise have nothing publishable.
+        stopped =
+          lastJob.outcome === 'cancelled' ||
+          (lastJob.outcome === 'failed' && alert !== undefined)
         activeJob = false
         activeFilename = undefined
       }
@@ -175,15 +185,35 @@ export function createAnycubicCollection(input: {
                 : value
         times[key as keyof PrinterState] = now
       }
+      if (printing || fields.progress !== undefined) progressReset = false
+      if (stopped) {
+        for (const key of ['progress', 'currentLayer', 'totalLayer'] as const) {
+          if (fields[key] !== undefined) continue
+          delete values[key]
+          delete times[key]
+        }
+        progressReset = fields.progress === undefined
+      }
+      if (progressReset && values.state === 'idle' && times.state) {
+        values.progress = 0
+        times.progress = times.state
+      }
+      const faultOnly =
+        values.progress === undefined &&
+        alert !== undefined &&
+        (values.state === 'error' || values.state === 'paused')
       if (
         !values.state ||
-        (values.state !== 'offline' && values.progress === undefined)
+        (values.state !== 'offline' &&
+          values.progress === undefined &&
+          !faultOnly)
       )
         return
       const parsed = PrinterState.safeParse({
         ...values,
         ...(lastJob ? { lastJob } : {}),
         ...(alert ? { statusMessage: alert.message } : {}),
+        ...(faultOnly ? { statusReason: 'printer-fault' } : {}),
         printerKey: input.binding.printerKey,
         observedAt: Date.now(),
       })
@@ -197,7 +227,14 @@ export function createAnycubicCollection(input: {
         ...(firmwareObservation ? { firmwareObservation } : {}),
         printer: parsed.data,
         receivedAtMonoMs: now,
-        fieldObservedAtMonoMs: { anycubic: { ...times } },
+        fieldObservedAtMonoMs: {
+          anycubic: {
+            ...times,
+            ...(faultOnly && times.state !== undefined
+              ? { statusReason: times.state }
+              : {}),
+          },
+        },
       })
       clearTimeout(timer)
       timer = setTimeout(

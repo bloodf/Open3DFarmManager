@@ -129,10 +129,26 @@ export interface FarmSlotView {
 
 const LOW_FRACTION = 0.15
 
+/**
+ * Global tray index of an AMS slot id: unit * 4 + slot (0-15) for the four-slot
+ * units, and the unit id (128-135) for the single-slot AMS HT units.
+ */
+export function amsTrayIndex(slot: string): number | undefined {
+  const ams = /^ams:([0-3]):([0-3])$/.exec(slot)
+  if (ams) return Number(ams[1]) * 4 + Number(ams[2])
+  const ht = /^ams:(12[89]|13[0-5]):0$/.exec(slot)
+  return ht ? Number(ht[1]) : undefined
+}
+
 /** The slot name as shown to people: AMS trays, ACE slots, holders, external. */
 export function farmSlotLabel(slot: string): string {
-  const ams = /^ams:([0-3]):([0-3])$/.exec(slot)
-  if (ams) return `AMS ${Number(ams[1]) + 1}, bandeja ${Number(ams[2]) + 1}`
+  const tray = amsTrayIndex(slot)
+  if (tray !== undefined)
+    return tray >= 128
+      ? `AMS HT ${tray - 127}`
+      : `AMS ${Math.floor(tray / 4) + 1}, bandeja ${(tray % 4) + 1}`
+  // The second external holder of a dual-extruder Bambu printer.
+  if (slot === 'external:254') return 'Bobina externa 2'
   const kobra = /^(-1|0):([0-3])$/.exec(slot)
   if (kobra)
     return `${kobra[1] === '-1' ? 'Suporte' : 'ACE'} ${Number(kobra[2]) + 1}`
@@ -194,14 +210,15 @@ export type SlotBindingIndex = ReadonlyMap<
 >
 
 export function slotBindingKey(slot: string): SlotBindingKey {
-  const ams = /^ams:([0-3]):([0-3])$/.exec(slot)
-  if (ams) return `ams:${Number(ams[1]) * 4 + Number(ams[2])}`
+  const tray = amsTrayIndex(slot)
+  if (tray !== undefined) return `ams:${tray}`
   const ace = /^(\d+):([0-3])$/.exec(slot)
   if (ace) return `ams:${Number(ace[1]) * 4 + Number(ace[2])}`
   const tool = /^(?:t|tool|extruder|toolhead)[-_:]?(\d{1,4})$/i.exec(slot)
   if (tool) return `toolhead:${Number(tool[1])}`
   const holder = /^-1:([0-3])$/.exec(slot)
   if (holder) return `printer:${Number(holder[1])}`
+  if (slot === 'external:254') return 'printer:1'
   return slot === 'external' ? 'printer:0' : 'printer:-1'
 }
 

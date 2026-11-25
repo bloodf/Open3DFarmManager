@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { ControlArguments } from '../../../farm-protocol/src/control-actions.ts'
 import type { ControlObservation } from '../control/pause-dispatcher.ts'
 import { ConsoleRefusal } from './control-console.ts'
+import { klipperCommandName } from './klipper-command.ts'
 import { type MotionState, MotionRefusal } from './control-motion.ts'
 import { U1_TOOL_OBJECTS } from './u1-marker.ts'
 
@@ -258,9 +259,10 @@ const READ_ONLY_COMMANDS = new Set(['M118'])
  * the effect cannot be read: the line was sent and acknowledged, but it is
  * reported as unconfirmed rather than applied.
  */
-function consoleReadback(line: string): Readback | undefined {
-  const [word = '', ...params] = line.trim().split(/\s+/)
-  const command = word.toUpperCase()
+function consoleReadback(
+  command: string,
+  params: readonly string[],
+): Readback | undefined {
   if (READ_ONLY_COMMANDS.has(command))
     return { objects: {}, confirmed: () => true }
   if (
@@ -301,16 +303,16 @@ export function u1ConsoleAudit(
   tool?: string,
   home?: U1Audit,
 ): U1Audit {
-  const readback = tool || home ? undefined : consoleReadback(line)
-  const [word = '', ...rest] = line.trim().split(/\s+/)
-  const command = word.toUpperCase()
+  const command = klipperCommandName(line)
+  const [, ...params] = line.trim().split(/\s+/)
+  const readback = tool || home ? undefined : consoleReadback(command, params)
   const isQuery =
     command.startsWith('QUERY_') ||
     ['M105', 'M114', 'M115', 'GET_POSITION'].includes(command)
   let reported = false
   return {
     response(message) {
-      if (QUERY_REPORTS[command]?.(message, rest.join(' '))) reported = true
+      if (QUERY_REPORTS[command]?.(message, params.join(' '))) reported = true
     },
     objects: tool
       ? { toolhead: ['extruder'] }

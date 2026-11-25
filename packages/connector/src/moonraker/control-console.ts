@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { GcodeLine } from '../../../farm-protocol/src/control-actions.ts'
+import { klipperCommandName } from './klipper-command.ts'
 
 /**
  * Moonraker adapter for the signed `gcode` console action. One validated line
@@ -101,7 +102,9 @@ export function consoleAllowedWhilePrinting(line: string): boolean {
   const parts = tokens(line)
   if (!parts) return false
   const [word, ...params] = parts
-  const command = word!.toUpperCase()
+  const command = klipperCommandName(line)
+  // The tuning rules only validate whitespace-separated parameters.
+  if (word!.toUpperCase() !== command) return false
   switch (command) {
     case 'M220':
     case 'M221':
@@ -138,7 +141,7 @@ export function consoleAllowedWhilePrinting(line: string): boolean {
 export function idleConsoleClass(line: string): 'safe' | 'guarded' | 'refused' {
   const parts = tokens(line)
   if (!parts) return 'refused'
-  const command = parts[0]!.toUpperCase()
+  const command = klipperCommandName(line)
   // QUERY_* is a legacy active-print rule. At idle, an arbitrary name with
   // that prefix could be a macro, so only known query commands qualify.
   if (
@@ -152,7 +155,12 @@ export function idleConsoleClass(line: string): 'safe' | 'guarded' | 'refused' {
     consoleAllowedWhilePrinting(line)
   )
     return 'safe'
-  if (command === 'M118' && parts.length > 1) return 'safe'
+  if (
+    command === 'M118' &&
+    parts[0]!.toUpperCase() === command &&
+    parts.length > 1
+  )
+    return 'safe'
   if (
     [
       'G0',
@@ -180,7 +188,7 @@ export function consoleAllowedWhenStopped(
 ): boolean {
   const parts = tokens(line)
   if (!parts) return false
-  const command = parts[0]!.toUpperCase()
+  const command = klipperCommandName(line)
   return (
     !ALWAYS_REFUSED.has(command) &&
     !additionalRefused?.includes(command) &&

@@ -11,7 +11,7 @@
 // A missing image or a Node/openssl mismatch fails the run clearly.
 //
 // Prerequisites (shared with scripts/check-all-docker.mjs; override via env):
-//   OPENFARM_GATE_NODE_IMAGE        default openfarm-e2e-node22.23.5:latest (Node + openssl;
+//   OPENFARM_GATE_NODE_IMAGE        default openfarm-e2e-node<.nvmrc>:latest (Node + openssl;
 //                                   its Node version must equal the connector Dockerfile's pin)
 //
 // Usage:
@@ -32,6 +32,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
+  browserNodeImage,
   ensureBaseImage,
   seedNodeModules,
 } from '../../scripts/docker-base-image.mjs'
@@ -136,8 +137,7 @@ async function cleanup() {
 }
 
 const config = {
-  image:
-    process.env.OPENFARM_GATE_NODE_IMAGE || 'openfarm-e2e-node22.23.5:latest',
+  image: process.env.OPENFARM_GATE_NODE_IMAGE || browserNodeImage(repoRoot),
 }
 
 function nodeImage() {

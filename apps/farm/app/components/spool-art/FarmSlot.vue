@@ -97,7 +97,7 @@ const amount = computed(() => {
       ? { main: `${left} de ${total}`, note: pct }
       : { main: pct, note: 'informado pelo Spoolman' }
   }
-  return { main: pct, note: 'informado pela impressora' }
+  return { main: `${pct} restante`, note: 'informado pela impressora' }
 })
 </script>
 

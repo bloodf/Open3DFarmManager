@@ -7,7 +7,7 @@ import {
   validateKobraClientCertificate,
   type KobraClientCertErrorReason,
   type KobraClientCertMetadata,
-} from '../../../../packages/farm-protocol/src/kobra-client-cert.ts'
+} from '../../../../packages/shared/src/kobra-client-cert.ts'
 
 export type KobraCertSourceMode = 'file' | 'install-path'
 

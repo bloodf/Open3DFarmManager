@@ -57,7 +57,7 @@ import { connectorFingerprintFromSpki } from '../../packages/farm-protocol/src/c
 import { deriveConfigurationAssignmentIdentity } from '../../packages/farm-protocol/src/configuration-inventory.ts'
 import { configurationTargetHash } from '../../packages/farm-protocol/src/configuration-target.ts'
 import { base64url } from '../../packages/farm-protocol/src/encoding.ts'
-import { validateKobraClientCertificate } from '../../packages/farm-protocol/src/kobra-client-cert.ts'
+import { validateKobraClientCertificate } from '../../packages/shared/src/kobra-client-cert.ts'
 import { PrinterState } from '../../packages/farm-protocol/src/state.ts'
 
 const workDir = realpathSync(mkdtempSync(join(tmpdir(), 'e16-366-')))

@@ -46,7 +46,7 @@ function shellRoutes(queries: string[]): Routes {
     'GET /api/browser-devices': reply({ currentRole: 'owner' }),
     [`GET /api/farms/${farmId}/spool-library/spools`]: ({ url }) => {
       const query = url.searchParams.get('q') ?? ''
-      if (query) queries.push(query)
+      queries.push(query)
       return reply({ items: query ? [spool] : [], total: query ? 1 : 0 })
     },
   }
@@ -123,6 +123,43 @@ it('scrolls the newly active keyboard option into the dialog viewport', async ()
       ).__scrollIntoViewCalls.at(-1),
     )
     pw(scrollCall).toEqual({ id: activeId, block: 'nearest' })
+  } finally {
+    await opened.close()
+  }
+})
+
+it('skips empty spool searches and exposes only nonempty, noninteractive options', async () => {
+  const queries: string[] = []
+  const opened = await harness.open('farm', shellRoutes(queries), {
+    layout: true,
+    route: { path: '/farm', query: { farm: farmId } },
+  })
+  try {
+    const input = await openPalette(opened.page)
+    await pw(
+      opened.page.locator('#shell-search-results [role=option]').first(),
+    ).toBeVisible()
+    await pw(input).toHaveValue('')
+    await pw(
+      opened.page.getByText('Há mais bobinas.', { exact: false }),
+    ).toHaveCount(0)
+    await pw(opened.page.locator('[role="group"]')).not.toHaveCount(0)
+    pw(
+      await opened.page
+        .locator('[role="group"]')
+        .evaluateAll((groups) =>
+          groups.every((group) => !!group.querySelector('[role="option"]')),
+        ),
+    ).toBe(true)
+    await pw(
+      opened.page.locator('[role="option"] a, [role="option"] button'),
+    ).toHaveCount(0)
+    pw(queries).toEqual([])
+    await opened.page
+      .locator('#shell-search-results [role=option]')
+      .first()
+      .click()
+    await pw(input).toHaveCount(0)
   } finally {
     await opened.close()
   }

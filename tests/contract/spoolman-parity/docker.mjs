@@ -3,13 +3,17 @@
 // anonymous volumes) when the run ends, whatever the outcome.
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { createLifecycle } from '../../../scripts/docker-run-lib.mjs'
 
 const exec = promisify(execFile)
+// Tracks in-flight `docker create` calls, so removal never races one.
+const lifecycle = createLifecycle()
 
 export const OWNER_LABEL = 'org.open3dfarmmanager.task'
 export const TASK = 'spoolman-parity-546'
 
 export async function docker(...args) {
+  if (args[0] === 'create') return lifecycle.create(args)
   const { stdout } = await exec('docker', args, {
     timeout: 600_000,
     maxBuffer: 16 * 1024 * 1024,
@@ -41,8 +45,12 @@ export async function ensureImage(reference, purpose) {
   }
 }
 
-/** Force-remove every container this process created; verify none remain. */
+/**
+ * Force-remove every container this process created; verify none remain. Waits
+ * for in-flight creates first and allows no new ones.
+ */
 export async function removeContainers(names) {
+  await lifecycle.settle()
   const remaining = []
   for (const name of names) {
     try {
@@ -58,7 +66,12 @@ export async function removeContainers(names) {
       }
       await docker('rm', '-f', '-v', name)
     } catch (error) {
-      if (!/no such (object|container)/i.test(String(error.stderr ?? error)))
+      // `--rm` containers may disappear, or be disappearing, on their own.
+      if (
+        !/no such (object|container)|already in progress/i.test(
+          String(error.stderr ?? error),
+        )
+      )
         remaining.push(
           `${name}: ${String(error.stderr ?? error).split('\n')[0]}`,
         )

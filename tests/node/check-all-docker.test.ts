@@ -10,7 +10,11 @@ const script = fileURLToPath(
 
 type RunnerModule = {
   resolveConfig: (env: Record<string, string>) => { nodeImage: string }
-  resourceNames: (id: string) => { id: string; container: string }
+  resourceNames: (id: string) => {
+    id: string
+    container: string
+    runDir: string
+  }
   planCalls: (cfg: unknown, names: unknown) => string[][]
   execPlan: (names: unknown) => { label: string; args: string[] }[]
   findPlanProblems: (calls: string[][]) => string[]
@@ -38,7 +42,8 @@ test('check-all-docker --self-test proves command construction and fail-closed p
     result.stdout,
     /self-test passed \(\d+ checks, no service started\)/,
   )
-  assert.match(result.stdout, /missing npm cache volume fails closed/)
+  assert.match(result.stdout, /missing PostgreSQL image fails closed/)
+  assert.match(result.stdout, /an existing dependency image is reused/)
   assert.doesNotMatch(result.stdout, /^FAIL/m)
 })
 
@@ -121,7 +126,7 @@ type RuntimeModule = {
   SCRATCH_DIR: string
   MIN_SCRATCH_BYTES: number
   PREPARE_SCRATCH: string
-  scratchMount: () => string
+  scratchMount: (runDir: string) => string
 }
 
 test('check-all-docker supplies python3 with the Node image libraries it needs', async () => {
@@ -169,7 +174,7 @@ test('check-all-docker supplies python3 with the Node image libraries it needs',
   )
 })
 
-test('check-all-docker gives /tmp a task-owned scratch volume with at least 10 GiB free', async () => {
+test('check-all-docker gives /tmp a run-owned scratch directory with at least 10 GiB free', async () => {
   const runner = (await import(
     new URL('../../scripts/check-all-docker.mjs', import.meta.url).href
   )) as RunnerModule
@@ -181,9 +186,11 @@ test('check-all-docker gives /tmp a task-owned scratch volume with at least 10 G
   const create = calls[0] ?? []
   const labels = runner.execPlan(names).map((step) => step.label)
 
-  // Anonymous volume (no source): owned by the container, removed with `rm -v`.
-  assert.equal(runtime.scratchMount(), 'type=volume,destination=/tmp')
-  assert.ok(create.includes(runtime.scratchMount()))
+  // A bind of this run's directory: owned by the run, removed with it.
+  const scratch = runtime.scratchMount(names.runDir)
+  assert.equal(scratch, `type=bind,source=${names.runDir}/tmp,destination=/tmp`)
+  assert.match(names.runDir, /\/openfarm-docker\/check-all-scratch-test$/)
+  assert.ok(create.includes(scratch))
   assert.ok(!create.some((arg) => /^\/tmp:/.test(arg)), 'no /tmp tmpfs')
   // The rehearsal asserts > 10 GiB; the runner checks it up front, fail-closed.
   assert.ok(runtime.MIN_SCRATCH_BYTES > 10 * 1024 ** 3)
@@ -194,22 +201,19 @@ test('check-all-docker gives /tmp a task-owned scratch volume with at least 10 G
   )
   assert.deepEqual(runner.findPlanProblems(calls), [])
 
-  // The checker refuses a named (shared) or missing scratch volume.
+  // The checker refuses a named, anonymous, foreign or missing scratch mount.
   const swap = (mount: string) =>
     calls.map((call, i) =>
-      i === 0
-        ? call.map((arg) => (arg === runtime.scratchMount() ? mount : arg))
-        : call,
+      i === 0 ? call.map((arg) => (arg === scratch ? mount : arg)) : call,
     )
   for (const tainted of [
     swap('type=volume,source=shared,destination=/tmp'),
+    swap('type=volume,destination=/tmp'),
+    swap('type=bind,source=/tmp,destination=/tmp'),
+    swap(`type=bind,source=${names.runDir}/../other/tmp,destination=/tmp`),
     calls.map((call, i) =>
       i === 0
-        ? call.filter(
-            (arg, j) =>
-              arg !== runtime.scratchMount() &&
-              call[j + 1] !== runtime.scratchMount(),
-          )
+        ? call.filter((arg, j) => arg !== scratch && call[j + 1] !== scratch)
         : call,
     ),
   ])

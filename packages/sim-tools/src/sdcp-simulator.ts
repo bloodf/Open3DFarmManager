@@ -19,6 +19,12 @@ export type SdcpMachine = {
   totalLayer: number
   /** Stored files by name, filled by a completed and verified upload. */
   files: Map<string, Buffer>
+  /** Resin only: finished tasks answered to Cmd 320 and 321. */
+  history: SdcpSimulatedTask[]
+  /** Resin only: address answered to Cmd 386; none means no camera. */
+  videoUrl?: string
+  /** Resin only: streams enabled and not yet disabled (limit 1). */
+  videoStreams: number
   /** Fault switches. */
   fault?: {
     /** Acknowledge a command without applying it. */
@@ -28,6 +34,16 @@ export type SdcpMachine = {
     /** Reject the upload chunk at this offset. */
     rejectOffset?: number
   }
+}
+
+/** The `HistoryDetailList` fields of the spec that the simulator fills. */
+export type SdcpSimulatedTask = {
+  TaskId: string
+  TaskName: string
+  BeginTime: number
+  EndTime: number
+  /** 0 other, 1 completed, 2 exceptional, 3 stopped. */
+  TaskStatus: number
 }
 
 const CMD_KEYS: Record<'resin' | 'fdm', string[]> = {
@@ -68,6 +84,43 @@ function statusFrame(machine: SdcpMachine, board: string) {
   }
 }
 
+/** History and video of a resin board (CBD spec, Cmd 320, 321 and 386). */
+function query(
+  machine: SdcpMachine,
+  cmd: number,
+  data: any,
+): Record<string, unknown> {
+  if (cmd === 320)
+    return { Ack: 0, HistoryData: machine.history.map((task) => task.TaskId) }
+  if (cmd === 321)
+    return {
+      Ack: 0,
+      HistoryDetailList: machine.history.filter((task) =>
+        data.Id.includes(task.TaskId),
+      ),
+    }
+  if (data.Enable === 0) {
+    machine.videoStreams = Math.max(0, machine.videoStreams - 1)
+    return { Ack: 0 }
+  }
+  if (!machine.videoUrl) return { Ack: 2 }
+  if (machine.videoStreams >= 1) return { Ack: 1 }
+  machine.videoStreams += 1
+  return { Ack: 0, VideoUrl: machine.videoUrl }
+}
+
+/** The payload shapes each family accepts; anything else is a crash. */
+function shaped(family: SdcpMachine['family'], cmd: number, data: any) {
+  const keys = Object.keys(data).sort().join()
+  if (cmd === 128) return keys === CMD_KEYS[family].join()
+  if ([0, 129, 130, 131].includes(cmd)) return keys === ''
+  // Resin only: the Connector never sends these to the Carbon.
+  if (family !== 'resin') return false
+  if (cmd === 320) return keys === ''
+  if (cmd === 321) return keys === 'Id' && Array.isArray(data.Id)
+  return cmd === 386 && keys === 'Enable' && [0, 1].includes(data.Enable)
+}
+
 /** Applies one print command and returns its acknowledgement code. */
 function apply(machine: SdcpMachine, cmd: number, data: any): number {
   if (machine.fault?.ack !== undefined) return machine.fault.ack
@@ -84,8 +137,17 @@ function apply(machine: SdcpMachine, cmd: number, data: any): number {
   }
   if (cmd === 129 && machine.phase === 'printing') machine.phase = 'paused'
   else if (cmd === 131 && machine.phase === 'paused') machine.phase = 'printing'
-  else if (cmd === 130 && busy) machine.phase = 'stopped'
-  else return 1
+  else if (cmd === 130 && busy) {
+    machine.phase = 'stopped'
+    const now = Math.floor(Date.now() / 1000)
+    machine.history.unshift({
+      TaskId: `task-${machine.history.length + 1}`,
+      TaskName: machine.filename,
+      BeginTime: now - 60,
+      EndTime: now,
+      TaskStatus: 3,
+    })
+  } else return 1
   return 0
 }
 
@@ -113,15 +175,34 @@ export async function startSdcpSimulator(
       FirmwareVersion: 'V1.0.0',
     },
   },
+  /** Fixed loopback address and ports for a journey; ephemeral by default. */
+  listen: {
+    discoveryPort?: number
+    websocketPort?: number
+  } = {},
 ) {
+  const host = '127.0.0.1'
   const board = discovery.Data.MainboardID!
   const udp = dgram.createSocket('udp4')
   const http = createServer()
   const ws = new WebSocketServer({ server: http, path: '/websocket' })
-  await Promise.all([
-    new Promise<void>((resolve) => udp.bind(0, '127.0.0.1', resolve)),
-    new Promise<void>((resolve) => http.listen(0, '127.0.0.1', resolve)),
-  ])
+  try {
+    await new Promise<void>((resolve, reject) => {
+      udp.once('error', reject)
+      udp.bind(listen.discoveryPort ?? 0, host, resolve)
+    })
+    await new Promise<void>((resolve, reject) => {
+      http.once('error', reject)
+      // `ws` re-emits the server's listen error on the WebSocket server.
+      ws.once('error', reject)
+      http.listen(listen.websocketPort ?? 0, host, resolve)
+    })
+  } catch (error) {
+    udp.close()
+    ws.close()
+    http.close()
+    throw error
+  }
   const requests: unknown[] = []
   const chunks: { offset: number; size: number; uuid: string }[] = []
   let response: unknown
@@ -147,19 +228,16 @@ export async function startSdcpSimulator(
         if (message.Topic !== `sdcp/request/${board}`) return
         // An unknown command or payload shape drops the connection, as the
         // Carbon's firmware does when its process dies.
-        const shaped =
-          Cmd === 128
-            ? Object.keys(Data).sort().join() ===
-              CMD_KEYS[machine.family].join()
-            : [0, 129, 130, 131].includes(Cmd) && !Object.keys(Data).length
-        if (!shaped) return client.terminate()
-        const ack = Cmd === 0 ? 0 : apply(machine, Cmd, Data)
+        if (!shaped(machine.family, Cmd, Data)) return client.terminate()
+        const answer = [320, 321, 386].includes(Cmd)
+          ? query(machine, Cmd, Data)
+          : { Ack: Cmd === 0 ? 0 : apply(machine, Cmd, Data) }
         client.send(
           JSON.stringify({
             Id: message.Id,
             Data: {
               Cmd,
-              Data: { Ack: ack },
+              Data: answer,
               RequestID,
               MainboardID: board,
             },
@@ -253,6 +331,8 @@ export async function startSdcpSimulator(
         currentLayer: 0,
         totalLayer: 0,
         files: new Map(),
+        history: [],
+        videoStreams: 0,
         ...initial,
       }
       return machine

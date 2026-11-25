@@ -331,7 +331,8 @@ export async function createRuntimeMoonrakerFixture() {
         const child = spawn(
           process.execPath,
           [
-            entry.pathname,
+            // A journey may replace the CLI with its own test composition.
+            process.env.SIGNALLING_HTTPS_CONNECTOR_ENTRY ?? entry.pathname,
             'run',
             '--config',
             configPath,

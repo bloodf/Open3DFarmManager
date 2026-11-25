@@ -36,6 +36,9 @@ import {
   type BambuDetailStream,
 } from '../bambu/printer-detail.ts'
 import { createCrealityDetailStream } from '../creality/printer-detail.ts'
+import { answerSdcpDetailQuery, sdcpPrinterDetail } from '../sdcp/detail.ts'
+import { sdcpProfile } from '../sdcp/models.ts'
+import type { SdcpVideo } from '../sdcp/video.ts'
 
 const MAX_ITEMS = 256
 const MAX_QUERIES_PER_SESSION = 4
@@ -50,7 +53,10 @@ type PrinterDetailSource = Pick<MoonrakerDetailStream, 'subscribe'> &
   Partial<Pick<BambuDetailStream, 'query'>>
 
 /** Moonraker, Bambu and Creality streams connect on subscription. Anycubic frames reuse collection. */
-export function createPrinterDetailSources(config: AgentRuntimeConfig) {
+export function createPrinterDetailSources(
+  config: AgentRuntimeConfig,
+  options: { sdcpVideo?: SdcpVideo } = {},
+) {
   const sources = new Map<string, PrinterDetailSource>()
   const { printers, limits } = config.collection
   const allowedOrigins = moonrakerOrigins(config.collection)
@@ -103,6 +109,37 @@ export function createPrinterDetailSources(config: AgentRuntimeConfig) {
       binding.printerKey,
       vendor.register(binding.printerKey, kobraXPrinterDetail),
     )
+  }
+  if (config.collection.version === 6) {
+    for (const binding of config.collection.sdcp.printers) {
+      // Only models with documented history get a detail page feed.
+      if (!sdcpProfile(binding.model)?.history) continue
+      const assignment = config.assignments.find(
+        ({ printer_key }) => printer_key === binding.printerKey,
+      )
+      if (!assignment) continue
+      const cameraId = options.sdcpVideo?.offered(binding)
+        ? config.camera?.cameras.find(
+            (item) =>
+              item.assignmentId === assignment.assignment_id &&
+              'kind' in item.source &&
+              item.source.kind === 'sdcp-rtsp',
+          )?.cameraId
+        : undefined
+      sources.set(binding.printerKey, {
+        ...vendor.register(binding.printerKey, (printer, seq) =>
+          sdcpPrinterDetail(printer, seq, {
+            cameraId:
+              printer.identity?.firmware &&
+              options.sdcpVideo?.qualified(binding, printer.identity.firmware)
+                ? cameraId
+                : undefined,
+            stream: options.sdcpVideo?.status(binding.mainboardId),
+          }),
+        ),
+        query: (kind, signal) => answerSdcpDetailQuery(binding, kind, signal),
+      })
+    }
   }
   if (config.collection.version === 5) {
     for (const binding of config.collection.anycubic.printers) {

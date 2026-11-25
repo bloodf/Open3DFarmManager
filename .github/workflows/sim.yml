@@ -202,7 +202,7 @@ jobs:
       OPENFARM_SIM: docker
       RTC_FARM_TEST_ALL_EVIDENCE: ${{ github.workspace }}/sim-diagnostics/network-fault
       RTC_FARM_TEST_ALL_SUMMARY: ${{ github.workspace }}/sim-diagnostics/network-fault/summary.json
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262

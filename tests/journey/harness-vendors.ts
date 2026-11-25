@@ -419,6 +419,7 @@ export async function startVendorSimulator(
                 host: '127.0.0.1',
                 port: fixture.simulator.port,
                 deviceId: fixture.deviceId,
+                model: fixture.model,
               },
             ],
           },

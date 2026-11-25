@@ -510,8 +510,9 @@ describe('migration rollback', () => {
     const through = (id: string) => catalogThrough(catalog, id)
     const down = (id: string) =>
       runMigrations(root, through(id), { kind: 'down', expectedLastId: id })
-    const last = catalog.at(-1)!.id
-    expect(last).toBe('0124_integration_library_followups')
+    const last = '0124_integration_library_followups'
+    const later = catalog.slice(through(last).length).map(({ id }) => id)
+    for (const id of [...later].reverse()) await down(id)
     await down(last)
     await down('0123_spool_observation_permissions')
     await down('0122_integration_refusal_message')
@@ -535,6 +536,7 @@ describe('migration rollback', () => {
       '0122_integration_refusal_message',
       '0123_spool_observation_permissions',
       '0124_integration_library_followups',
+      ...later,
     ])
   })
 })

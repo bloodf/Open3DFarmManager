@@ -56,12 +56,12 @@ const STATES: State[] = [
  * Plain arguments for every action both entry points carry. The API path
  * takes only `API_ENVELOPE_ACTIONS`; `start_library_print` also needs a
  * library relay, so its state rule is covered by the shared predicate test.
- * Emergency stop has separate local state gates on the two paths.
  */
 const ARGS: Partial<Record<Action, Record<string, unknown>>> = {
   pause: {},
   resume: {},
   cancel: {},
+  emergency_stop: {},
   set_temperature: { heater: 'extruder', target_c: 200 },
   set_tool_temperature: { tool: 0, target_c: 200 },
   set_fan: { fan: 'part', percent: 50 },
@@ -73,7 +73,7 @@ const ARGS: Partial<Record<Action, Record<string, unknown>>> = {
   unload_filament: {},
 }
 const CASES = API_ENVELOPE_ACTIONS.filter(
-  (action) => action !== 'start_library_print' && action !== 'emergency_stop',
+  (action) => action !== 'start_library_print',
 ).map((action) => {
   const args = ARGS[action]
   assert.ok(args, `parity arguments for ${action}`)
@@ -448,14 +448,23 @@ test('the busy rule covers motion, filament, macros, job starts and tool heating
 })
 
 for (const [action, args] of CASES)
-  test(`browser and API paths agree on ${action} in every state`, async () => {
+  test(`browser and API paths enforce the local state rules for ${action}`, async () => {
     let sentSomewhere = false
     for (const state of STATES) {
       const browser = await browserDecision(action, args, state)
       const api = await apiDecision(action, args, state)
       sentSomewhere ||= browser.sent
       const label = `${action} while ${state}`
-      assert.equal(browser.sent, api.sent, `${label}: same send decision`)
+      if (action === 'emergency_stop') {
+        assert.equal(browser.sent, true, `${label}: browser stop`)
+        assert.equal(
+          api.sent,
+          !['unknown', 'error'].includes(state),
+          `${label}: API readiness gate`,
+        )
+      } else {
+        assert.equal(browser.sent, api.sent, `${label}: same send decision`)
+      }
       if (action === 'set_tool_temperature')
         assert.equal(browser.sent, state === 'idle', `${label}: idle only`)
       if (
@@ -469,8 +478,3 @@ for (const [action, args] of CASES)
     }
     assert.ok(sentSomewhere, `${action} is written in some state`)
   })
-
-test('the API emergency stop uses its local readiness gate', async () => {
-  assert.equal((await apiDecision('emergency_stop', {}, 'paused')).sent, true)
-  assert.equal((await apiDecision('emergency_stop', {}, 'unknown')).sent, false)
-})

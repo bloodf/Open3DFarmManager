@@ -15,6 +15,8 @@ Upgrade the application first, then each Connector. Both orders keep telemetry f
 
 **New Connector, older server.** The older server refuses records that carry a send age (HTTP 400). The Connector then sends the same batch again without it, before anything is committed. Telemetry keeps flowing, at the cost of one extra request per batch with printer state or inventory. Server behavior is that of the old release. The same applies after rolling the application back. Once the server is upgraded, it receives the send age on the next batch, with no Connector restart.
 
+An idle printer reports no progress. A server that still requires progress refuses that record (HTTP 400), and the Connector sends the batch again with progress 0 for the idle printer before anything is committed. It keeps the send age if the server accepts it. A server older than both changes costs two extra requests for such a batch.
+
 A new Connector uses the timestamps saved in its queue to age reports recovered after a restart. It reports at least the full queue retention window for recovered observations because elapsed time across the restart cannot be verified from the wall clock alone. Reports without a usable age are eligible only for the stop-action fallback.
 
 ## 1. Rehearse the application upgrade

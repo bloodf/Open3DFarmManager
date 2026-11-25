@@ -11,20 +11,32 @@ import type { TelemetrySender } from './drain.ts'
 class RequestRefused extends Error {}
 
 /**
- * A server older than the send age parses records strictly and refuses the
- * whole batch. This returns the same batch without it, or null if it has none.
+ * Older servers parse records strictly and refuse the whole batch for a shape
+ * they do not know: an idle printer with no progress, or a send age. This
+ * returns the shapes to try after a refusal, least changed first. Idle
+ * progress is 0 only for such a server; the queue keeps the record as observed.
  */
-function withoutSendAge(body: string): string | null {
-  let found = false
+function olderShapes(body: string): string[] {
   const records = TelemetryBatch.parse(
     parseBoundedJson(body, TELEMETRY_BATCH_JSON_LIMITS),
-  ).map((record) => {
+  )
+  const withProgress = records.map((record) =>
+    record.kind === 'printer-state' &&
+    record.state.state === 'idle' &&
+    record.state.progress === undefined
+      ? { ...record, state: { ...record.state, progress: 0 } }
+      : record,
+  )
+  const withoutAge = withProgress.map((record) => {
     if (!('ageAtSendMs' in record)) return record
-    found = true
     const { ageAtSendMs: _age, ...rest } = record
     return rest
   })
-  return found ? JSON.stringify(records) : null
+  const shapes = new Set(
+    [withProgress, withoutAge].map((shape) => JSON.stringify(shape)),
+  )
+  shapes.delete(JSON.stringify(records))
+  return [...shapes]
 }
 
 /** Explicit trusted configuration; no fallback to the unauthenticated prototype. */
@@ -186,17 +198,20 @@ export function createAuthenticatedTelemetrySender(options: {
       const requestChallenge = () =>
         requestWithRetry(endpoint + '/challenge', headers, deadlineAt)
       let reply: unknown
-      try {
-        reply = await requestChallenge()
-      } catch (error) {
-        // Nothing is committed by a refused challenge, so asking again with
-        // the older record shape is safe. Each batch tries the age first, so
-        // an upgraded server receives it without a Connector restart.
-        const older =
-          error instanceof RequestRefused ? withoutSendAge(body) : null
-        if (older === null) throw error
-        bytes = new TextEncoder().encode(older)
-        reply = await requestChallenge()
+      let older: string[] | undefined
+      for (;;) {
+        try {
+          reply = await requestChallenge()
+          break
+        } catch (error) {
+          // Nothing is committed by a refused challenge, so asking again with
+          // an older record shape is safe. Each batch tries the current shape
+          // first, so an upgraded server receives it without a restart.
+          if (!(error instanceof RequestRefused)) throw error
+          const next = (older ??= olderShapes(body)).shift()
+          if (next === undefined) throw error
+          bytes = new TextEncoder().encode(next)
+        }
       }
       if (
         !reply ||

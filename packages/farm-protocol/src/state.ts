@@ -295,9 +295,8 @@ function printerStateSchema(legacy: boolean) {
     .refine(
       (value) =>
         value.state === 'offline' ||
-        // Older servers require progress for this state and may reject such
-        // observations until they are upgraded; this does not negotiate a
-        // backwards-compatible wire representation.
+        // An idle printer reports no progress. Older servers require it, so the
+        // Connector's telemetry sender adds 0 only after such a server refuses.
         (value.state === 'idle' &&
           value.lastJob !== undefined &&
           value.statusReason === undefined) ||

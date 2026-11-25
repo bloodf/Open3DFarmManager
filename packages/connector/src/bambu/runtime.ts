@@ -1,10 +1,14 @@
 import { mapBambuFirmware } from './firmware.ts'
-import { parseBambuMachineProfile } from '../machine-profile/bambu.ts'
+import { mergeBambuMachineProfile } from '../machine-profile/bambu.ts'
+import { applyBambuAmsReport } from './ams.ts'
 import type { MachineProfile } from '../../../farm-protocol/src/machine-profile.ts'
 import { decodeBambuVersion } from './version.ts'
 import type { RawPrinterObservation } from '../runtime/farm-snapshot-provider.ts'
 import { readFileSync } from 'node:fs'
-import { PrinterState } from '@open3dfarmmanager/farm-protocol'
+import {
+  boundPrinterString,
+  PrinterState,
+} from '@open3dfarmmanager/farm-protocol'
 import type { FilamentUsage } from '@open3dfarmmanager/farm-protocol'
 import { parseBambuBinding, type BambuBinding } from './configuration.ts'
 import { readBambuCredentials } from './credentials.ts'
@@ -171,7 +175,7 @@ export function createBambuRuntimeSubscription(input: {
             return
           }
           if (decodeBambuVersion(rawFirmware)) version = rawFirmware
-          machine = parseBambuMachineProfile(rawFirmware) ?? machine
+          machine = mergeBambuMachineProfile(machine, rawFirmware)
           if (
             rawFirmware &&
             typeof rawFirmware === 'object' &&
@@ -261,15 +265,27 @@ export function createBambuRuntimeSubscription(input: {
           }
           for (const key of Object.keys(observed) as (keyof Fields)[])
             if (key !== 'lastJob') times[key] = now
-          if (observed.materials) {
-            const merged = new Map(
-              (fields.materials ?? []).map((item) => [item.slot, item]),
+          const reportedPrint = (raw as { print?: unknown })?.print
+          if (
+            reportedPrint !== null &&
+            typeof reportedPrint === 'object' &&
+            !Array.isArray(reportedPrint)
+          ) {
+            // Also covers reports that only clear slots or move the active one.
+            const materials = applyBambuAmsReport(
+              fields.materials,
+              reportedPrint as Record<string, unknown>,
             )
-            for (const item of observed.materials) {
-              const previous = merged.get(item.slot)
-              merged.set(item.slot, { ...previous, ...item })
+            if (materials) {
+              observed.materials = materials.map((item) =>
+                item.materialType === undefined
+                  ? item
+                  : {
+                      ...item,
+                      materialType: boundPrinterString(item.materialType),
+                    },
+              )
             }
-            observed.materials = [...merged.values()]
           }
           if (observed.fans)
             observed.fans = { ...fields.fans, ...observed.fans }

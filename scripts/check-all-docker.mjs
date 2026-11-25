@@ -546,6 +546,22 @@ export function containerSession({
 
 const stamp = () => new Date().toISOString()
 
+/** Reuse or build the dependency image; unavailable dependencies fail closed. */
+export function ensureDependencyImage(cfg, docker) {
+  try {
+    return ensureBaseImage({
+      projectDir: ROOT,
+      nodeImage: cfg.nodeImage,
+      bin: cfg.docker,
+      docker,
+    })
+  } catch (error) {
+    throw new PrerequisiteError(
+      `dependency image ${cfg.baseImage} is not available: ${error.message}`,
+    )
+  }
+}
+
 async function runGate(cfg, log) {
   const id = `${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`
   const names = resourceNames(id)
@@ -556,11 +572,7 @@ async function runGate(cfg, log) {
   const docker = dockerRunner(cfg.docker)
   const prerequisites = await checkPrerequisites(docker, cfg)
   const free = checkHostSpace()
-  ensureBaseImage({
-    projectDir: ROOT,
-    nodeImage: cfg.nodeImage,
-    bin: cfg.docker,
-  })
+  ensureDependencyImage(cfg)
 
   const ledger = mkdtempSync(join(tmpdir(), 'openfarm-check-all-docker-'))
   await mkdir(ledger, { recursive: true })
@@ -877,16 +889,18 @@ export async function selfTest(log = console.log) {
     /platforms must match/,
   )
   const dependencyCalls = []
-  const reused = ensureBaseImage({
-    nodeImage: cfg.nodeImage,
-    docker: (args) => {
-      dependencyCalls.push(args[0])
-      return { status: 0 }
-    },
+  const reused = ensureDependencyImage(cfg, (args) => {
+    dependencyCalls.push(args[0])
+    return { status: 0 }
   })
   check(
     'an existing dependency image is reused, not rebuilt',
     reused === cfg.baseImage && !dependencyCalls.includes('build'),
+  )
+  await rejects(
+    'missing dependency source image fails closed',
+    async () => ensureDependencyImage(cfg, () => ({ status: 1 })),
+    /dependency image .* is not present locally/,
   )
 
   const failed = checks.filter((c) => !c.ok)

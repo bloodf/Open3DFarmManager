@@ -44,6 +44,7 @@ test('check-all-docker --self-test proves command construction and fail-closed p
   )
   assert.match(result.stdout, /missing PostgreSQL image fails closed/)
   assert.match(result.stdout, /an existing dependency image is reused/)
+  assert.match(result.stdout, /missing dependency source image fails closed/)
   assert.doesNotMatch(result.stdout, /^FAIL/m)
 })
 

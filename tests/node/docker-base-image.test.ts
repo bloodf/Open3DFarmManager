@@ -6,14 +6,12 @@ import { createHash } from 'node:crypto'
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
@@ -65,16 +63,7 @@ test('the tag hashes the lockfile and the Node image reference', () => {
   )
 })
 
-test('the image is built only when missing, from manifests alone', (t) => {
-  // The build context is a run directory: keep it out of the real cache.
-  const cache = mkdtempSync(join(tmpdir(), 'openfarm-base-context-test-'))
-  const previous = process.env.XDG_CACHE_HOME
-  process.env.XDG_CACHE_HOME = cache
-  t.after(() => {
-    if (previous === undefined) delete process.env.XDG_CACHE_HOME
-    else process.env.XDG_CACHE_HOME = previous
-    rmSync(cache, { recursive: true, force: true })
-  })
+test('the image is built only when missing, from manifests alone', () => {
   const calls: string[][] = []
   let context: string[] = []
   const docker = (present: (ref: string) => boolean) => (args: string[]) => {
@@ -120,7 +109,8 @@ test('the image is built only when missing, from manifests alone', (t) => {
 })
 
 test('the seed copies every node_modules tree and nothing else', () => {
-  const root = mkdtempSync(join(tmpdir(), 'openfarm-seed-test-'))
+  // Scratch space follows the runners' rule: under the cache, not /tmp.
+  const root = lib.createRunDir('seed-test')
   try {
     const deps = join(root, 'deps')
     const work = join(root, 'work')
@@ -501,7 +491,7 @@ test('check-all masks the PostgreSQL volume and the checker requires it', () => 
 })
 
 test('run directories live under the cache root and only they are removed', async () => {
-  const cache = mkdtempSync(join(tmpdir(), 'openfarm-run-dir-test-'))
+  const cache = lib.createRunDir('cache-test')
   try {
     const env = { XDG_CACHE_HOME: cache }
     assert.equal(lib.runRoot(env), join(cache, 'openfarm-docker'))

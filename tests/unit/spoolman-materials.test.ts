@@ -28,6 +28,13 @@ describe('Spoolman materials', () => {
     expect(
       mapSpoolmanMaterial({ ...spool, remaining_weight: -5 }).remainingPercent,
     ).toBe(0)
+    expect(
+      mapSpoolmanMaterial({
+        ...spool,
+        initial_weight: null,
+        filament: { ...spool.filament, weight: 500 },
+      }).remainingPercent,
+    ).toBe(50)
   })
   it('selects only the active spool from a fresh inventory', async () => {
     const snapshot = {

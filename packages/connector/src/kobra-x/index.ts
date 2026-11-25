@@ -14,6 +14,7 @@ import {
   parseKobraXReport,
   reportRefusal,
   type KobraXReport,
+  type KobraXReportIdentity,
 } from './requests.ts'
 import {
   createKobraXQueryEvidence,
@@ -52,6 +53,8 @@ export async function connectKobraX(options: {
   resultTimeoutMs?: number
   motionResultTimeoutMs?: number
   usageSettleMs?: number
+  /** `printer-assigned` only for firmware that replaces report msgids. */
+  reportIdentity?: KobraXReportIdentity
 }) {
   const { address, clientIdentity } = options
   if (!clientIdentity?.cert || !clientIdentity.key)
@@ -60,7 +63,9 @@ export async function connectKobraX(options: {
   try {
     secureContext = createSecureContext({
       ...clientIdentity,
-      minVersion: 'TLSv1.2',
+      // The client certificate is held back until the printer passes its
+      // pin check, which needs TLS 1.3 (see `connectAnycubicTls`).
+      minVersion: 'TLSv1.3',
     })
   } catch {
     throw new Error('Kobra X client certificate or key is invalid')
@@ -97,6 +102,7 @@ export async function connectKobraX(options: {
       const socket = connectAnycubicTls(
         { host: address, port: options.mqttPort ?? 9883, secureContext },
         pin,
+        { holdClientIdentity: true },
       )
       socket.once('secureConnect', () => {
         tlsEstablished = !socket.destroyed
@@ -128,6 +134,9 @@ export async function connectKobraX(options: {
     },
     ...(options.resultTimeoutMs !== undefined
       ? { resultTimeoutMs: options.resultTimeoutMs }
+      : {}),
+    ...(options.reportIdentity
+      ? { reportIdentity: options.reportIdentity }
       : {}),
   })
   const control = createKobraXControl({
@@ -276,7 +285,22 @@ export async function connectKobraX(options: {
           state.report(type, message)
         facts.report(report)
         usage.report(report)
-        options.onReport?.(report, state.snapshot(), facts.get(), source)
+        // The observer is the caller's code. A failure in it must never keep
+        // this report from settling the request that is waiting for it: that
+        // request's command is already on the wire.
+        try {
+          options.onReport?.(report, state.snapshot(), facts.get(), source)
+        } catch (error) {
+          try {
+            options.onError?.(
+              error instanceof Error
+                ? error
+                : new Error('Kobra X report observer failed'),
+            )
+          } catch {
+            // A failing error handler is no more allowed to block settlement.
+          }
+        }
       }
       // A reply carrying the ID of one of our own state queries belongs to
       // that query and never settles a command.

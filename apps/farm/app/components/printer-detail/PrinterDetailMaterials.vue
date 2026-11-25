@@ -1,11 +1,13 @@
 <script setup lang="ts">
+import type { ActiveSpool } from '../../../../../packages/farm-protocol/src/status.ts'
 import type { PrinterState } from '../../../../../packages/farm-protocol/src/state.ts'
-import type { SlotBinding } from '../../utils/farm-slot-view.ts'
+import type { SlotBinding } from '../../utils/slot-spools.ts'
 import FarmMaterials from '../FarmMaterials.vue'
 
 withDefaults(
   defineProps<{
     materials: PrinterState['materials']
+    activeSpools?: readonly ActiveSpool[]
     historical?: boolean
     bindings?: Readonly<Record<string, SlotBinding | undefined>>
     heading?: string
@@ -24,6 +26,7 @@ withDefaults(
       v-else
       :materials="materials"
       :bindings="bindings"
+      :active-spools="activeSpools"
       :heading="heading"
       :heading-level="2"
     />

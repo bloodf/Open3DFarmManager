@@ -245,7 +245,15 @@ test('another MQTT client retains its capture through Connector camera failure a
   t.after(() => adapter.close())
 
   const report = await sendVideo(mock, client, reports, 'startCapture')
-  assert.notEqual(report.msgid, 'capture-startCapture-0')
+  // The printer echoes the requester's id, so this report belongs to the
+  // other client's request. No request the Connector published carries it.
+  assert.equal(report.msgid, 'capture-startCapture-0')
+  assert.equal(
+    mock.calls.all.filter(
+      ({ payload }) => JSON.parse(payload.toString()).msgid === report.msgid,
+    ).length,
+    1,
+  )
   const url = report.data.urls.rtspUrl as string
   assert.equal(typeof url, 'string')
   const peerStream = await stream(url)

@@ -535,6 +535,13 @@ export function createFarmSnapshotSource(input: {
       ...(parsedPrinter.data.identity
         ? { identity: Object.freeze({ ...parsedPrinter.data.identity }) }
         : {}),
+      ...(parsedPrinter.data.toolHeaters
+        ? {
+            toolHeaters: parsedPrinter.data.toolHeaters.map((heater) => ({
+              ...heater,
+            })),
+          }
+        : {}),
       observedAt: parsedPrinter.data.observedAt,
     })
     if (printer.printerKey !== value.printerKey) {

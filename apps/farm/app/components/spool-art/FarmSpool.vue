@@ -6,6 +6,7 @@
 // Changes: OpenFarm --ops-* tokens, pt-BR copy, no hard-coded colours, and an unknown amount always draws the full
 // reel with a visible "desconhecido" badge.
 import { computed } from 'vue'
+import { spoolLevelLabel } from '../../utils/spool-level.ts'
 
 /*
  * A spool as an object: a product render of the reel with the winding in the filament's own colour, as deep as the
@@ -27,6 +28,7 @@ const props = withDefaults(
     /** Filament left, 0..1; null when unknown. Use `resolveSpoolLevel` to get it. */
     fraction?: number | null
     size?: number
+    announceLevel?: boolean
   }>(),
   { color: null, colors: null, direction: null, fraction: null, size: 40 },
 )
@@ -87,6 +89,8 @@ const px = computed(() => `${props.size}px`)
 <template>
   <span
     class="farm-spool"
+    :role="announceLevel ? 'img' : undefined"
+    :aria-label="announceLevel ? spoolLevelLabel(fraction) : undefined"
     :data-level="level"
     :data-unknown="unknown || undefined"
     :data-color="hasColor ? 'set' : 'missing'"

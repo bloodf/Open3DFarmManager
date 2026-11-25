@@ -82,15 +82,57 @@ export interface KobraXRequestSpec<T = undefined> {
   signal?: AbortSignal
 }
 
+/**
+ * How a printer names its reports.
+ *
+ * - `exact` (default): a report settles a request only with the request's own
+ *   `msgid`, `type` and `action`.
+ * - `printer-assigned`: for firmware that answers on `<type>/report` with its
+ *   own `msgid`, or none (docs/compatibility/kobra-x-lan.md, "Requests,
+ *   acknowledgements and outcomes"). A report can settle a request only after
+ *   the printer acknowledged that request's `msgid`, when it has the same
+ *   `type` and `action`, and when it carries no `msgid` this connection ever
+ *   issued. Exactly one acknowledged request may wait on that type and action;
+ *   with two, neither settles by this route. Any other unsettled request on
+ *   that type and action, acknowledged or not, also blocks it, and so does a
+ *   request on that type and action that ended without a result in the last
+ *   `lateReportMs`, because its report may still arrive. A report the printer sent for
+ *   another client that fits all of this cannot be told apart, so this mode
+ *   is opt-in and never the default.
+ */
+export type KobraXReportIdentity = 'exact' | 'printer-assigned'
+
+/** Bound on the msgids remembered as ours; far above any in-flight count. */
+const issuedLimit = 512
+/** How long a request that ended without a result may still own a late report. */
+const lateReportMs = 30_000
+
 export function createKobraXRequests(input: {
   topic(type: string): string
   publish(topic: string, payload: string, failed: (error: Error) => void): void
   resultTimeoutMs?: number
+  reportIdentity?: KobraXReportIdentity
 }) {
   const defaultTimeout = input.resultTimeoutMs ?? 5000
+  const printerAssigned = input.reportIdentity === 'printer-assigned'
   const acks = new Map<string, (code: number | undefined) => void>()
   const listeners = new Set<(report: KobraXReport) => void>()
-  const inflight = new Map<string, (report: KobraXReport) => boolean>()
+  /** Every msgid this connection published, oldest first. */
+  const issued = new Set<string>()
+  /** Unsettled requests by msgid, for the printer-assigned route. */
+  const waiting = new Map<
+    string,
+    {
+      type: string
+      action: string
+      acked: boolean
+      /** Exact match: this request's own msgid, type and action. */
+      owns: (report: KobraXReport) => boolean
+    }
+  >()
+  /** When a request last ended without a result, by type and action. */
+  const endedWithoutResult = new Map<string, number>()
+  const routeKey = (type: string, action: string) => `${type}\0${action}`
 
   /** Acknowledgement on `<deviceId>/response`: "received" only. */
   function handleAck(payload: unknown) {
@@ -101,7 +143,7 @@ export function createKobraXRequests(input: {
   }
 
   function isPending(report: KobraXReport) {
-    return inflight.get(report.msgid)?.(report) === true
+    return waiting.get(report.msgid)?.owns(report) === true
   }
 
   function handleReport(report: KobraXReport) {
@@ -122,6 +164,21 @@ export function createKobraXRequests(input: {
         return
       }
       const msgid = randomUUID()
+      issued.add(msgid)
+      if (issued.size > issuedLimit)
+        issued.delete(issued.values().next().value as string)
+      waiting.set(msgid, {
+        type: spec.type,
+        action: spec.action,
+        acked: false,
+        owns: () => false,
+      })
+      // A late report of an earlier request on this route cannot be told
+      // from this request's own, so this request gets no printer-assigned route.
+      const key = routeKey(spec.type, spec.action)
+      const earlier = endedWithoutResult.get(key)
+      const lateRisk =
+        earlier !== undefined && Date.now() - earlier < lateReportMs
       let acked = false
       let finished = false
       let timer: NodeJS.Timeout | undefined
@@ -131,7 +188,9 @@ export function createKobraXRequests(input: {
         finished = true
         clearTimeout(timer)
         acks.delete(msgid)
-        inflight.delete(msgid)
+        waiting.delete(msgid)
+        if (outcome.kind !== 'confirmed')
+          endedWithoutResult.set(key, Date.now())
         stop()
         spec.signal?.removeEventListener('abort', onAbort)
         resolve(outcome)
@@ -139,21 +198,27 @@ export function createKobraXRequests(input: {
       function onAbort() {
         finish(acked ? { kind: 'received' } : { kind: 'unanswered' })
       }
-      // Exact: our own msgid with the right type and action.
+      // Exact: this request's own msgid with the right type and action. Only
+      // this is evidence that the printer acted on this request.
       const ownsReport = (report: KobraXReport) =>
         report.msgid === msgid &&
         report.type === spec.type &&
         report.action === spec.action
-      // S1 printers acknowledge with our msgid, then report with a printer
-      // chosen msgid or none. Type and action still apply on this path, and an
-      // ID that belongs to another pending request never settles this one
-      // (#616). Such a report can settle the request but is never evidence of
-      // an effect: `confirmed.correlated` stays false.
-      const settlesReport = (report: KobraXReport) =>
-        ownsReport(report) ||
-        (report.type === spec.type &&
-          report.action === spec.action &&
-          !inflight.has(report.msgid))
+      // Printer-assigned firmware gets the narrower route described on
+      // `KobraXReportIdentity`. Such a report can settle the request but is
+      // never evidence of an effect: `confirmed.correlated` stays false.
+      const settlesReport = (report: KobraXReport) => {
+        if (ownsReport(report)) return true
+        if (report.type !== spec.type || report.action !== spec.action)
+          return false
+        if (!printerAssigned || !acked || lateRisk) return false
+        if (report.msgid !== '' && issued.has(report.msgid)) return false
+        let sharing = 0
+        for (const other of waiting.values())
+          if (other.type === spec.type && other.action === spec.action)
+            sharing++
+        return sharing === 1
+      }
       stop = onReport((report) => {
         if (!settlesReport(report) || Number.isNaN(report.code)) return
         const refusal = reportRefusal(report)
@@ -181,7 +246,8 @@ export function createKobraXRequests(input: {
           data: (spec.result ? spec.result(report) : undefined) as T,
         })
       })
-      inflight.set(msgid, ownsReport)
+      const entry = waiting.get(msgid)
+      if (entry) entry.owns = ownsReport
       acks.set(msgid, (code) => {
         if (code !== undefined && code !== 0 && code !== 200) {
           finish({
@@ -193,6 +259,8 @@ export function createKobraXRequests(input: {
           return
         }
         acked = true
+        const pending = waiting.get(msgid)
+        if (pending) pending.acked = true
       })
       spec.signal?.addEventListener('abort', onAbort, { once: true })
       timer = setTimeout(

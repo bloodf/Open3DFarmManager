@@ -468,6 +468,7 @@ export async function startVendorSimulator(
         const fixture = await startBambuCameraFixture({
           directory,
           accessCode: BAMBU_ACCESS_CODE,
+          rtsps: options.bambuCamera === 'rtsps',
         })
         undo.push(fixture.close)
         camera = { ...fixture, helper: ffmpeg }

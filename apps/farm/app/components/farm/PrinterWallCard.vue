@@ -8,10 +8,8 @@ import { computed } from 'vue'
 import type { ActiveSpool } from '../../../../../packages/farm-protocol/src/status.ts'
 import type { FarmAlert } from '../../utils/farm-alerts.ts'
 import { farmJobView } from '../../utils/farm-job-view.ts'
-import { farmSlotViews, type SlotBinding } from '../../utils/farm-slot-view.ts'
-import { resolveSpoolLevel } from '../../utils/spool-level.ts'
+import { farmSlotViews, type SlotBinding } from '../../utils/slot-spools.ts'
 import FarmSlot from '../spool-art/FarmSlot.vue'
-import FarmSpool from '../spool-art/FarmSpool.vue'
 import {
   formatPrinterStateLabel,
   observationAge,
@@ -86,16 +84,11 @@ const finish = computed(() => {
 const slots = computed(() =>
   props.observation?.historical
     ? undefined
-    : farmSlotViews(state.value?.materials, props.bindings),
+    : farmSlotViews(state.value?.materials, props.bindings, props.activeSpools),
 )
 const staleMaterials = computed(
   () => !!props.observation?.historical && !!state.value?.materials?.length,
 )
-
-function spoolFraction(spool: ActiveSpool) {
-  const level = resolveSpoolLevel({ printerPercent: spool.remainingPercent })
-  return level.kind === 'known' ? level.fraction : null
-}
 
 function temperature(value: number | undefined) {
   return formatTemperature(value) ?? 'Indisponível'
@@ -107,14 +100,6 @@ const alertKey = (alert: string | FarmAlert) =>
   typeof alert === 'string' ? alert : alert.id
 const alertKind = (alert: string | FarmAlert) =>
   typeof alert === 'string' ? undefined : alert.kind
-
-function spoolLabel(spool: ActiveSpool) {
-  return (
-    spool.name ||
-    spool.material ||
-    (spool.spoolId !== undefined ? `Carretel nº ${spool.spoolId}` : spool.slot)
-  )
-}
 </script>
 
 <template>
@@ -201,32 +186,6 @@ function spoolLabel(spool: ActiveSpool) {
     <p v-else-if="!embedded && staleMaterials" class="wall-printer__stale">
       Materiais indisponíveis: os dados estão desatualizados.
     </p>
-    <ul
-      v-if="!observation?.historical && activeSpools?.length"
-      aria-label="Carretéis ativos"
-    >
-      <li
-        v-for="spool in activeSpools"
-        :key="spool.slot"
-        class="wall-printer__spool"
-      >
-        <FarmSpool
-          :color="spool.colorHex ? '#' + spool.colorHex : null"
-          :fraction="spoolFraction(spool)"
-          :size="32"
-        />
-        <span>
-          {{ spoolLabel(spool)
-          }}<template v-if="spoolLabel(spool) !== spool.slot">
-            · {{ spool.slot }}</template
-          >
-          <template v-if="!spool.colorHex"> · Cor não informada</template>
-          <template v-if="spool.remainingPercent !== undefined">
-            · {{ spool.remainingPercent }}% restante</template
-          >
-        </span>
-      </li>
-    </ul>
     <ul v-if="alerts?.length" class="wall-printer__alerts" aria-label="Alertas">
       <li
         v-for="alert in alerts"
@@ -280,11 +239,6 @@ function spoolLabel(spool: ActiveSpool) {
 }
 .wall-printer__remaining {
   margin: 0;
-}
-.wall-printer__spool {
-  display: flex;
-  align-items: center;
-  gap: var(--ops-space-2);
 }
 .wall-printer__alerts {
   display: flex;

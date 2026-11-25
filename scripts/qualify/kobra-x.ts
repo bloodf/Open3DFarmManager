@@ -96,9 +96,10 @@ export async function qualifyKobraX(
           ...(ca !== undefined ? { ca } : {}),
           cert: clientIdentity.certPem,
           key: clientIdentity.keyPem,
-          minVersion: 'TLSv1.2',
+          minVersion: 'TLSv1.3',
         },
         pin,
+        { holdClientIdentity: true },
       ),
     {
       manualConnect: true,

@@ -6,7 +6,7 @@ import {
   verifiedSlotBindings,
   slotBindingKey,
   type SlotBindingIndex,
-} from '../utils/farm-slot-view.ts'
+} from '../utils/slot-spools.ts'
 
 export function useFarmSlotBindings(
   farmId: () => string | undefined,

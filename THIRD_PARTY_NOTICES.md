@@ -58,7 +58,13 @@ SOFTWARE.
 
 ## orca-ui-foundation notice
 
-The following copyright and permission notice accompanies the spool illustration components and renders ported from `bloodf/orca-ui-foundation`.
+The spool illustration components (`SpoolIllustration`, `FarmSpool`,
+`FarmSlot`, `FarmLevel`) and the layered reel renders in
+`apps/farm/app/assets/spool` and `apps/farm/public/spool-art` are adapted from
+[bloodf/orca-ui-foundation](https://github.com/bloodf/orca-ui-foundation/tree/e4d93af0cf576660ad4b80ac5d5a1cdef4a5c795)
+(commit `e4d93af0cf576660ad4b80ac5d5a1cdef4a5c795`), copyright 2026 bloodf.
+The source is MIT licensed; its notice is reproduced below and retained in
+[`notices/orca-ui-foundation-MIT.txt`](notices/orca-ui-foundation-MIT.txt).
 
 ```text
 MIT License

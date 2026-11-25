@@ -49,7 +49,8 @@ function readConfiguredBambuCamera(
       ...(caFile ? { caFile } : {}),
       ...(pinSha256 ? { pinSha256 } : {}),
     }
-    if (selectBambuCamera(source).kind === 'jpeg') return { source, ffmpeg }
+    const selected = selectBambuCamera(source)
+    if (selected.kind === 'jpeg' || caFile) return { source, ffmpeg }
   } catch {
     return undefined
   }
@@ -123,7 +124,7 @@ export function getRtspCameraStatus(
         available,
         status: available ? ('available' as const) : ('unavailable' as const),
         message: available
-          ? 'Bambu TLS JPEG camera'
+          ? 'Bambu camera available'
           : 'Bambu camera unavailable',
       })
     }
@@ -322,7 +323,8 @@ export async function createCameraMediaFactory(input: {
       })) ?? []),
     ].flatMap((camera, index) => {
       if (
-        selectBambuCamera(camera.source).kind !== 'jpeg' ||
+        (selectBambuCamera(camera.source).kind === 'rtsps' &&
+          !camera.source.caFile) ||
         (!camera.source.caFile && !camera.source.pinSha256) ||
         camera.ffmpeg.path === helper.path ||
         camera.ffmpeg.sha256 === helper.sha256

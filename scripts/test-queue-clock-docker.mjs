@@ -3,7 +3,7 @@
 // test-timeout failures seen in the final gate. It runs only the focused files
 // below, with no network and no physical printer, and writes one JSON summary.
 //
-//   node scripts/test-queue-clock-docker.mjs [--install] [--profile gate|quiet|loaded|isolation|overlay|disk|stress|all]
+//   node scripts/test-queue-clock-docker.mjs [--profile gate|quiet|loaded|isolation|overlay|disk|stress|all]
 //        [--cpus N] [--load N] [--test-timeout MS] [--file path]... [--evidence-dir DIR] [--profile-timeout MS]
 //
 // Default profile `gate` runs quiet, loaded and isolation: all deterministic, exit 0
@@ -16,22 +16,43 @@
 // quiet   : the container owns --cpus CPUs alone; /tmp is tmpfs.
 // loaded  : the same container is starved by --load busy-loop processes, which
 //           reproduces shared-host CPU contention deterministically; /tmp is tmpfs.
-// disk    : overlay /tmp plus --load background writers that append and fsync
-//           on the same overlay, reproducing shared-disk fsync contention.
+// disk    : host-disk /tmp plus --load background writers that append and fsync
+//           on the same disk, reproducing shared-disk fsync contention.
 // stress  : one CPU, --load CPU spinners and --load fsync writers together.
-// overlay : quiet CPU, but /tmp stays on the container overlay filesystem, so
-//           every fsync reaches the shared host disk. Runs only the durable
+// overlay : quiet CPU, but /tmp stays on the host disk (a bind directory), so
+//           every fsync reaches the shared disk. Runs only the durable
 //           heartbeat backlog file unless --file is given.
-// Each run uses a task-named container and removes it on exit. The workspace is
-// mounted read-write only so node_modules can live beside it; nothing is built.
-import { spawn, spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+// Each run uses task-named `--rm` containers. Tests run in a copy of the working
+// tree under ${XDG_CACHE_HOME:-~/.cache}/openfarm-docker/ with node_modules
+// copied from the dependency image (scripts/docker-base-image.mjs); nothing is
+// installed per run (--install is accepted and ignored) and nothing is built.
+// The run directory is removed on exit; the evidence directory is kept.
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { listWorkspaceFiles } from './check-all-docker.mjs'
+import {
+  DIAGNOSTIC_NODE_IMAGE,
+  ensureBaseImage,
+  seedNodeModules,
+} from './docker-base-image.mjs'
+import {
+  TMPFS_TMP,
+  copyWorkspace,
+  createLifecycle,
+  createRunDir,
+  removeRunDir,
+} from './docker-run-lib.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const IMAGE = 'node:22-bookworm'
 const PREFIX = 'o3dfm-qclock-557'
 const DEFAULT_FILES = [
   'tests/unit/mixed-telemetry-runtime.test.ts',
@@ -43,7 +64,6 @@ const DURABLE_FILES = ['tests/unit/heartbeat-coalesce.test.ts']
 
 function parse(argv) {
   const options = {
-    install: false,
     profile: 'gate',
     profileTimeout: 900000,
     cpus: 4,
@@ -59,7 +79,8 @@ function parse(argv) {
       if (next === undefined) throw new Error(`${flag} needs a value`)
       return next
     }
-    if (flag === '--install') options.install = true
+    if (flag === '--install')
+      console.error('--install is ignored: dependencies are preinstalled')
     else if (flag === '--profile') options.profile = value()
     else if (flag === '--cpus') options.cpus = Number(value())
     else if (flag === '--load') options.load = Number(value())
@@ -104,19 +125,11 @@ const ids =
     ? ['--user', `${process.getuid()}:${process.getgid()}`]
     : []
 
-function docker(args, input, options = {}) {
-  return spawnSync('docker', args, {
-    encoding: 'utf8',
-    input,
-    timeout: options.profileTimeout,
-    maxBuffer: 64 * 1024 * 1024,
-  })
-}
-
-function base(name, cpus, tmpfs, evidence) {
+export function queueClockRunArgs({ name, cpus, tmpDir, runDir, image }) {
   return [
     'run',
     '--rm',
+    '--pull=never',
     '--name',
     name,
     '--network',
@@ -124,7 +137,8 @@ function base(name, cpus, tmpfs, evidence) {
     ...ids,
     '--cpus',
     String(cpus),
-    ...(tmpfs ? ['--tmpfs', '/tmp:rw,mode=1777'] : []),
+    // Without a directory /tmp is a tmpfs; with one it is on the host disk.
+    ...(tmpDir ? ['-v', `${tmpDir}:/tmp`] : ['--tmpfs', TMPFS_TMP]),
     '-e',
     'HOME=/tmp',
     '-e',
@@ -132,44 +146,27 @@ function base(name, cpus, tmpfs, evidence) {
     '-e',
     'CI=1',
     '-v',
-    `${ROOT}:/workspace`,
+    `${join(runDir, 'work')}:/workspace`,
     '-v',
-    `${evidence}:/evidence`,
+    `${join(runDir, 'evidence')}:/evidence`,
     '-w',
     '/workspace',
-    IMAGE,
+    image,
   ]
 }
 
-function install(cache) {
-  const name = `${PREFIX}-install`
-  const result = spawnSync(
-    'docker',
-    [
-      'run',
-      '--rm',
-      '--name',
-      name,
-      ...ids,
-      '-e',
-      'HOME=/tmp',
-      '-e',
-      'npm_config_cache=/cache',
-      '-v',
-      `${ROOT}:/workspace`,
-      '-v',
-      `${cache}:/cache`,
-      '-w',
-      '/workspace',
-      IMAGE,
-      'npm',
-      'ci',
-      '--no-audit',
-      '--no-fund',
-    ],
-    { stdio: 'inherit' },
-  )
-  if (result.status !== 0) throw new Error('npm ci failed in Docker')
+export function queueClockSeedArgs({ runDir, image }) {
+  return [
+    ...queueClockRunArgs({
+      name: `${PREFIX}-seed-${process.pid}`,
+      cpus: 2,
+      runDir,
+      image,
+    }),
+    'sh',
+    '-ec',
+    seedNodeModules('/workspace'),
+  ]
 }
 
 // Busy loops inside the same container compete for its CPU quota exactly as
@@ -178,7 +175,7 @@ const BUSY = 'while (true) {}'
 const WRITER =
   'const fs=require("fs");const fd=fs.openSync(process.argv[1],"w");const b=Buffer.alloc(65536,97);while(true){fs.writeSync(fd,b,0,b.length,0);fs.fsyncSync(fd)}'
 
-function runProfile(profile, options, evidence) {
+async function runProfile(profile, options, evidence, run) {
   const name = `${PREFIX}-${profile}-${process.pid}`
   const load =
     profile === 'loaded' || profile === 'disk' || profile === 'stress'
@@ -209,25 +206,37 @@ function runProfile(profile, options, evidence) {
     'kill $(jobs -p) 2>/dev/null',
     'exit $code',
   ].join('; ')
+  const onDisk =
+    profile === 'overlay' || profile === 'disk' || profile === 'stress'
+  const tmpDir = onDisk ? join(run.runDir, `tmp-${profile}`) : undefined
+  if (tmpDir) mkdirSync(tmpDir)
   const started = Date.now()
-  const result = docker(
+  const result = await run.lifecycle.run(
     [
-      ...base(
+      ...queueClockRunArgs({
         name,
-        profile === 'loaded' ? 2 : profile === 'stress' ? 1 : options.cpus,
-        profile !== 'overlay' && profile !== 'disk' && profile !== 'stress',
-        evidence,
-      ),
+        cpus:
+          profile === 'loaded' ? 2 : profile === 'stress' ? 1 : options.cpus,
+        tmpDir,
+        runDir: run.runDir,
+        image: run.image,
+      }),
       'bash',
       '-c',
       script,
     ],
-    undefined,
-    options,
+    { timeout: options.profileTimeout },
   )
-  docker(['rm', '-f', name])
+  // The fsync writers' files are disposable and can be large.
+  if (tmpDir) rmSync(tmpDir, { recursive: true, force: true })
   const wallMs = Date.now() - started
   const reportFile = join(evidence, `${profile}.report.json`)
+  const written = join(run.runDir, 'evidence', `${profile}.report.json`)
+  try {
+    cpSync(written, reportFile)
+  } catch {
+    // no report: the run failed or timed out
+  }
   let report
   try {
     report = JSON.parse(readFileSync(reportFile, 'utf8'))
@@ -256,10 +265,7 @@ function runProfile(profile, options, evidence) {
           : load
             ? 'cpu-spin'
             : 'none',
-    tmp:
-      profile === 'overlay' || profile === 'disk' || profile === 'stress'
-        ? 'overlay'
-        : 'tmpfs',
+    tmp: onDisk ? 'disk' : 'tmpfs',
     busyLoops: load,
     exitCode:
       profile === 'isolation'
@@ -283,25 +289,44 @@ function runProfile(profile, options, evidence) {
   return summary
 }
 
-function main() {
+async function main() {
   const options = parse(process.argv.slice(2))
   const evidence =
     options.evidenceDir ?? mkdtempSync(join(tmpdir(), 'qclock-evidence-'))
   mkdirSync(evidence, { recursive: true })
-  if (options.install) {
-    const cache = join(evidence, 'npm-cache')
-    mkdirSync(cache, { recursive: true })
-    install(cache)
-  }
+  const image = ensureBaseImage({
+    projectDir: ROOT,
+    nodeImage: DIAGNOSTIC_NODE_IMAGE,
+    allowPull: true,
+  })
+  const runDir = createRunDir('queue-clock')
+  const lifecycle = createLifecycle()
+  lifecycle.finalizer(() => removeRunDir(runDir, { image }))
+  lifecycle.installSignals()
   const profiles =
     options.profile === 'all'
       ? ['quiet', 'loaded', 'isolation', 'overlay', 'disk', 'stress']
       : options.profile === 'gate'
         ? ['quiet', 'loaded', 'isolation']
         : [options.profile]
-  const results = profiles.map((profile) =>
-    runProfile(profile, options, evidence),
-  )
+  const results = []
+  try {
+    copyWorkspace(ROOT, listWorkspaceFiles(ROOT), join(runDir, 'work'))
+    mkdirSync(join(runDir, 'evidence'))
+    const seeded = await lifecycle.run(queueClockSeedArgs({ runDir, image }))
+    if (seeded.status !== 0)
+      throw new Error(`dependency seed failed: ${seeded.stderr}`)
+    for (const profile of profiles)
+      results.push(
+        await runProfile(profile, options, evidence, {
+          lifecycle,
+          runDir,
+          image,
+        }),
+      )
+  } finally {
+    await lifecycle.cleanup()
+  }
   for (const r of results)
     console.log(
       `${r.profile}: exit=${r.exitCode} passed=${r.passed} failed=${r.failed} timeouts=${r.timeouts} clockRegressions=${r.queueClockRegressions} wall=${r.wallMs}ms (cpus=${r.cpus} busy=${r.busyLoops} tmp=${r.tmp})`,
@@ -310,9 +335,14 @@ function main() {
   process.exitCode = results.every((r) => r.exitCode === 0) ? 0 : 1
 }
 
-try {
-  main()
-} catch (error) {
-  console.error(`test-queue-clock-docker: ${error.message}`)
-  process.exitCode = 2
+if (
+  process.argv[1] &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
+  try {
+    await main()
+  } catch (error) {
+    console.error(`test-queue-clock-docker: ${error.message}`)
+    process.exitCode = 2
+  }
 }

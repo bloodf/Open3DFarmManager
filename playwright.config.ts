@@ -48,6 +48,8 @@ export default defineConfig({
   // Opt-in journeys on the E16 harness: playwright.farm-manager.config.ts.
   testIgnore: '**/farm-manager/**',
   timeout: 30_000 * timeoutScale,
+  // Local runs share the machine; CI keeps the Playwright default.
+  ...(process.env.CI ? {} : { workers: 2 }),
   expect: { timeout: 5_000 * timeoutScale },
   use: {
     baseURL: `http://127.0.0.1:${port}`,

@@ -1,6 +1,7 @@
 <script setup lang="ts" generic="Row extends FarmRow">
 import { formatPercentage, formatTemperature } from '../../utils/ui-format.ts'
 import { computed, onMounted, ref } from 'vue'
+import type { ActiveSpool } from '../../../../../packages/farm-protocol/src/status.ts'
 import {
   formatPrinterAlarmLabel,
   formatPrinterOperationalStateLabel,
@@ -9,7 +10,7 @@ import {
 } from '../../utils/farm-view.ts'
 import { formatJobTime } from '../../utils/farm-job-view.ts'
 import { printerDetailHref } from '../../utils/farm-wall-card.ts'
-import { farmSlotViews, type SlotBinding } from '../../utils/farm-slot-view.ts'
+import { farmSlotViews, type SlotBinding } from '../../utils/slot-spools.ts'
 import FarmSpool from '../spool-art/FarmSpool.vue'
 
 const props = defineProps<{
@@ -19,6 +20,7 @@ const props = defineProps<{
     row: Row,
   ) => Readonly<Record<string, SlotBinding | undefined>> | undefined
   liveNow: () => { wall: number; mono: number }
+  activeSpoolsFor?: (row: Row) => readonly ActiveSpool[]
 }>()
 
 const storageKey = 'openfarm:printer-wall-view'
@@ -79,7 +81,11 @@ const sortedRows = computed(() => {
       // pass for the filament that is loaded now.
       const spools = row.observation?.historical
         ? undefined
-        : farmSlotViews(state?.materials, props.bindingsFor?.(row))
+        : farmSlotViews(
+            state?.materials,
+            props.bindingsFor?.(row),
+            props.activeSpoolsFor?.(row),
+          )
       const age = row.observation && observationAge(row.observation, now)
       const printerAlarms = formatPrinterAlarmLabel(state?.alarms)
       const alerts = [
@@ -206,6 +212,7 @@ function display(value: string | number | null | undefined, index: number) {
               <ul class="wall-spools" aria-label="Bobinas">
                 <li v-for="spool in row.spools" :key="spool.key">
                   <FarmSpool
+                    announce-level
                     :color="spool.color"
                     :fraction="
                       spool.level.kind === 'known' ? spool.level.fraction : null

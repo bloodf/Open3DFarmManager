@@ -31,6 +31,12 @@ export interface BambuSimulatorOptions {
   /** Reported as `nozzle_diameter`; absent unless given. */
   nozzleDiameter?: string | undefined
   versionModules?: { name: string; sw_ver: string }[] | undefined
+  /**
+   * Extra `print` report fields, replacing the defaults. Reference-derived
+   * test data only. `ctt`, `device.extruder` and `device.airduct` enable the
+   * chamber, dual-nozzle and air-duct requests.
+   */
+  initialReport?: Record<string, unknown> | undefined
   confirmCommands?: boolean | undefined
   /**
    * Interval of the repeated status report (default 100 ms). State changes and
@@ -63,6 +69,7 @@ export async function startBambuSimulator({
   confirmCommands = true,
   reportIntervalMs = 100,
   versionModules,
+  initialReport,
   printDurationMs,
   totalLayers = 100,
   credentials,
@@ -133,7 +140,15 @@ export async function startBambuSimulator({
     ...(nozzleDiameter === undefined
       ? {}
       : { nozzle_diameter: nozzleDiameter }),
+    ...structuredClone(initialReport),
   }
+  // The parts of a report that requests act on (see connector bambu/ams.ts and
+  // commands.ts for the BambuStudio sources of these shapes).
+  type Device = {
+    extruder?: { info: { id: number; temp: number; snow?: number }[] }
+    airduct?: { parts: { id: number; state: number }[] }
+  }
+  const device = () => extended.device as Device | undefined
   // Commands that act on the printer (pause, resume, stop, gcode, ...), in arrival order.
   const requests: {
     command: string
@@ -247,6 +262,10 @@ export async function startBambuSimulator({
           'print_speed',
           'project_file',
           'ams_change_filament',
+          'set_ctt',
+          'set_bed_temp',
+          'set_nozzle_temp',
+          'set_fan',
         ].includes(command) ||
         typeof request?.sequence_id !== 'string'
       )
@@ -286,10 +305,32 @@ export async function startBambuSimulator({
         )
           throw new Error('File not uploaded')
       } else if (
+        command === 'set_ctt' &&
+        'ctt' in extended &&
+        within(request.ctt_val, 0, 65)
+      ) {
+        // valid
+      } else if (command === 'set_bed_temp' && within(request.temp, 0, 120)) {
+        // valid
+      } else if (
+        command === 'set_nozzle_temp' &&
+        device()?.extruder?.info.some(
+          (item) => item.id === request.extruder_index,
+        ) &&
+        within(request.target_temp, 0, 300)
+      ) {
+        // valid
+      } else if (
+        command === 'set_fan' &&
+        device()?.airduct?.parts.some(
+          (part) => airPartId(part.id) === request.fan_index,
+        ) &&
+        within(request.speed, 0, 100)
+      ) {
+        // valid
+      } else if (
         command === 'ams_change_filament' &&
-        Number.isInteger(request.target) &&
-        ((request.target >= 0 && request.target <= 15) ||
-          request.target === 255) &&
+        validFilamentChange(request) &&
         Number.isInteger(request.curr_temp) &&
         request.curr_temp >= 0 &&
         request.curr_temp <= 300 &&
@@ -326,8 +367,17 @@ export async function startBambuSimulator({
       if (command === 'gcode_line') {
         const match = /^(M104|M140|M106 P[123]) S(\d+)\n$/.exec(request.param)
         const home = /^G28 ([XYZ](?: [XYZ])*)\n$/.exec(request.param)
-        if (match) extended[match[1]!] = Number(match[2])
-        else if (home) extended.homed_axes = home[1]
+        if (match) {
+          const value = Number(match[2])
+          extended[match[1]!] = value
+          if (match[1] === 'M104') extended.nozzle_target_temper = value
+          else if (match[1] === 'M140') extended.bed_target_temper = value
+          // Fan speeds are reported on a 0-15 scale, as strings.
+          else
+            extended[FAN_REPORT[match[1]!.slice(-1)]!] = String(
+              Math.round((value * 15) / 255),
+            )
+        } else if (home) extended.homed_axes = home[1]
         gcodeLines.push(request.param)
       } else if (command === 'ledctrl') {
         extended.light = request.led_mode
@@ -348,7 +398,31 @@ export async function startBambuSimulator({
           startTimer()
         } else delete extended.mc_percent
       } else if (command === 'ams_change_filament') {
-        extended.ams = { tray_now: String(request.target) }
+        extended.ams = {
+          ...(extended.ams as object | undefined),
+          tray_now: String(request.target),
+        }
+        const main = device()?.extruder?.info.find((item) => item.id === 0)
+        if (main)
+          main.snow =
+            request.target === 255
+              ? 0xffff
+              : (request.ams_id << 8) | request.slot_id
+      } else if (command === 'set_ctt') {
+        extended.ctt = request.ctt_val
+      } else if (command === 'set_bed_temp') {
+        extended.bed_target_temper = request.temp
+      } else if (command === 'set_nozzle_temp') {
+        // Packed word: current temperature low, target high.
+        const nozzle = device()!.extruder!.info.find(
+          (item) => item.id === request.extruder_index,
+        )!
+        nozzle.temp = (nozzle.temp & 0xffff) + request.target_temp * 0x10000
+      } else if (command === 'set_fan') {
+        const part = device()!.airduct!.parts.find(
+          (item) => airPartId(item.id) === request.fan_index,
+        )!
+        part.state = request.speed
       }
 
       if (['pause', 'resume', 'stop'].includes(command))
@@ -515,6 +589,38 @@ export async function startBambuSimulator({
       return closing
     },
   }
+}
+
+const FAN_REPORT: Record<string, string> = {
+  1: 'cooling_fan_speed',
+  2: 'big_fan1_speed',
+  3: 'big_fan2_speed',
+}
+
+/** Air-duct part ids carry the fan number in bits 4-11. */
+const airPartId = (id: number) => (id >> 4) & 0xff
+
+function within(value: unknown, min: number, max: number) {
+  return Number.isInteger(value) && Number(value) >= min && Number(value) <= max
+}
+
+/** A load names a consistent unit, slot and tray; an unload names 255. */
+function validFilamentChange(request: {
+  target?: unknown
+  ams_id?: unknown
+  slot_id?: unknown
+}) {
+  const { target, ams_id: unit, slot_id: slot } = request
+  const standard = (value: unknown) => within(value, 0, 3)
+  const ht = (value: unknown) => within(value, 128, 135)
+  if (target === 255)
+    return slot === 255 && (unit === undefined || standard(unit) || ht(unit))
+  if (ht(target)) return unit === target && slot === 0
+  return (
+    standard(unit) &&
+    standard(slot) &&
+    target === Number(unit) * 4 + Number(slot)
+  )
 }
 
 /** Plain motion and console scripts: one G or M command per line. */

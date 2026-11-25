@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { formatWeight } from '../utils/ui-format.ts'
 import FarmSpool from './spool-art/FarmSpool.vue'
-import { resolveSpoolLevel } from '../utils/spool-level.ts'
+import { resolveSpoolLevel, spoolLevelLabel } from '../utils/spool-level.ts'
 import { computed } from 'vue'
 import {
   spoolInventoryStale,
@@ -37,12 +37,22 @@ const sections = computed(() =>
     }
   }),
 )
-// Spoolman can report a negative remaining weight after over-consumption;
-// show it as reported instead of hiding it behind "Indisponível".
-function spoolFraction(remainingGrams: number | null) {
-  const level = resolveSpoolLevel({ spoolmanRemainingWeight: remainingGrams })
+// Spoolman's own percentage first; grams alone (no initial weight in the
+// summary) never become a level, so the reel stays full and marked unknown.
+function spoolFraction(spool: {
+  remainingGrams: number | null
+  remainingPercent?: number
+}) {
+  const percent = spool.remainingPercent
+  if (typeof percent === 'number' && Number.isFinite(percent))
+    return Math.max(0, Math.min(1, percent / 100))
+  const level = resolveSpoolLevel({
+    spoolmanRemainingWeight: spool.remainingGrams,
+  })
   return level.kind === 'known' ? level.fraction : null
 }
+// Spoolman can report a negative remaining weight after over-consumption;
+// show it as reported instead of hiding it behind "Indisponível".
 function grams(value: number | null) {
   const magnitude = formatWeight(value === null ? null : Math.abs(value))
   if (!magnitude) return 'Indisponível'
@@ -101,7 +111,6 @@ function grams(value: number | null) {
             </caption>
             <thead>
               <tr>
-                <th scope="col">Bobina</th>
                 <th scope="col">Filamento</th>
                 <th scope="col">Material</th>
                 <th scope="col">Cor</th>
@@ -115,22 +124,19 @@ function grams(value: number | null) {
                 v-for="(spool, index) in section.item.inventory.spools"
                 :key="index"
               >
-                <td>
-                  <FarmSpool
-                    :color="spool.colorHex ? `#${spool.colorHex}` : null"
-                    :fraction="spoolFraction(spool.remainingGrams)"
-                    :size="36"
-                  />
-                </td>
                 <th scope="row">{{ spool.name ?? 'Sem nome' }}</th>
                 <td>{{ spool.material ?? 'Indisponível' }}</td>
                 <td>
+                  <!-- Kept out of the row header so its name stays the filament name. -->
+                  <FarmSpool
+                    role="img"
+                    :aria-label="spoolLevelLabel(spoolFraction(spool))"
+                    :color="spool.colorHex ? `#${spool.colorHex}` : null"
+                    :fraction="spoolFraction(spool)"
+                    :size="40"
+                    class="cell-spool"
+                  />
                   <template v-if="spool.colorHex">
-                    <span
-                      class="swatch"
-                      aria-hidden="true"
-                      :style="{ backgroundColor: `#${spool.colorHex}` }"
-                    ></span>
                     #{{ spool.colorHex }}
                   </template>
                   <template v-else>Indisponível</template>
@@ -164,7 +170,7 @@ function grams(value: number | null) {
 }
 table {
   border-collapse: collapse;
-  min-width: 100%;
+  min-inline-size: max(100%, 36rem);
 }
 caption {
   text-align: left;
@@ -178,12 +184,8 @@ td {
   text-align: left;
   overflow-wrap: anywhere;
 }
-.swatch {
-  display: inline-block;
-  width: 1rem;
-  height: 1rem;
-  vertical-align: middle;
-  border: 1px solid currentColor;
+.cell-spool {
+  margin-inline-end: 0.4rem;
 }
 .opaque {
   overflow-wrap: anywhere;

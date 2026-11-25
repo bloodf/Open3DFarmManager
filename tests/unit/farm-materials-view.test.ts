@@ -24,6 +24,7 @@ describe('farmMaterialsView', () => {
         material: 'PLA',
         color: '#FF0000FF',
         colorLabel: 'Cor #FF0000FF',
+        remainingPercent: 0,
         remaining: '0%',
         active: true,
       },

@@ -301,6 +301,10 @@ async function runConnectorAgentOnce(
   let controlsFor:
     ((assignmentId: string) => readonly ExtendedControlAction[]) | undefined
   let refreshControls: (() => void) | undefined
+  const kobraXControlEvidence = new Map<
+    string,
+    import('../kobra-x/control-support.ts').KobraXControlEvidence
+  >()
   const printerSpeedModes = new Map<
     string,
     NonNullable<
@@ -969,6 +973,8 @@ async function runConnectorAgentOnce(
           speedModesFor(printerKey) {
             return printerSpeedModes.get(printerKey)
           },
+          kobraXControlEvidenceFor: (printerKey) =>
+            kobraXControlEvidence.get(printerKey),
           libraryPrint(assignmentId) {
             const key = refs.find(
               (ref) => ref.assignmentId === assignmentId,
@@ -1121,7 +1127,18 @@ async function runConnectorAgentOnce(
     tasks.push(
       collectIntoQueue({
         config: config.collection,
-        ...(config.kobraX ? { kobraX: { bindings: config.kobraX } } : {}),
+        ...(config.kobraX
+          ? {
+              kobraX: {
+                bindings: config.kobraX,
+                onControlEvidence(printerKey, evidence) {
+                  if (evidence) kobraXControlEvidence.set(printerKey, evidence)
+                  else kobraXControlEvidence.delete(printerKey)
+                  refreshControls?.()
+                },
+              },
+            }
+          : {}),
         apiJobs,
         onPrinterState(printer) {
           if (printer.speedModes === undefined)

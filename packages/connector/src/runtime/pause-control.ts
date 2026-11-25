@@ -184,6 +184,10 @@ type PauseControlInput = {
   >[0]['resinCapabilities']
   /** True while local storage is degraded: commands are refused with `storage`. */
   storageDegraded?: () => boolean
+  /** Latest Kobra X accessory evidence from its status collection. */
+  kobraXControlEvidenceFor?: (
+    printerKey: string,
+  ) => import('../kobra-x/control-support.ts').KobraXControlEvidence | undefined
   speedModesFor?: (
     printerKey: string,
   ) =>
@@ -378,6 +382,13 @@ async function runAssignmentControl(
       ],
       limits: config.collection.limits,
       clock,
+      kobraXControlEvidence(binding) {
+        const mapping =
+          binding === printerBinding ? readPrinterBinding(binding) : null
+        return mapping
+          ? input.kobraXControlEvidenceFor?.(mapping.printer_key)
+          : undefined
+      },
       gcodeConsole: (binding) =>
         binding === printerBinding &&
         pause.control?.consoleAssignmentIds?.includes(assignmentId) === true,

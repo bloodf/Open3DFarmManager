@@ -595,3 +595,54 @@ test(
     assert.deepEqual(f.violations, [])
   },
 )
+
+test('runtime status admits Bambu RTSPS only with a CA file and a mapped model', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'camera-runtime-rtsps-'))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const credentialFile = join(directory, 'bambu.json')
+  await writeFile(credentialFile, JSON.stringify({ accessCode: 'synthetic' }), {
+    mode: 0o600,
+  })
+  const caFile = join(directory, 'ca.pem')
+  await writeFile(caFile, 'unused in status')
+  const helperPath = join(directory, 'rtsp-ingest')
+  await writeFile(helperPath, '#!/bin/sh\nexit 0\n', { mode: 0o700 })
+  const helper = {
+    path: helperPath,
+    sha256: createHash('sha256')
+      .update(await readFile(helperPath))
+      .digest('hex'),
+  }
+  const encoder = createFakeEncoder(['synthetic'])
+  t.after(() => encoder.dispose())
+  const scenarios = [
+    ['X1C', { caFile }, true],
+    ['H2S', { caFile }, true],
+    ['X1C', { pinSha256: 'a'.repeat(64) }, false],
+    ['X2D', { caFile }, false],
+    ['P1S', { pinSha256: 'a'.repeat(64) }, true],
+  ] as const
+  const ids = scenarios.map(() => randomUUID())
+  const config = parseCameraRuntimeConfig(
+    {
+      helper,
+      cameras: scenarios.map(([model, trust], index) => ({
+        cameraId: `bambu-${index}`,
+        assignmentId: ids[index],
+        source: {
+          kind: 'bambu-lan',
+          model,
+          address: '127.0.0.1',
+          ...trust,
+          credentialFile,
+          ffmpeg: encoder.ffmpeg,
+        },
+      })),
+    },
+    ids,
+  )
+  assert.deepEqual(
+    getRtspCameraStatus(config).cameras.map(({ available }) => available),
+    scenarios.map(([, , expected]) => expected),
+  )
+})

@@ -68,7 +68,10 @@ if (inner) {
   test(
     'Docker check image provides Node 22 and Chrome for a loopback page',
     { timeout: 10_800_000 },
-    () => {
+    async () => {
+      // Imported here: the inner run inside the image needs none of it.
+      const { checkImageRunArgs, createLifecycle } =
+        await import('./docker-run-lib.mjs')
       if (!skipBuild) {
         run(
           'docker',
@@ -86,33 +89,22 @@ if (inner) {
         )
       }
 
-      const containerName = `o3dfm-node22-smoke-${process.pid}`
+      const lifecycle = createLifecycle()
+      lifecycle.installSignals()
       try {
         // One container: Node version, Chrome binary, and Playwright channel.
-        run(
-          'docker',
-          [
-            'run',
-            '--rm',
-            '--name',
-            containerName,
-            '--network',
-            'none',
-            '--shm-size',
-            '1g',
-            '--env',
-            'OPEN3D_DOCKER_CHECK_INNER=1',
-            imageTag,
-            'node',
-            '--test',
-            'scripts/test-docker-check-image.mjs',
-          ],
-          { cwd: root, stdio: 'inherit' },
+        const result = await lifecycle.run(
+          checkImageRunArgs({
+            name: `o3dfm-node22-smoke-${process.pid}`,
+            image: imageTag,
+            env: ['OPEN3D_DOCKER_CHECK_INNER=1'],
+            command: ['node', '--test', 'scripts/test-docker-check-image.mjs'],
+          }),
+          { inherit: true },
         )
+        assert.equal(result.status, 0, 'check image smoke failed')
       } finally {
-        spawnSync('docker', ['rm', '--force', containerName], {
-          encoding: 'utf8',
-        })
+        await lifecycle.cleanup()
       }
     },
   )

@@ -7,6 +7,20 @@ const temperatureCelsius = z.number().finite().positive().max(1_000)
 /** Most tools a profile may describe; larger machines omit tool fields. */
 export const MACHINE_PROFILE_MAX_TOOLS = 8
 
+/** One attached filament unit, as the printer reports it. */
+export const MachineMaterialUnit = z.strictObject({
+  id: z.number().int().min(0).max(255),
+  kind: z.enum(['ams', 'ams-lite', 'ams-2-pro', 'ams-ht']),
+  slots: z.number().int().min(1).max(4),
+  /** Tool the unit feeds; omitted when it is not bound to one. */
+  tool: z
+    .number()
+    .int()
+    .min(0)
+    .max(MACHINE_PROFILE_MAX_TOOLS - 1)
+    .optional(),
+})
+
 /**
  * Static hardware limits of one printer, for compatibility checks.
  *
@@ -38,6 +52,7 @@ export const MachineProfile = z
       .string()
       .regex(/^[a-z0-9_]{1,32}$/)
       .optional(),
+    materialUnits: z.array(MachineMaterialUnit).min(1).max(12).optional(),
   })
   .refine((value) => Object.keys(value).length > 0, 'Empty machine profile')
   .refine(

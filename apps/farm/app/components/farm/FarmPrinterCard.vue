@@ -2,7 +2,7 @@
 import ProgressRing from '../ui/charts/ProgressRing.vue'
 import { formatDateTime, formatTemperature } from '../../utils/ui-format.ts'
 import { computed } from 'vue'
-import type { SlotBinding } from '../../utils/farm-slot-view.ts'
+import type { ActiveSpool } from '../../../../../packages/farm-protocol/src/status.ts'
 import FarmMaterials from '../FarmMaterials.vue'
 import FarmEnvironment from '../FarmEnvironment.vue'
 import CameraDisplay from '../CameraDisplay.vue'
@@ -18,6 +18,10 @@ import { deriveRowAlerts, type FarmAlert } from '../../utils/farm-alerts.ts'
 import { farmJobOutcome } from '../../utils/farm-job-outcome.ts'
 import { farmJobView } from '../../utils/farm-job-view.ts'
 import {
+  moonrakerManagesSpool,
+  type SlotBinding,
+} from '../../utils/slot-spools.ts'
+import {
   KOBRA_X_DEVICE_CAPABILITIES,
   isKobraXAssignment,
 } from '../../utils/kobralink-onboarding.ts'
@@ -30,12 +34,18 @@ const props = defineProps<{
   cameraFor: (id: string) => MediaStream | null
   liveNow: () => { wall: number; mono: number }
   alerts?: readonly FarmAlert[]
+  activeSpools?: readonly ActiveSpool[]
 }>()
 const liveNow = props.liveNow
 const cardAlerts = computed(
   () => props.alerts ?? deriveRowAlerts(props.row, props.liveNow()),
 )
-const emit = defineEmits<{ setup: []; save: []; cancel: [] }>()
+const emit = defineEmits<{
+  setup: []
+  save: []
+  cancel: []
+  spoolAssignments: [Readonly<Record<string, number>>]
+}>()
 function temperatureLabel(value: number | undefined): string {
   return formatTemperature(value) ?? 'Indisponível'
 }
@@ -48,14 +58,8 @@ const DEFAULT_SPOOL_SLOTS = [
   'ams:0:3',
 ]
 
-function moonrakerActiveSpool(row: FarmRow): boolean {
-  const materials = row.observation?.state.materials ?? []
-  return materials.some(
-    (material) => material.slot === 'external' && material.active === true,
-  )
-}
-
 function activeSpoolSlots(row: FarmRow): string[] {
+  if (row.observation?.historical) return [...DEFAULT_SPOOL_SLOTS]
   const fromMaterials = (row.observation?.state.materials ?? []).map(
     (material) => material.slot,
   )
@@ -101,7 +105,7 @@ function dateLabel(time: number) {
       <h3 :id="`printer-${row.assignment.assignmentId}`" class="opaque">
         {{ row.assignment.printerKey }}
       </h3>
-      <slot name="summary" />
+      <slot name="summary" :active-spools="activeSpools" />
       <PrinterAlerts
         v-if="cardAlerts.length && !$slots.summary"
         :chips="cardAlerts"
@@ -182,6 +186,7 @@ function dateLabel(time: number) {
           v-if="!row.observation.historical"
           :materials="row.observation.state.materials"
           :bindings="bindings"
+          :active-spools="activeSpools"
         />
         <p
           v-else-if="row.observation.state.materials?.length"
@@ -208,13 +213,15 @@ function dateLabel(time: number) {
             row.observation.historical ||
             observationAge(row.observation, liveNow()).stale
           "
-          :moonraker-managed="moonrakerActiveSpool(row)"
+          :moonraker-managed="moonrakerManagesSpool(row)"
+          @change="emit('spoolAssignments', $event)"
           :materials="
             row.observation.historical
               ? undefined
               : row.observation.state.materials
           "
           :bindings="bindings"
+          :active-spools="row.observation.historical ? undefined : activeSpools"
         />
         <FarmEnvironment
           :fans="row.observation.state.fans"

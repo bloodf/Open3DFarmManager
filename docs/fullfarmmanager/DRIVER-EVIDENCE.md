@@ -143,11 +143,36 @@ Tests: `tests/node/creality-speed-cfs.test.ts`. Source: M device UI (`feedInOrOu
 - **K3 nozzle mapping.** M's device UI reads `nozzleList`, `nozzleState` and `nozzleFilament` and sends `loadNozzle` for model `F039`, but no pinned source ties `F039` to the K3 or shows how a job's tools are mapped to nozzles at print start. Nothing is sent.
 - **Multi-colour start.** M sends `colorMatch` and then `multiColorPrint` for CFS jobs; OpenFarm starts files with `opGcodeFile` only.
 
+## Bambu command and AMS evidence
+
+Source for every wire format: [bambulab/BambuStudio](https://github.com/bambulab/BambuStudio) (AGPL-3.0), commit `23a33758933e712c6041e1f8f135f7d6b50004aa`. Original code; nothing copied. File and function are cited in the code comments. Fixtures (`tests/fixtures/bambu-reference-derived.ts`) are **reference-derived, not captured**. No report or command was observed on hardware, so no row is hardware-qualified.
+
+| Capability                   | Wire form                                                      | BambuStudio path under `src/slic3r/GUI/`                     | Simulator evidence                          |
+| ---------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------- |
+| Nozzle, bed target           | `M104`, `M140`; `set_bed_temp` when `fun` bit 39               | `DeviceManager.cpp`                                          | `tests/node/bambu-command-payloads.test.ts` |
+| Second nozzle target         | `set_nozzle_temp` (built, not advertised)                      | `DeviceManager.cpp`                                          | same                                        |
+| Chamber target               | `set_ctt`, only X1E, X2D, H2C, H2D, H2D Pro, H2S, H3C          | `DeviceCore/DevChamberCtrl.cpp`, `resources/printers/*.json` | same                                        |
+| Part, aux, chamber fan       | `M106 P1`-`P3`; `set_fan` when `device.airduct` is reported    | `DeviceCore/DevFan.cpp`, `Widgets/FanControl.cpp`            | same                                        |
+| AMS load, unload, select     | `ams_change_filament` with `ams_id`, `slot_id`, `target`       | `DeviceManager.cpp`                                          | same                                        |
+| AMS HT, expanded AMS reports | ids 128-135, exist bits, `tray_now`, per-extruder `snow`       | `DeviceCore/DevFilaSystem.cpp`, `DevExtruderSystem.cpp`      | `tests/node/bambu-ams-profiles.test.ts`     |
+| Partial updates and clears   | objects merge, arrays replace; missing unit or tray is removed | `../Utils/json_diff.cpp`, `DeviceCore/DevFilaSystem.cpp`     | same                                        |
+| Dual nozzle and unit profile | `device.extruder`, `device.nozzle`, AMS `info`                 | `DeviceCore/DevNozzleSystem.cpp`, `DevFilaSystem.cpp`        | same                                        |
+
+Unproven or missing:
+
+- No recorded AMS HT, expanded AMS or H2D report exists in this repository. Firmware behaviour, including incremental pushes that replace arrays whole, is taken from the client source only.
+- BambuStudio has no separate tray-select request: selecting is a load, or `ams_mapping` at print start. The `ams_mapping2` form is not implemented.
+- The signed `load_filament` action accepts trays 0-15, so an AMS HT load is built and simulated but cannot be requested by a browser or the API. `set_tool_temperature` is likewise not advertised for Bambu.
+- Loading the external spool, filament-switcher `extruder_id` and air-duct mode selection (`set_airduct`) are not implemented. `set_fan` percentages are sent as given; BambuStudio sends steps of 10.
+- `PrinterState.materials` holds 17 entries: beyond that, the last AMS slots are omitted and external spools are kept.
+- The farm UI shows AMS HT slot ids (`ams:128:0`) and the second external spool (`external:254`) unformatted, and does not display `machine.materialUnits`.
+- `machine.materialUnits` is new in the strict telemetry schema: the server must be updated before a Connector that sends it.
+
 ## Gaps by owner
 
 ### Cortex
 
-- **Bambu Lab:** model/firmware qualification, camera travel coverage, explicit temperature/fan effects and multi-material assertions remain incomplete.
+- **Bambu Lab:** model/firmware qualification and camera travel coverage remain incomplete. Temperature, fan and AMS effects are asserted against the simulator only; see “Bambu command and AMS evidence”.
 - **Creality:** see [Creality stock LAN](#creality-stock-lan-evidence-and-gaps); nothing is hardware-qualified.
 - **Anycubic FDM:** non-Kobra-X adapters are experimental/read-only; model-specific fixtures and operation journeys are missing.
 - **Snapmaker and Klipper/Moonraker-based:** generic Moonraker journey exists, but U1-specific tool behavior, camera, error/alarm and model-specific command journeys are missing.

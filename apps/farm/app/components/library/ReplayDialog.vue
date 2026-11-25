@@ -101,7 +101,8 @@ const slotLabel = (m: ReplayPrinter['materials'][number], index: number) =>
   `Slot ${m.slot || index + 1}: ${m.materialType ?? 'material desconhecido'}`
 const slotValue = (m: ReplayPrinter['materials'][number], index: number) =>
   /^\d{1,3}$/.test(m.slot) ? Number(m.slot) : index
-/** The slot chosen for a filament, as the match view shows it; null until one is chosen. */
+/** The slot chosen for a filament, as the match view shows it; null until one is chosen.
+ * Spoolman's colour and percentage for the slot's active spool come first. */
 function chosen(index: number): MatchedSlot | null {
   const printer = selected.value
   if (!printer) return null
@@ -113,8 +114,10 @@ function chosen(index: number): MatchedSlot | null {
   return {
     label: `Slot ${m.slot || at + 1}`,
     materialType: m.materialType,
-    colorHex: m.colorHex,
+    // Spoolman's active spool first, as the local reel did; else the printer.
+    colorHex: m.spoolmanColorHex ?? m.colorHex,
     remainingPercent: m.remainingPercent,
+    spoolmanRemainingPercent: m.spoolmanRemainingPercent,
   }
 }
 

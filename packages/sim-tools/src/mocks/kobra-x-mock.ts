@@ -155,6 +155,12 @@ export interface KobraXInfoPayload {
   zone: string
 }
 
+export interface KobraXAccessories {
+  ace: boolean
+  light: boolean
+  fan: boolean
+}
+
 export interface KobraXMockState {
   state: KobraXPrintState
   infoState: 'free' | 'busy'
@@ -177,6 +183,25 @@ export interface KobraXMockOptions {
   credentials?: { username: string; password: string } | undefined
   initialState?: KobraXPrintState | undefined
   spoolHolder?: boolean | undefined
+  /**
+   * Accessories this synthetic printer reports. Each defaults to present. An
+   * absent one is left out of every report, as hardware without it would.
+   */
+  accessories?: Partial<KobraXAccessories> | undefined
+  /**
+   * Synthetic, reference-derived (not captured): answer Connector requests with
+   * a printer-made report `msgid` while the ack keeps the request's own, as
+   * described in bloodf/kobracontrol@c414db4f36d4c96f2b232c368ad6cfe56e3d0408
+   * docs/protocol.md, "Requests and replies". `commands` still echoes the IDs
+   * of state queries (`query`, `getInfo`); `all` echoes none. Default: echo.
+   */
+  printerChosenReportIds?: 'commands' | 'all' | undefined
+  /**
+   * Synthetic, not captured: the reports selected by `printerChosenReportIds`
+   * carry no `msgid` at all. No cited source observed this; it exercises the
+   * missing-ID branch of `printer-assigned` (kobra-x/requests.ts).
+   */
+  omitReplacedReportIds?: boolean | undefined
   printDurationMs?: number | undefined
   preparationPhases?: readonly KobraXJobPhase[] | undefined
   preparationStepMs?: number | undefined
@@ -261,6 +286,8 @@ export interface KobraXMockInstance {
         clientKind?: KobraXClientKind
       },
     ) => void
+    /** Change which accessories the printer reports and publish a fresh info report. */
+    setAccessories: (next: Partial<KobraXAccessories>) => void
     setState: (state: KobraXPrintState) => void
     setPrintProgress: (progress: number) => void
     setJobPhase: (
@@ -273,6 +300,8 @@ export interface KobraXMockInstance {
         preparationPhases?: readonly KobraXJobPhase[]
         preparationStepMs?: number
         printDurationMs?: number
+        taskid?: string
+        msgid?: string
       },
     ) => Promise<void>
     finishPrint: () => void
@@ -432,6 +461,7 @@ export async function startKobraXMock(
   let activeFilename: string | undefined =
     state === 'printing' || state === 'paused' ? 'synthetic.gcode' : undefined
   let activeTaskId = '-1'
+  let nextTaskId = 0
   let errorCode: number | undefined
   let errorMessage: string | undefined
   let printerName = 'Anycubic Kobra X (Synthetic)'
@@ -452,8 +482,16 @@ export async function startKobraXMock(
     ? { ...defaultAceBox(), id: -1, model_id: 'SPOOL_HOLDER_SYNTHETIC' }
     : undefined
   if (spoolHolder) spoolHolder.slots[3]!.consumables_percent = 0
+  const accessories: KobraXAccessories = {
+    ace: true,
+    light: true,
+    fan: true,
+    ...options.accessories,
+  }
   const colorBoxes = () =>
-    structuredClone(spoolHolder ? [spoolHolder, aceBox] : [aceBox])
+    accessories.ace
+      ? structuredClone(spoolHolder ? [spoolHolder, aceBox] : [aceBox])
+      : structuredClone(spoolHolder ? [spoolHolder] : [])
   const assistantSettings = [
     { option: 0, value: 1 },
     { option: 1, value: 1 },
@@ -823,9 +861,9 @@ export async function startKobraXMock(
         ...(announcedFlvUrl() ? { rtspUrl: announcedFlvUrl() } : {}),
       },
       temp: { ...tempState },
-      fan_speed_pct: fanSpeedPct,
+      ...(accessories.fan ? { fan_speed_pct: fanSpeedPct } : {}),
       print_speed_mode: printSpeedMode,
-      lights: [{ ...lightState }],
+      lights: accessories.light ? [{ ...lightState }] : [],
       multi_color_box: colorBoxes(),
       ...extended,
     }
@@ -837,7 +875,7 @@ export async function startKobraXMock(
     return {
       ...project,
       settings: {
-        fan_speed_pct: fanSpeedPct,
+        ...(accessories.fan ? { fan_speed_pct: fanSpeedPct } : {}),
         print_speed_mode: printSpeedMode,
       },
     }
@@ -852,6 +890,8 @@ export async function startKobraXMock(
   // Latest unanswered Connector request per type/action. A scripted report for
   // that type/action stands in for the printer's own answer and carries its ID.
   const openRequestIds = new Map<string, string>()
+  /** Request IDs this printer answers with an ID of its own. */
+  const replacedIds = new Set<string>()
   function nextMsgId() {
     reportSeq += 1
     return `printer-msg-${reportSeq}`
@@ -929,10 +969,18 @@ export async function startKobraXMock(
       clientKind?: KobraXClientKind
     } = {},
   ) {
+    const echoed = reportOptions.msgid ?? replyMsgid
+    const replaced = echoed !== undefined && replacedIds.has(echoed)
     const body = {
       type,
       action,
-      msgid: reportOptions.msgid ?? replyMsgid ?? nextMsgId(),
+      // `undefined` drops the key from the serialized report.
+      msgid:
+        replaced && options.omitReplacedReportIds
+          ? undefined
+          : echoed === undefined || replaced
+            ? nextMsgId()
+            : echoed,
       timestamp: Date.now(),
       state: reportOptions.state ?? 'done',
       code: reportOptions.code ?? 200,
@@ -978,6 +1026,7 @@ export async function startKobraXMock(
       preparationStepMs?: number
       printDurationMs?: number
       taskid?: string
+      msgid?: string
     } = {},
   ) {
     stopPrintTimers()
@@ -1003,6 +1052,7 @@ export async function startKobraXMock(
       jobPhase = phase
       publishTypedReport('print', 'start', buildPrintData(), {
         state: phase,
+        ...(opts.msgid ? { msgid: opts.msgid } : {}),
       })
       if (stepMs > 0) {
         await new Promise<void>((resolve) => scheduleTimeout(resolve, stepMs))
@@ -1013,6 +1063,7 @@ export async function startKobraXMock(
     jobPhase = 'printing'
     publishTypedReport('print', 'start', buildPrintData(), {
       state: 'printing',
+      ...(opts.msgid ? { msgid: opts.msgid } : {}),
     })
     startAdvancingPrint(opts.printDurationMs ?? options.printDurationMs)
   }
@@ -1133,6 +1184,13 @@ export async function startKobraXMock(
       // 1. Immediate ACK on <deviceId>/response
       publishAck(msgid, clientKind)
 
+      const mode = options.printerChosenReportIds
+      if (
+        mode === 'all' ||
+        (mode === 'commands' && action !== 'query' && action !== 'getInfo')
+      )
+        replacedIds.add(msgid)
+
       // 2. Dispatch per message type
       replyMsgid = connectorRequestId.test(msgid) ? msgid : undefined
       if (replyMsgid) openRequestIds.set(`${topicType}/${action}`, replyMsgid)
@@ -1144,6 +1202,7 @@ export async function startKobraXMock(
           if (action === 'query') {
             publishTypedReport('info', 'report', buildInfoData(), {
               clientKind,
+              msgid,
             })
           } else if (action === 'net') {
             publishTypedReport(
@@ -1154,7 +1213,7 @@ export async function startKobraXMock(
                 machine_mac: '02:00:00:00:20:30',
                 ip: '127.0.0.1',
               },
-              { clientKind },
+              { clientKind, msgid },
             )
           } else if (action === 'statistic-query') {
             publishTypedReport(
@@ -1165,7 +1224,7 @@ export async function startKobraXMock(
                 print_count: 3,
                 material_used_gram_value: 250,
               },
-              { clientKind },
+              { clientKind, msgid },
             )
           } else if (action === 'setPrinterName') {
             if (typeof data.printerName === 'string' && data.printerName) {
@@ -1175,11 +1234,12 @@ export async function startKobraXMock(
               'info',
               'setPrinterName',
               { printerName },
-              { clientKind },
+              { clientKind, msgid },
             )
           } else {
             publishTypedReport('info', action || 'report', buildInfoData(), {
               clientKind,
+              msgid,
             })
           }
           break
@@ -1195,7 +1255,7 @@ export async function startKobraXMock(
               temp: { ...tempState },
               project: buildProjectPayload(),
             },
-            { clientKind },
+            { clientKind, msgid },
           )
           break
         }
@@ -1209,6 +1269,7 @@ export async function startKobraXMock(
             publishTypedReport('print', 'query', buildPrintData(), {
               state: jobPhase ?? state,
               clientKind,
+              msgid,
             })
           } else if (action === 'start') {
             const filepath =
@@ -1227,13 +1288,17 @@ export async function startKobraXMock(
               publishTypedReport('print', 'start', buildPrintData(), {
                 state: 'checking',
                 clientKind,
+                msgid,
               })
               scheduleTimeout(() => {
                 failPrint(10111, 'abnormal end of task')
               }, trap10111DelayMs)
               return
             }
-            void startPrintScenario(filename, { taskid })
+            void startPrintScenario(filename, {
+              taskid: taskid === '-1' ? `job-${++nextTaskId}` : taskid,
+              msgid,
+            })
           } else if (action === 'pause') {
             state = 'paused'
             jobPhase = 'paused'
@@ -1244,6 +1309,7 @@ export async function startKobraXMock(
             publishTypedReport('print', 'pause', buildPrintData(), {
               state: 'paused',
               clientKind,
+              msgid,
             })
           } else if (action === 'resume') {
             state = 'printing'
@@ -1252,6 +1318,7 @@ export async function startKobraXMock(
             publishTypedReport('print', 'resume', buildPrintData(), {
               state: 'printing',
               clientKind,
+              msgid,
             })
           } else if (action === 'stop' || action === 'cancel') {
             stopPrintTimers()
@@ -1261,6 +1328,7 @@ export async function startKobraXMock(
               state: 'stoped',
               code: 200,
               clientKind,
+              msgid,
             })
             infoState = 'free'
             activeFilename = undefined
@@ -1283,11 +1351,13 @@ export async function startKobraXMock(
             }
             publishTypedReport('print', 'update', buildPrintData(), {
               clientKind,
+              msgid,
             })
           } else {
             publishTypedReport('print', action || 'report', buildPrintData(), {
               state: jobPhase ?? state,
               clientKind,
+              msgid,
             })
           }
           break
@@ -1308,7 +1378,7 @@ export async function startKobraXMock(
             'tempature',
             action || 'query',
             { ...tempState },
-            { clientKind },
+            { clientKind, msgid },
           )
           break
         }
@@ -1373,7 +1443,7 @@ export async function startKobraXMock(
             'multiColorBox',
             action || 'getInfo',
             { multi_color_box: colorBoxes() },
-            { clientKind },
+            { clientKind, msgid },
           )
           break
         }
@@ -1395,7 +1465,7 @@ export async function startKobraXMock(
             'light',
             action || 'control',
             { ...lightState },
-            { clientKind },
+            { clientKind, msgid },
           )
           break
         }
@@ -1412,7 +1482,7 @@ export async function startKobraXMock(
             'fan',
             action || 'setSpeed',
             { fan_speed_pct: fanSpeedPct },
-            { clientKind },
+            { clientKind, msgid },
           )
           break
         }
@@ -1424,7 +1494,12 @@ export async function startKobraXMock(
               size: f.size,
               timestamp: f.uploadedAt,
             }))
-            publishTypedReport('file', 'listLocal', { records }, { clientKind })
+            publishTypedReport(
+              'file',
+              'listLocal',
+              { records },
+              { clientKind, msgid },
+            )
           } else if (action === 'fileDetails') {
             const filename =
               typeof data.filename === 'string' ? data.filename : ''
@@ -1442,7 +1517,7 @@ export async function startKobraXMock(
                   print_time: 600,
                 },
               },
-              { clientKind },
+              { clientKind, msgid },
             )
           } else if (action === 'delete' || action === 'deleteLocal') {
             const filename =
@@ -1452,14 +1527,14 @@ export async function startKobraXMock(
               'file',
               action,
               { filename, deleted: true },
-              { clientKind },
+              { clientKind, msgid },
             )
           } else if (action === 'listVideo') {
             publishTypedReport(
               'file',
               'listVideo',
               { records: structuredClone(videoRecords) },
-              { clientKind },
+              { clientKind, msgid },
             )
           } else if (action === 'deleteVideo') {
             const filename =
@@ -1473,14 +1548,14 @@ export async function startKobraXMock(
                 path: typeof data.path === 'string' ? data.path : '/',
                 filename,
               },
-              { clientKind },
+              { clientKind, msgid },
             )
           } else {
             publishTypedReport(
               'file',
               action || 'listLocal',
               { records: [] },
-              { clientKind },
+              { clientKind, msgid },
             )
           }
           break
@@ -1505,14 +1580,14 @@ export async function startKobraXMock(
               'axis',
               'move',
               { axis, move_type: moveType, position: { ...axisPosition } },
-              { clientKind },
+              { clientKind, msgid },
             )
           } else {
             publishTypedReport(
               'axis',
               action || 'query',
               { position: { ...axisPosition } },
-              { clientKind },
+              { clientKind, msgid },
             )
           }
           break
@@ -1532,7 +1607,7 @@ export async function startKobraXMock(
             'skip',
             action || 'query',
             { skipped_objects: [...skippedObjects] },
-            { clientKind },
+            { clientKind, msgid },
           )
           break
         }
@@ -1559,7 +1634,7 @@ export async function startKobraXMock(
                 urls: { ...(rtspUrl ? { rtspUrl } : {}) },
                 active: cameraMock.capture.active(),
               },
-              { clientKind },
+              { clientKind, msgid },
             )
             break
           }
@@ -1570,7 +1645,7 @@ export async function startKobraXMock(
               ...(flvUrl ? { rtspUrl: flvUrl } : {}),
               active: videoCapturing,
             },
-            { clientKind },
+            { clientKind, msgid },
           )
           break
         }
@@ -1595,7 +1670,7 @@ export async function startKobraXMock(
             'properties',
             action || 'read',
             { assistant_settings: structuredClone(assistantSettings) },
-            { clientKind },
+            { clientKind, msgid },
           )
           break
         }
@@ -1803,6 +1878,18 @@ export async function startKobraXMock(
           ...(open ? { msgid: open } : {}),
           ...reportOptions,
         })
+      },
+      setAccessories: (next) => {
+        Object.assign(accessories, next)
+        publishTypedReport('info', 'report', buildInfoData(), {
+          state: 'done',
+        })
+        publishTypedReport(
+          'multiColorBox',
+          'getInfo',
+          { multi_color_box: colorBoxes() },
+          { state: 'done' },
+        )
       },
       setState: (newState) => {
         state = newState

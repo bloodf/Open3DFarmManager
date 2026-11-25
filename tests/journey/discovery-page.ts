@@ -2,7 +2,10 @@
 // through the Connector's own search, and the farm page shows its decoded
 // camera frames. Both only drive the page; nothing calls a simulator.
 import { expect, type Page } from '@playwright/test'
-import { assertCameraPlaying } from '../helpers/signalling-farm-camera.ts'
+import {
+  assertCameraFramesDecoded,
+  assertCameraPlaying,
+} from '../helpers/signalling-farm-camera.ts'
 import type { JourneyHarness } from './harness.ts'
 
 type Family = 'creality-native' | 'anycubic-lan'
@@ -124,4 +127,12 @@ export async function expectCameraFrames(
   })
   // The frames came from the simulated camera, not from a stand-in.
   expect(camera.requests()).toBeGreaterThan(0)
+}
+
+/** The RTSPS fixture owns an upstream socket probe for playback teardown. */
+export async function expectRtspsCameraFrames(journey: JourneyHarness) {
+  await assertCameraFramesDecoded({
+    page: journey.ownerPage,
+    printerKey: journey.printerKey,
+  })
 }

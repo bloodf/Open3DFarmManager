@@ -8,6 +8,7 @@ import {
 } from '../control/queue-collection-journal.ts'
 import type { MacroParamMap } from '../moonraker/control-macros.ts'
 import { createPrinterDetailSources } from './printer-detail-session.ts'
+import { createSdcpVideo } from '../sdcp/video.ts'
 import {
   discoveryBindings,
   pause,
@@ -165,6 +166,11 @@ type AgentInput = {
     typeof import('./pause-control.ts').runPauseControl
   >[0]['resinCapabilities']
   clock?: AgentClock
+  /**
+   * Test composition only: replaces the shipped SDCP video qualification list,
+   * which is empty. The CLI, the runtime file and the wire cannot set it.
+   */
+  sdcpQualifiedVideo?: readonly import('../sdcp/models.ts').SdcpQualification[]
   statusPort?: number
   configPath: string
   credentialPath: string
@@ -321,7 +327,16 @@ async function runConnectorAgentOnce(
       import('../../../farm-protocol/src/state.ts').PrinterState['speedModes']
     >
   >()
-  const detailSources = createPrinterDetailSources(config)
+  // One state for the signed video command, the camera and the detail page.
+  const sdcpVideo = createSdcpVideo({
+    boards: config.camera?.cameras.flatMap(({ source }) =>
+      'kind' in source && source.kind === 'sdcp-rtsp'
+        ? [source.mainboardId]
+        : [],
+    ),
+    qualified: input.sdcpQualifiedVideo,
+  })
+  const detailSources = createPrinterDetailSources(config, { sdcpVideo })
   // Library prints (#384): download from the server or read the local copy,
   // checked against what each printer itself reported. Never stops the agent.
   const printerProfiles = createPrinterProfiles()
@@ -537,6 +552,7 @@ async function runConnectorAgentOnce(
             agentId: credential.agent_id,
             farmId: credential.farm_id,
             assignmentRefs: refs,
+            sdcpVideo,
           })
         : undefined
     const links = new Map(
@@ -980,6 +996,7 @@ async function runConnectorAgentOnce(
           dataDirectory: input.dataDirectory,
           signal,
           freshness: offline.freshness,
+          sdcpVideo,
           apiHandlers,
           libraryLinks,
           collection,

@@ -1,4 +1,5 @@
 import { uploadMoonrakerFile } from '../moonraker/upload.ts'
+import { QIDI_PROFILES, type QidiModel } from './profiles.ts'
 
 // Qidi ships a Moonraker fork. See https://github.com/QIDITECH/QIDI_Q1_Pro
 // HTTP contracts: https://moonraker.readthedocs.io/en/latest/external_api/
@@ -8,15 +9,15 @@ import { uploadMoonrakerFile } from '../moonraker/upload.ts'
 // https://github.com/Klipper3d/klipper/blob/master/klippy/extras/fan_generic.py
 // https://moonraker.readthedocs.io/en/latest/external_api/printer/#query-printer-object-status
 const namedPartFan = 'fan_generic cooling_fan'
-const objects = [
+const baseObjects = [
   'webhooks',
   'print_stats',
   'virtual_sdcard',
   'extruder',
   'heater_bed',
-  'fan',
-  namedPartFan,
 ] as const
+// Without a provisioned model only the part fan is read.
+const unboundObjects = [...baseObjects, 'fan', namedPartFan]
 
 type Failure =
   'unauthorized' | 'unsupported' | 'timeout' | 'offline' | 'invalid-response'
@@ -36,8 +37,13 @@ function record(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>
 }
 
+const optionalRecord = (value: unknown) =>
+  value === undefined ? undefined : record(value)
+
 export function createQidiAdapter(input: {
   origin: string
+  /** Provisioned locally. Selects the model's cited Klipper objects. */
+  model?: QidiModel
   auth?: { apiKey: string } | { bearerToken: string }
   snapshotPath?: string
   timeoutMs?: number
@@ -58,6 +64,18 @@ export function createQidiAdapter(input: {
       snapshot.hash)
   )
     throw new TypeError('Expected a same-origin Qidi snapshot URL')
+
+  const profile = input.model && QIDI_PROFILES[input.model]
+  const objects = profile
+    ? [
+        ...baseObjects,
+        profile.partFan,
+        ...profile.auxFans,
+        ...[profile.chamberFan, profile.chamberHeater, profile.box].filter(
+          (name) => name !== undefined,
+        ),
+      ]
+    : unboundObjects
 
   const auth = input.auth
   const headers = new Headers()
@@ -150,25 +168,28 @@ export function createQidiAdapter(input: {
         cancel,
       )
       const status = record(result.status)
-      const fan = status.fan === undefined ? status[namedPartFan] : status.fan
+      const read = (name: string | undefined) =>
+        name === undefined ? undefined : optionalRecord(status[name])
+      const common = {
+        webhooks: read('webhooks'),
+        printStats: read('print_stats'),
+        virtualSdcard: read('virtual_sdcard'),
+        extruder: read('extruder'),
+        heaterBed: read('heater_bed'),
+      }
+      if (!profile)
+        return {
+          ...common,
+          fan: read(status.fan === undefined ? namedPartFan : 'fan'),
+        }
       return {
-        webhooks:
-          status.webhooks === undefined ? undefined : record(status.webhooks),
-        printStats:
-          status.print_stats === undefined
-            ? undefined
-            : record(status.print_stats),
-        virtualSdcard:
-          status.virtual_sdcard === undefined
-            ? undefined
-            : record(status.virtual_sdcard),
-        extruder:
-          status.extruder === undefined ? undefined : record(status.extruder),
-        heaterBed:
-          status.heater_bed === undefined
-            ? undefined
-            : record(status.heater_bed),
-        fan: fan === undefined ? undefined : record(fan),
+        ...common,
+        fan: read(profile.partFan),
+        // One entry per cited object, in profile order.
+        auxFans: profile.auxFans.map(read),
+        chamberFan: read(profile.chamberFan),
+        chamber: read(profile.chamberHeater),
+        box: read(profile.box),
       }
     },
     async readHistory() {

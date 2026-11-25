@@ -4,6 +4,7 @@ import { BlockList, isIP } from 'node:net'
 import { z } from 'zod'
 import { isKobraXFlvPath, isKobraXFlvPort } from '../kobra-x/camera.ts'
 import { BrowserDeviceUuid } from '../../../farm-protocol/src/browser-device-proof.ts'
+import { sdcpProfile } from '../sdcp/models.ts'
 
 const textId = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/)
 // Cameras are local devices: loopback, private and link-local ranges only.
@@ -92,6 +93,18 @@ const CameraRuntime = z.strictObject({
           }),
           BambuSource,
           MjpegSource('creality-mjpeg'),
+          // SDCP resin boards: names the collected printer whose stream the
+          // signed video command opens. The stream's port and path come from
+          // its reply, and only this address is opened.
+          z.strictObject({
+            kind: z.literal('sdcp-rtsp'),
+            address: z.ipv4().refine(localAddress),
+            mainboardId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
+            model: z
+              .string()
+              .max(128)
+              .refine((model) => sdcpProfile(model)?.camera === true),
+          }),
           // Creality `webrtc_local` signalling; the path is fixed. Encrypted
           // signalling on the advertised videoPort is not implemented.
           z.strictObject({

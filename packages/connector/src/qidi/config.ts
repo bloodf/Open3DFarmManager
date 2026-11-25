@@ -2,6 +2,7 @@ import { isAbsolute } from 'node:path'
 import { z } from 'zod'
 import { readPrivateJsonFile } from '../config/local.ts'
 import { isLocalFormlabsHost } from '../formlabs/index.ts'
+import { QIDI_MODELS } from './profiles.ts'
 
 const Key = z.string().trim().min(1).max(128)
 const LocalOrigin = z
@@ -24,17 +25,7 @@ export const Binding = z.strictObject({
   origin: LocalOrigin,
   simulated: z.boolean(),
   expect: z.strictObject({
-    model: z
-      .enum([
-        'Q1 Pro',
-        'Plus4',
-        'Q2',
-        'Max4',
-        'X-Max 3',
-        'X-Plus 3',
-        'X-Smart 3',
-      ])
-      .optional(),
+    model: z.enum(QIDI_MODELS).optional(),
     firmware: Key.optional(),
     moonrakerVersion: Key,
   }),

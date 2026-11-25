@@ -57,6 +57,7 @@ export type ReplayEntry = {
 }
 export type ReplayGroups = Record<ReplayLevel, ReplayEntry[]>
 export type ReplayResult = {
+  message?: string
   outcome: 'applied' | 'rejected' | 'not-sent' | 'outcome-unknown'
   code?: string
   reasons?: readonly string[]
@@ -245,6 +246,11 @@ const SOURCE_TEXT = {
 
 /** Outcome text; `retry` is never offered, an uncertain command stays uncertain. */
 export function replayOutcomeText(result: ReplayResult): string {
+  if (
+    result.message &&
+    (result.outcome === 'rejected' || result.outcome === 'not-sent')
+  )
+    return result.message
   switch (result.outcome) {
     case 'applied':
       return `Impressão iniciada. O Connector confirmou o comando${

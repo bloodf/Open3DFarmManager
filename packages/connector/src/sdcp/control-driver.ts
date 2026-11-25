@@ -29,6 +29,8 @@ import {
   SDCP_CONTROL_ACTIONS,
   sdcpProfile,
   sdcpStartQualified,
+  sdcpStartUnavailableMessage,
+  RESIN_LIBRARY_START_MESSAGE,
   type SdcpAction,
   type SdcpQualification,
 } from './models.ts'
@@ -214,7 +216,7 @@ export function openFixedSdcpControl(input: {
   async function prewrite(
     next: ExtendedControlAction,
     values: Record<string, unknown>,
-    request: Parameters<PauseDriver['pauseOnce']>[0],
+    request: Parameters<NonNullable<PauseDriver['execute']>>[2],
   ) {
     current()
     if (
@@ -242,16 +244,26 @@ export function openFixedSdcpControl(input: {
       throw new DriverRefusalError(
         'unsupported-action',
         `SDCP start_print is not qualified for ${local!.model} firmware ${target!.firmwareVersion}`,
+        {
+          userMessage: sdcpStartUnavailableMessage(
+            local!.model,
+            target!.firmwareVersion,
+          ),
+        },
       )
     // Built before the guard: an invalid argument never reaches the printer.
     const command = buildSdcpCommand(local!.model, fixed, values)
     if (fixed === 'start_print') {
       // As on the API path, a resin file starts only as a validated library
       // version: its name cannot show which resin model it was sliced for.
-      if (resinArtifactFormatFor(String(command.Data.Filename)))
+      if (
+        resinArtifactFormatFor(String(command.Data.Filename)) &&
+        request.verifiedResinFilename !== command.Data.Filename
+      )
         throw new DriverRefusalError(
           'invalid-command',
           'resin-artifact-requires-library-version',
+          { userMessage: RESIN_LIBRARY_START_MESSAGE },
         )
       // A printer still storing an upload reports a busy machine status; wait
       // for a stopped report instead of sending into it.
@@ -266,7 +278,7 @@ export function openFixedSdcpControl(input: {
   async function send(
     next: ExtendedControlAction,
     values: Record<string, unknown>,
-    request: Parameters<PauseDriver['pauseOnce']>[0],
+    request: Parameters<NonNullable<PauseDriver['execute']>>[2],
   ): Promise<{ acknowledged: boolean }> {
     // Untyped: after a first attempt, a write may already have happened.
     if (attempted) throw failure()
@@ -280,7 +292,11 @@ export function openFixedSdcpControl(input: {
         : new DriverRefusalError(
             'state',
             error instanceof Error ? error.message : 'SDCP control unavailable',
-            { cause: error },
+            {
+              cause: error,
+              userMessage:
+                'A impressora não ficou pronta para receber o comando.',
+            },
           )
     })
     action = fixed

@@ -297,6 +297,7 @@ export const ApiEnvelopeResultFrame = z
       .max(MAX_API_ENVELOPE_DETAIL_CHARS)
       .regex(/^[^\x00-\x08\x0b\x0c\x0e-\x1f\x7f]*$/)
       .optional(),
+    message: z.string().min(1).max(MAX_API_ENVELOPE_DETAIL_CHARS).optional(),
     /** Job history entry once a print has ended (decimal, up to 19 digits). */
     history_entry_id: z
       .string()
@@ -304,6 +305,7 @@ export const ApiEnvelopeResultFrame = z
       .optional(),
     at: time,
   })
+  .refine((value) => value.message === undefined || value.outcome === 'refused')
   .refine((value) => (value.outcome === 'refused') === !!value.refusal_code)
   .refine(
     (value) =>

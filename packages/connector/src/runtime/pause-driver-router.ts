@@ -27,6 +27,7 @@ import {
   SDCP_QUALIFIED_STARTS,
   sdcpModelKey,
   sdcpStartQualified,
+  sdcpStartUnavailableMessage,
   type SdcpQualification,
 } from '../sdcp/models.ts'
 import { readSdcpPrinterBinding } from '../control/printer-binding.ts'
@@ -195,6 +196,15 @@ export function createPauseDriverRouter(config: {
   }
   return Object.freeze({
     controls,
+    startUnavailableMessage(binding: PrinterBinding) {
+      const sdcp = readSdcpPrinterBinding(binding)
+      if (sdcp && !controls(binding).includes('start_print'))
+        return sdcpStartUnavailableMessage(
+          sdcp.model,
+          sdcpFirmware.get(binding),
+        )
+      return undefined
+    },
     allowsExtendedResult(binding: PrinterBinding) {
       const mapping = readPrinterBinding(binding)
       return (

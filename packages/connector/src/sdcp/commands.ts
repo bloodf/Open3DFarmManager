@@ -27,7 +27,10 @@ export function sdcpFileName(model: string, name: unknown): string {
     name.startsWith('.') ||
     !profile.extensions.some((end) => name.toLowerCase().endsWith(end))
   )
-    throw new DriverRefusalError('invalid-command', 'Invalid SDCP file name')
+    throw new DriverRefusalError('invalid-command', 'Invalid SDCP file name', {
+      userMessage:
+        'Escolha um arquivo de impressão compatível com a impressora.',
+    })
   return name
 }
 

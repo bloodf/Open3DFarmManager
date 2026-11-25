@@ -24,7 +24,12 @@ export type FarmPauseControlState =
   /** Admitted peer with a fresh signed capability, valid until `expiresAt` (wall). */
   | { kind: 'ready'; expiresAt: number }
   | { kind: 'sending' }
-  | { kind: 'settled'; outcome: PauseCommandOutcome; code?: ControlResultCode }
+  | {
+      kind: 'settled'
+      outcome: PauseCommandOutcome
+      code?: ControlResultCode
+      message?: string
+    }
   | { kind: 'failed'; reason: FarmPauseFailure }
 
 /** `not-ready`: no fresh capability in time, often a wrong device clock. */
@@ -174,10 +179,15 @@ export function openFarmPauseControl(input: FarmPauseControlInput) {
         sendCommand: (message) =>
           current() ? (signalling?.sendCommand(message) ?? false) : false,
       },
-      onOutcome: (outcome, code) => {
+      onOutcome: (outcome, code, message) => {
         if (!current()) return
         resultCode = code
-        set({ kind: 'settled', outcome, ...(code ? { code } : {}) })
+        set({
+          kind: 'settled',
+          outcome,
+          ...(code ? { code } : {}),
+          ...(message ? { message } : {}),
+        })
       },
     })
     const create =

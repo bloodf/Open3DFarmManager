@@ -268,6 +268,29 @@ export class PostgresIntegrationApprovals implements IntegrationApprovalStore {
           )
           return { kind: 'authority-lost', item }
         }
+        // The file must still be in the library: a version removed while held
+        // is never printed, even before retention purges its bytes.
+        if (kind === 'job' && row.libraryVersionId != null) {
+          const live = await tx`
+            SELECT 1 FROM farm.library_versions v
+            JOIN farm.library_blobs b ON b.farm_id = v.farm_id AND b.sha256 = v.sha256
+              AND b.storage_location = v.storage_location AND b.location_agent_id = v.location_agent_id
+            WHERE v.id = ${row.libraryVersionId}::uuid AND v.farm_id = ${row.farmId}::uuid
+              AND v.deleted_at IS NULL AND b.purged_at IS NULL`
+          if (live.length === 0) {
+            await settle('rejected')
+            await this.audit(
+              tx,
+              kind,
+              row,
+              { kind: 'owner', id: input.accountId },
+              'rejected',
+              'version-unavailable',
+              now,
+            )
+            return { kind: 'version-unavailable', item }
+          }
+        }
         await settle('submitted')
         await this.audit(
           tx,

@@ -48,6 +48,11 @@ export interface BlobFacts {
   refs: number
   /** At least one referencing version is not soft-deleted. */
   live: boolean
+  /**
+   * A Connector holds a copy of a file whose live version is on another
+   * Connector (integration replays copy it to the target printer's Connector).
+   */
+  copyOfLive?: boolean
   newestDeletedAt: number | null
 }
 
@@ -58,7 +63,8 @@ export function isPurgeable(
   graceMs: number = ORPHAN_GRACE_MS,
 ): boolean {
   if (facts.live) return false
-  if (facts.refs === 0) return now - facts.createdAt >= graceMs
+  if (facts.refs === 0)
+    return !facts.copyOfLive && now - facts.createdAt >= graceMs
   return (
     facts.newestDeletedAt !== null &&
     facts.newestDeletedAt <= now - facts.retentionDays * DAY_MS
@@ -113,7 +119,8 @@ const FACT_COLUMNS = (
 ) => tx`SELECT b.farm_id AS "farmId", b.sha256, b.size_bytes::float8 AS "sizeBytes",
   b.storage_location AS "location", b.agent_id AS "agentId", b.created_at::float8 AS "createdAt",
   COALESCE(s.retention_days, ${DEFAULT_RETENTION_DAYS})::int AS "retentionDays",
-  count(v.id)::int AS refs, COALESCE(bool_or(v.deleted_at IS NULL), false) AS live,
+  count(v.id)::int AS refs, COALESCE(bool_or(v.id IS NOT NULL AND v.deleted_at IS NULL), false) AS live,
+  b.storage_location = 'connector' AND EXISTS (SELECT 1 FROM farm.library_versions o WHERE o.farm_id = b.farm_id AND o.sha256 = b.sha256 AND o.storage_location = 'connector' AND o.deleted_at IS NULL) AS "copyOfLive",
   max(v.deleted_at)::float8 AS "newestDeletedAt"
   FROM farm.library_blobs b
   LEFT JOIN farm.library_settings s ON s.farm_id = b.farm_id
@@ -136,8 +143,9 @@ function purgeCandidates(
   return sql<
     BlobFacts[]
   >`${FACT_COLUMNS(sql)} WHERE b.purged_at IS NULL ${FACT_GROUP(sql)}
-  HAVING bool_or(v.deleted_at IS NULL) IS NOT TRUE AND (
-    (count(v.id) = 0 AND b.created_at <= ${now - graceMs})
+  HAVING bool_or(v.id IS NOT NULL AND v.deleted_at IS NULL) IS NOT TRUE AND (
+    (count(v.id) = 0 AND b.created_at <= ${now - graceMs}
+      AND NOT (b.storage_location = 'connector' AND EXISTS (SELECT 1 FROM farm.library_versions o WHERE o.farm_id = b.farm_id AND o.sha256 = b.sha256 AND o.storage_location = 'connector' AND o.deleted_at IS NULL)))
     OR max(v.deleted_at) <= ${now} - COALESCE(s.retention_days, ${DEFAULT_RETENTION_DAYS})::bigint * ${DAY_MS})
   ORDER BY b.created_at LIMIT ${limit}`
 }

@@ -256,7 +256,9 @@ export async function uploadIntegrationLibrary(
                 pointer:
                   result.reason === 'profile-mismatch'
                     ? '/resinProfile'
-                    : '/name',
+                    : result.reason === 'quota-exceeded'
+                      ? '/contentBase64'
+                      : '/name',
                 detail: result.reason,
               },
             ]

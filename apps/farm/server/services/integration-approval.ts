@@ -60,6 +60,8 @@ export type DecideOutcome =
   | { kind: 'expired'; item: HeldItem }
   /** The app, grant or printer lost its authority while held: the item is now `rejected`. */
   | { kind: 'authority-lost'; item: HeldItem }
+  /** The library version was removed while held: the item is now `rejected`. */
+  | { kind: 'version-unavailable'; item: HeldItem }
   /** Someone else already decided it, or it was not held. */
   | { kind: 'conflict' }
   | { kind: 'forbidden' }
@@ -106,6 +108,7 @@ export type ApprovalProblem =
   | 'conflict'
   | 'expired'
   | 'authority-lost'
+  | 'version-unavailable'
   | 'service-unavailable'
 export interface DecisionView {
   kind: ApprovalKind
@@ -186,6 +189,8 @@ export class IntegrationApprovalService {
         return { ok: false, problem: 'expired' }
       case 'authority-lost':
         return { ok: false, problem: 'authority-lost' }
+      case 'version-unavailable':
+        return { ok: false, problem: 'version-unavailable' }
     }
     const item = outcome.item
     if (decision === 'reject')

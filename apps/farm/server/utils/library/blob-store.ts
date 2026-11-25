@@ -9,6 +9,7 @@ import {
   rename,
   stat,
   unlink,
+  utimes,
 } from 'node:fs/promises'
 import { isAbsolute, join, resolve, sep } from 'node:path'
 
@@ -151,6 +152,10 @@ export async function createBlobStore(
         await options.beforeRename?.()
         if (await regularFile(target)) {
           await unlink(temp)
+          // A repeated upload restarts the orphan grace, so the retention sweep
+          // cannot take an unreferenced file before its record is back.
+          const now = new Date()
+          await utimes(target, now, now)
           return { sha256, size, created: false }
         }
         await rename(temp, target)

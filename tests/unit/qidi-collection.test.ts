@@ -9,6 +9,7 @@ import {
 } from '../../packages/connector/src/runtime/qidi-collection.ts'
 import { startQidiSimulator } from '../../packages/sim-tools/src/qidi-simulator.ts'
 import fixture from '../fixtures/qidi/moonraker.json'
+import { qidiVariant } from '../fixtures/qidi/variants.ts'
 
 test('collects, withdraws failed sources, and recovers in new read-only epochs', async () => {
   const info = structuredClone(fixture.info)
@@ -108,8 +109,7 @@ test('collects, withdraws failed sources, and recovers in new read-only epochs',
       simulator.requests.every(
         (request) =>
           request === 'GET /server/info' ||
-          request ===
-            'GET /printer/objects/query?webhooks&print_stats&virtual_sdcard&extruder&heater_bed&fan&fan_generic%20cooling_fan',
+          request === `GET ${qidiVariant('Q1 Pro').query}`,
       ),
     ).toBe(true)
   } finally {

@@ -23,6 +23,7 @@ it('clears old farm data and ignores late responses after a farm switch', async 
     useShellRecords(
       () => farm.value,
       () => open.value,
+      () => 'PLA',
     ),
   )!
   expect(pending).toHaveLength(2)

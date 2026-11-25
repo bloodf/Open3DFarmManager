@@ -79,7 +79,8 @@ import { renderToString } from 'vue/server-renderer'
 import FarmPrinterCard from '${join(root, 'app/components/farm/FarmPrinterCard.vue')}'
 import PrinterWallCard from '${join(root, 'app/components/farm/PrinterWallCard.vue')}'
 import PrinterWallTable from '${join(root, 'app/components/farm/PrinterWallTable.vue')}'
-const rows = ${JSON.stringify([row(true, '001'), row(false, '002'), row(false, '003')])}
+const rows = ${JSON.stringify([row(true, '001'), row(false, '002')])}
+rows.push(${JSON.stringify(row(false, '003'))})
 rows[2].observation.received = { wall: -999999, mono: -999999 }
 rows[2].observation.state.observedAt = -999999
 const now = { wall: 1000, mono: 1000 }

@@ -46,7 +46,7 @@ function shellRoutes(queries: string[]): Routes {
     'GET /api/browser-devices': reply({ currentRole: 'owner' }),
     [`GET /api/farms/${farmId}/spool-library/spools`]: ({ url }) => {
       const query = url.searchParams.get('q') ?? ''
-      queries.push(query)
+      if (query) queries.push(query)
       return reply({ items: query ? [spool] : [], total: query ? 1 : 0 })
     },
   }
@@ -130,7 +130,13 @@ it('scrolls the newly active keyboard option into the dialog viewport', async ()
 
 it('skips empty spool searches and exposes only nonempty, noninteractive options', async () => {
   const queries: string[] = []
-  const opened = await harness.open('farm', shellRoutes(queries), {
+  const requests: string[] = []
+  const routes = shellRoutes(queries)
+  routes[`GET /api/farms/${farmId}/spool-library/spools`] = ({ url }) => {
+    requests.push(url.searchParams.get('q') ?? '')
+    return reply({ items: [], total: 0 })
+  }
+  const opened = await harness.open('farm', routes, {
     layout: true,
     route: { path: '/farm', query: { farm: farmId } },
   })
@@ -154,7 +160,7 @@ it('skips empty spool searches and exposes only nonempty, noninteractive options
     await pw(
       opened.page.locator('[role="option"] a, [role="option"] button'),
     ).toHaveCount(0)
-    pw(queries).toEqual([])
+    pw(requests).toEqual([])
     await opened.page
       .locator('#shell-search-results [role=option]')
       .first()

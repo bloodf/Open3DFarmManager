@@ -166,7 +166,7 @@ async function changePassword() {
 </script>
 
 <template>
-  <SettingsPage title="Conta">
+  <SettingsPage class="ops-screen ops-screen--columns" title="Conta">
     <template #intro>
       Gerencie como você entra: o vínculo com o Google e a senha desta conta.
     </template>

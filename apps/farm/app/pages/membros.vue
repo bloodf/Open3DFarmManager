@@ -271,7 +271,7 @@ function onRevoke(invite: FarmInvite) {
 </script>
 
 <template>
-  <main id="conteudo" class="members-page">
+  <main id="conteudo" class="ops-screen members-page">
     <header class="page-header">
       <p class="eyebrow">Open3DFarmManager</p>
       <h1>Membros e convites</h1>
@@ -370,107 +370,19 @@ function onRevoke(invite: FarmInvite) {
 </template>
 
 <style scoped>
-.members-page {
-  display: grid;
-  gap: var(--space-4);
-  align-content: start;
-}
-.page-header {
-  display: grid;
-  gap: var(--space-2);
-}
-.page-header h1,
-.page-header p,
-.back {
-  margin: 0;
-}
-.eyebrow {
-  font-size: var(--font-size-sm);
-  letter-spacing: 0.04em;
-  color: var(--color-text-muted);
-}
-.intro {
-  color: var(--color-text-muted);
-}
 .content {
   display: grid;
-  gap: var(--space-4);
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ops-space-3);
   min-width: 0;
-}
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-4);
-  align-items: center;
-}
-[role='alert']:focus-visible {
-  outline: var(--focus-ring-width) solid var(--color-focus-ring);
-  outline-offset: var(--focus-ring-offset);
-  border-radius: var(--radius-md);
 }
 .live:empty {
   display: none;
 }
-.notice {
-  margin: 0;
-  padding: var(--space-3);
-  border: 1px solid var(--color-border);
-  border-inline-start: 3px solid var(--color-accent);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface-raised);
-}
-.panel {
-  margin: 0;
-  padding: var(--space-5);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-raised);
-  min-width: 0;
-}
-.panel p {
-  margin: 0;
-}
-.loading {
-  display: grid;
-  gap: var(--space-3);
-}
 .loading :deep(.skeleton) {
   min-block-size: 3rem;
 }
-.farm-field {
-  display: grid;
-  gap: var(--space-2);
-}
-label {
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
-}
-select {
-  width: 100%;
-  max-width: 32rem;
-  min-height: 2.75rem;
-  padding: var(--space-2) var(--space-3);
-  font: inherit;
-  color: inherit;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-}
-select:focus-visible {
-  outline: var(--focus-ring-width) solid var(--color-focus-ring);
-  outline-offset: var(--focus-ring-offset);
-}
-select:disabled {
-  opacity: 0.6;
-}
-/* Same bordered surface as the panels. */
-.members-page :deep(.ui-card) {
-  border: 1px solid var(--color-border);
-  box-shadow: none;
-}
-@media (max-width: 30rem) {
-  .panel {
-    padding: var(--space-4);
-  }
+#conteudo div.farm-field.panel {
+  gap: var(--space-1);
 }
 </style>

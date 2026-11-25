@@ -120,7 +120,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <SettingsPage title="Provedores de entrada">
+  <SettingsPage class="ops-account" title="Provedores de entrada">
     <template #intro>
       Contas → Provedores de entrada. Só administradores da instalação podem
       alterar estas opções.

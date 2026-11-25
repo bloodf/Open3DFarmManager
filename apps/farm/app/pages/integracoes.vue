@@ -377,7 +377,11 @@ function grantDraft(appId: string) {
 </script>
 
 <template>
-  <main id="conteudo" class="integrations-page" :aria-busy="loading || pending">
+  <main
+    id="conteudo"
+    class="ops-account integrations-page"
+    :aria-busy="loading || pending"
+  >
     <header class="page-header">
       <p class="eyebrow">Open3DFarmManager</p>
       <h1>Integrações</h1>
@@ -594,177 +598,59 @@ function grantDraft(appId: string) {
 </template>
 
 <style scoped>
-.integrations-page {
-  display: grid;
-  gap: var(--space-4);
-  align-content: start;
-}
-.page-header {
-  display: grid;
-  gap: var(--space-2);
-}
-.eyebrow {
-  margin: 0;
-  font-size: var(--font-size-sm);
-  letter-spacing: 0.04em;
-  color: var(--color-text-muted);
-}
-.page-header h1 {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-.intro {
-  margin: 0;
-  color: var(--color-text-muted);
-}
-.alert:focus-visible,
-.secret-panel:focus-visible {
-  outline: var(--focus-ring-width) solid var(--color-focus-ring);
-  outline-offset: var(--focus-ring-offset);
-  border-radius: var(--radius-md);
-}
-.alert:empty {
-  display: none;
-}
-.notice {
-  margin: 0;
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-raised);
-}
+.alert:empty,
 .notice:empty {
   display: none;
 }
-.notice-error {
-  border-color: var(--printer-error);
-  color: var(--printer-error);
-  font-weight: var(--font-weight-semibold);
-}
-.panel {
-  margin: 0;
-  padding: var(--space-5);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-raised);
-  min-width: 0;
-}
-.panel > p {
-  margin-block: 0 var(--space-3);
-}
-h2 {
-  margin: 0 0 var(--space-3);
-  font-size: var(--font-size-lg);
-  line-height: var(--line-height-tight);
-}
-h3 {
-  margin: 0;
-  font-size: var(--font-size-lg);
-  overflow-wrap: anywhere;
-}
-h4 {
-  margin: var(--space-4) 0 var(--space-2);
-  font-size: var(--font-size-base);
-}
-.loading {
-  display: grid;
-  gap: var(--space-3);
+.loading :deep(.skeleton) {
+  min-block-size: var(--space-5);
 }
 .apps {
   display: grid;
-  gap: var(--space-4);
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ops-space-3);
   min-width: 0;
 }
-.apps > h2 {
-  margin: 0;
-}
-.secret-panel {
-  border-color: var(--printer-paused);
+#conteudo section.secret-panel.panel {
+  border-inline-start: var(--ops-space-1) solid var(--ops-attention);
 }
 .field {
   display: grid;
   gap: var(--space-1);
   min-width: 0;
 }
-label,
-legend {
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
-}
 legend {
   padding: 0;
   margin-bottom: var(--space-2);
 }
-select,
-input:not([type='checkbox']),
 textarea {
-  width: 100%;
-  max-width: 38rem;
-  min-height: 2.75rem;
-  padding: var(--space-2) var(--space-3);
-  font: inherit;
-  color: inherit;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-}
-textarea {
-  font-family: ui-monospace, monospace;
   resize: vertical;
-}
-select:focus-visible,
-input:focus-visible,
-textarea:focus-visible {
-  outline: var(--focus-ring-width) solid var(--color-focus-ring);
-  outline-offset: var(--focus-ring-offset);
-}
-select:disabled,
-input:disabled {
-  opacity: 0.6;
 }
 .register {
   display: grid;
   grid-template-columns: minmax(0, 38rem) auto;
+  justify-content: start;
   gap: var(--space-3) var(--space-4);
   align-items: end;
 }
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-3);
-  align-items: center;
-  margin-top: var(--space-3);
+h3 {
+  font-size: var(--ops-text-body);
 }
-.register .actions,
-.register > button {
-  margin: 0;
-}
-.app-card {
-  display: grid;
-  gap: var(--space-2);
-  align-content: start;
-}
-.app-card .actions {
-  margin-top: 0;
-}
-.app-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2) var(--space-3);
+h4 {
+  padding-top: var(--ops-space-3);
+  border-top: 1px solid var(--ops-border);
 }
 .meta {
-  margin: 0;
-  font-size: var(--font-size-sm);
-  color: var(--color-text-muted);
+  font-size: var(--ops-text-small);
+}
+.meta.wrap {
+  font-family: var(--ops-font-mono);
 }
 .grant-form {
   display: grid;
   gap: var(--space-3);
-  margin-top: var(--space-3);
   padding-top: var(--space-3);
-  border-top: 1px solid var(--color-border);
+  border-top: 1px solid var(--ops-border);
 }
 fieldset {
   margin: 0;
@@ -775,29 +661,24 @@ fieldset {
 .scopes {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
-  gap: var(--space-1) var(--space-4);
+  column-gap: var(--space-4);
 }
-.check {
+label.check {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   min-height: 2.75rem;
   font-weight: 400;
-  font-size: var(--font-size-base);
+  font-size: var(--ops-text-body);
   overflow-wrap: anywhere;
-}
-.check input {
-  flex: 0 0 auto;
-  width: 1.25rem;
-  height: 1.25rem;
-  accent-color: var(--color-accent);
+  cursor: pointer;
 }
 .grants {
-  display: grid;
-  gap: var(--space-2);
   margin: 0;
   padding: 0;
   list-style: none;
+  border: 1px solid var(--ops-border);
+  border-radius: var(--ops-radius-sm);
 }
 .grants li {
   display: flex;
@@ -806,32 +687,15 @@ fieldset {
   justify-content: space-between;
   gap: var(--space-2) var(--space-3);
   padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
+}
+.grants li + li {
+  border-top: 1px solid var(--ops-border);
 }
 .wrap {
   overflow-wrap: anywhere;
   min-width: 0;
 }
-code {
-  font-family: ui-monospace, monospace;
-}
-.integrations-page :deep(.danger) {
-  border-color: var(--printer-error);
-  color: var(--printer-error);
-}
-.integrations-page :deep(.ui-card) {
-  border: 1px solid var(--color-border);
-  box-shadow: none;
-}
-.back {
-  margin: 0;
-}
 @media (max-width: 30rem) {
-  .panel {
-    padding: var(--space-4);
-  }
   .register {
     grid-template-columns: minmax(0, 1fr);
   }

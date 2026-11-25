@@ -9,13 +9,15 @@ export type DriverRefusalReason =
  * other error there is an unknown outcome.
  */
 export class DriverRefusalError extends Error {
+  readonly userMessage: string | undefined
   readonly refusal: DriverRefusalReason
   constructor(
     refusal: DriverRefusalReason,
     message: string,
-    options?: ErrorOptions,
+    options?: ErrorOptions & { userMessage?: string },
   ) {
     super(message, options)
+    this.userMessage = options?.userMessage
     this.refusal = refusal
   }
 }

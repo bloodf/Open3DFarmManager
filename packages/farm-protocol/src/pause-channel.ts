@@ -67,6 +67,7 @@ export const PauseChannelFrame = z
       command_id: BrowserDeviceUuid,
       outcome: z.enum(['rejected', 'not-sent', 'applied', 'outcome-unknown']),
       code: ControlResultCode.optional(),
+      message: z.string().min(1).max(256).optional(),
     }),
     z.strictObject({
       ...base,

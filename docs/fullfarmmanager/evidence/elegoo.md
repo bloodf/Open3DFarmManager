@@ -50,8 +50,9 @@ Even on a qualified pair, a resin file (`.ctb`, `.goo`) is never started by
 name: its name cannot show which resin model it was sliced for. The browser
 path now applies the API path's rule
 (`resin-artifact-requires-library-version`). The validated resin library
-dispatch is a separate path, and this driver does not provide it, so resin
-models currently have no start through this driver.
+dispatch is a separate path. A qualified Connector capability must validate
+the library artifact and upload it before asking the SDCP driver to start the
+same file. The driver still requires a qualified model and firmware pair.
 
 ## Per model
 

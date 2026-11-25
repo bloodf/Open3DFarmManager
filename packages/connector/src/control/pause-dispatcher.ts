@@ -222,6 +222,8 @@ export interface PauseDriver {
     input: {
       binding: PrinterBinding
       beforeSend(): boolean
+      /** Connector-only filename from the validated resin replay path. */
+      verifiedResinFilename?: string
       transportId?: string
       stillAuthorized?(): boolean
       signal: AbortSignal
@@ -229,6 +231,7 @@ export interface PauseDriver {
   ): Promise<PauseRpcResult>
   macros?(binding: PrinterBinding): readonly string[] | undefined
   macroParams?(binding: PrinterBinding): MacroParamMap | undefined
+  startUnavailableMessage?(binding: PrinterBinding): string | undefined
   controls?(binding: PrinterBinding): readonly ExtendedControlAction[]
   allowsExtendedResult?(binding: PrinterBinding): boolean
   /**
@@ -284,13 +287,14 @@ export type PauseDispatchReason =
   | 'guard-denied'
   | 'applied'
 export type PauseDispatchResult =
-  | { kind: 'rejected'; reason: PauseDispatchReason }
+  | { kind: 'rejected'; reason: PauseDispatchReason; message?: string }
   | {
       kind: 'not-sent' | 'applied' | 'outcome-unknown'
       cmdId: string
       reason: PauseDispatchReason
       /** Advisory driver detail. Present only when a driver reported one. */
       code?: ControlResultCode
+      message?: string
     }
 type Sample = { wall: number; mono: number }
 
@@ -333,6 +337,9 @@ export function createPauseDispatcher(config: {
   const driver = Object.freeze({
     execute: config.driver.execute?.bind(config.driver),
     controls: config.driver.controls?.bind(config.driver),
+    startUnavailableMessage: config.driver.startUnavailableMessage?.bind(
+      config.driver,
+    ),
     allowsExtendedResult: config.driver.allowsExtendedResult?.bind(
       config.driver,
     ),
@@ -574,6 +581,7 @@ export function createPauseDispatcher(config: {
         reason: PauseDispatchReason,
         journalReason: CommandJournalReason,
         observedWall?: number,
+        message?: string,
       ): PauseDispatchResult {
         if (terminal) return terminal
         if (kind === 'applied' && (!cleaned || observedWall === undefined)) {
@@ -588,9 +596,10 @@ export function createPauseDispatcher(config: {
               kind: kind === 'rejected' ? 'not-sent' : kind,
               cmdId: command.cmd_id,
               reason,
+              ...(message ? { message } : {}),
               ...(resultCode && kind !== 'applied' ? { code: resultCode } : {}),
             }
-          : { kind: 'rejected', reason }
+          : { kind: 'rejected', reason, ...(message ? { message } : {}) }
         cleanup()
         finishDetails =
           observedWall === undefined
@@ -835,7 +844,16 @@ export function createPauseDispatcher(config: {
               command.action,
             )
           ) {
-            finalize('rejected', 'unsupported-action', 'guard-denied')
+            finalize(
+              'rejected',
+              'unsupported-action',
+              'guard-denied',
+              undefined,
+              command.action === 'start_print' ||
+                command.action === 'start_library_print'
+                ? driver.startUnavailableMessage?.(printerBinding)
+                : undefined,
+            )
             return
           }
           extendedResultMs =
@@ -1060,7 +1078,13 @@ export function createPauseDispatcher(config: {
             receipt &&
             error instanceof DriverRefusalError
           )
-            finalize('not-sent', error.refusal, 'guard-denied')
+            finalize(
+              'not-sent',
+              error.refusal,
+              'guard-denied',
+              undefined,
+              error.userMessage,
+            )
           else if (!terminal)
             finalize(
               permitted || contractBroken || (driverCalled && !guardCalled)

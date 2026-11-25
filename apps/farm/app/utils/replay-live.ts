@@ -122,11 +122,15 @@ export async function sendLibraryReplay(
     if (!selectionCurrent())
       return { outcome: 'not-sent', code: 'stale-selection' }
     let code: string | undefined
+    let message: string | undefined
     let result: ReplayResult = { outcome: 'not-sent' }
     let control: ReplayControl | undefined
     try {
       control = await connect((state) => {
-        if (state.kind === 'settled' && state.code) code = state.code
+        if (state.kind === 'settled') {
+          code = state.code
+          message = state.message
+        }
       })
     } catch {
       if (code) return { outcome: 'not-sent', code }
@@ -139,7 +143,11 @@ export async function sendLibraryReplay(
           'start_library_print',
           args,
         )
-        result = { outcome: outcome ?? 'not-sent', ...(code ? { code } : {}) }
+        result = {
+          outcome: outcome ?? 'not-sent',
+          ...(code ? { code } : {}),
+          ...(message ? { message } : {}),
+        }
       } catch {
         result = { outcome: 'outcome-unknown' }
       } finally {
@@ -147,7 +155,12 @@ export async function sendLibraryReplay(
         await control.dispose().catch(() => {})
       }
     }
-    if (result.outcome !== 'not-sent' || result.code || attempt === 2)
+    if (
+      result.outcome !== 'not-sent' ||
+      result.code ||
+      result.message ||
+      attempt === 2
+    )
       return result
     // A Connector serves one command session at a time and waits at least 1 s
     // before it listens again (`RETRY_MIN_MS` in

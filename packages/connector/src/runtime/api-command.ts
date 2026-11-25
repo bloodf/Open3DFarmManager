@@ -2,6 +2,7 @@ import { DriverRefusalError } from '../control/driver-refusal.ts'
 import { toolTemperatureRefusal } from '../control/control-driver.ts'
 import type { ToolHeaters } from '../../../farm-protocol/src/state.ts'
 import { createHash } from 'node:crypto'
+import { RESIN_LIBRARY_START_MESSAGE } from '../sdcp/models.ts'
 import { resinArtifactFormatFor } from '../../../shared/src/print-file/resin-artifacts.ts'
 import {
   preflightResinArtifactReplay,
@@ -51,6 +52,7 @@ import type { PlateStartGuard } from '../control/queue-collection-hold.ts'
 import type { PreparedPauseDriver } from '../control/pause-dispatcher.ts'
 import {
   readPrinterBinding,
+  readSdcpPrinterBinding,
   type PrinterBinding,
 } from '../control/printer-binding.ts'
 import { controlWithinLimits, type ControlLimits } from './control-limits.ts'
@@ -77,6 +79,7 @@ export type ApiCommandDriver = Pick<
   PreparedPauseDriver,
   | 'execute'
   | 'controls'
+  | 'startUnavailableMessage'
   | 'macros'
   | 'macroParams'
   | 'speedModes'
@@ -103,6 +106,8 @@ export interface QualifiedResinDispatch extends ResinArtifactDispatchCapability 
     binding: PrinterBinding
     signal: AbortSignal
     beforeSend(): boolean
+    /** SDCP uploaders call this with no arguments after uploading the validated artifact. */
+    startVerifiedSdcp?(): Promise<boolean>
   }): Promise<boolean>
 }
 
@@ -234,6 +239,7 @@ export function createApiCommandRunner(config: {
     outcome: 'refused' | 'completed' | 'started',
     code?: ApiEnvelopeRefusalCode,
     detail?: string,
+    message?: string,
   ) {
     try {
       config.report(
@@ -244,6 +250,7 @@ export function createApiCommandRunner(config: {
           outcome,
           ...(code ? { refusal_code: code } : {}),
           ...(detail ? { detail } : {}),
+          ...(message ? { message } : {}),
           at: config.clock.wallNow(),
         }),
       )
@@ -255,8 +262,9 @@ export function createApiCommandRunner(config: {
     envelope: ApiEnvelopeV1,
     code: ApiEnvelopeRefusalCode,
     detail?: string,
+    message?: string,
   ): ApiCommandResult {
-    send(envelope, 'refused', code, detail)
+    send(envelope, 'refused', code, detail, message)
     return detail
       ? { kind: 'refused', code, detail }
       : { kind: 'refused', code }
@@ -332,6 +340,12 @@ export function createApiCommandRunner(config: {
         : ['unsupported', 'plate confirmation is not supported by this printer']
     const resin = ApiResinReplay.safeParse(envelope.action)
     if (resin.success) {
+      if (
+        readSdcpPrinterBinding(binding) &&
+        (!config.driver.execute ||
+          !config.driver.controls?.(binding).includes('start_print'))
+      )
+        return ['unsupported', 'action not supported by this printer']
       const decision = resinPreflight(envelope, binding, resin.data.args)
       if (decision.status === 'rejected')
         return ['unsupported', decision.reason]
@@ -520,10 +534,21 @@ export function createApiCommandRunner(config: {
     receipt: CommandClaimHandle,
     issuerKey: CryptoKey,
   ): Promise<ApiCommandResult> {
+    const startMessage = (detail: string) => {
+      if (detail === 'resin-artifact-requires-library-version')
+        return RESIN_LIBRARY_START_MESSAGE
+      if (
+        detail === 'job delivery is not supported by this printer' ||
+        (detail === 'action not supported by this printer' &&
+          driverAction(envelope)?.action === 'start_library_print')
+      )
+        return config.driver.startUnavailableMessage?.(binding)
+      return undefined
+    }
     const unsafe = safetyRefusal(envelope, binding)
     if (unsafe) {
       finishCommand(config.journal, receipt, 'not-sent', 'guard-denied')
-      return refuse(envelope, ...unsafe)
+      return refuse(envelope, ...unsafe, startMessage(unsafe[1]))
     }
     const request =
       envelope.kind === 'job' && envelope.job
@@ -608,6 +633,7 @@ export function createApiCommandRunner(config: {
       }
       return stateRefusal(action, binding)
     }
+    let refusalMessage: string | undefined
     let lastRefusal: [ApiEnvelopeRefusalCode, string] | null = null
     let guardCalled = false
     let permitted = false
@@ -770,27 +796,45 @@ export function createApiCommandRunner(config: {
                 safetyRefusal(envelope, binding) ??
                 commandStateRefusal()
               if (lastRefusal || signal.aborted) return
+              const beforeResinSend = () => {
+                const current = resinPreflight(envelope, binding, artifact)
+                if (
+                  current.status !== 'eligible' ||
+                  current.capability !== capability
+                ) {
+                  guardCalled = true
+                  lastRefusal = [
+                    'unsupported',
+                    'resin-artifact-dispatch-unavailable',
+                  ]
+                  return false
+                }
+                return beforeSend()
+              }
               attempted = true
+              const sdcp = readSdcpPrinterBinding(binding)
+              const startVerifiedSdcp = async () => {
+                await config.driver.prepare?.({ binding, signal })
+                return (
+                  await config.driver.execute!(
+                    'start_print',
+                    { file: artifact.filename },
+                    {
+                      binding,
+                      signal,
+                      beforeSend: beforeResinSend,
+                      verifiedResinFilename: artifact.filename,
+                    },
+                  )
+                ).acknowledged
+              }
               acknowledged = await capability.dispatch({
                 filename: artifact.filename,
                 path,
                 binding,
                 signal,
-                beforeSend() {
-                  const current = resinPreflight(envelope, binding, artifact)
-                  if (
-                    current.status !== 'eligible' ||
-                    current.capability !== capability
-                  ) {
-                    guardCalled = true
-                    lastRefusal = [
-                      'unsupported',
-                      'resin-artifact-dispatch-unavailable',
-                    ]
-                    return false
-                  }
-                  return beforeSend()
-                },
+                beforeSend: sdcp ? () => false : beforeResinSend,
+                ...(sdcp && config.driver.execute ? { startVerifiedSdcp } : {}),
               })
             },
           )
@@ -908,6 +952,7 @@ export function createApiCommandRunner(config: {
         error instanceof DriverRefusalError
       ) {
         attempted = false
+        refusalMessage = error.userMessage
         lastRefusal = [
           error.refusal === 'state' ? 'wrong-state' : 'unsupported',
           error.refusal,
@@ -962,7 +1007,12 @@ export function createApiCommandRunner(config: {
         'not-ready',
         'printer not reachable',
       ]
-      return refuse(envelope, code, detail)
+      return refuse(
+        envelope,
+        code,
+        detail,
+        refusalMessage ?? startMessage(detail),
+      )
     }
     if (threw || interrupted || !acknowledged) {
       finishCommand(config.journal, receipt, 'outcome-unknown', 'rpc-unknown')

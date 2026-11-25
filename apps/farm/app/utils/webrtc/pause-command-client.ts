@@ -84,7 +84,11 @@ export type PauseCommandClientOptions = Readonly<{
    */
   monotonicNow?(): number
   /** Notified once per command with its final outcome. */
-  onOutcome?(outcome: PauseCommandOutcome, code?: ControlResultCode): void
+  onOutcome?(
+    outcome: PauseCommandOutcome,
+    code?: ControlResultCode,
+    message?: string,
+  ): void
   /** Aborted when the control session ends. */
   signal?: AbortSignal
 }>
@@ -253,6 +257,7 @@ export function createPauseCommandClient(
   function settleCommand(
     outcome: PauseCommandOutcome,
     code?: ControlResultCode,
+    message?: string,
   ): void {
     const current = command
     if (!current) return
@@ -262,7 +267,7 @@ export function createPauseCommandClient(
     terminal = true
     current.settle(outcome)
     try {
-      options.onOutcome?.(outcome, code)
+      options.onOutcome?.(outcome, code, message)
     } catch {
       // A throwing observer never breaks the settlement of the command.
     }
@@ -582,7 +587,7 @@ export function createPauseCommandClient(
       if (frame.t !== 'control.result') return
       const current = command
       if (!current || frame.command_id !== current.id) return
-      settleCommand(frame.outcome, frame.code)
+      settleCommand(frame.outcome, frame.code, frame.message)
     },
     pause(): Promise<PauseCommandOutcome> {
       if (aborted) return Promise.resolve('rejected')

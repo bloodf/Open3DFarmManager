@@ -90,3 +90,12 @@ export function sdcpStartQualified(
       pair.firmwareVersion === firmwareVersion,
   )
 }
+
+export const RESIN_LIBRARY_START_MESSAGE =
+  'Para iniciar uma impressão de resina, selecione uma versão validada do arquivo na biblioteca.'
+
+export function sdcpStartUnavailableMessage(model: string, firmware?: string) {
+  return firmware
+    ? `O início de impressão na impressora ${model} com firmware ${firmware} ainda não foi qualificado.`
+    : `O início de impressão na impressora ${model} exige uma versão de firmware qualificada.`
+}

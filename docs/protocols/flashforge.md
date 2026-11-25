@@ -34,8 +34,9 @@ Protocol references informed the wire fields and firmware allowlist. No third-pa
 
 ## Read-only collection activation
 
-The brand collector polls authenticated `POST /detail` every two seconds after
-each request settles. The request supplies the configured serial number and
+The brand collector polls authenticated `POST /detail` one second after each
+request settles, and bounds each request so a reading is replaced before it
+expires. The request supplies the configured serial number and
 check code. The reply must pass the adapter's firmware allowlist above and
 match the configured model. The documented detail fixture has no echoed serial.
 On a failed poll, retire that source epoch and withdraw its status. A subsequent

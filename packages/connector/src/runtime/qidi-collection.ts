@@ -3,6 +3,10 @@ import { z } from 'zod'
 import { parseQidiBinding, readQidiAuth } from '../qidi/config.ts'
 import { createQidiAdapter } from '../qidi/index.ts'
 import type { RawPrinterObservation } from './farm-snapshot-provider.ts'
+import {
+  READ_ONLY_POLL_BUDGET_MS,
+  READ_ONLY_POLL_MS,
+} from './snapshot-window.ts'
 
 type QidiPrinter = Omit<RawPrinterObservation['printer'], 'statusReason'> & {
   statusReason: 'qidi-simulated' | 'qidi-unqualified'
@@ -53,17 +57,28 @@ export function createQidiCollection(input: {
   const timeoutMs = z.number().int().min(1).max(3000).parse(input.timeoutMs)
   let epoch = 1
   let unavailable = false
+  // Holds the private credential until a poll fails.
+  let adapter: ReturnType<typeof createQidiAdapter> | undefined
+
+  function connect() {
+    const auth = readQidiAuth(binding)
+    return createQidiAdapter({
+      origin: binding.origin,
+      ...(auth ? { auth } : {}),
+      timeoutMs: Math.min(timeoutMs, READ_ONLY_POLL_BUDGET_MS),
+    })
+  }
 
   async function run() {
     while (!signal.aborted) {
       try {
-        const auth = readQidiAuth(binding)
-        const { discover, readState } = createQidiAdapter({
-          origin: binding.origin,
-          ...(auth ? { auth } : {}),
-          timeoutMs,
-        })
-        const info = await discover()
+        const cycle = AbortSignal.any([
+          signal,
+          AbortSignal.timeout(READ_ONLY_POLL_BUDGET_MS),
+        ])
+        adapter ??= connect()
+        // Probed every poll: it is the only proof Klippy is still ready.
+        const info = await adapter.discover(cycle)
         if (signal.aborted) return
         if (
           info.moonrakerVersion !== binding.expect.moonrakerVersion ||
@@ -71,7 +86,7 @@ export function createQidiCollection(input: {
           info.klippyState !== 'ready'
         )
           throw Error('Qidi probe did not match the configured ready source')
-        const status = State.parse(await readState())
+        const status = State.parse(await adapter.readState(cycle))
         if (signal.aborted) return
         const mono = performance.now()
         input.onObservation({
@@ -101,13 +116,14 @@ export function createQidiCollection(input: {
         })
         unavailable = false
       } catch {
+        adapter = undefined
         if (!signal.aborted && !unavailable) {
           unavailable = true
           input.onUnavailable(epoch++)
         }
       }
       try {
-        await delay(2000, undefined, { signal })
+        await delay(READ_ONLY_POLL_MS, undefined, { signal })
       } catch (error) {
         if (!signal.aborted) throw error
       }

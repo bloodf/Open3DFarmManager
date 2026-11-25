@@ -6,6 +6,10 @@ import {
   type FlashforgeBinding,
 } from './config.ts'
 import { createFlashforgeAdapter } from './index.ts'
+import {
+  READ_ONLY_POLL_BUDGET_MS,
+  READ_ONLY_POLL_MS,
+} from '../runtime/snapshot-window.ts'
 
 type Printer = Omit<RawPrinterObservation['printer'], 'statusReason'> & {
   statusReason: 'flashforge-simulated' | 'flashforge-unqualified'
@@ -34,7 +38,7 @@ export function createFlashforgeCollection(input: {
   const { readStatus } = createFlashforgeAdapter({
     host: url.hostname,
     port: Number(url.port),
-    timeoutMs: input.timeoutMs,
+    timeoutMs: Math.min(input.timeoutMs, READ_ONLY_POLL_BUDGET_MS),
     ...readFlashforgeCredentials(binding),
   })
   const { signal } = input
@@ -42,7 +46,7 @@ export function createFlashforgeCollection(input: {
   let unavailable = false
 
   async function poll() {
-    const result = await readStatus()
+    const result = await readStatus(signal)
     if (result.model !== binding.expect.model)
       throw new Error('Flashforge model mismatch')
     const state =
@@ -96,17 +100,19 @@ export function createFlashforgeCollection(input: {
 
   async function run() {
     while (!signal.aborted) {
-      const observation = await poll().catch(() => undefined)
-      if (signal.aborted) return
-      if (observation) {
+      try {
+        const observation = await poll()
+        if (signal.aborted) return
         input.onObservation(observation)
         unavailable = false
-      } else if (!unavailable) {
-        unavailable = true
-        input.onUnavailable(epoch++)
+      } catch {
+        if (!signal.aborted && !unavailable) {
+          unavailable = true
+          input.onUnavailable(epoch++)
+        }
       }
       try {
-        await delay(2000, undefined, { signal })
+        await delay(READ_ONLY_POLL_MS, undefined, { signal })
       } catch (error) {
         if (!signal.aborted) throw error
       }

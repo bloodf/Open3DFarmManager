@@ -2,6 +2,11 @@ import { setTimeout as delay } from 'node:timers/promises'
 import type { RawPrinterObservation } from '../runtime/farm-snapshot-provider.ts'
 import { parsePhrozenBinding, type PhrozenBinding } from './config.ts'
 import { connectPhrozen } from './index.ts'
+import type { PhrozenSession } from './transport.ts'
+import {
+  READ_ONLY_POLL_BUDGET_MS,
+  READ_ONLY_POLL_MS,
+} from '../runtime/snapshot-window.ts'
 
 export type PhrozenObservation = Omit<RawPrinterObservation, 'printer'> & {
   printer: Omit<RawPrinterObservation['printer'], 'statusReason'> & {
@@ -26,6 +31,12 @@ export function createPhrozenCollection(input: {
     : 'phrozen-unqualified'
   let epoch = 1
   let unavailable = false
+  // Discovery repeats every poll to recheck identity; the socket is kept.
+  const session: PhrozenSession = {}
+  const disconnect = () => {
+    session.socket?.close()
+    session.socket = undefined
+  }
 
   async function run() {
     while (!signal.aborted) {
@@ -33,7 +44,12 @@ export function createPhrozenCollection(input: {
         const adapter = await connectPhrozen(origin.hostname, {
           udpPort: binding.discoveryPort,
           wsPort: Number(origin.port || 80),
-          timeoutMs: input.timeoutMs,
+          timeoutMs: Math.min(input.timeoutMs, READ_ONLY_POLL_BUDGET_MS),
+          signal: AbortSignal.any([
+            signal,
+            AbortSignal.timeout(READ_ONLY_POLL_BUDGET_MS),
+          ]),
+          session,
         })
         if (signal.aborted) return
         const { id, board, model, firmware } = adapter.identity
@@ -77,18 +93,19 @@ export function createPhrozenCollection(input: {
         })
         unavailable = false
       } catch {
+        disconnect()
         if (!signal.aborted && !unavailable) {
           unavailable = true
           input.onUnavailable(epoch++)
         }
       }
       try {
-        await delay(input.pollMs ?? 2000, undefined, { signal })
+        await delay(input.pollMs ?? READ_ONLY_POLL_MS, undefined, { signal })
       } catch (error) {
         if (!signal.aborted) throw error
       }
     }
   }
 
-  return { done: run() }
+  return { done: run().finally(disconnect) }
 }

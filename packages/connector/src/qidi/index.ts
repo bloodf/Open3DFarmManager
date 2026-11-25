@@ -65,8 +65,13 @@ export function createQidiAdapter(input: {
   if (auth && 'bearerToken' in auth)
     headers.set('Authorization', `Bearer ${auth.bearerToken}`)
 
-  async function read(url: URL, mediaType: string): Promise<Buffer> {
-    const signal = AbortSignal.timeout(input.timeoutMs ?? 3000)
+  async function read(
+    url: URL,
+    mediaType: string,
+    cancel?: AbortSignal,
+  ): Promise<Buffer> {
+    const timeout = AbortSignal.timeout(input.timeoutMs ?? 3000)
+    const signal = cancel ? AbortSignal.any([cancel, timeout]) : timeout
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
     try {
       const response = await fetch(url, {
@@ -109,8 +114,8 @@ export function createQidiAdapter(input: {
     }
   }
 
-  async function query(path: string) {
-    const bytes = await read(new URL(path, origin), 'application/json')
+  async function query(path: string, cancel?: AbortSignal) {
+    const bytes = await read(new URL(path, origin), 'application/json', cancel)
     try {
       const envelope = record(
         JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)),
@@ -125,8 +130,8 @@ export function createQidiAdapter(input: {
   return {
     // A targeted probe establishes protocol reachability. Model and firmware
     // identity come from local provisioning, not from a generic Moonraker reply.
-    async discover() {
-      const info = await query('/server/info')
+    async discover(cancel?: AbortSignal) {
+      const info = await query('/server/info', cancel)
       if (
         typeof info.moonraker_version !== 'string' ||
         typeof info.klippy_connected !== 'boolean' ||
@@ -139,9 +144,10 @@ export function createQidiAdapter(input: {
         klippyState: info.klippy_state,
       }
     },
-    async readState() {
+    async readState(cancel?: AbortSignal) {
       const result = await query(
         `/printer/objects/query?${objects.map(encodeURIComponent).join('&')}`,
+        cancel,
       )
       const status = record(result.status)
       const fan = status.fan === undefined ? status[namedPartFan] : status.fan

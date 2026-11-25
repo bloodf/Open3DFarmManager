@@ -25,7 +25,10 @@ import { createKobraXCollection } from './kobra-x-collection.ts'
 import type { KobraXBinding } from '../config/kobra-x.ts'
 import { createBambuRuntimeSubscription } from '../bambu/runtime.ts'
 import type { createBambuTransport } from '../bambu/transport.ts'
-import type { RawPrinterObservation } from './farm-snapshot-provider.ts'
+import type {
+  RawPrinterObservation,
+  RawPrinterUnavailable,
+} from './farm-snapshot-provider.ts'
 import { createKobraLinkRuntimeSubscription } from '../kobralink/runtime.ts'
 import { createFlashforgeCollection } from '../flashforge/collection.ts'
 import { createPhrozenCollection } from '../phrozen/collection.ts'
@@ -44,7 +47,6 @@ import {
   createSpoolmanProvider,
   type SpoolmanSnapshot,
 } from './spoolman-provider.ts'
-import type { RawMoonrakerUnavailable } from '../moonraker/subscription.ts'
 import { join } from 'node:path'
 import type { PrinterState } from '@open3dfarmmanager/farm-protocol'
 import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
@@ -167,7 +169,7 @@ export async function collectIntoQueue(input: {
   onInventory?: (snapshot: SpoolmanSnapshot) => void
   onPrinterState?: (printer: PrinterState) => void
   onRawObservation?: (observation: RawPrinterObservation) => void
-  onRawUnavailable?: (event: RawMoonrakerUnavailable) => void
+  onRawUnavailable?: (event: RawPrinterUnavailable) => void
   /** Links a finished job to the library version that was started on this printer (#385). */
   libraryLinks?: Pick<LibraryJobLinks, 'attach'>
   queue: TelemetryQueue
@@ -301,8 +303,8 @@ export async function collectIntoQueue(input: {
           ...(controls === undefined ? {} : { controls: [...controls] }),
         }
         const queued = machineGate.apply(current)
-        // A snapshot that cannot replace the latest row must not consume a
-        // profile change that the next eligible snapshot needs to publish.
+        // The Farm ignores out-of-order rows, so one must not consume a profile
+        // change that the next eligible snapshot needs to publish.
         if (outOfOrder) machineGate.forget(printerKey)
         const lostBeforeSnapshot = queue.storageLost
         let receipt
@@ -313,9 +315,7 @@ export async function collectIntoQueue(input: {
           throw error
         }
         const snapshotDropped = queue.storageLost !== lostBeforeSnapshot
-        // The Farm ignores out-of-order rows, so a machine block carried by one
-        // was never recorded there; the next in-order snapshot must resend it.
-        if (outOfOrder || (confirmsRelease && snapshotDropped))
+        if (confirmsRelease && snapshotDropped)
           machineGate.forget(printer.printerKey)
         if (!outOfOrder && !(confirmsRelease && snapshotDropped)) {
           latestStates.set(printer.printerKey, current)
@@ -943,7 +943,18 @@ export async function collectIntoQueue(input: {
           onObservation: (value: RawPrinterObservation) =>
             input.onRawObservation?.(value),
           onUnavailable: (epoch: number) =>
-            input.onRawUnavailable?.({ printerKey: binding.printerKey, epoch }),
+            input.onRawUnavailable?.({
+              printerKey: binding.printerKey,
+              epoch,
+              ...(binding.family === 'prusa-link'
+                ? {}
+                : {
+                    readOnly: {
+                      family: binding.family,
+                      simulated: binding.simulated,
+                    },
+                  }),
+            }),
         }
         const sub =
           binding.family === 'prusa-link'

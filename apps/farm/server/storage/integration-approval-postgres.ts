@@ -7,7 +7,11 @@ import {
   type HeldItem,
   type IntegrationApprovalStore,
 } from '../services/integration-approval.ts'
-import { HELD_TTL_MS, resinReplayAction } from '../services/integration-jobs.ts'
+import {
+  HELD_TTL_MS,
+  libraryReplayAction,
+  resinReplayAction,
+} from '../services/integration-jobs.ts'
 
 const validTime = (value: number) => Number.isSafeInteger(value) && value >= 0
 
@@ -27,8 +31,8 @@ interface HeldRow {
   sha256?: string
   sizeBytes?: number
   displayName?: string
-  libraryVersionId?: string
-  plate?: number
+  libraryVersionId?: string | null
+  plate?: number | null
   resinProfile?: string | null
   // Action column.
   action?: ApiEnvelopeAction
@@ -69,15 +73,23 @@ function toItem(kind: ApprovalKind, row: HeldRow): HeldItem {
                 resinProfile: row.resinProfile,
               }),
             }
-          : {
-              kind: 'job',
-              job: {
-                file_url: row.fileUrl!,
-                sha256: row.sha256!,
-                size_bytes: row.sizeBytes!,
-                display_name: row.displayName!,
+          : row.libraryVersionId != null
+            ? {
+                kind: 'action',
+                action: libraryReplayAction({
+                  sha256: row.sha256!,
+                  ...(row.plate != null ? { plate: row.plate } : {}),
+                }),
+              }
+            : {
+                kind: 'job',
+                job: {
+                  file_url: row.fileUrl!,
+                  sha256: row.sha256!,
+                  size_bytes: row.sizeBytes!,
+                  display_name: row.displayName!,
+                },
               },
-            },
     }
   return {
     ...base,

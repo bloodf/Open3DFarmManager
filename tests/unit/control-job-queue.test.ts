@@ -36,7 +36,7 @@ import {
   moonrakerControls,
 } from '../../packages/connector/src/moonraker/control-support.ts'
 import { openFixedMoonrakerPause } from '../../packages/connector/src/moonraker/pause-driver.ts'
-import { renderFarmComponent } from '../../apps/farm/app/components/farm/render-farm-component.ts'
+import { renderFarmComponent } from '../helpers/render-farm-component.ts'
 import { actionsForControlRole } from '../../apps/farm/server/utils/pause-authority/role-policy.ts'
 import { startMoonrakerMock } from '../../packages/sim-tools/src/mocks/moonraker-mock.ts'
 import type { MoonrakerMockOptions } from '../../packages/sim-tools/src/mocks/moonraker-mock.ts'

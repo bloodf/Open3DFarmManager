@@ -24,6 +24,8 @@ import { join } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { serveWsTestServer, type WsTestSocket } from './ws-serve.ts'
 import { collectStream } from './streams.ts'
+import { durableTelemetryEvent } from '../../apps/farm/server/storage/postgres-telemetry.ts'
+import { TelemetryBatch } from '../../packages/farm-protocol/src/telemetry.ts'
 import { loadOrCreateIdentity } from '../../packages/connector/src/identity/store.ts'
 import { TelemetryQueue } from '../../packages/connector/src/cloud/queue.ts'
 import { readRuntimeCredential } from '../../packages/connector/src/config/credential.ts'
@@ -660,7 +662,17 @@ test('actual run CLI retries fresh proofs with durable IDs and resumes the scope
   const first = server.launch()
   try {
     await first.until(() => server.completed.length >= 2)
-    expect(server.issued[0]!.body).toBe(server.issued[1]!.body)
+    const original = TelemetryBatch.parse(JSON.parse(server.issued[0]!.body))
+    const retry = TelemetryBatch.parse(JSON.parse(server.issued[1]!.body))
+    expect(retry.map(durableTelemetryEvent)).toEqual(
+      original.map(durableTelemetryEvent),
+    )
+    const originalState = original.find(
+      (event) => event.kind === 'printer-state',
+    )
+    const retryState = retry.find((event) => event.kind === 'printer-state')
+    expect(originalState?.ageAtSendMs).toEqual(expect.any(Number))
+    expect(retryState?.ageAtSendMs).toBeGreaterThan(originalState!.ageAtSendMs!)
     expect(server.completed[0]!.jti).not.toBe(server.completed[1]!.jti)
     expect(server.completed[0]!.signature).not.toBe(
       server.completed[1]!.signature,
@@ -861,20 +873,22 @@ test('local credential expiry stops authentication attempts while bounded local 
   }
 }, 20000)
 
-test('expired or mismatched credentials fail before any queue or network', async () => {
-  for (const mode of [
-    'expiry',
-    'fingerprint',
-    'mapping',
-    'oversized',
-    'public',
-    'duplicate',
-    'fifo',
-    'missing-identity',
-    'audience',
-    'signalling-origin',
-    'signalling-token',
-  ]) {
+test.for([
+  'expiry',
+  'fingerprint',
+  'mapping',
+  'oversized',
+  'public',
+  'duplicate',
+  'fifo',
+  'missing-identity',
+  'audience',
+  'signalling-origin',
+  'signalling-token',
+])(
+  'expired or mismatched credentials fail before any queue or network (%s)',
+  { timeout: 20000 },
+  async (mode) => {
     const server = await fixture()
     try {
       if (mode === 'expiry')
@@ -938,8 +952,8 @@ test('expired or mismatched credentials fail before any queue or network', async
     } finally {
       await server.close()
     }
-  }
-}, 20000)
+  },
+)
 
 test('malformed, missing and interrupted scope receipts stay untouched and cannot reach any network', async () => {
   const server = await fixture()

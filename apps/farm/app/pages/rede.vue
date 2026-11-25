@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import '../assets/css/ops-screen.css'
 import { farmLocation } from '../utils/farm-scope.ts'
 import { useFarmRoute } from '../composables/useFarmRoute.ts'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -277,7 +278,7 @@ const entries = computed(() =>
 </script>
 
 <template>
-  <SettingsPage title="Rede da farm" focus-heading>
+  <SettingsPage class="ops-screen" title="Rede da farm" focus-heading>
     <template #intro>
       Connectors e impressoras da farm, com a saúde do enlace de cada um.
     </template>
@@ -375,7 +376,7 @@ const entries = computed(() =>
                 </option>
               </select>
             </div>
-            <Button :disabled="scanning" @click="scan()">
+            <Button class="ops-primary" :disabled="scanning" @click="scan()">
               Procurar agora
             </Button>
           </div>
@@ -397,15 +398,7 @@ const entries = computed(() =>
 <style scoped>
 .loading {
   display: grid;
-  gap: var(--space-3);
-}
-.panel {
-  margin: 0;
-  padding: var(--space-5);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-raised);
-  min-width: 0;
+  gap: var(--ops-space-3);
 }
 .panel p {
   margin: 0;
@@ -413,45 +406,27 @@ const entries = computed(() =>
 .actions {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2) var(--space-4);
+  gap: var(--ops-space-2) var(--ops-space-4);
   align-items: center;
 }
 .retry {
-  margin-inline-start: var(--space-3);
+  margin-inline-start: var(--ops-space-3);
 }
 .scan {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-3) var(--space-4);
+  gap: var(--ops-space-3);
   align-items: end;
 }
 .field {
   display: grid;
-  gap: var(--space-1);
+  gap: var(--ops-space-1);
   min-width: min(100%, 14rem);
   flex: 1 1 14rem;
   max-inline-size: 28rem;
 }
-label {
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
-}
 select {
   inline-size: 100%;
-  min-block-size: 2.75rem;
-  padding: var(--space-2) var(--space-3);
-  font: inherit;
-  color: inherit;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-}
-select:focus-visible {
-  outline: var(--focus-ring-width) solid var(--color-focus-ring);
-  outline-offset: var(--focus-ring-offset);
-}
-select:disabled {
-  opacity: 0.6;
 }
 .scan-status:empty {
   position: absolute;
@@ -462,30 +437,20 @@ select:disabled {
 }
 .scan-status {
   margin: 0;
-  color: var(--color-text-muted);
+  color: var(--ops-muted);
 }
-/* The farm scope selector is a shared component: give its section the same
-   panel surface as the others on this screen. */
-:deep(#farm-scope-heading) {
-  margin: 0 0 var(--space-3);
-  font-size: var(--font-size-lg);
-  line-height: var(--line-height-tight);
+/* The farm scope selector is shared; here it lays out as one panel field. */
+:deep(section[aria-labelledby='farm-scope-heading'] label) {
+  margin-block-end: calc(-1 * var(--ops-space-2));
 }
-:deep(section[aria-labelledby='farm-scope-heading']) {
-  margin: 0;
-  padding: var(--space-5);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-raised);
-  min-width: 0;
+:deep(section[aria-labelledby='farm-scope-heading'] select) {
+  inline-size: 100%;
+  max-inline-size: 28rem;
+}
+:deep(section[aria-labelledby='farm-scope-heading'] .opaque) {
+  color: var(--ops-muted);
 }
 :deep(section[aria-labelledby='farm-scope-heading'] .actions:empty) {
   display: none;
-}
-@media (max-width: 30rem) {
-  .panel,
-  :deep(section[aria-labelledby='farm-scope-heading']) {
-    padding: var(--space-4);
-  }
 }
 </style>

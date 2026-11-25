@@ -11,7 +11,7 @@ import {
   parseLastKnownStates,
   type LastKnownState,
 } from '../../apps/farm/app/composables/useLastKnownStates-core.ts'
-import { renderFarmComponent } from '../../apps/farm/app/components/farm/render-farm-component.ts'
+import { renderFarmComponent } from '../helpers/render-farm-component.ts'
 import {
   farmRef,
   settleFarmUpdates,

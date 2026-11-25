@@ -3,13 +3,16 @@ import type { ReplaySend } from '../../utils/replay-live.ts'
 import { computed, ref, watch } from 'vue'
 import Dialog from '../ui/Dialog.vue'
 import Button from '../ui/Button.vue'
-import { locationLabel, safeColour } from '../../utils/library-view.ts'
+import { locationLabel } from '../../utils/library-view.ts'
+import type { MatchedSlot } from '../../utils/filament-match.ts'
+import FilamentMatch from './FilamentMatch.vue'
 import { replayOutcomeLocks } from '../../utils/replay-outcome.ts'
 import {
   GROUP_LABELS,
   buildArgs,
   confirmationError,
   defaultPrinter,
+  effectiveSlotColour,
   groupPrinters,
   replayOutcomeText,
   suggestMapping,
@@ -41,6 +44,8 @@ const bedClear = ref(false)
 const sending = ref(false)
 /** A settled attempt locks the form: an uncertain command is never resent. */
 const result = ref<ReplayResult | null>(null)
+const reconnecting = ref(false)
+const connectionNotice = ref('')
 
 const selected = computed(() =>
   props.printers.find((printer) => printer.key === selectedKey.value),
@@ -70,6 +75,7 @@ const outcomeLockKey = () => props.itemId ?? props.source.sha256
 
 function reset() {
   result.value = replayOutcomeLocks.get(outcomeLockKey())
+  connectionNotice.value = ''
   bedClear.value = false
   selectedKey.value = defaultPrinter(groups.value, props.preferredPrinter)
   plate.value = Math.min(
@@ -99,20 +105,31 @@ const slotLabel = (m: ReplayPrinter['materials'][number], index: number) =>
   `Slot ${m.slot || index + 1}: ${m.materialType ?? 'material desconhecido'}`
 const slotValue = (m: ReplayPrinter['materials'][number], index: number) =>
   /^\d{1,3}$/.test(m.slot) ? Number(m.slot) : index
-/** Colour of the slot chosen for a filament, painted only when it is a safe hex. */
-function paint(index: number) {
-  const hex = selected.value?.materials.find(
+/** The slot chosen for a filament, as the match view shows it; null until one is chosen.
+ * Spoolman's colour and percentage for the slot's active spool come first. */
+function chosen(index: number): MatchedSlot | null {
+  const printer = selected.value
+  if (!printer) return null
+  const at = printer.materials.findIndex(
     (m, slot) => slotValue(m, slot) === mapping.value[index],
-  )?.colorHex
-  return safeColour(
-    hex && /^[0-9A-F]{8}$/i.test(hex) ? `#${hex.slice(0, 6)}` : '',
   )
+  const m = printer.materials[at]
+  if (!m) return null
+  return {
+    label: `Slot ${m.slot || at + 1}`,
+    materialType: m.materialType,
+    // Spoolman's active spool first, as the local reel did; else the printer.
+    colorHex: effectiveSlotColour(m),
+    remainingPercent: m.remainingPercent,
+    spoolmanRemainingPercent: m.spoolmanRemainingPercent,
+  }
 }
 
 async function confirm() {
   const printer = selected.value
   if (!printer || problem.value || sending.value || result.value) return
   sending.value = true
+  connectionNotice.value = ''
   const { sha256, versionId } = props.source
   const itemId = props.itemId
   const lockKey = outcomeLockKey()
@@ -147,6 +164,27 @@ async function confirm() {
   }
   replayOutcomeLocks.record(lockKey, settled)
   if (outcomeLockKey() === lockKey) result.value = settled
+}
+
+/** After a failed handshake only the connection is tried again, never the print. */
+async function retryConnection() {
+  const printer = selected.value
+  const failed = result.value
+  if (!printer || !failed || !props.send.reconnect || reconnecting.value) return
+  reconnecting.value = true
+  connectionNotice.value = ''
+  const connected = await props.send.reconnect(printer.key).catch(() => false)
+  reconnecting.value = false
+  // The dialog was closed or reused while the connection was being tried.
+  if (!open.value || result.value !== failed) return
+  if (!connected) {
+    connectionNotice.value = 'A conexão com o Connector continua falhando.'
+    return
+  }
+  result.value = null
+  bedClear.value = false
+  connectionNotice.value =
+    'Conexão restabelecida. Nada foi enviado: confira a mesa e confirme novamente.'
 }
 
 function confirmPrinterChecked() {
@@ -240,15 +278,21 @@ function confirmPrinterChecked() {
               :value="slotValue(m, slot)"
             >
               {{ slotLabel(m, slot) }}
-              {{ m.colorHex ? `· #${m.colorHex.slice(0, 6)}` : '' }}
+              {{
+                effectiveSlotColour(m)
+                  ? `· #${effectiveSlotColour(m)!.slice(0, 6)}`
+                  : ''
+              }}
             </option>
           </select>
-          <span
-            v-if="paint(index)"
-            class="swatch"
-            aria-hidden="true"
-            :style="{ background: paint(index) }"
-          ></span>
+          <FilamentMatch
+            :index="index + 1"
+            :required="{
+              type: tool.filamentType,
+              colour: tool.filamentColour,
+            }"
+            :matched="chosen(index)"
+          />
         </div>
       </section>
 
@@ -275,6 +319,13 @@ function confirmPrinterChecked() {
         <li v-for="reason in reasons" :key="reason">{{ reason }}</li>
       </ul>
     </div>
+    <div v-if="result?.code === 'session-handshake-failed' && send.reconnect">
+      <Button :disabled="reconnecting" @click="retryConnection"
+        >Tentar conectar novamente</Button
+      >
+    </div>
+    <p v-if="reconnecting" role="status">Conectando ao Connector…</p>
+    <p v-else-if="connectionNotice" role="status">{{ connectionNotice }}</p>
     <div v-if="result?.outcome === 'outcome-unknown'">
       <p>
         Verifique a impressora. Se a impressão não começou, confirme abaixo para
@@ -377,11 +428,5 @@ ul {
 .confirm {
   margin-block-end: var(--ops-space-3);
   margin-inline-end: var(--ops-space-2);
-}
-.swatch {
-  display: inline-block;
-  inline-size: 1rem;
-  block-size: 1rem;
-  border: 1px solid var(--text-muted);
 }
 </style>

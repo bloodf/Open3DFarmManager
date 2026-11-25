@@ -1,6 +1,10 @@
 # Elegoo SDCP
 
-The registered read-only Connector uses UDP discovery with `M99999`. It accepts
+The model table below describes status coverage. Print control and upload are an
+experimental local opt-in, recorded in
+[Elegoo evidence](../fullfarmmanager/evidence/elegoo.md).
+
+The registered Connector uses UDP discovery with `M99999`. It accepts
 flat `Data` from the matching IPv4 sender. WebSocket status requires an allowed
 model and an explicit v3.0.0 identity. The adapter polls with command 0 every two
 seconds while connected at `/websocket` on TCP 3030 by default. It accepts
@@ -10,7 +14,7 @@ acknowledgment or request ID. SDCP LAN traffic is unauthenticated and unencrypte
 
 The runtime exposes normalized state, valid layer counters and layer progress.
 Malformed or mismatched frames do not update the snapshot. Errors, disconnects
-and expiry make status unavailable. Dispatch and control are disabled.
+and expiry make status unavailable. Control is disabled without the opt-in.
 
 | Model                                 | Protocol and firmware evidence                                                                                            | Adapter coverage                                                                                                                 |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |

@@ -71,8 +71,8 @@ li {
   gap: var(--space-3) var(--space-4);
   align-items: center;
   justify-content: space-between;
-  padding-block: var(--space-4);
-  border-block-end: 1px solid var(--color-border);
+  padding-block: var(--ops-space-3);
+  border-block-end: 1px solid var(--ops-border);
 }
 li:first-child {
   padding-block-start: 0;
@@ -90,12 +90,9 @@ li:last-child {
   font-weight: var(--font-weight-semibold);
 }
 .expiry {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-muted);
-}
-li .danger {
-  border-color: var(--printer-error);
-  color: var(--printer-error);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--ops-text-small);
+  color: var(--ops-muted);
 }
 @media (max-width: 30rem) {
   li .danger {

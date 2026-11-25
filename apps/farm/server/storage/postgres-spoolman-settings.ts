@@ -139,7 +139,7 @@ export class PostgresSpoolmanSettings implements SpoolmanSettingsStore {
     }>(input, async (tx, member) => {
       const rows = await tx<
         SpoolmanConnectorSetting[]
-      >`SELECT agent_id AS "agentId", origin, service_id AS "serviceId", status, configured, checked_at::float8 AS "checkedAt" FROM farm.spoolman_connector_settings WHERE farm_id=${input.farmId}::uuid ORDER BY agent_id LIMIT 50`
+      >`SELECT agent_id AS "agentId", origin, COALESCE(service_id, observed_service_id) AS "serviceId", status, configured, checked_at::float8 AS "checkedAt" FROM farm.spoolman_connector_settings WHERE farm_id=${input.farmId}::uuid ORDER BY agent_id LIMIT 50`
       return {
         ok: true as const,
         settings: rows.map((row) => ({ ...row })),
@@ -172,11 +172,11 @@ export class PostgresSpoolmanSettings implements SpoolmanSettingsStore {
         // A failed test never replaces a Spoolman that is already applied.
         await tx`INSERT INTO farm.spoolman_connector_settings (farm_id, agent_id, origin, service_id, status, configured, checked_at, updated_by)
           VALUES (${input.farmId}::uuid, ${input.agentId}::uuid, ${input.origin}, ${input.serviceId ?? null}::uuid, ${input.status}, ${input.configured}, ${now}, ${accountId})
-          ON CONFLICT (farm_id, agent_id) DO UPDATE SET origin=EXCLUDED.origin, service_id=CASE WHEN EXCLUDED.service_id IS NOT NULL THEN EXCLUDED.service_id WHEN farm.spoolman_connector_settings.origin=EXCLUDED.origin THEN farm.spoolman_connector_settings.service_id ELSE NULL END, status=EXCLUDED.status, configured=EXCLUDED.configured, checked_at=EXCLUDED.checked_at, updated_by=EXCLUDED.updated_by
+          ON CONFLICT (farm_id, agent_id) DO UPDATE SET origin=EXCLUDED.origin, service_id=CASE WHEN EXCLUDED.service_id IS NOT NULL THEN EXCLUDED.service_id WHEN farm.spoolman_connector_settings.origin=EXCLUDED.origin THEN farm.spoolman_connector_settings.service_id ELSE NULL END, observed_service_id=CASE WHEN farm.spoolman_connector_settings.origin=EXCLUDED.origin THEN farm.spoolman_connector_settings.observed_service_id ELSE NULL END, status=EXCLUDED.status, configured=EXCLUDED.configured, checked_at=EXCLUDED.checked_at, updated_by=EXCLUDED.updated_by
           WHERE EXCLUDED.configured OR NOT farm.spoolman_connector_settings.configured`
         const stored = await tx<
           SpoolmanConnectorSetting[]
-        >`SELECT agent_id AS "agentId", origin, service_id AS "serviceId", status, configured, checked_at::float8 AS "checkedAt" FROM farm.spoolman_connector_settings WHERE farm_id=${input.farmId}::uuid AND agent_id=${input.agentId}::uuid`
+        >`SELECT agent_id AS "agentId", origin, COALESCE(service_id, observed_service_id) AS "serviceId", status, configured, checked_at::float8 AS "checkedAt" FROM farm.spoolman_connector_settings WHERE farm_id=${input.farmId}::uuid AND agent_id=${input.agentId}::uuid`
         if (!stored[0])
           return { ok: false as const, reason: 'storage-unavailable' as const }
         return { ok: true as const, setting: { ...stored[0] } }

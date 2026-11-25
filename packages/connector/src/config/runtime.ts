@@ -1,3 +1,4 @@
+import { moonrakerOrigins } from './moonraker.ts'
 import { parseCollectorConfig } from '../prusa/config.ts'
 import {
   provisionBambuPrinter,
@@ -14,6 +15,7 @@ import {
   provisionReadonlyPrinter,
   provisionKobraLinkPrinter,
   provisionKobraXPrinter,
+  provisionSdcpPrinter,
   type PrinterBinding,
 } from '../control/printer-binding.ts'
 import { readVersionedRuntimeConfig } from './version.ts'
@@ -113,9 +115,10 @@ export function readAgentRuntimeConfig(
     throw Error('Runtime collection version mismatch')
   if (collection.spoolman && collection.spoolman.farmId !== credential.farm_id)
     throw new Error('Spoolman scope does not match local credential')
-  const registry = collection.allowedOrigins.length
+  const origins = moonrakerOrigins(collection)
+  const registry = origins.length
     ? createPrinterBindingRegistry({
-        allowedOrigins: collection.allowedOrigins,
+        allowedOrigins: origins,
       })
     : null
   const pause =
@@ -179,21 +182,22 @@ export function readAgentRuntimeConfig(
             (p) => p.printerKey === value.printer_key,
           )
         : undefined
-    const prusa =
+    const driver =
       collection.version === 8 &&
-      value &&
+      value !== null &&
       typeof value === 'object' &&
-      'printer_key' in value &&
-      collection.drivers.some((p) => p.printerKey === value.printer_key)
-    const binding = prusa
+      'printer_key' in value
+        ? collection.drivers.find((p) => p.printerKey === value.printer_key)
+        : undefined
+    const binding = driver
       ? (() => {
           if (
             !value ||
             typeof value !== 'object' ||
             !('backend' in value) ||
-            value.backend !== 'prusa-link'
+            value.backend !== driver.family
           )
-            throw Error('PrusaLink assignment mismatch')
+            throw Error('Read-only driver assignment mismatch')
           return provisionReadonlyPrinter(value)
         })()
       : formlabs
@@ -216,7 +220,21 @@ export function readAgentRuntimeConfig(
                 value.backend !== 'sdcp'
               )
                 throw Error('SDCP assignment mismatch')
-              return provisionReadonlyPrinter(value)
+              const readonly = provisionReadonlyPrinter(value)
+              const assignment = readRuntimePrinterBinding(readonly)!
+              // Print control is a local opt-in per assignment.
+              if (
+                !pause?.control?.assignmentIds.includes(
+                  assignment.assignment_id,
+                )
+              )
+                return readonly
+              const { assignment_id, farm_id, agent_id, printer_key } =
+                assignment
+              return provisionSdcpPrinter(
+                { assignment_id, farm_id, agent_id, printer_key },
+                sdcp,
+              )
             })()
           : bambu
             ? provisionBambuPrinter(value, bambu)
@@ -293,7 +311,7 @@ export function readAgentRuntimeConfig(
   for (const printer of collection.printers) {
     const selected = validateMoonrakerInput({
       assignment: printer,
-      allowedOrigins: collection.allowedOrigins,
+      allowedOrigins: origins,
       limits: collection.limits,
     })
     if (
@@ -315,10 +333,10 @@ export function readAgentRuntimeConfig(
           (a) =>
             a.printer_key === printer.printerKey &&
             'backend' in a &&
-            a.backend === 'prusa-link',
+            a.backend === printer.family,
         ).length !== 1
       )
-        throw Error('PrusaLink assignment mismatch')
+        throw Error('Read-only driver assignment mismatch')
     }
   }
   if (collection.version === 7) {

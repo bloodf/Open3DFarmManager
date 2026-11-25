@@ -4,6 +4,7 @@ import {
   controlRoleAllowed,
 } from '../utils/pause-authority/role-policy.ts'
 import { readPauseAuthorityCredentialRecords } from './postgres-connector-credential-record.ts'
+import { OBSERVATION_FRESH_MS } from '../utils/integration-telemetry.ts'
 import { randomUUID } from 'node:crypto'
 import type { Sql, TransactionSql } from 'postgres'
 import { z } from 'zod'
@@ -86,13 +87,52 @@ export type PauseChallengeDecision =
 export type PauseCapabilityDecision =
   { ok: true; capability: SignedPauseCapabilityV1 } | PauseAuthorityFailure
 const denied = (): PauseAuthorityFailure => ({ ok: false, reason: 'denied' })
-// Keep the fallback readable by legacy Connectors as the action enum grows.
-const legacyActions = [
-  'pause',
-  'resume',
-  'cancel',
-  'emergency_stop',
-] as const satisfies readonly ExtendedControlAction[]
+/** How far ahead of its receipt an observation without a send age may claim to be. */
+const MAX_FUTURE_OBSERVATION_MS = 30_000
+/** Actions that start a job. They always need a send age. */
+const SEND_AGE_REQUIRED: ReadonlySet<ExtendedControlAction> = new Set([
+  'start_print',
+  'start_library_print',
+  'queue_op',
+])
+/**
+ * An issuer may only grant controls from a current telemetry observation.
+ * An older Connector sends no age (SQL NULL): freshness then counts from the
+ * database receipt, the observation may not be far ahead of it, and job starts
+ * are withheld. A present but invalid age grants nothing.
+ */
+export function freshAdvertisedActions(
+  controls: unknown,
+  ageAtSendMs: unknown,
+  receivedAt: unknown,
+  now: number,
+  observedAt?: unknown,
+): ExtendedControlAction[] {
+  const withoutAge = ageAtSendMs === null || ageAtSendMs === undefined
+  const sendAge = time.safeParse(withoutAge ? 0 : ageAtSendMs)
+  const received = time.safeParse(receivedAt)
+  if (
+    !sendAge.success ||
+    !received.success ||
+    received.data > now ||
+    sendAge.data + (now - received.data) > OBSERVATION_FRESH_MS ||
+    !Array.isArray(controls)
+  )
+    return []
+  if (withoutAge) {
+    const observed = time.safeParse(observedAt)
+    if (
+      !observed.success ||
+      observed.data > received.data + MAX_FUTURE_OBSERVATION_MS
+    )
+      return []
+  }
+  const advertised = new Set<unknown>(controls)
+  return ExtendedControlAction.options.filter(
+    (action) =>
+      advertised.has(action) && !(withoutAge && SEND_AGE_REQUIRED.has(action)),
+  )
+}
 type Current = {
   account: AccountSessionState
   session: SessionRecord
@@ -435,16 +475,25 @@ export class PostgresPauseAuthority {
     tx: TransactionSql,
     binding: ControlSessionBinding,
     printerKey: string,
+    now: number,
   ): Promise<readonly ExtendedControlAction[]> {
-    const [latest] = await tx<{ controls: unknown }[]>`
-      SELECT controls FROM farm.pause_authority_advertised_controls
+    const [latest] = await tx<
+      {
+        controls: unknown
+        age_at_send_ms: number | null
+        received_at: number | null
+        observed_at: number
+      }[]
+    >`
+      SELECT controls, age_at_send_ms::float8 AS age_at_send_ms, received_at::float8 AS received_at, observed_at::float8 AS observed_at FROM farm.pause_authority_advertised_controls
       WHERE farm_id=${binding.farm_id}::uuid AND agent_id=${binding.agent_id}::uuid
         AND printer_key=${printerKey}`
-    if (latest?.controls == null) return legacyActions
-    if (!Array.isArray(latest.controls)) return []
-    const advertised = new Set<unknown>(latest.controls)
-    return ExtendedControlAction.options.filter((action) =>
-      advertised.has(action),
+    return freshAdvertisedActions(
+      latest?.controls,
+      latest?.age_at_send_ms,
+      latest?.received_at,
+      now,
+      latest?.observed_at,
     )
   }
   async issueChallenge(input: unknown): Promise<PauseChallengeDecision> {
@@ -689,7 +738,12 @@ export class PostgresPauseAuthority {
         }
         const actions = actionsForControlRole(
           current.role,
-          await this.advertisedActions(tx, binding, current.printerKey),
+          await this.advertisedActions(
+            tx,
+            binding,
+            current.printerKey,
+            checked,
+          ),
         )
         if (actions.length === 0) {
           await this.terminal(tx, row, 'rejected', await this.now(tx))

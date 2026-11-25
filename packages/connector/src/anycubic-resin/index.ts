@@ -1,5 +1,22 @@
 import { createDecipheriv, createHash, randomBytes } from 'node:crypto'
 import { isIP } from 'node:net'
+import {
+  openPhotonResinBrokerSession,
+  type PhotonResinSession,
+} from './session.ts'
+
+export {
+  photonResinModels,
+  photonResinModelSupport,
+  type PhotonResinModelSupport,
+} from './models.ts'
+export {
+  photonResinRefusals,
+  type PhotonResinCapability,
+  type PhotonResinCommandResult,
+  type PhotonResinSession,
+  type PhotonResinState,
+} from './session.ts'
 
 type Options = { host: string; port?: number; timeoutMs?: number }
 const responseLimit = 16_384
@@ -113,13 +130,19 @@ export function createPhotonResinAdapter({
     }
   }
 
-  return {
+  const adapter = {
     async discover() {
       return (await info()).identity
     },
     async negotiateBroker(expectedSerial: string) {
       const { identity, token } = await info()
-      if (identity.serial !== expectedSerial || identity.mode !== 'net') {
+      // The P1 Max capture that ended in a refused broker reported `net`.
+      // PrintLog Bridge accepts `lan` and `net` as LAN Mode; `cloud` is not:
+      // https://github.com/HoffmanEngineering/printlog-bridge/blob/8a205eb/src/printlog_bridge/adapters/anycubic/handshake.py
+      if (
+        identity.serial !== expectedSerial ||
+        !['net', 'lan'].includes(identity.mode)
+      ) {
         throw new Error('Photon LAN identity or mode mismatch')
       }
       const ts = String(Date.now())
@@ -186,5 +209,54 @@ export function createPhotonResinAdapter({
         throw new Error('Malformed Photon LAN credentials')
       }
     },
+    /**
+     * Authenticates to the broker and returns once the printer has reported its
+     * status. Nothing is advertised before that. Throws on any failure.
+     */
+    async openSession({
+      serial,
+      pinSha256,
+      brokerPort,
+      cameraPort = 18088,
+      commandTimeoutMs = 30_000,
+      signal,
+    }: {
+      serial: string
+      /** SHA-256 of the broker certificate or of its public key. */
+      pinSha256: string
+      /** Overrides the port named by `/ctrl`. */
+      brokerPort?: number
+      cameraPort?: number
+      commandTimeoutMs?: number
+      signal?: AbortSignal
+    }): Promise<PhotonResinSession> {
+      const pin = pinSha256.replaceAll(':', '').toLowerCase()
+      const validPort = (value: number) =>
+        Number.isInteger(value) && value >= 1 && value <= 65535
+      if (
+        !/^[a-f0-9]{64}$/.test(pin) ||
+        (brokerPort !== undefined && !validPort(brokerPort)) ||
+        !validPort(cameraPort) ||
+        !Number.isInteger(commandTimeoutMs) ||
+        commandTimeoutMs < 1 ||
+        commandTimeoutMs > 60000
+      ) {
+        throw new Error('Invalid Photon LAN session options')
+      }
+      signal?.throwIfAborted()
+      const credentials = await adapter.negotiateBroker(serial)
+      return openPhotonResinBrokerSession({
+        credentials: {
+          ...credentials,
+          port: brokerPort ?? credentials.port,
+        },
+        pinSha256: pin,
+        cameraPort,
+        connectTimeoutMs: timeoutMs,
+        commandTimeoutMs,
+        signal,
+      })
+    },
   }
+  return adapter
 }

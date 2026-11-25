@@ -1,3 +1,4 @@
+import { DriverRefusalError } from '../control/driver-refusal.ts'
 import { advertisedMoonrakerMacros } from '../control/macro-support.ts'
 import { openFixedKobraLinkControl } from '../kobralink/control-driver.ts'
 import { KOBRALINK_CONTROLS } from '../kobralink/extended-control.ts'
@@ -8,12 +9,28 @@ import {
   KOBRA_X_SIGNED_ACTIONS,
   openFixedKobraXControl,
 } from '../kobra-x/control-driver.ts'
+import {
+  kobraXControls,
+  kobraXResultWindowMs,
+  type KobraXControlEvidence,
+} from '../kobra-x/control-support.ts'
 import { anycubicControls } from '../anycubic/control-support.ts'
 import { readAnycubicPrinterBinding } from '../control/printer-binding.ts'
 import { openFixedCrealityControl } from '../creality/control-driver.ts'
-import { CREALITY_ACTIONS } from '../creality/commands.ts'
+import { CREALITY_ACTIONS, CREALITY_CFS_ACTIONS } from '../creality/commands.ts'
 import { readCrealityPrinterBinding } from '../control/printer-binding.ts'
 import { openFixedBambuControl } from '../bambu/control-driver.ts'
+import { openFixedSdcpControl } from '../sdcp/control-driver.ts'
+import { resolveSdcpTarget } from '../sdcp/identity.ts'
+import {
+  SDCP_CONTROL_ACTIONS,
+  SDCP_QUALIFIED_STARTS,
+  sdcpModelKey,
+  sdcpStartQualified,
+  sdcpStartUnavailableMessage,
+  type SdcpQualification,
+} from '../sdcp/models.ts'
+import { readSdcpPrinterBinding } from '../control/printer-binding.ts'
 import { bambuControls } from '../bambu/control-support.ts'
 import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
 import {
@@ -75,6 +92,16 @@ export function createPauseDriverRouter(config: {
   connectKobraX?: NonNullable<
     Parameters<typeof openFixedKobraXControl>[0]['connect']
   >
+  /**
+   * What the Kobra X itself last reported (ACE, light, fan). When supplied, a
+   * Kobra X advertises only the controls that evidence supports, and
+   * `undefined` (nothing reported, or unreachable) leaves the accessory-free
+   * ones. Absent, the router offers the driver's full signed list; production
+   * composition always supplies it.
+   */
+  kobraXControlEvidence?(
+    binding: PrinterBinding,
+  ): KobraXControlEvidence | undefined
   allowedOrigins: readonly string[]
   limits: MoonrakerLimits
   clock: { monotonicNow(): number }
@@ -87,6 +114,11 @@ export function createPauseDriverRouter(config: {
   bambuModel?(binding: PrinterBinding): string | undefined
   /** Local per-printer admin switch of the G-code console; absent means off. */
   gcodeConsole?(binding: PrinterBinding): boolean
+  /**
+   * Replaces the shipped SDCP start qualification list, which is empty. For
+   * simulator tests; production composition never sets it.
+   */
+  sdcpQualifiedStarts?: readonly SdcpQualification[]
   observe(
     binding: PrinterBinding,
     observation: ControlObservation | null,
@@ -105,14 +137,41 @@ export function createPauseDriverRouter(config: {
   const attempts = new Map<PrinterBinding, Attempt>()
   const moonrakerObjects = new WeakMap<PrinterBinding, readonly string[]>()
   const moonrakerMacroParams = new WeakMap<PrinterBinding, MacroParamMap>()
+  const sdcpFirmware = new WeakMap<PrinterBinding, string>()
+  const sdcpQualified = config.sdcpQualifiedStarts ?? SDCP_QUALIFIED_STARTS
   // KobraLink bindings are read-only handles with no command mapping, so they
   // resolve to no binding here and advertise nothing.
   function controls(binding: PrinterBinding): readonly ExtendedControlAction[] {
     const mapping = readPrinterBinding(binding)
     if (!mapping) return []
     if (readKobraLinkPrinterBinding(binding)) return KOBRALINK_CONTROLS
-    if (readCrealityPrinterBinding(binding)) return CREALITY_ACTIONS
-    if (readKobraXPrinterBinding(binding)) return KOBRA_X_SIGNED_ACTIONS
+    const creality = readCrealityPrinterBinding(binding)
+    if (creality)
+      return creality.cfsFeed
+        ? [...CREALITY_ACTIONS, ...CREALITY_CFS_ACTIONS]
+        : CREALITY_ACTIONS
+    const kobraX = readKobraXPrinterBinding(binding)
+    if (kobraX) {
+      const offered = config.kobraXControlEvidence
+        ? kobraXControls(config.kobraXControlEvidence(binding))
+        : KOBRA_X_SIGNED_ACTIONS
+      // Printer-assigned command reports cannot prove these effects, and no
+      // correlated accessory read-back is established for this firmware.
+      return kobraX.reportIdentity === 'printer-assigned'
+        ? offered.filter(
+            (action) => action !== 'set_fan' && action !== 'set_light',
+          )
+        : offered
+    }
+    const sdcp = readSdcpPrinterBinding(binding)
+    if (sdcp) {
+      // Start is offered only for a qualified pair; unknown firmware is not one.
+      const firmware = sdcpFirmware.get(binding)
+      return firmware !== undefined &&
+        sdcpStartQualified(sdcp.model, firmware, sdcpQualified)
+        ? SDCP_CONTROL_ACTIONS
+        : SDCP_CONTROL_ACTIONS.filter((action) => action !== 'start_print')
+    }
     const anycubic = readAnycubicPrinterBinding(binding)
     if (anycubic) return anycubicControls(anycubic.modelId)
     const bambu = readBambuPrinterBinding(binding)
@@ -137,6 +196,15 @@ export function createPauseDriverRouter(config: {
   }
   return Object.freeze({
     controls,
+    startUnavailableMessage(binding: PrinterBinding) {
+      const sdcp = readSdcpPrinterBinding(binding)
+      if (sdcp && !controls(binding).includes('start_print'))
+        return sdcpStartUnavailableMessage(
+          sdcp.model,
+          sdcpFirmware.get(binding),
+        )
+      return undefined
+    },
     allowsExtendedResult(binding: PrinterBinding) {
       const mapping = readPrinterBinding(binding)
       return (
@@ -145,16 +213,41 @@ export function createPauseDriverRouter(config: {
         moonrakerObjects.get(binding)?.includes(SNAPMAKER_U1_MARKER) === true
       )
     },
+    resultWindowMs(binding: PrinterBinding, action: ExtendedControlAction) {
+      return readKobraXPrinterBinding(binding)
+        ? kobraXResultWindowMs(action)
+        : undefined
+    },
     macros: (binding: PrinterBinding) =>
       advertisedMoonrakerMacros(moonrakerObjects.get(binding)),
     macroParams: (binding: PrinterBinding) => moonrakerMacroParams.get(binding),
     async detect(binding: PrinterBinding, signal?: AbortSignal) {
+      const sdcp = readSdcpPrinterBinding(binding)
+      // Firmware is only worth asking for when the model has a qualified pair.
+      if (
+        sdcp &&
+        sdcpQualified.some(
+          (pair) => sdcpModelKey(pair.model) === sdcpModelKey(sdcp.model),
+        )
+      ) {
+        sdcpFirmware.delete(binding)
+        try {
+          const target = await resolveSdcpTarget(sdcp, {
+            ...(sdcp.discoveryPort ? { port: sdcp.discoveryPort } : {}),
+            ...(signal ? { signal } : {}),
+          })
+          sdcpFirmware.set(binding, target.firmwareVersion)
+        } catch {
+          // A failed firmware read cannot establish start qualification.
+        }
+      }
       if (
         readPrinterBinding(binding) &&
         !readKobraLinkPrinterBinding(binding) &&
         !readBambuPrinterBinding(binding) &&
         !readCrealityPrinterBinding(binding) &&
         !readKobraXPrinterBinding(binding) &&
+        !readSdcpPrinterBinding(binding) &&
         !readAnycubicPrinterBinding(binding)
       ) {
         const detect = {
@@ -223,11 +316,13 @@ export function createPauseDriverRouter(config: {
               ? openFixedKobraXControl
               : readAnycubicPrinterBinding(binding)
                 ? openFixedAnycubicControl
-                : readCrealityPrinterBinding(binding)
-                  ? openFixedCrealityControl
-                  : readBambuPrinterBinding(binding)
-                    ? openFixedBambuControl
-                    : openFixedMoonrakerPause
+                : readSdcpPrinterBinding(binding)
+                  ? openFixedSdcpControl
+                  : readCrealityPrinterBinding(binding)
+                    ? openFixedCrealityControl
+                    : readBambuPrinterBinding(binding)
+                      ? openFixedBambuControl
+                      : openFixedMoonrakerPause
         )({
           binding,
           fetch: config.kobraLinkFetch,
@@ -236,6 +331,7 @@ export function createPauseDriverRouter(config: {
           limits: config.limits,
           connectionGeneration: generation,
           objects: moonrakerObjects.get(binding),
+          qualifiedStarts: config.sdcpQualifiedStarts,
           gcodeConsole: config.gcodeConsole?.(binding) === true,
           clock: config.clock,
           observeRun,
@@ -276,13 +372,20 @@ export function createPauseDriverRouter(config: {
       if (!attempt)
         return Promise.reject(new Error('No prepared pause attempt'))
       // Both checks precede the driver, so a refusal can never reach a printer.
+      const advertised =
+        controls(input.binding).includes(action) &&
+        !!attempt.driver.driver.execute
       if (
-        !controls(input.binding).includes(action) ||
-        !controlWithinLimits(action, args, config.controlLimits) ||
-        !attempt.driver.driver.execute
+        !advertised ||
+        !controlWithinLimits(action, args, config.controlLimits)
       )
-        return Promise.reject(new Error('Control action unavailable'))
-      return attempt.driver.driver.execute(action, args, input)
+        return Promise.reject(
+          new DriverRefusalError(
+            advertised ? 'invalid-command' : 'unsupported-action',
+            'Control action unavailable',
+          ),
+        )
+      return attempt.driver.driver.execute!(action, args, input)
     },
     pauseOnce(input: Parameters<PreparedPauseDriver['pauseOnce']>[0]) {
       const attempt = attempts.get(input.binding)

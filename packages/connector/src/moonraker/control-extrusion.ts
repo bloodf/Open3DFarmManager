@@ -1,3 +1,4 @@
+import { DriverRefusalError } from '../control/driver-refusal.ts'
 import { z } from 'zod'
 import { ExtrudeArguments } from '../../../farm-protocol/src/control-actions.ts'
 
@@ -13,11 +14,9 @@ export type ExtrudeRefusalReason =
  * Thrown before any write. The dispatcher reads `refusal` and reports a
  * not-sent result with that reason instead of an unknown outcome.
  */
-export class ExtrudeRefused extends Error {
-  readonly refusal: ExtrudeRefusalReason
+export class ExtrudeRefused extends DriverRefusalError {
   constructor(refusal: ExtrudeRefusalReason) {
-    super(`Extrusion refused: ${refusal}`)
-    this.refusal = refusal
+    super(refusal, `Extrusion refused: ${refusal}`)
   }
 }
 

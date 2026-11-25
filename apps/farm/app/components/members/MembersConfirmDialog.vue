@@ -110,10 +110,11 @@ dialog {
   max-block-size: calc(100% - 2 * var(--space-4));
   overflow-y: auto;
   padding: var(--space-5);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  color: var(--color-text);
-  background: var(--color-surface-raised);
+  border: 1px solid var(--ops-border);
+  border-radius: var(--ops-radius-lg);
+  color: var(--ops-text);
+  background: var(--ops-panel);
+  overscroll-behavior: contain;
   font: inherit;
 }
 dialog::backdrop {
@@ -121,7 +122,7 @@ dialog::backdrop {
 }
 h2 {
   margin: 0 0 var(--space-3);
-  font-size: var(--font-size-lg);
+  font-size: var(--ops-text-title);
   line-height: var(--line-height-tight);
   overflow-wrap: anywhere;
 }
@@ -147,25 +148,21 @@ input {
 }
 .status {
   min-block-size: 1.5rem;
-  color: var(--color-text-muted);
+  color: var(--ops-muted);
 }
 .error {
   margin-block-end: var(--space-3);
   padding: var(--space-3);
-  border: 1px solid var(--printer-error);
-  border-radius: var(--radius-sm);
-  color: var(--printer-error);
+  border: 1px solid var(--ops-fault);
+  border-radius: var(--ops-radius-sm);
+  color: var(--ops-fault);
+  background: var(--ops-fault-bg);
 }
 .actions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-3);
 }
-.actions .danger {
-  border-color: var(--printer-error);
-  color: var(--printer-error);
-}
-button:focus-visible,
 input:focus-visible,
 .error:focus-visible {
   outline: var(--focus-ring-width) solid var(--color-focus-ring);

@@ -1,5 +1,5 @@
 import { ApiSpoolMembership } from '../../../../packages/farm-protocol/src/api-query.ts'
-import type { TransactionSql } from 'postgres'
+import type { Sql, TransactionSql } from 'postgres'
 import {
   SPOOL_INVENTORY_STALE_MS,
   SpoolInventory,
@@ -17,25 +17,18 @@ export function parseInventorySnapshot(row: InventoryRow) {
     : null
 }
 
-// Allow modest Connector clock skew without letting a far-future report
-// become the ordering watermark for this Connector.
-const MAX_FUTURE_OBSERVATION_MS = 30_000
-
 export async function recordInventorySnapshot(
   tx: TransactionSql,
   { farmId, agentId }: { farmId: string; agentId: string },
   inventory: SpoolInventory,
-  receivedAt: number,
+  ageAtSendMs?: number,
 ) {
-  if (inventory.observedAt > receivedAt + MAX_FUTURE_OBSERVATION_MS) return
-
   await tx`INSERT INTO farm.connector_inventory_snapshots AS current
-    (farm_id, agent_id, observed_at, snapshot, received_at)
-    VALUES (${farmId}::uuid, ${agentId}::uuid, ${inventory.observedAt}, ${tx.json(inventory)}, ${receivedAt})
+    (farm_id, agent_id, observed_at, snapshot, received_at, age_at_send_ms)
+    VALUES (${farmId}::uuid, ${agentId}::uuid, ${inventory.observedAt}, ${tx.json(inventory)}, floor(extract(epoch FROM pg_catalog.clock_timestamp())*1000)::bigint, ${ageAtSendMs ?? null})
     ON CONFLICT (farm_id, agent_id) DO UPDATE SET
-      observed_at = EXCLUDED.observed_at, snapshot = EXCLUDED.snapshot, received_at = EXCLUDED.received_at
-    WHERE current.observed_at < EXCLUDED.observed_at
-      OR (current.received_at IS NULL AND current.observed_at > EXCLUDED.received_at + ${MAX_FUTURE_OBSERVATION_MS}::bigint)`
+      observed_at = EXCLUDED.observed_at, snapshot = EXCLUDED.snapshot, received_at = EXCLUDED.received_at,
+      age_at_send_ms = EXCLUDED.age_at_send_ms, revision = current.revision + 1`
 }
 
 type Binding = { serviceId: string; spoolId: number }
@@ -45,68 +38,132 @@ export type ReadSpoolMembership = (
   binding: Binding,
 ) => Promise<unknown> | undefined
 
-function fresh(receivedAt: number | null, now: number) {
-  if (receivedAt === null) return false
-  const age = now - receivedAt
-  return age >= 0 && age < SPOOL_INVENTORY_STALE_MS
+type ObservationRow = InventoryRow & {
+  agentId: string
+  receivedAt: number | null
+  ageAtSendMs: number | null
+  databaseNow: number
+  revision: string
 }
 
-export async function hasCurrentSpoolObservation(
-  tx: TransactionSql,
-  farmId: string,
-  binding: Binding,
-  readMembership?: ReadSpoolMembership,
-) {
-  // The bounded lookup runs with the same locks as the summary check. A
-  // revocation, settings update or snapshot replacement that wins these locks
-  // first is visible before the lookup. A later update waits for the write.
-  const rows = await tx<
-    (InventoryRow & { agentId: string; receivedAt: number | null })[]
-  >`
-    SELECT agent_id::text AS "agentId", observed_at::float8 AS "observedAt",
-      received_at::float8 AS "receivedAt", snapshot
-    FROM farm.lock_physical_spool_observations_with_receipt(${farmId}::uuid, ${binding.serviceId}::uuid)`
-  const now = Date.now()
-  const eligible = rows.flatMap((row) => {
+export type MembershipEvidence = Pick<
+  ObservationRow,
+  'agentId' | 'revision'
+> & {
+  repliedAt: number
+}
+
+function eligibleObservations(rows: ObservationRow[], binding: Binding) {
+  return rows.flatMap((row) => {
     const snapshot = parseInventorySnapshot(row)
+    const elapsed =
+      row.receivedAt === null ? -1 : row.databaseNow - row.receivedAt
     return snapshot &&
       !snapshot.stale &&
-      fresh(row.receivedAt, now) &&
+      elapsed >= 0 &&
+      Number.isSafeInteger(row.ageAtSendMs) &&
+      row.ageAtSendMs !== null &&
+      row.ageAtSendMs >= 0 &&
+      elapsed + row.ageAtSendMs < SPOOL_INVENTORY_STALE_MS &&
       snapshot.serviceId?.toLowerCase() === binding.serviceId
       ? [{ row, snapshot }]
       : []
   })
-  if (
-    eligible.some(({ snapshot }) =>
-      snapshot.spools.some(({ spoolId }) => spoolId === binding.spoolId),
-    )
-  )
-    return true
-  if (!readMembership) return false
+}
+
+function listsSpool(snapshot: SpoolInventory, binding: Binding) {
+  return snapshot.spools.some(({ spoolId }) => spoolId === binding.spoolId)
+}
+
+export async function prefetchSpoolMembership(
+  sql: Sql,
+  farmId: string,
+  binding: Binding,
+  readMembership: ReadSpoolMembership,
+  retryAgents?: ReadonlySet<string>,
+): Promise<MembershipEvidence[]> {
+  const rows = await sql<ObservationRow[]>`
+    SELECT agent_id::text AS "agentId", observed_at::float8 AS "observedAt",
+      received_at::float8 AS "receivedAt", age_at_send_ms::float8 AS "ageAtSendMs",
+      floor(extract(epoch FROM pg_catalog.clock_timestamp())*1000)::float8 AS "databaseNow",
+      revision::text AS revision, snapshot
+    FROM farm.read_physical_spool_observations_with_freshness(${farmId}::uuid, ${binding.serviceId}::uuid)`
+  const eligible = eligibleObservations(rows, binding)
+  if (eligible.some(({ snapshot }) => listsSpool(snapshot, binding))) return []
 
   const candidates = eligible
     .filter(
-      ({ snapshot, row }) =>
-        row.agentId && snapshot.total > snapshot.spools.length,
+      ({ row, snapshot }) =>
+        snapshot.total > snapshot.spools.length &&
+        (!retryAgents || retryAgents.has(row.agentId)),
     )
-    .slice(0, 4)
-  const results = await Promise.all(
-    candidates.map(async ({ row }) => {
-      const reply = ApiSpoolMembership.safeParse(
-        await readMembership(row.agentId, binding),
+    .sort((a, b) => b.row.receivedAt! - a.row.receivedAt!)
+  const pending: Promise<MembershipEvidence[]>[] = []
+  for (const { row } of candidates) {
+    // Unavailable inboxes return undefined and do not consume a slot.
+    const query = readMembership(row.agentId, binding)
+    if (!query) continue
+    pending.push(
+      query.then((result) => {
+        const reply = ApiSpoolMembership.safeParse(result)
+        return reply.success &&
+          reply.data.present &&
+          reply.data.serviceId === binding.serviceId &&
+          reply.data.spoolId === binding.spoolId
+          ? [
+              {
+                agentId: row.agentId,
+                revision: row.revision,
+                repliedAt: performance.now(),
+              },
+            ]
+          : []
+      }),
+    )
+    if (pending.length === 4) {
+      const results = (await Promise.all(pending)).flat()
+      if (results.length) return results
+      pending.length = 0
+    }
+  }
+  const results = await Promise.all(pending)
+  return results.flat()
+}
+
+export async function checkCurrentSpoolObservation(
+  tx: TransactionSql,
+  farmId: string,
+  binding: Binding,
+  membership: MembershipEvidence[] = [],
+) {
+  const rows = await tx<ObservationRow[]>`
+    SELECT agent_id::text AS "agentId", observed_at::float8 AS "observedAt",
+      received_at::float8 AS "receivedAt", age_at_send_ms::float8 AS "ageAtSendMs",
+      floor(extract(epoch FROM pg_catalog.clock_timestamp())*1000)::float8 AS "databaseNow",
+      revision::text AS revision, snapshot
+    FROM farm.lock_physical_spool_observations_with_freshness(${farmId}::uuid, ${binding.serviceId}::uuid)`
+  const newerAgents = new Set<string>()
+  const now = performance.now()
+  for (const { row, snapshot } of eligibleObservations(rows, binding)) {
+    if (listsSpool(snapshot, binding)) return { present: true, newerAgents }
+    if (snapshot.total <= snapshot.spools.length) continue
+    for (const reply of membership) {
+      if (
+        reply.agentId !== row.agentId ||
+        now - reply.repliedAt < 0 ||
+        now - reply.repliedAt >= SPOOL_INVENTORY_STALE_MS
       )
-      return { row, reply }
-    }),
-  )
-  // The Connector checks membership age locally. Recheck the locked
-  // snapshot against the server clock after the round trip.
-  const checkedAt = Date.now()
-  return results.some(
-    ({ row, reply }) =>
-      reply.success &&
-      reply.data.present &&
-      reply.data.serviceId === binding.serviceId &&
-      reply.data.spoolId === binding.spoolId &&
-      fresh(row.receivedAt, checkedAt),
-  )
+        continue
+      if (reply.revision === row.revision) return { present: true, newerAgents }
+      if (BigInt(row.revision) > BigInt(reply.revision))
+        newerAgents.add(row.agentId)
+    }
+  }
+  return { present: false, newerAgents }
+}
+
+export async function hasCurrentSpoolObservation(
+  ...args: Parameters<typeof checkCurrentSpoolObservation>
+) {
+  return (await checkCurrentSpoolObservation(...args)).present
 }

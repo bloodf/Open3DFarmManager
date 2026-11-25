@@ -51,7 +51,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <main id="conteudo" class="camera-page ops-screen">
+  <main id="conteudo" class="camera-page ops-library">
     <div class="ops-heading">
       <p class="ops-wordmark" translate="no">Open3DFarmManager</p>
       <PageHeader title="Câmera da impressora" />

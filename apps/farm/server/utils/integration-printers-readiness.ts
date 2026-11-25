@@ -104,8 +104,9 @@ export function printerReadiness(
 ): PrinterReadiness {
   const parsed = PrinterState.safeParse(row.state)
   const qualification = qualifyPrinterState(row.state)
-  const observedAt =
+  const timestamp =
     row.observedAt ?? (parsed.success ? parsed.data.observedAt : null)
+  const observedAt = timestamp !== null && timestamp <= now ? timestamp : null
   const degradedReason =
     (parsed.success &&
     parsed.data.state === 'error' &&

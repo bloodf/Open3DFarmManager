@@ -249,7 +249,7 @@ onBeforeUnmount(() => controller?.abort())
 </script>
 
 <template>
-  <main id="conteudo" class="library ops-screen">
+  <main id="conteudo" class="library ops-library">
     <div class="ops-heading">
       <p class="ops-wordmark" translate="no">Open3DFarmManager</p>
       <PageHeader

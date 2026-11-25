@@ -110,6 +110,9 @@ const rows = computed(() =>
 const hrefById = computed(
   () => new Map(visible.value.map((entry) => [entry.id, entry.href])),
 )
+const statusById = computed(
+  () => new Map(visible.value.map((entry) => [entry.id, entry.status])),
+)
 const discoveryById = computed(
   () =>
     new Map(
@@ -256,6 +259,11 @@ const statuses = Object.keys(statusInfo) as NetworkStatus[]
       :columns="columns"
       :rows="rows"
     >
+      <template #status="{ row }">
+        <span class="status" :data-status="statusById.get(row.id)">{{
+          row.cells.status
+        }}</span>
+      </template>
       <template #name="{ row }">
         <a v-if="hrefById.get(row.id)" :href="hrefById.get(row.id)!">{{
           row.cells.name
@@ -283,24 +291,117 @@ const statuses = Object.keys(statusInfo) as NetworkStatus[]
 </template>
 
 <style scoped>
+.farm-map {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ops-space-3);
+  min-inline-size: 0;
+  padding: var(--ops-space-3);
+  border: 1px solid var(--ops-border);
+  border-radius: var(--ops-radius-lg);
+  background: var(--ops-panel);
+}
+.farm-map p {
+  margin: 0;
+}
+.source,
+.farm-map > [role='status'] {
+  color: var(--ops-muted);
+  font-size: var(--ops-text-small);
+}
 .controls {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2) var(--space-3);
+  gap: var(--ops-space-2) var(--ops-space-3);
+  padding-block-end: var(--ops-space-3);
+  border-block-end: 1px solid var(--ops-border);
 }
 button,
 select {
   min-block-size: 2.75rem;
   max-inline-size: 100%;
 }
+/* The screen stylesheet fills the pressed view; weight and underline stay here
+   so the choice never depends on colour alone. */
+.controls [role='group'] {
+  display: inline-flex;
+  gap: var(--ops-space-1);
+}
 button[aria-pressed='true'] {
   font-weight: 700;
   text-decoration: underline;
 }
+/* Narrow screens: each filter label stays beside its own select. */
+@media (max-width: 30rem) {
+  .controls {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .controls [role='group'] {
+    grid-column: 1 / -1;
+  }
+}
+.status {
+  display: inline-block;
+  padding: 1px var(--ops-space-2);
+  border: 1px solid currentColor;
+  border-radius: var(--ops-radius-sm);
+  font-size: var(--ops-text-small);
+  font-weight: 600;
+  line-height: 18px;
+}
+.status[data-status='connected'] {
+  color: var(--ops-action);
+  background: var(--ops-idle-bg);
+}
+.status[data-status='degraded'],
+.status[data-status='reconnecting'],
+.status[data-status='pending'] {
+  color: var(--ops-attention);
+  background: var(--ops-attention-bg);
+}
+.status[data-status='offline'] {
+  color: var(--ops-offline);
+  background: var(--ops-offline-hatch);
+}
+.status[data-status='discovered'] {
+  color: var(--ops-idle);
+  background: var(--ops-idle-bg);
+}
+.farm-map :deep(td:nth-child(5)),
+.farm-map :deep(td:nth-child(6)) {
+  font-family: var(--ops-font-mono);
+  font-size: var(--ops-text-small);
+  font-variant-numeric: tabular-nums;
+}
+.farm-map :deep(caption) {
+  padding-block-end: var(--ops-space-2);
+}
+.farm-map :deep(td button) {
+  display: block;
+  margin-block-start: var(--ops-space-1);
+}
+.farm-map ul {
+  display: grid;
+  gap: var(--ops-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.farm-map li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ops-space-2);
+}
 .map-scroll {
   overflow: auto;
   max-inline-size: 100%;
+  background: var(--ops-canvas);
+  border: 1px solid var(--ops-border);
+  border-radius: var(--ops-radius-md);
 }
 .map-scroll:focus-visible,
 a:focus-visible {
@@ -312,8 +413,8 @@ svg {
   font-family: inherit;
 }
 .node {
-  fill: var(--surface-raised);
-  stroke: var(--text);
+  fill: var(--ops-panel);
+  stroke: var(--ops-muted);
   stroke-width: 1.5;
 }
 .node.dashed {
@@ -324,16 +425,16 @@ svg {
   stroke-width: 2.5;
 }
 .name {
-  fill: var(--text);
+  fill: var(--ops-text);
   font-size: 13px;
   font-weight: 600;
 }
 .kind {
-  fill: var(--text-muted);
-  font-size: 11px;
+  fill: var(--ops-muted);
+  font-size: var(--ops-text-label);
 }
 .link-label {
-  font-size: 11px;
+  font-size: var(--ops-text-label);
   font-weight: 600;
 }
 a:focus-visible .node {

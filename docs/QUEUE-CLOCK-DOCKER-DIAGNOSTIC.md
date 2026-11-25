@@ -24,8 +24,8 @@ passes only if no timeout leaks into a later test as `Queue clock regressed`.
 `gate` runs these three.
 
 `overlay`, `disk` and `stress` are diagnostics, run only when named or with
-`all`. `overlay` keeps `/tmp` on the overlay filesystem so each fsync reaches the
-shared host disk; `disk` adds background fsync writers; `stress` adds them with
+`all`. `overlay` keeps `/tmp` on the host disk (a run-directory bind mount) so each
+fsync reaches the shared disk; `disk` adds background fsync writers; `stress` adds them with
 CPU spinners on one CPU. Their outcome depends on the host disk, so they are not
 a gate. Each profile has a wall-clock limit (`--profile-timeout`).
 

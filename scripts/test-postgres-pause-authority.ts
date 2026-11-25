@@ -10,6 +10,9 @@ import {
   validateMigrationHistory,
 } from './db/migrations.ts'
 import { ExtendedControlAction } from '../packages/farm-protocol/src/control-actions.ts'
+import { freshAdvertisedActions } from '../apps/farm/server/storage/postgres-pause-authority.ts'
+import { recordLatestStates } from '../apps/farm/server/storage/postgres-printer-latest-state.ts'
+import { OBSERVATION_FRESH_MS } from '../apps/farm/server/utils/integration-telemetry.ts'
 import {
   testPostgresPauseAuthority,
   verifyPauseAuthorityReplayRestart,
@@ -264,6 +267,53 @@ try {
       for (const migration of controlsMigrations)
         await tx.unsafe(migration.up).simple()
     })
+    const farmId = randomUUID(),
+      agentId = randomUUID(),
+      now = Date.now(),
+      staleReceipt = now - OBSERVATION_FRESH_MS - 1
+    await admin`INSERT INTO farm.printer_latest_state (farm_id, agent_id, printer_key, observed_at, received_at, age_at_send_ms, state) VALUES (${farmId}::uuid, ${agentId}::uuid, 'freshness-fixture', ${staleReceipt + 20_000}, ${staleReceipt}, 0, ${admin.json({ controls: ['pause', 'start_print'] })})`
+    const readControls = () =>
+      admin`SELECT controls, age_at_send_ms::float8 AS age_at_send_ms, received_at::float8 AS received_at, floor(extract(epoch FROM pg_catalog.clock_timestamp())*1000)::float8 AS now FROM farm.pause_authority_advertised_controls WHERE farm_id=${farmId}::uuid AND agent_id=${agentId}::uuid AND printer_key='freshness-fixture'`
+    const stale = (await readControls())[0]!
+    assert.deepEqual(
+      freshAdvertisedActions(
+        stale.controls,
+        stale.age_at_send_ms,
+        stale.received_at,
+        stale.now,
+      ),
+      [],
+    )
+    // A pre-migration row may already contain a poisoned timestamp.
+    await admin`UPDATE farm.printer_latest_state SET observed_at=${now + 120_000}, received_at=NULL WHERE farm_id=${farmId}::uuid AND agent_id=${agentId}::uuid AND printer_key='freshness-fixture'`
+    await admin.begin((tx) =>
+      recordLatestStates(tx, { farmId, agentId }, [
+        {
+          eventId: randomUUID(),
+          queuedAt: now,
+          kind: 'printer-state',
+          ageAtSendMs: 0,
+          state: {
+            printerKey: 'freshness-fixture',
+            observedAt: now + 20_000,
+            state: 'paused',
+            progress: 0.5,
+            controls: ['pause', 'start_print'],
+          },
+        },
+      ]),
+    )
+    const released = (await readControls())[0]!
+    assert.deepEqual(
+      freshAdvertisedActions(
+        released.controls,
+        released.age_at_send_ms,
+        released.received_at,
+        released.now,
+      ),
+      ['pause', 'start_print'],
+    )
+    await admin`DELETE FROM farm.printer_latest_state WHERE farm_id=${farmId}::uuid AND agent_id=${agentId}::uuid AND printer_key='freshness-fixture'`
     // The catalog check rebuilds 0018, so the shipped constraint comes next.
     const constraintChecks = await applyConfirmCollectionConstraint(admin)
     const revocationChecks = await testPauseConnectorRevocations(admin, port)

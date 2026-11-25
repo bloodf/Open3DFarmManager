@@ -1,3 +1,4 @@
+import { DriverRefusalError } from '../control/driver-refusal.ts'
 import { randomUUID } from 'node:crypto'
 import { openAsBlob, readFileSync } from 'node:fs'
 import { z } from 'zod'
@@ -16,6 +17,16 @@ import { createAnycubicControlTransport } from './control-transport.ts'
 export const ANYCUBIC_FILE_MODEL = '20024'
 const FIRMWARE = '2.4.6.7'
 const FRAME_LIMIT = 131072
+// Wire format. Topics and `listLocal`/`/gcode_upload`:
+// rvanderp3/kobra-connect@3edba24606d7122c4a68accd09af937ba4fdbd08
+// docs/mqtt-commands.md §13 and §16 (model 20024 topics).
+// Request fields, reply states, millisecond timestamps, `is_dir` records and
+// the upload parts: bloodf/kobracontrol@c414db4f36d4c96f2b232c368ad6cfe56e3d0408
+// docs/protocol.md "Files on the printer" and src/kobracontrol/kobra.py
+// (`LIST_DATA`, `_file_records`, `_seconds`, `_upload`). Observed there on a
+// Kobra X; the Kobra 3 is "experimental" and nothing was captured on one.
+const LIST_ROOT = { page_num: 1, page_size: 200, path: '/' } as const
+type ListRoot = typeof LIST_ROOT
 const MQTT_ROOT = 'anycubic/anycubicCloud/v1'
 const Report = z.object({
   type: z.enum(['info', 'file']),
@@ -83,7 +94,7 @@ async function withFileSession<T>(
     request: (
       type: 'info' | 'file',
       action: 'query' | 'listLocal',
-      data: null | { path: '/' },
+      data: null | ListRoot,
     ) => Promise<unknown>,
     local: ReturnType<typeof localBinding>,
   ) => Promise<T>,
@@ -149,7 +160,7 @@ async function withFileSession<T>(
   async function request(
     type: 'info' | 'file',
     action: 'query' | 'listLocal',
-    data: null | { path: '/' },
+    data: null | ListRoot,
   ) {
     signal.throwIfAborted()
     const msgid = randomUUID()
@@ -174,7 +185,10 @@ async function withFileSession<T>(
           report.action !== (type === 'info' ? 'report' : action)
         )
           return
-        if (report.code !== 200 || report.state !== 'done')
+        if (
+          (report.code !== 0 && report.code !== 200) ||
+          (report.state !== 'done' && report.state !== 'success')
+        )
           reply.reject(Error('offline'))
         else reply.resolve(report.data)
       } catch {
@@ -219,7 +233,7 @@ export function listAnycubicFiles(input: FileRequest) {
   return withFileSession(input, async (_info, request) => {
     const { records } = z
       .object({ records: z.array(z.unknown()) })
-      .parse(await request('file', 'listLocal', { path: '/' }))
+      .parse(await request('file', 'listLocal', LIST_ROOT))
     const files = new Map<string, PrinterFile>()
     for (const value of records) {
       const record = FileRecord.safeParse(value)
@@ -234,7 +248,8 @@ export function listAnycubicFiles(input: FileRequest) {
       files.set(filename, {
         name: filename,
         size,
-        modified: timestamp,
+        // `PrinterFile.modified` is in seconds.
+        modified: timestamp > 1e11 ? timestamp / 1000 : timestamp,
         ...(!isAnycubicStartFile(filename) ? { printUnsupported: true } : {}),
       })
     }
@@ -330,11 +345,12 @@ export interface AnycubicFileTransport {
   publish(topic: string, payload: string, signal: AbortSignal): Promise<void>
 }
 
-export class AnycubicStartRefused extends Error {
-  readonly refusal: 'unsupported-action' | 'invalid-command'
-  constructor(refusal: AnycubicStartRefused['refusal'], message: string) {
-    super(message)
-    this.refusal = refusal
+export class AnycubicStartRefused extends DriverRefusalError {
+  constructor(
+    refusal: 'unsupported-action' | 'invalid-command',
+    message: string,
+  ) {
+    super(refusal, message)
   }
 }
 

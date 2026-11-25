@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { readdirSync, readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import { basename, dirname, join, relative, resolve } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Browser, BrowserContext, Page } from '@playwright/test'
@@ -218,7 +218,8 @@ async function bundle(replace: Readonly<Record<string, string>>) {
             const source = await readFile(path, 'utf8')
             const { descriptor, errors } = parse(source, { filename: path })
             if (errors.length) throw new Error(errors.join('\n'))
-            const id = `data-v-${basename(path, '.vue')}`
+            // By path, not file name: two index.vue must not share scoped styles.
+            const id = `data-v-${relative(appDir, path).replace(/\W/g, '-')}`
             let code: string
             if (descriptor.scriptSetup) {
               code = compileScript(descriptor, {

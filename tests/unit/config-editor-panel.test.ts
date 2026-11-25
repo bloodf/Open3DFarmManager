@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { renderFarmComponent } from '../../apps/farm/app/components/farm/render-farm-component.ts'
+import { renderFarmComponent } from '../helpers/render-farm-component.ts'
 
 const component = '../printer-detail/ConfigEditorPanel.vue'
 

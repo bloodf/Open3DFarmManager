@@ -57,6 +57,13 @@ export function spoolLibraryRuntime(): Promise<PostgresSpoolLibrary> {
   return instance
 }
 
+/** The validated pool, for spool moves (storage/postgres-spool-moves.ts). */
+export async function spoolLibraryPool() {
+  await spoolLibraryRuntime()
+  if (!pool) throw new Error('Spool database unavailable')
+  return pool
+}
+
 export async function closeSpoolLibraryRuntime() {
   const closing = pool
   pool = undefined

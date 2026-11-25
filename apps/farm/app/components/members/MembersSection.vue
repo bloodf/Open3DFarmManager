@@ -27,39 +27,22 @@ defineProps<{
 <style scoped>
 .members-section {
   display: grid;
-  gap: var(--space-3);
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ops-space-3);
   min-width: 0;
-}
-.members-section.bordered {
-  padding: var(--space-5);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-raised);
 }
 .head {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: var(--space-1) var(--space-3);
+  gap: var(--ops-space-1) var(--ops-space-3);
 }
-h2 {
-  margin: 0;
-  font-size: var(--font-size-lg);
-  line-height: var(--line-height-tight);
-}
+h2,
 .summary {
   margin: 0;
-  font-size: var(--font-size-sm);
-  color: var(--color-text-muted);
 }
-/* The empty-state card shares the bordered surface of the filled panel. */
-.members-section :deep(.ui-card) {
-  border: 1px solid var(--color-border);
-  box-shadow: none;
-}
-@media (max-width: 30rem) {
-  .members-section.bordered {
-    padding: var(--space-4);
-  }
+.summary {
+  font-size: var(--ops-text-small);
+  font-variant-numeric: tabular-nums;
 }
 </style>

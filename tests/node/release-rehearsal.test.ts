@@ -96,6 +96,7 @@ fi
           COMPOSE_PROJECT_NAME: 'foreign-project',
           OPENFARM_DOCKER_REHEARSAL: '0',
           OPENFARM_REHEARSAL_EVIDENCE: evidence,
+          OPENFARM_REHEARSAL_FREE_BYTES: String(11 * 1024 ** 3),
           DOCKER_TRACE: trace,
           DOCKER_DOWN_STATUS: cleanupFails ? '43' : '0',
         },
@@ -166,4 +167,35 @@ fi
     )
   }
   assert.equal(projects.size, 2)
+
+  return t.test('low free space blocks builds and archives', () => {
+    const trace = join(directory, 'low-space.log')
+    const artifacts = join(directory, 'low-space-artifacts')
+    const result = spawnSync(
+      'bash',
+      ['scripts/build-release.sh', '1.2.3', artifacts],
+      {
+        encoding: 'utf8',
+        timeout: 30_000,
+        env: {
+          ...process.env,
+          NODE_TEST_CONTEXT: undefined,
+          PATH: `${directory}:${dirname(process.execPath)}:${process.env.PATH}`,
+          TMPDIR: directory,
+          OPENFARM_REHEARSAL_EVIDENCE: join(directory, 'low-space-evidence'),
+          OPENFARM_REHEARSAL_FREE_BYTES: String(9 * 1024 ** 3),
+          DOCKER_TRACE: trace,
+          DOCKER_DOWN_STATUS: '0',
+        },
+      },
+    )
+    assert.ifError(result.error)
+    assert.equal(result.status, 1, result.stdout + result.stderr)
+    assert.match(
+      result.stdout + result.stderr,
+      /Need 10 GiB free for two builds/,
+    )
+    assert.equal(existsSync(artifacts), false)
+    assert.doesNotMatch(readFileSync(trace, 'utf8'), /^(buildx|compose) /m)
+  })
 })

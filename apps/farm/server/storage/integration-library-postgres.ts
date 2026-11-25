@@ -23,8 +23,8 @@ function asMode(value: string): StorageMode {
 }
 
 /**
- * Library rows for the integration role. Bytes for server mode are written by
- * the farm library blob store before `addVersion`; this store keeps metadata.
+ * Library rows for the integration role. `retain` writes the bytes through the
+ * farm library runtime (blob store or Connector relay) before `addVersion`.
  */
 export class PostgresIntegrationLibrary implements IntegrationLibraryStore {
   private readonly sql: Sql
@@ -154,9 +154,8 @@ export class PostgresIntegrationLibrary implements IntegrationLibraryStore {
     sha256: string,
     bytes: Uint8Array,
     mode: StorageMode,
-    target?: { farmId: string; agentId: string | null },
+    target: { farmId: string; agentId: string | null },
   ) {
-    if (!target) return
     const { libraryRuntime } = await import('../utils/library/runtime.ts')
     const { blobs, relay } = await libraryRuntime()
     const body = Readable.from([bytes])
@@ -172,7 +171,7 @@ export class PostgresIntegrationLibrary implements IntegrationLibraryStore {
             agentId: target.agentId,
           }))
     if (!stored || stored.sha256 !== sha256 || stored.size !== bytes.length)
-      throw new Error('Resin artifact storage unavailable')
+      throw new Error('Library storage unavailable')
   }
 
   async addVersion(version: NewLibraryVersion) {

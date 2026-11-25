@@ -241,7 +241,7 @@ const paletteGroups = computed(() => {
         to: scopedHref('/bobinas', { q: String(item.id) }),
       })),
     },
-  ]
+  ].filter((group) => group.items.length)
 })
 const paletteItems = computed(() =>
   paletteGroups.value.flatMap((group) => group.items),
@@ -250,6 +250,10 @@ const paletteIndex = ref(0)
 watch([query, paletteItems], () => {
   paletteIndex.value = 0
 })
+function selectPaletteItem(to: string) {
+  void router.push(to)
+  search.value = false
+}
 function paletteKey(event: KeyboardEvent) {
   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
     if (!paletteItems.value.length) return
@@ -560,14 +564,10 @@ async function refreshAccount() {
               :key="item.to"
               role="option"
               :aria-selected="paletteItems[paletteIndex] === item"
+              :class="{ selected: paletteItems[paletteIndex] === item }"
+              @click="selectPaletteItem(item.to)"
             >
-              <NuxtLink
-                :to="item.to"
-                :class="{ selected: paletteItems[paletteIndex] === item }"
-                tabindex="-1"
-                @click="search = false"
-                >{{ item.label }}</NuxtLink
-              >
+              {{ item.label }}
             </li>
           </ul>
         </div>
@@ -651,12 +651,12 @@ input {
   list-style: none;
   padding: 0;
 }
-.palette-list a {
+.palette-list [role='option'] {
   display: block;
   padding: var(--space-2);
   min-height: 44px;
 }
-.palette-list a.selected {
+.palette-list [role='option'].selected {
   background: var(--surface);
   outline: 2px solid var(--color-focus-ring);
 }

@@ -325,6 +325,9 @@ export function createMoonrakerSubscription(input: {
                 ...value.status,
                 print_stats: {
                   state: value.status.print_stats.state,
+                  // Snapmaker/u1-klipper@93cb12faebf6e74c51bbc5f0be66e95124af14c8,
+                  // klippy/extras/print_stats.py (get_status).
+                  filename: value.status.print_stats.filename,
                   ...(input.jobFields
                     ? {
                         info: value.status.print_stats.info,

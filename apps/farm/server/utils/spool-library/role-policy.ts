@@ -23,6 +23,8 @@ const FEATURE_TABLES = [
   'spool_usage_records',
 ]
 const FEATURE_ROLE = 'farm_spool_features'
+/** Migration 0113 identity map and move journal: INSERT only, never UPDATE. */
+const MOVE_TABLES = ['spool_identities', 'spool_moves']
 
 /** Tables where the role may hold UPDATE: the spool tables (column-level) and the session touch columns. */
 const TABLES_WITH_UPDATE = [
@@ -56,7 +58,7 @@ export async function validateSpoolLibraryRole(sql: Sql): Promise<void> {
           OR has_table_privilege(current_user,c.oid,'REFERENCES')
           OR has_table_privilege(current_user,c.oid,'TRIGGER')
           OR ((has_table_privilege(current_user,c.oid,'INSERT') OR has_table_privilege(current_user,c.oid,'DELETE'))
-              AND NOT (n.nspname='farm' AND c.relname = ANY(${[...TABLES, ...FEATURE_TABLES]}::text[])))
+              AND NOT (n.nspname='farm' AND c.relname = ANY(${[...TABLES, ...FEATURE_TABLES, ...MOVE_TABLES]}::text[])))
           OR (has_any_column_privilege(current_user,c.oid,'UPDATE')
               AND NOT (n.nspname='farm' AND c.relname = ANY(${TABLES_WITH_UPDATE}::text[])))
           OR has_table_privilege(current_user,c.oid,'UPDATE')))

@@ -52,7 +52,7 @@ const TICK_LAG_MS = 5000
  * it is judged against. Such an observation is fresh, not stale: measure it
  * from its own receipt. A larger gap is a clock fault and stays untouched.
  */
-function clockNotBefore(
+export function clockNotBefore(
   observation: NonNullable<FarmRow['observation']>,
   now: Clock,
 ): Clock {
@@ -305,6 +305,7 @@ export function extendedControlStatusText(
 ): string {
   if (state.kind === 'sending') return 'Enviando o comando…'
   if (state.kind === 'settled') {
+    if (state.message) return state.message
     const base = {
       applied: 'Comando confirmado pelo Connector.',
       rejected: 'Comando recusado.',
@@ -336,7 +337,9 @@ export function controlStatusText(
     case 'sending':
       return `Enviando o comando de ${verb}…`
     case 'settled':
-      return actionOutcomeText(action, state.outcome, state.code)
+      return (
+        state.message ?? actionOutcomeText(action, state.outcome, state.code)
+      )
     case 'failed':
       switch (state.reason) {
         case 'unavailable':

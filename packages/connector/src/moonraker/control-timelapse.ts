@@ -1,3 +1,4 @@
+import { DriverRefusalError } from '../control/driver-refusal.ts'
 import { z } from 'zod'
 import { TimelapseArguments } from '../../../farm-protocol/src/control-actions.ts'
 
@@ -21,12 +22,10 @@ export type TimelapseRefusalReason =
   'state' | 'unsupported-action' | 'invalid-command'
 
 /** Thrown before any write; the dispatcher reports a not-sent result. */
-export class TimelapseRefused extends Error {
-  readonly refusal: TimelapseRefusalReason
+export class TimelapseRefused extends DriverRefusalError {
   constructor(refusal: TimelapseRefusalReason) {
-    super(`Timelapse operation refused: ${refusal}`)
+    super(refusal, `Timelapse operation refused: ${refusal}`)
     this.name = 'TimelapseRefused'
-    this.refusal = refusal
   }
 }
 

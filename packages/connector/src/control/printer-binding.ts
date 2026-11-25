@@ -2,6 +2,7 @@ import { KobraLinkRuntimeBinding } from '../kobralink/configuration.ts'
 import { AnycubicBinding } from '../config/anycubic.ts'
 import { KobraXBinding } from '../config/kobra-x.ts'
 import { CrealityBinding } from '../config/creality.ts'
+import { sdcpProfile } from '../sdcp/models.ts'
 import { parseBambuBinding, type BambuBinding } from '../bambu/configuration.ts'
 import { z } from 'zod'
 import { BrowserDeviceUuid } from '../../../farm-protocol/src/browser-device-proof.ts'
@@ -122,7 +123,14 @@ const ReadonlyAssignment = Assignment.omit({ moonraker_origin: true }).extend({
   revision: z.number().int().positive(),
 })
 const SdcpAssignment = Assignment.omit({ moonraker_origin: true }).extend({
-  backend: z.enum(['sdcp', 'formlabs', 'prusa-link']),
+  backend: z.enum([
+    'sdcp',
+    'formlabs',
+    'prusa-link',
+    'flashforge',
+    'phrozen',
+    'qidi',
+  ]),
 })
 const readonlyBindings = new WeakMap<
   PrinterBinding,
@@ -165,7 +173,59 @@ export function readRuntimePrinterBinding(binding: PrinterBinding) {
       revision: local.revision,
     }
   }
+  if (mapping && sdcpBindings.has(binding)) {
+    const { assignment_id, farm_id, agent_id, printer_key } = mapping
+    return {
+      assignment_id,
+      farm_id,
+      agent_id,
+      printer_key,
+      backend: 'sdcp' as const,
+    }
+  }
   return mapping ?? readonlyBindings.get(binding) ?? null
+}
+
+const SdcpControlBinding = z.strictObject({
+  printerKey: z.string().min(1).max(128),
+  host: z.ipv4(),
+  mainboardId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
+  model: z
+    .string()
+    .min(1)
+    .max(128)
+    .refine((model) => sdcpProfile(model) !== undefined),
+  discoveryPort: z.number().int().min(1).max(65535).optional(),
+  websocketPort: z.number().int().min(1).max(65535).optional(),
+  uploadPort: z.number().int().min(1).max(65535).optional(),
+})
+const sdcpBindings = new WeakMap<
+  PrinterBinding,
+  Readonly<z.infer<typeof SdcpControlBinding>>
+>()
+/** Explicit local command opt-in; other SDCP handles stay read-only. */
+export function provisionSdcpPrinter(
+  assignmentInput: unknown,
+  bindingInput: unknown,
+): PrinterBinding {
+  const local = Object.freeze(SdcpControlBinding.parse(bindingInput))
+  const scope = Assignment.omit({ moonraker_origin: true }).parse(
+    assignmentInput,
+  )
+  if (scope.printer_key !== local.printerKey)
+    throw new Error('SDCP assignment mismatch')
+  const binding = new BoundPrinter()
+  bindings.set(binding, {
+    assignment: Object.freeze({ ...scope, moonraker_origin: '' }),
+    active: true,
+  })
+  sdcpBindings.set(binding, local)
+  return binding
+}
+export function readSdcpPrinterBinding(binding: PrinterBinding) {
+  return readPrinterBinding(binding)
+    ? (sdcpBindings.get(binding) ?? null)
+    : null
 }
 
 const bambuBindings = new WeakMap<PrinterBinding, BambuBinding>()

@@ -1,3 +1,4 @@
+import { DriverRefusalError } from './driver-refusal.ts'
 import { toolTemperatureRefusal } from './control-driver.ts'
 import { ToolHeaters } from '../../../farm-protocol/src/state.ts'
 import { authorityConfirmation } from '../auth/offline-authority.ts'
@@ -122,6 +123,11 @@ const Observation = z.strictObject({
         tray: z.number().int().min(0).max(15).nullable(),
         observedMono: mono,
       }),
+      z.strictObject({
+        kind: z.literal('speed'),
+        level: z.enum(['silent', 'standard', 'sport', 'ludicrous']),
+        observedMono: mono,
+      }),
     ])
     .optional(),
 })
@@ -192,6 +198,8 @@ export function controlEffectMatches(
       return effect.kind === 'filament' && effect.tray === args.tray
     case 'unload_filament':
       return effect.kind === 'filament' && effect.tray === null
+    case 'set_speed':
+      return effect.kind === 'speed' && effect.level === args.level
     default:
       return false
   }
@@ -214,6 +222,8 @@ export interface PauseDriver {
     input: {
       binding: PrinterBinding
       beforeSend(): boolean
+      /** Connector-only filename from the validated resin replay path. */
+      verifiedResinFilename?: string
       transportId?: string
       stillAuthorized?(): boolean
       signal: AbortSignal
@@ -221,8 +231,18 @@ export interface PauseDriver {
   ): Promise<PauseRpcResult>
   macros?(binding: PrinterBinding): readonly string[] | undefined
   macroParams?(binding: PrinterBinding): MacroParamMap | undefined
+  startUnavailableMessage?(binding: PrinterBinding): string | undefined
   controls?(binding: PrinterBinding): readonly ExtendedControlAction[]
   allowsExtendedResult?(binding: PrinterBinding): boolean
+  /**
+   * Bounded time the driver's own steps may take after the write, when that
+   * exceeds the default result deadline. Counted from the write, so waits
+   * before it never make a sent command uncertain. Never retried either way.
+   */
+  resultWindowMs?(
+    binding: PrinterBinding,
+    action: ExtendedControlAction,
+  ): number | undefined
   speedModes?(binding: PrinterBinding): readonly SpeedMode[] | undefined
   pauseOnce(input: {
     args?: Record<string, unknown>
@@ -267,15 +287,26 @@ export type PauseDispatchReason =
   | 'guard-denied'
   | 'applied'
 export type PauseDispatchResult =
-  | { kind: 'rejected'; reason: PauseDispatchReason }
+  | { kind: 'rejected'; reason: PauseDispatchReason; message?: string }
   | {
       kind: 'not-sent' | 'applied' | 'outcome-unknown'
       cmdId: string
       reason: PauseDispatchReason
       /** Advisory driver detail. Present only when a driver reported one. */
       code?: ControlResultCode
+      message?: string
     }
 type Sample = { wall: number; mono: number }
+
+/** A driver's window may only widen the default, and never past the U1 ceiling. */
+function boundedResultWindow(ms: number | undefined): number | undefined {
+  return ms !== undefined &&
+    Number.isFinite(ms) &&
+    ms > 5000 &&
+    ms <= U1_CONTROL_RESULT_TIMEOUT_MS
+    ? Math.ceil(ms)
+    : undefined
+}
 
 /** Internal library only. No runtime, printer driver, issuer, control transport or human confirmation is supplied. */
 export function createPauseDispatcher(config: {
@@ -306,9 +337,13 @@ export function createPauseDispatcher(config: {
   const driver = Object.freeze({
     execute: config.driver.execute?.bind(config.driver),
     controls: config.driver.controls?.bind(config.driver),
+    startUnavailableMessage: config.driver.startUnavailableMessage?.bind(
+      config.driver,
+    ),
     allowsExtendedResult: config.driver.allowsExtendedResult?.bind(
       config.driver,
     ),
+    resultWindowMs: config.driver.resultWindowMs?.bind(config.driver),
     speedModes: config.driver.speedModes?.bind(config.driver),
     macros: config.driver.macros?.bind(config.driver),
     macroParams: config.driver.macroParams?.bind(config.driver),
@@ -523,7 +558,7 @@ export function createPauseDispatcher(config: {
         start.mono +
         Math.min(verifier.policy.commandMs, command.expires_at - start.wall)
       let resultDeadline = start.mono + resultTimeoutMs
-      let extendedResult = false
+      let extendedResultMs: number | undefined
       let timer: ReturnType<typeof setTimeout> | undefined
       let resolveResult: (result: PauseDispatchResult) => void = () => {}
       const result = new Promise<PauseDispatchResult>((resolve) => {
@@ -546,6 +581,7 @@ export function createPauseDispatcher(config: {
         reason: PauseDispatchReason,
         journalReason: CommandJournalReason,
         observedWall?: number,
+        message?: string,
       ): PauseDispatchResult {
         if (terminal) return terminal
         if (kind === 'applied' && (!cleaned || observedWall === undefined)) {
@@ -560,9 +596,10 @@ export function createPauseDispatcher(config: {
               kind: kind === 'rejected' ? 'not-sent' : kind,
               cmdId: command.cmd_id,
               reason,
+              ...(message ? { message } : {}),
               ...(resultCode && kind !== 'applied' ? { code: resultCode } : {}),
             }
-          : { kind: 'rejected', reason }
+          : { kind: 'rejected', reason, ...(message ? { message } : {}) }
         cleanup()
         finishDetails =
           observedWall === undefined
@@ -761,13 +798,10 @@ export function createPauseDispatcher(config: {
           sentMono: now.mono,
         })
         // Extend only the result wait, after every signed write check passed.
-        if (extendedResult) {
-          resultDeadline = now.mono + U1_CONTROL_RESULT_TIMEOUT_MS
+        if (extendedResultMs !== undefined) {
+          resultDeadline = now.mono + extendedResultMs
           clearTimeout(timer)
-          timer = setTimeout(
-            () => interrupted('deadline'),
-            U1_CONTROL_RESULT_TIMEOUT_MS,
-          )
+          timer = setTimeout(() => interrupted('deadline'), extendedResultMs)
         }
         permitted = true
         return true // The driver must send immediately on this stack, with no intervening await.
@@ -810,12 +844,25 @@ export function createPauseDispatcher(config: {
               command.action,
             )
           ) {
-            finalize('rejected', 'unsupported-action', 'guard-denied')
+            finalize(
+              'rejected',
+              'unsupported-action',
+              'guard-denied',
+              undefined,
+              command.action === 'start_print' ||
+                command.action === 'start_library_print'
+                ? driver.startUnavailableMessage?.(printerBinding)
+                : undefined,
+            )
             return
           }
-          extendedResult =
+          extendedResultMs =
             isU1PhysicalControl(command.action, command.args) &&
             driver.allowsExtendedResult?.(printerBinding) === true
+              ? U1_CONTROL_RESULT_TIMEOUT_MS
+              : boundedResultWindow(
+                  driver.resultWindowMs?.(printerBinding, command.action),
+                )
           let claim: ReturnType<typeof claimCommand>
           try {
             claiming = true
@@ -1024,17 +1071,20 @@ export function createPauseDispatcher(config: {
           )
           if (carried.success) resultCode = carried.data
           // A typed refusal means the driver wrote nothing and says why.
-          const refusal = (error as { refusal?: unknown } | null)?.refusal
           if (
             !terminal &&
             !permitted &&
             !guardCalled &&
             receipt &&
-            (refusal === 'state' ||
-              refusal === 'unsupported-action' ||
-              refusal === 'invalid-command')
+            error instanceof DriverRefusalError
           )
-            finalize('not-sent', refusal, 'guard-denied')
+            finalize(
+              'not-sent',
+              error.refusal,
+              'guard-denied',
+              undefined,
+              error.userMessage,
+            )
           else if (!terminal)
             finalize(
               permitted || contractBroken || (driverCalled && !guardCalled)

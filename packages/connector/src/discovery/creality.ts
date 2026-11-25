@@ -230,5 +230,6 @@ export async function resolveCrealityEndpoint(input: {
     port: discovered.port,
     secure: true,
     ca,
+    httpsPort,
   }
 }

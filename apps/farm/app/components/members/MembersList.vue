@@ -139,8 +139,8 @@ li {
   gap: var(--space-3) var(--space-4);
   align-items: flex-end;
   justify-content: space-between;
-  padding-block: var(--space-4);
-  border-block-end: 1px solid var(--color-border);
+  padding-block: var(--ops-space-3);
+  border-block-end: 1px solid var(--ops-border);
 }
 li:first-child {
   padding-block-start: 0;
@@ -160,8 +160,8 @@ li:last-child {
   overflow-wrap: anywhere;
 }
 .role {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-muted);
+  font-size: var(--ops-text-small);
+  color: var(--ops-muted);
 }
 .actions {
   display: flex;
@@ -175,30 +175,9 @@ li:last-child {
   gap: var(--space-1);
   min-width: 0;
 }
-label {
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
-}
-select {
-  min-height: 2.75rem;
-  padding: var(--space-2) var(--space-3);
-  font: inherit;
-  color: inherit;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-}
 select:focus-visible {
   outline: var(--focus-ring-width) solid var(--color-focus-ring);
   outline-offset: var(--focus-ring-offset);
-}
-select:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-.actions .danger {
-  border-color: var(--printer-error);
-  color: var(--printer-error);
 }
 @media (max-width: 30rem) {
   .actions,

@@ -47,3 +47,26 @@ test('Connector image and release copy node-datachannel notices', () => {
     /https:\/\/github\.com\/murat-dogan\/node-datachannel\/tree\/6f5c0a2494c20ac9f1250d937856697843bde823/,
   )
 })
+
+test('Farm runtime image copies project notices', () => {
+  const dockerfile = read('apps/farm/Dockerfile')
+  const runtime =
+    dockerfile
+      .split(/^FROM /m)
+      .slice(1)
+      .at(-1) ?? ''
+  const copies = runtime.split(/\r?\n/).filter((line) => /^COPY\s/.test(line))
+  for (const notice of [
+    'LICENSE',
+    'THIRD_PARTY.md',
+    'THIRD_PARTY_NOTICES.md',
+  ]) {
+    assert.ok(
+      copies.some((line) => {
+        const parts = line.trim().split(/\s+/)
+        return parts.at(-1) === './' && parts.includes(`/app/${notice}`)
+      }),
+      `Farm runtime must copy ${notice}`,
+    )
+  }
+})

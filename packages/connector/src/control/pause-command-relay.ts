@@ -339,6 +339,7 @@ export function createPauseCommandRelay(
     commandId: string,
     outcome: PauseRelayOutcome,
     code?: ControlResultCode,
+    message?: string,
   ): void {
     // A sealed peer never sends again: the result stays local.
     if (peer.sealed) return
@@ -348,6 +349,7 @@ export function createPauseCommandRelay(
         command_id: commandId,
         outcome,
         ...(code ? { code } : {}),
+        ...(message ? { message } : {}),
       }),
     )
     if (state !== 'sent') {
@@ -572,7 +574,7 @@ export function createPauseCommandRelay(
       libraryStart && (outcome === 'not-sent' || outcome === 'rejected')
         ? (driverCode ?? libraryRefusalCode(result.reason))
         : driverCode
-    deliverResult(peer, commandId, outcome, code)
+    deliverResult(peer, commandId, outcome, code, result.message)
     return outcome
   }
   function commandPeer(input: {

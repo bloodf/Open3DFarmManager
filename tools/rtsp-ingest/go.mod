@@ -2,6 +2,8 @@ module open3dfarm.local/rtsp-ingest
 
 go 1.26.0
 
+toolchain go1.27.4
+
 require (
 	github.com/bluenviron/gortsplib/v5 v5.6.7
 	github.com/bluenviron/mediacommon/v2 v2.9.7

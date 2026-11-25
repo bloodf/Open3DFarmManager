@@ -94,7 +94,7 @@ jobs:
       - run: docker build -f packages/connector/Dockerfile -t open3dfarmmanager-connector-test .
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: '22.23.5'
+          node-version: '24.22.3'
       - run: node --test tests/docker/connector-image.test.ts
         env:
           CONNECTOR_TEST_IMAGE: open3dfarmmanager-connector-test
@@ -116,7 +116,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: '22.23.5'
+          node-version: '24.22.3'
       - run: npm ci --ignore-scripts
       - name: Install PostgreSQL 17 binaries
         run: |

@@ -8,6 +8,7 @@ import {
   totalGrams,
   type LibraryMetadata,
 } from '../../utils/library-view.ts'
+import FarmSpool from '../spool-art/FarmSpool.vue'
 
 defineProps<{ metadata: LibraryMetadata }>()
 </script>
@@ -36,14 +37,15 @@ defineProps<{ metadata: LibraryMetadata }>()
         <span v-if="!materials(metadata).length">não informado</span>
         <ul v-else class="materials">
           <li v-for="(m, i) in materials(metadata)" :key="i">
-            <span
-              v-if="safeColour(m.colour)"
-              class="swatch"
-              :style="{ background: safeColour(m.colour) }"
-              aria-hidden="true"
-            ></span>
-            {{ m.type ?? 'material'
-            }}<template v-if="m.colour">, {{ m.colour }}</template>
+            <FarmSpool
+              :color="safeColour(m.colour) ?? null"
+              :fraction="1"
+              :size="28"
+            />
+            <span>
+              {{ m.type ?? 'Material não informado' }},
+              {{ safeColour(m.colour) ?? 'cor não informada' }}</span
+            >
           </li>
         </ul>
       </dd>
@@ -95,16 +97,15 @@ dd {
   font-variant-numeric: tabular-nums;
 }
 .materials {
+  display: grid;
+  gap: var(--ops-space-2);
   list-style: none;
   margin: 0;
   padding: 0;
 }
-.swatch {
-  display: inline-block;
-  inline-size: 0.875rem;
-  block-size: 0.875rem;
-  border: 1px solid var(--text-muted);
-  border-radius: 50%;
-  vertical-align: middle;
+.materials li {
+  display: flex;
+  gap: var(--ops-space-2);
+  align-items: center;
 }
 </style>

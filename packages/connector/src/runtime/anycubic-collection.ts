@@ -4,6 +4,11 @@ import {
   createAnycubicLanClient,
   decodeAnycubicReport,
 } from '../anycubic/index.ts'
+import {
+  mergeAnycubicMaterials,
+  type AnycubicMaterial,
+} from '../anycubic/ace.ts'
+import type { AnycubicAlert } from '../anycubic/alerts.ts'
 import type { AnycubicCollectorConfig } from '../config/anycubic.ts'
 import { readKobraClientCertMaterial } from '../config/kobra-x-cert.ts'
 import { readPrivateJsonFile } from '../config/local.ts'
@@ -58,6 +63,8 @@ export function createAnycubicCollection(input: {
   // Repeated in every observation until the next job starts, so a telemetry
   // batch that misses the transition report still carries the finished job.
   let lastJob: PrinterState['lastJob']
+  // An end fault stays until a new job; a pause reason until the pause ends.
+  let alert: AnycubicAlert | undefined
   let epoch = 1
   let timer: ReturnType<typeof setTimeout> | undefined
   let values: Record<string, unknown> = {}
@@ -67,6 +74,7 @@ export function createAnycubicCollection(input: {
     estimateActive = false
     activeJob = false
     activeFilename = undefined
+    alert = undefined
     clearTimeout(timer)
     values = {}
     times = {}
@@ -102,10 +110,19 @@ export function createAnycubicCollection(input: {
       const firmware = mapAnycubicFirmware(JSON.parse(payload.toString('utf8')))
       if (firmware) firmwareObservation = { firmware, observedAtMonoMs: now }
       const observation: Record<string, unknown> = report
-      const { kind, estimateBlocked, ...fields } = observation
+      const { kind, estimateBlocked, alert: reported, ...fields } = observation
       if (kind === 'ignored' && !firmware) return
       const state = fields.state
+      if (reported) alert = reported as AnycubicAlert
+      else if (
+        state !== undefined &&
+        (state === 'printing' ||
+          (alert?.kind === 'paused') !== (state === 'paused'))
+      )
+        alert = undefined
       const printing = state === 'printing' || state === 'paused'
+      // Set when this report stops the job; its old numbers no longer apply.
+      let stopped = false
       // An explicit phase can withdraw the estimate without ending the job.
       if (state !== undefined || estimateBlocked) estimateActive = printing
       if (printing) {
@@ -129,6 +146,11 @@ export function createAnycubicCollection(input: {
           endedAt: Date.now(),
           ...(activeFilename ? { filename: activeFilename } : {}),
         }
+        // A failure without the printer's own reason keeps its numbers: the
+        // report would otherwise have nothing publishable.
+        stopped =
+          lastJob.outcome === 'cancelled' ||
+          (lastJob.outcome === 'failed' && alert !== undefined)
         activeJob = false
         activeFilename = undefined
       }
@@ -152,17 +174,38 @@ export function createAnycubicCollection(input: {
             ? Number(value) / 100
             : key === 'state' && value === 'finished'
               ? 'idle'
-              : value
+              : key === 'materials'
+                ? mergeAnycubicMaterials(
+                    values.materials as AnycubicMaterial[] | undefined,
+                    value as AnycubicMaterial[],
+                  )
+                : value
         times[key as keyof PrinterState] = now
       }
+      if (stopped) {
+        for (const key of ['progress', 'currentLayer', 'totalLayer'] as const) {
+          if (fields[key] !== undefined) continue
+          delete values[key]
+          delete times[key]
+        }
+      }
+      const faultOnly =
+        values.progress === undefined &&
+        alert !== undefined &&
+        (values.state === 'error' || values.state === 'paused')
       if (
         !values.state ||
-        (values.state !== 'offline' && values.progress === undefined)
+        (values.state !== 'offline' &&
+          !(values.state === 'idle' && lastJob) &&
+          values.progress === undefined &&
+          !faultOnly)
       )
         return
       const parsed = PrinterState.safeParse({
         ...values,
         ...(lastJob ? { lastJob } : {}),
+        ...(alert ? { statusMessage: alert.message } : {}),
+        ...(faultOnly ? { statusReason: 'printer-fault' } : {}),
         printerKey: input.binding.printerKey,
         observedAt: Date.now(),
       })
@@ -176,7 +219,14 @@ export function createAnycubicCollection(input: {
         ...(firmwareObservation ? { firmwareObservation } : {}),
         printer: parsed.data,
         receivedAtMonoMs: now,
-        fieldObservedAtMonoMs: { anycubic: { ...times } },
+        fieldObservedAtMonoMs: {
+          anycubic: {
+            ...times,
+            ...(faultOnly && times.state !== undefined
+              ? { statusReason: times.state }
+              : {}),
+          },
+        },
       })
       clearTimeout(timer)
       timer = setTimeout(

@@ -4,6 +4,7 @@
 // the presentation changed. The submit stays disabled until hydration so a
 // native submit can never post the credentials in the URL.
 import Button from '../ui/Button.vue'
+import Icon from '../ui/Icon.vue'
 import OnboardingField from './OnboardingField.vue'
 import { completeAuth } from '../../utils/auth-invalidation.ts'
 
@@ -133,7 +134,10 @@ async function submit() {
       />
     </OnboardingField>
     <div ref="errorSummary" class="alert" role="alert" tabindex="-1">
-      <p v-if="errorMessage">{{ errorMessage }}</p>
+      <p v-if="errorMessage">
+        <Icon name="info" />
+        <span>{{ errorMessage }}</span>
+      </p>
     </div>
     <div class="actions">
       <Button type="submit" :disabled="pending || !hydrated">
@@ -148,11 +152,12 @@ async function submit() {
 <style scoped>
 .onboarding-form {
   display: grid;
-  gap: var(--space-4);
-  padding: var(--space-5);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-raised);
+  gap: var(--ops-space-4);
+  padding: var(--ops-space-4);
+  border: 1px solid var(--ops-border);
+  border-radius: var(--ops-radius-lg);
+  background: var(--ops-panel);
+  color: var(--ops-text);
   min-width: 0;
 }
 .alert:empty {
@@ -160,35 +165,48 @@ async function submit() {
 }
 .alert p {
   margin: 0;
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--state-error-color);
-  border-inline-start-width: 0.3rem;
-  border-radius: var(--radius-md);
-  color: var(--state-error-color);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ops-space-2);
+  padding: var(--ops-space-2) var(--ops-space-3);
+  border-inline-start: 3px solid var(--ops-fault);
+  border-radius: var(--ops-radius-sm);
+  background: var(--ops-fault-bg);
+  color: var(--ops-fault);
+  line-height: 20px;
   overflow-wrap: anywhere;
 }
+.alert svg {
+  flex: none;
+}
 .alert:focus-visible {
-  outline: var(--focus-ring-width) solid var(--color-focus-ring);
-  outline-offset: var(--focus-ring-offset);
-  border-radius: var(--radius-md);
+  outline: var(--focus-ring-width) solid var(--ops-action);
+  outline-offset: 2px;
 }
 .actions {
-  display: flex;
+  display: grid;
+}
+.actions :deep(.ui-button) {
+  border-color: var(--ops-action);
+  border-radius: var(--ops-radius-md);
+  background: var(--ops-action);
+  color: var(--ops-on-action);
+  font-weight: var(--font-weight-semibold);
+}
+.actions :deep(.ui-button:hover:not(:disabled)) {
+  background: color-mix(in srgb, var(--ops-action) 88%, var(--ops-text));
+}
+.actions :deep(.ui-button:focus-visible) {
+  outline: var(--focus-ring-width) solid var(--ops-action);
+  outline-offset: 2px;
 }
 .note {
   margin: 0;
-  font-size: var(--font-size-sm);
-  color: var(--color-text-muted);
+  font-size: var(--ops-text-small);
+  line-height: 18px;
+  color: var(--ops-muted);
 }
 .note:empty {
   display: none;
-}
-@media (max-width: 30rem) {
-  .onboarding-form {
-    padding: var(--space-4);
-  }
-  .actions :deep(.ui-button) {
-    width: 100%;
-  }
 }
 </style>

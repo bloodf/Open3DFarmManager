@@ -19,6 +19,11 @@ export const CrealityBinding = z.strictObject({
   caFile: z.string().min(1).max(4096).optional(),
   /** Stock HTTP upload port (POST /upload/<name>); absent means 80. */
   httpPort: z.number().int().min(1).max(65535).optional(),
+  /**
+   * Owner opt-in for CFS load and unload, off by default: it heats and moves
+   * filament and has not been run on a printer.
+   */
+  cfsFeed: z.boolean().optional(),
 })
 export function crealityWebUiOrigin(binding: {
   host: string

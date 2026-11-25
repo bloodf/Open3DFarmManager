@@ -3,7 +3,7 @@
 # Built only by scripts/docker-base-image.mjs, whose build context holds just
 # package-lock.json, .npmrc and the workspace manifests.
 # Digest matches node:22.23.5-bookworm-slim pinned in infra/sandbox/compose.yml.
-FROM node:22.23.5-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee
+FROM node:22.23.5-bookworm-slim@sha256:be979e5523c76fa4d5ca4ebd3099078f220aa47ec39c48ad5b5df9314debd6eb
 USER root
 WORKDIR /opt/openfarm-deps
 COPY . .

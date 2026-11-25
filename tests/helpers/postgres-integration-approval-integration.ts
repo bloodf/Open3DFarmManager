@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import type { Sql } from 'postgres'
+import { PostgresIntegrationActions } from '../../apps/farm/server/storage/integration-actions-postgres.ts'
 import { IntegrationAuditService } from '../../apps/farm/server/services/integration-audit.ts'
 import { IntegrationApprovalService } from '../../apps/farm/server/services/integration-approval.ts'
 import { IntegrationDeliveryService } from '../../apps/farm/server/services/integration-delivery.ts'
@@ -411,6 +412,21 @@ export async function testPostgresIntegrationApproval(
     Error,
   )
   check('the runtime role cannot change a job beyond its decision')
+
+  // The API action target applies the browser freshness rule to stored controls.
+  const actionTargets = new PostgresIntegrationActions(runtime)
+  await admin`INSERT INTO farm.printer_latest_state (farm_id, agent_id, printer_key, observed_at, state)
+    VALUES (${farm}::uuid, ${agent}::uuid, 'printer-a', 1, '{"state":"idle","progress":0}')`
+  const advertise = async (ageAtSendMs: number | null, receivedAt: number) => {
+    await admin`UPDATE farm.printer_latest_state SET revision = revision + 1,
+      state = '{"state":"printing","controls":["pause","set_temperature"]}',
+      received_at = ${receivedAt}, age_at_send_ms = ${ageAtSendMs}, observed_at = ${receivedAt}`
+    return (await actionTargets.target(printer))?.controls
+  }
+  assert.deepEqual(await advertise(0, Date.now()), ['pause', 'set_temperature'])
+  assert.deepEqual(await advertise(null, Date.now()), ['pause'])
+  assert.deepEqual(await advertise(0, Date.now() - 600_000), [])
+  check('API action targets only carry fresh advertised controls')
 
   return checks
 }

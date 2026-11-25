@@ -584,11 +584,11 @@ export class TelemetryQueue {
         : record.kind === 'inventory-snapshot'
           ? record.inventory.observedAt
           : record.queuedAt
-    if (observedAt > record.queuedAt) return undefined
     const wallAge = now - observedAt
     // The log persists both timestamps. Across a restart the wall clock can
     // undercount elapsed time, so age recovered records by at least the full
-    // queue retention window. Only a live monotonic anchor can prove freshness.
+    // queue retention window. Only a live monotonic anchor can prove freshness;
+    // an observation later than its enqueue time never gets one.
     if (!anchor) return Math.max(wallAge, MAX_AGE)
     return Math.max(
       wallAge,

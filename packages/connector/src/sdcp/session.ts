@@ -56,6 +56,12 @@ export async function openSdcpSession(
   }
   return {
     target,
+    get connected() {
+      return socket.readyState === WebSocket.OPEN
+    },
+    onClose(callback: () => void) {
+      socket.once('close', callback)
+    },
     request(
       command: { Cmd: 320 | 321; Data: Record<string, unknown> },
       signal?: AbortSignal,

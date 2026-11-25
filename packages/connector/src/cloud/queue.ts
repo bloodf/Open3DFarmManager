@@ -683,6 +683,25 @@ export class TelemetryQueue {
     }
   }
   /** Remove a head that is locally known to be unencodable. */
+  /**
+   * Removes records wherever they are in the queue, by rewriting the log. While
+   * storage is degraded the removal stays in memory until `retryStorage`.
+   */
+  remove(eventIds: readonly string[], now: number): void {
+    this.ready(now, true)
+    const removed = new Set(eventIds)
+    const rest = this.records.filter((record) => !removed.has(record.eventId))
+    if (rest.length === this.records.length) return
+    if (!this.degraded) {
+      try {
+        this.replace(rest)
+      } catch (error) {
+        if (!this.degraded || this.failed) throw error
+      }
+    }
+    this.records = rest
+    this.pruneAgeAnchors()
+  }
   discardHead(now: number): void {
     const head = this.records[0]
     if (head) this.acknowledge([head.eventId], now)

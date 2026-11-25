@@ -69,6 +69,56 @@ function accepted(reply: Record<string, unknown>) {
   return reply
 }
 
+// Reuse short-lived sessions so repeated viewers do not crowd out control.
+type HistorySession = Awaited<ReturnType<typeof openSdcpSession>>
+const sessions = new Map<string, Promise<HistorySession>>()
+const SESSION_LIFETIME_MS = 10000
+const MAX_SESSIONS = 32
+
+async function historySession(endpoint: SdcpEndpoint, signal: AbortSignal) {
+  signal.throwIfAborted()
+  const key = JSON.stringify([
+    endpoint.host,
+    endpoint.mainboardId,
+    endpoint.model,
+    endpoint.discoveryPort ?? 3000,
+    endpoint.websocketPort ?? 3030,
+  ])
+  let pending = sessions.get(key)
+  if (pending) return pending
+  if (sessions.size >= MAX_SESSIONS)
+    throw new Error('Too many SDCP history sessions')
+  pending = openSdcpSession(endpoint, { signal })
+  sessions.set(key, pending)
+  const entry = pending
+  const evict = () => {
+    if (sessions.get(key) === entry) sessions.delete(key)
+  }
+  try {
+    const session = await pending
+    if (!session.connected || signal.aborted) {
+      session.close()
+      throw new Error('SDCP history session closed')
+    }
+    const close = () => {
+      evict()
+      session.close()
+    }
+    const timer = setTimeout(close, SESSION_LIFETIME_MS)
+    timer.unref()
+    session.onClose(() => {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', close)
+      evict()
+    })
+    signal.addEventListener('abort', close, { once: true })
+    return session
+  } catch (error) {
+    evict()
+    throw error
+  }
+}
+
 export async function readSdcpHistory(
   endpoint: SdcpEndpoint,
   signal: AbortSignal,
@@ -76,7 +126,7 @@ export async function readSdcpHistory(
   // Refuses a model without documented history before any connection.
   const list = buildSdcpHistoryCommand(endpoint.model)
   const bounded = AbortSignal.any([signal, AbortSignal.timeout(8000)])
-  const session = await openSdcpSession(endpoint, { signal: bounded })
+  const session = await historySession(endpoint, signal)
   try {
     const reply = accepted(await session.request(list, bounded))
     if (!Array.isArray(reply.HistoryData))
@@ -102,7 +152,8 @@ export async function readSdcpHistory(
       }
     }
     return jobs.sort((a, b) => b.startedAtMs - a.startedAtMs)
-  } finally {
+  } catch (error) {
     session.close()
+    throw error
   }
 }

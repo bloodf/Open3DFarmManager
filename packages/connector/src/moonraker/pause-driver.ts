@@ -411,7 +411,18 @@ export function openFixedMoonrakerPause(input: {
       )
       // Side notifications cannot acknowledge a request; do not count them
       // toward the reply-frame or byte caps while waiting for a result.
-      if (SideNotification.safeParse(frame).success) return
+      // A G-code report may only prove the query in flight, never answer it.
+      const side = SideNotification.safeParse(frame)
+      if (side.success) {
+        const [message] = side.data.params
+        if (
+          side.data.method === 'notify_gcode_response' &&
+          pending?.id === 2 &&
+          typeof message === 'string'
+        )
+          u1Audit?.response?.(message)
+        return
+      }
       if (++receivedFrames > 16 || (receivedBytes += data.byteLength) > 32768)
         throw failure()
       const result = Reply.parse(frame)
@@ -943,6 +954,16 @@ export function openFixedMoonrakerPause(input: {
         u1 ? (candidate) => /^T[0-3]$/i.test(candidate.trim()) : undefined,
       )
       const tool = u1 ? u1ConsoleTool(line.trim(), input.objects) : undefined
+      // A macro replaces the classified command, so it is refused in every
+      // state. The U1 tool selection is a vendor macro with its own guard.
+      const command = line.trim().split(/\s+/, 1)[0]!.toUpperCase()
+      if (
+        !tool &&
+        input.objects?.some(
+          (name) => name.toUpperCase() === `GCODE_MACRO ${command}`,
+        )
+      )
+        throw new ConsoleRefusal('not-allowed')
       let wireArgs = args
       let cap = 5000
       if (tool) {
@@ -962,13 +983,6 @@ export function openFixedMoonrakerPause(input: {
         state.printState !== 'printing' &&
         state.printState !== 'paused'
       ) {
-        const command = line.trim().split(/\s+/, 1)[0]!.toUpperCase()
-        if (
-          input.objects?.some(
-            (name) => name.toUpperCase() === `GCODE_MACRO ${command}`,
-          )
-        )
-          throw new ConsoleRefusal('not-allowed')
         if (idleConsoleClass(line) === 'guarded') {
           const homing = command === 'G28'
           // Homing needs no configured bounds, only a fresh idle state.

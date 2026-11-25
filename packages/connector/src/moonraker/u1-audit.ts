@@ -9,6 +9,8 @@ type AuditEffect = NonNullable<ControlObservation['effect']>
 export type U1Audit = {
   objects: Record<string, string[]>
   effect: (status: unknown, observedMono: number) => AuditEffect | undefined
+  /** One `notify_gcode_response` text received while the command was in flight. */
+  response?: (message: string) => void
 }
 
 export class U1ConfigRefusal extends Error {
@@ -185,6 +187,57 @@ export function u1ConsoleTool(
   return tool
 }
 
+/*
+ * Report formats of the built-in query commands, identical in both:
+ * - https://github.com/Klipper3d/klipper at c9559fa04ec6b11fb1a9a1610903546319fcf310
+ * - https://github.com/Snapmaker/u1-klipper at 7ac453b50fe6779b2ec0b759038a17da5e6d671d
+ * Paths are under klippy/: `gcode.py` (respond_info prefixes each line with
+ * "// "; cmd_M115), `extras/heaters.py` (_get_temp, cmd_M105),
+ * `extras/gcode_move.py` (cmd_M114, cmd_GET_POSITION),
+ * `extras/query_endstops.py`, `extras/probe.py` (cmd_QUERY_PROBE),
+ * `extras/query_adc.py` and `extras/filament_switch_sensor.py`.
+ * Moonraker b559b9a81161f958a43c2f527b6ad96f73310d5d,
+ * moonraker/components/klippy_connection.py (_process_gcode_response), relays
+ * each text as `notify_gcode_response`. Only the formats are used, no code.
+ */
+const ENDSTOP = '\\w+:(?:open|TRIGGERED)'
+const QUERY_REPORTS: Readonly<
+  Record<string, (message: string, params: string) => boolean>
+> = {
+  // The "T:0" placeholder of a printer without sensors is not a reading.
+  M105: (message) =>
+    /^(?:(?:T\d*|B|C):-?\d+\.\d \/-?\d+\.\d(?: |$))+/.test(message),
+  M114: (message) =>
+    /^X:-?\d+\.\d{3} Y:-?\d+\.\d{3} Z:-?\d+\.\d{3} E:-?\d+\.\d{3}$/.test(
+      message,
+    ),
+  M115: (message) => /^\/\/ .*\bFIRMWARE_NAME:\S/.test(message),
+  GET_POSITION: (message) =>
+    /^\/\/ mcu: [\s\S]*\n\/\/ toolhead: [\s\S]*\n\/\/ gcode homing: /.test(
+      message,
+    ),
+  QUERY_ENDSTOPS: (message) =>
+    new RegExp(`^${ENDSTOP}(?: ${ENDSTOP})*$`).test(message),
+  QUERY_PROBE: (message) => /^\/\/ probe: (?:open|TRIGGERED)$/.test(message),
+  QUERY_ADC(message, params) {
+    const name = /(?:^| )NAME=(\S+)/i.exec(params)?.[1]
+    return message.startsWith(
+      name
+        ? `// ADC object "${name}" has value `
+        : '// Available ADC objects: ',
+    )
+  },
+  QUERY_FILAMENT_SENSOR(message, params) {
+    const name = /(?:^| )SENSOR=(\S+)/i.exec(params)?.[1]
+    return (
+      !!name &&
+      new RegExp(
+        `^// Filament Sensor ${name.replace(/[.+]/g, '\\$&')}: filament (?:not )?detected$`,
+      ).test(message)
+    )
+  },
+}
+
 const BedTargetStatus = z.object({
   heater_bed: z.object({ target: z.number().finite() }),
 })
@@ -198,13 +251,7 @@ type Readback = {
 }
 
 /** Output-only commands: the script acknowledgement is all the evidence there is. */
-const READ_ONLY_COMMANDS = new Set([
-  'M105',
-  'M114',
-  'M115',
-  'M118',
-  'GET_POSITION',
-])
+const READ_ONLY_COMMANDS = new Set(['M118'])
 
 /**
  * How to read back the state a console line leaves behind. `undefined` means
@@ -214,7 +261,7 @@ const READ_ONLY_COMMANDS = new Set([
 function consoleReadback(line: string): Readback | undefined {
   const [word = '', ...params] = line.trim().split(/\s+/)
   const command = word.toUpperCase()
-  if (READ_ONLY_COMMANDS.has(command) || /^QUERY_[A-Z0-9_]+$/.test(command))
+  if (READ_ONLY_COMMANDS.has(command))
     return { objects: {}, confirmed: () => true }
   if (
     command === 'M140' &&
@@ -255,7 +302,16 @@ export function u1ConsoleAudit(
   home?: U1Audit,
 ): U1Audit {
   const readback = tool || home ? undefined : consoleReadback(line)
+  const [word = '', ...rest] = line.trim().split(/\s+/)
+  const command = word.toUpperCase()
+  const isQuery =
+    command.startsWith('QUERY_') ||
+    ['M105', 'M114', 'M115', 'GET_POSITION'].includes(command)
+  let reported = false
   return {
+    response(message) {
+      if (QUERY_REPORTS[command]?.(message, rest.join(' '))) reported = true
+    },
     objects: tool
       ? { toolhead: ['extruder'] }
       : (home?.objects ?? readback?.objects ?? {}),
@@ -266,7 +322,7 @@ export function u1ConsoleAudit(
       } else if (home) {
         // The console home is signed as `gcode` but proven by the homed axes.
         if (!home.effect(status, observedMono)) return
-      } else if (!readback?.confirmed(status)) return
+      } else if (isQuery ? !reported : !readback?.confirmed(status)) return
       return { kind: 'gcode', line, observedMono }
     },
   }

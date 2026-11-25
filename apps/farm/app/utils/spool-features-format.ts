@@ -28,6 +28,9 @@ export const GROUP_BY_OPTIONS: readonly {
 ]
 
 export function slotLabel(kind: SlotKind, index: number): string {
+  // AMS HT units are bound by their global tray index (128-135).
+  if (kind === 'ams' && index >= 128 && index <= 135)
+    return `AMS HT ${index - 127}`
   return `${SLOT_KIND_LABELS[kind].split(' (')[0]} ${index + 1}`
 }
 

@@ -8,6 +8,7 @@
  * printer's own later status report, never by the send or the acknowledgement.
  */
 import WebSocket from 'ws'
+import { resinArtifactFormatFor } from '../../../shared/src/print-file/resin-artifacts.ts'
 import {
   controlTargetState,
   type ExtendedControlAction,
@@ -21,9 +22,16 @@ import type {
   ControlObservation,
   PauseDriver,
 } from '../control/pause-dispatcher.ts'
+import { DriverRefusalError } from '../control/driver-refusal.ts'
 import { buildSdcpCommand, sdcpRequest } from './commands.ts'
 import { resolveSdcpTarget, type SdcpTarget } from './identity.ts'
-import { SDCP_CONTROL_ACTIONS, sdcpProfile, type SdcpAction } from './models.ts'
+import {
+  SDCP_CONTROL_ACTIONS,
+  sdcpProfile,
+  sdcpStartQualified,
+  type SdcpAction,
+  type SdcpQualification,
+} from './models.ts'
 import { decodeSdcpAck, decodeSdcpStatus, type SdcpReport } from './report.ts'
 
 export class SdcpControlTimeout extends Error {
@@ -41,6 +49,8 @@ export function openFixedSdcpControl(input: {
   signal: AbortSignal
   timeoutMs?: number
   pollMs?: number
+  /** Local composition only; the shipped list is empty. */
+  qualifiedStarts?: readonly SdcpQualification[] | undefined
 }) {
   const local = readSdcpPrinterBinding(input.binding)
   const mapping = readPrinterBinding(input.binding)
@@ -200,41 +210,85 @@ export function openFixedSdcpControl(input: {
       check()
     })
   }
+  /** Every check and wait that precedes the write guard. Writes no command. */
+  async function prewrite(
+    next: ExtendedControlAction,
+    values: Record<string, unknown>,
+    request: Parameters<PauseDriver['pauseOnce']>[0],
+  ) {
+    current()
+    if (
+      !prepared ||
+      request.binding !== input.binding ||
+      request.signal.aborted
+    )
+      throw new DriverRefusalError('state', 'SDCP control unavailable')
+    if (!(SDCP_CONTROL_ACTIONS as readonly string[]).includes(next))
+      throw new DriverRefusalError(
+        'unsupported-action',
+        'SDCP control action unavailable',
+      )
+    attempted = true
+    const fixed = next as SdcpAction
+    // The firmware is the one the printer just reported for this session.
+    if (
+      fixed === 'start_print' &&
+      !sdcpStartQualified(
+        local!.model,
+        target!.firmwareVersion,
+        input.qualifiedStarts,
+      )
+    )
+      throw new DriverRefusalError(
+        'unsupported-action',
+        `SDCP start_print is not qualified for ${local!.model} firmware ${target!.firmwareVersion}`,
+      )
+    // Built before the guard: an invalid argument never reaches the printer.
+    const command = buildSdcpCommand(local!.model, fixed, values)
+    if (fixed === 'start_print') {
+      // As on the API path, a resin file starts only as a validated library
+      // version: its name cannot show which resin model it was sliced for.
+      if (resinArtifactFormatFor(String(command.Data.Filename)))
+        throw new DriverRefusalError(
+          'invalid-command',
+          'resin-artifact-requires-library-version',
+        )
+      // A printer still storing an upload reports a busy machine status; wait
+      // for a stopped report instead of sending into it.
+      await wait(
+        () =>
+          latest?.printState === 'idle' || latest?.printState === 'cancelled',
+      )
+    }
+    current()
+    return { fixed, ...sdcpRequest(target!, profile!, command) }
+  }
   async function send(
     next: ExtendedControlAction,
     values: Record<string, unknown>,
     request: Parameters<PauseDriver['pauseOnce']>[0],
   ): Promise<{ acknowledged: boolean }> {
-    current()
-    if (
-      !prepared ||
-      attempted ||
-      request.binding !== input.binding ||
-      request.signal.aborted ||
-      !(SDCP_CONTROL_ACTIONS as readonly string[]).includes(next)
-    )
-      throw failure()
-    attempted = true
-    const fixed = next as SdcpAction
-    // Built before the guard: an invalid argument never reaches the printer.
-    const command = buildSdcpCommand(local!.model, fixed, values)
-    // A printer still storing an upload reports a busy machine status; wait
-    // for a stopped report instead of sending into it.
-    if (fixed === 'start_print')
-      await wait(
-        () =>
-          latest?.printState === 'idle' || latest?.printState === 'cancelled',
-      )
-    current()
-    const { requestId: id, frame } = sdcpRequest(target!, profile!, command)
+    // Untyped: after a first attempt, a write may already have happened.
+    if (attempted) throw failure()
+    const {
+      fixed,
+      requestId: id,
+      frame,
+    } = await prewrite(next, values, request).catch((error: unknown) => {
+      throw error instanceof DriverRefusalError
+        ? error
+        : new DriverRefusalError(
+            'state',
+            error instanceof Error ? error.message : 'SDCP control unavailable',
+            { cause: error },
+          )
+    })
     action = fixed
     args = values
-    if (
-      socket?.readyState !== WebSocket.OPEN ||
-      request.signal.aborted ||
-      !request.beforeSend()
-    )
-      throw failure()
+    // `prewrite` resolved a microtask ago: recheck on the sending stack.
+    if (socket?.readyState !== WebSocket.OPEN || request.signal.aborted)
+      throw new DriverRefusalError('state', 'SDCP control unavailable')
+    if (!request.beforeSend()) throw failure()
     requestId = id
     sentSequence = sequence
     sentMono = input.clock.monotonicNow()

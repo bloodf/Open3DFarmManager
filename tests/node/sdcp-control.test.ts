@@ -38,6 +38,12 @@ const MODELS = [
 ] as const
 type Model = (typeof MODELS)[number]
 
+// The shipped list is empty; these simulator tests qualify the simulator.
+const QUALIFIED = MODELS.map(({ model }) => ({
+  model,
+  firmwareVersion: 'V1.0.0',
+}))
+
 // The Carbon's discovery names neither its address nor a protocol version.
 const discoveryFor = (model: Model) => ({
   Id: 'fixture',
@@ -86,6 +92,7 @@ function router(observe: (observation: ControlObservation) => void) {
     allowedOrigins: [],
     limits: {} as never,
     clock: { monotonicNow: () => performance.now() },
+    sdcpQualifiedStarts: QUALIFIED,
     observe: (_binding, observation) => {
       if (observation) observe(observation)
       return true
@@ -103,6 +110,7 @@ async function attempt(
   const routes = router((observation) => seen.push(observation))
   const signal = new AbortController().signal
   try {
+    await routes.detect(binding, signal)
     await routes.prepare({ binding, signal })
     let after = {
       connectionGeneration: 0,
@@ -138,7 +146,9 @@ async function attempt(
 }
 
 for (const model of MODELS) {
-  test(`${model.model} applies start, pause, resume and cancel and reports each state`, async (t) => {
+  // Resin files start only as a validated library version, never by name.
+  const starts = model.family === 'fdm'
+  test(`${model.model} applies ${starts ? 'start, ' : ''}pause, resume and cancel and reports each state`, async (t) => {
     const { sim, machine, binding } = await printer(t, model)
     assert.deepEqual(await router(() => {}).detect(binding), [
       'pause',
@@ -146,10 +156,24 @@ for (const model of MODELS) {
       'cancel',
       'start_print',
     ])
-    const started = await attempt(binding, 'start_print', { file: model.file })
-    assert.equal(started?.printState, 'printing')
-    assert.equal(started?.effect?.kind, 'file')
-    assert.equal((started?.effect as { filename: string }).filename, model.file)
+    if (starts) {
+      const started = await attempt(binding, 'start_print', {
+        file: model.file,
+      })
+      assert.equal(started?.printState, 'printing')
+      assert.equal(started?.effect?.kind, 'file')
+      assert.equal(
+        (started?.effect as { filename: string }).filename,
+        model.file,
+      )
+    } else {
+      await assert.rejects(
+        attempt(binding, 'start_print', { file: model.file }),
+        /resin-artifact-requires-library-version/,
+      )
+      assert.equal(commands(sim.requests).length, 0)
+      machine.phase = 'printing'
+    }
     assert.equal(machine.phase, 'printing')
 
     assert.equal((await attempt(binding, 'pause'))?.printState, 'paused')
@@ -163,21 +187,22 @@ for (const model of MODELS) {
     const sent = commands(sim.requests)
     assert.deepEqual(
       sent.map((data) => data.Cmd),
-      [128, 129, 131, 130],
+      starts ? [128, 129, 131, 130] : [129, 131, 130],
     )
-    assert.deepEqual(
-      sent[0].Data,
-      model.family === 'resin'
-        ? { Filename: model.file, StartLayer: 0 }
-        : {
-            Filename: model.file,
-            StartLayer: 0,
-            Calibration_switch: 1,
-            PrintPlatformType: 0,
-            Tlp_Switch: 0,
-            slot_map: [],
-          },
-    )
+    if (starts)
+      assert.deepEqual(sent[0].Data, {
+        Filename: model.file,
+        StartLayer: 0,
+        Calibration_switch: 1,
+        PrintPlatformType: 0,
+        Tlp_Switch: 0,
+        slot_map: [],
+      })
+    else
+      assert.deepEqual(
+        buildSdcpCommand(model.model, 'start_print', { file: model.file }),
+        { Cmd: 128, Data: { Filename: model.file, StartLayer: 0 } },
+      )
     assert.equal(sent[0].From, model.family === 'resin' ? 0 : 1)
     assert.equal(sent[0].MainboardID, 'board01')
   })
@@ -193,6 +218,7 @@ async function openDriver(binding: PrinterBinding, timeoutMs = 300) {
     signal: new AbortController().signal,
     timeoutMs,
     pollMs: 20,
+    qualifiedStarts: QUALIFIED,
   })
   await driver.prepare()
   let guards = 0
@@ -223,12 +249,7 @@ test('a library start is not advertised for SDCP', async (t) => {
       targetFor: () => ({ backend: 'sdcp', binding }),
     },
   )
-  assert.deepEqual(wrapped.controls!(binding), [
-    'pause',
-    'resume',
-    'cancel',
-    'start_print',
-  ])
+  assert.deepEqual(wrapped.controls!(binding), ['pause', 'resume', 'cancel'])
 })
 
 test('an acknowledgement without a state change never confirms', async (t) => {
@@ -245,16 +266,16 @@ test('an acknowledgement without a state change never confirms', async (t) => {
 })
 
 test('a refused acknowledgement fails the attempt without a retry', async (t) => {
-  const { machine, binding, sim } = await printer(t, MODELS[1])
+  const { machine, binding, sim } = await printer(t, MODELS[3])
   machine.fault = { ack: 1 }
   const control = await openDriver(binding)
   t.after(() => control.driver.close())
   await assert.rejects(
-    control.run('start_print', { file: 'part.goo' }),
+    control.run('start_print', { file: 'part.gcode' }),
     /Ack 1/,
   )
   assert.equal(control.seen.at(-1)?.printState, 'idle')
-  await assert.rejects(control.run('start_print', { file: 'part.goo' }))
+  await assert.rejects(control.run('start_print', { file: 'part.gcode' }))
   assert.equal(commands(sim.requests).length, 1)
 })
 
@@ -270,13 +291,15 @@ test('a missing file is refused by the printer and nothing starts', async (t) =>
 })
 
 test('a start waits while the printer reports a file transfer', async (t) => {
-  const { sim, machine, binding } = await printer(t, MODELS[0])
+  const { sim, machine, binding } = await printer(t, MODELS[3])
   machine.transferring = true
   const control = await openDriver(binding)
   t.after(() => control.driver.close())
-  await assert.rejects(control.run('start_print', { file: 'part.ctb' }), {
-    code: 'SDCP_CONTROL_TIMEOUT',
-  })
+  await assert.rejects(
+    control.run('start_print', { file: 'part.gcode' }),
+    (error: { refusal?: string; cause?: { code?: string } }) =>
+      error.refusal === 'state' && error.cause?.code === 'SDCP_CONTROL_TIMEOUT',
+  )
   assert.equal(control.guards(), 0)
   assert.equal(commands(sim.requests).length, 0)
 })
@@ -536,7 +559,7 @@ test('runtime provisions control only for an explicit assignment opt-in', (t) =>
     assert.equal(!!readSdcpPrinterBinding(binding), control)
     assert.deepEqual(
       router(() => {}).controls(binding),
-      control ? ['pause', 'resume', 'cancel', 'start_print'] : [],
+      control ? ['pause', 'resume', 'cancel'] : [],
     )
   }
 })

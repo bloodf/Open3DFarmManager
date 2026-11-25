@@ -1,3 +1,4 @@
+import { DriverRefusalError } from '../control/driver-refusal.ts'
 import { z } from 'zod'
 import { ControlArguments } from '../../../farm-protocol/src/control-actions.ts'
 
@@ -29,10 +30,17 @@ export type MotionRefusalCode =
   | 'printing'
   | 'unhomed'
   | 'out-of-range'
-export class MotionRefusal extends Error {
+export class MotionRefusal extends DriverRefusalError {
   readonly code: MotionRefusalCode
   constructor(code: MotionRefusalCode) {
-    super(`Motion refused: ${code}`)
+    super(
+      code === 'invalid'
+        ? 'invalid-command'
+        : code === 'unsupported'
+          ? 'unsupported-action'
+          : 'state',
+      `Motion refused: ${code}`,
+    )
     this.name = 'MotionRefusal'
     this.code = code
   }

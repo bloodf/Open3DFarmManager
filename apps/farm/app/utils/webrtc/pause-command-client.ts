@@ -1,7 +1,7 @@
 import {
   ExtendedControlAction,
-  U1_CONTROL_RESULT_TIMEOUT_MS,
   isU1PhysicalControl,
+  U1_CONTROL_RESULT_TIMEOUT_MS,
   type ControlResultCode,
 } from '../../../../../packages/farm-protocol/src/control-actions.ts'
 import { canonicalize } from '../../../../../packages/farm-protocol/src/canonical.ts'
@@ -71,6 +71,8 @@ export type PauseCommandTransport = Readonly<{
 export type PauseCommandClientOptions = Readonly<{
   /** Existing enrolled nonextractable P-256 private key of this browser. */
   privateKey: CryptoKey
+  /** Driver family inferred from the Connector's live printer observation. */
+  driverFamily?: PauseResultDriverFamily
   issuer: PauseCommandIssuer
   transport?: PauseCommandTransport
   /** Wall clock of the browser. Injectable for tests only. */
@@ -82,7 +84,11 @@ export type PauseCommandClientOptions = Readonly<{
    */
   monotonicNow?(): number
   /** Notified once per command with its final outcome. */
-  onOutcome?(outcome: PauseCommandOutcome, code?: ControlResultCode): void
+  onOutcome?(
+    outcome: PauseCommandOutcome,
+    code?: ControlResultCode,
+    message?: string,
+  ): void
   /** Aborted when the control session ends. */
   signal?: AbortSignal
 }>
@@ -137,6 +143,44 @@ const inert = () => false
 const ADMISSION_MS = PAUSE_POLICY_HARD_MAXIMUMS.admissionMs
 const COMMAND_MS = PAUSE_POLICY_HARD_MAXIMUMS.commandMs
 const SESSION_MS = PAUSE_POLICY_HARD_MAXIMUMS.capabilityMs
+
+export type PauseResultDriverFamily =
+  'moonraker' | 'u1' | 'kobra-x' | 'bambu' | 'unknown'
+
+/**
+ * Result waits are selected by the Connector-reported printer family. Moonraker
+ * collection reports no identity, a U1 included, so an unknown family falls back
+ * to the action. A longer wait never resends and never widens what the
+ * Connector allows.
+ */
+export function pauseCommandResultWaitMs(
+  driverFamily: PauseResultDriverFamily,
+  action?: ExtendedControlAction,
+  args: Record<string, unknown> = {},
+): number {
+  return driverFamily === 'u1' ||
+    driverFamily === 'kobra-x' ||
+    (driverFamily === 'unknown' &&
+      action !== undefined &&
+      isU1PhysicalControl(action, args))
+    ? COMMAND_MS + U1_CONTROL_RESULT_TIMEOUT_MS
+    : COMMAND_MS
+}
+
+export function pauseResultDriverFamilyFromIdentity(
+  identity?: Readonly<{
+    vendor?: string | undefined
+    model?: string | undefined
+  }>,
+): PauseResultDriverFamily {
+  const value =
+    `${identity?.vendor ?? ''} ${identity?.model ?? ''}`.toLowerCase()
+  if (/snapmaker\s*u1|\bu1\b/.test(value)) return 'u1'
+  if (/kobra\s*x/.test(value)) return 'kobra-x'
+  if (/bambu/.test(value)) return 'bambu'
+  if (/klipper|moonraker/.test(value)) return 'moonraker'
+  return 'unknown'
+}
 
 type SendState = 'sent' | 'refused' | 'faulted'
 
@@ -213,6 +257,7 @@ export function createPauseCommandClient(
   function settleCommand(
     outcome: PauseCommandOutcome,
     code?: ControlResultCode,
+    message?: string,
   ): void {
     const current = command
     if (!current) return
@@ -222,7 +267,7 @@ export function createPauseCommandClient(
     terminal = true
     current.settle(outcome)
     try {
-      options.onOutcome?.(outcome, code)
+      options.onOutcome?.(outcome, code, message)
     } catch {
       // A throwing observer never breaks the settlement of the command.
     }
@@ -438,9 +483,11 @@ export function createPauseCommandClient(
       // transport before the failure.
       commandSent = true
       armResult(
-        isU1PhysicalControl(signed.action, signed.args)
-          ? COMMAND_MS + U1_CONTROL_RESULT_TIMEOUT_MS
-          : COMMAND_MS,
+        pauseCommandResultWaitMs(
+          options.driverFamily ?? 'unknown',
+          signed.action,
+          signed.args,
+        ),
       )
       if (
         attemptSend(() => sendCommand({ t: 'control.command', wire })) !==
@@ -540,7 +587,7 @@ export function createPauseCommandClient(
       if (frame.t !== 'control.result') return
       const current = command
       if (!current || frame.command_id !== current.id) return
-      settleCommand(frame.outcome, frame.code)
+      settleCommand(frame.outcome, frame.code, frame.message)
     },
     pause(): Promise<PauseCommandOutcome> {
       if (aborted) return Promise.resolve('rejected')

@@ -40,14 +40,16 @@ export default defineEventHandler(async (event) => {
       body,
       key,
       (agentId, binding) =>
-        signallingRuntime()?.queryAgentInbox(
+        signallingRuntime()?.querySpoolMembership(
           access.farmId,
           agentId,
-          { kind: 'spool-membership', farmId: access.farmId, ...binding },
+          binding,
           event.req.signal,
         ),
     )
     if (!spool) return integrationProblem('not-found', headers)
+    if (spool.outcome === 'deleted')
+      return integrationProblem('not-found', headers)
     if (spool.outcome === 'key-reused')
       return integrationProblem('idempotency-key-reused', headers)
     if (spool.outcome === 'already-bound')

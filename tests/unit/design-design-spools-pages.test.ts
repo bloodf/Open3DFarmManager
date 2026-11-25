@@ -3,6 +3,7 @@ import { basename, dirname } from 'node:path'
 import { build } from 'esbuild'
 import { compileScript, compileStyle, parse } from 'vue/compiler-sfc'
 import { expect, it } from 'vitest'
+import { expect as pw } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { launchBrowser } from '../helpers/browser'
 import { startHttpMock } from '../../packages/sim-tools/src/mocks/http-mock'
@@ -18,6 +19,7 @@ it('renders spool screens without overflow and accessibility violations', async 
       import './apps/farm/app/assets/css/main.css'
       const filament = { id: 1, name: 'Azul Royal', material: 'PLA', color_hex: '1F4FE0', density: 1.24, diameter: 1.75, weight: 1000, extra: {} }
       const spool = { id: 12, filament, remaining_weight: 120, used_weight: 880, used_length: 0, location: 'Prateleira A1', archived: false, extra: {} }
+      const unweighed = { ...spool, id: 13, filament: { ...filament, name: 'Azul sem pesagem' }, remaining_weight: null }
       globalThis.useRoute = () => ({ query: {} })
       globalThis.useRouter = () => ({ replace() {} })
       globalThis.$fetch = async (url) => {
@@ -26,7 +28,7 @@ it('renders spool screens without overflow and accessibility violations', async 
         if (url.endsWith('/filaments')) return { items: [filament], total: 1, canWrite: true }
         if (url.endsWith('/vendors')) return { items: [], total: 0 }
         if (url.endsWith('/slots')) return { assignments: [] }
-        return { items: [spool], total: 1, canWrite: true, canImport: true }
+        return { items: [spool, unweighed], total: 2, canWrite: true, canImport: true }
       }
       const app = createApp(location.pathname === '/estoque' ? Stock : location.pathname === '/localizar' ? Finder : Index)
       app.component('NuxtLink', { props: ['to'], render() { return h('a', { href: typeof this.to === 'string' ? this.to : this.to.path }, this.$slots.default?.()) } })
@@ -73,6 +75,9 @@ it('renders spool screens without overflow and accessibility violations', async 
       },
     ],
   })
+  // Vite-only APIs (for example import.meta.glob) compile to empty values in
+  // this esbuild bundle and blank the page; fail on the warning, not a timeout.
+  expect(bundle.warnings.map((warning) => warning.text)).toEqual([])
   const js = bundle.outputFiles.find((f) => f.path.endsWith('.js'))!
   const css = bundle.outputFiles.find((f) => f.path.endsWith('.css'))!
   const server = await startHttpMock({
@@ -117,11 +122,19 @@ it('renders spool screens without overflow and accessibility violations', async 
           })
           try {
             const page = await context.newPage()
-            await page.addInitScript(
-              (theme) =>
-                document.documentElement.setAttribute('data-theme', theme),
-              theme,
-            )
+            const pageErrors: string[] = []
+            page.on('pageerror', (error) => pageErrors.push(error.message))
+            await page.addInitScript((theme) => {
+              // Init scripts run before <html> exists; apply once it does.
+              const apply = () =>
+                document.documentElement?.setAttribute('data-theme', theme)
+              if (document.documentElement) return apply()
+              new MutationObserver((_, observer) => {
+                if (!document.documentElement) return
+                apply()
+                observer.disconnect()
+              }).observe(document, { childList: true })
+            }, theme)
             await page.goto(`${server.origin}/${screen}`)
             await page
               .getByText(
@@ -130,6 +143,30 @@ it('renders spool screens without overflow and accessibility violations', async 
               )
               .first()
               .waitFor()
+              .catch((error: Error) => {
+                throw new Error(
+                  `${screen} ${size} ${theme}: ${error.message}\npage errors: ${pageErrors.join(' | ') || 'none'}`,
+                )
+              })
+            if (screen !== 'estoque') {
+              const unknown = page.getByRole('img', {
+                name: 'Nível restante desconhecido',
+              })
+              await pw(unknown).toHaveAttribute('data-unknown', 'true')
+              await pw(
+                unknown.locator('img[src="/spool-art/n1-corpo.webp"]'),
+              ).toHaveCount(1)
+              await pw(unknown.locator('.farm-spool-art')).toHaveAttribute(
+                'style',
+                /--farm-spool-paint:\s*#1F4FE0/i,
+              )
+            }
+            expect(pageErrors).toEqual([])
+            expect(
+              await page.evaluate(() =>
+                document.documentElement.getAttribute('data-theme'),
+              ),
+            ).toBe(theme)
             expect(
               await page.evaluate(() => document.documentElement.scrollWidth),
             ).toBe(width)

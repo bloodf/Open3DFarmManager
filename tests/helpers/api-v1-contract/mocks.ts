@@ -37,6 +37,16 @@ export const jobsRuntime = async () => ({
 
 export const signalling = () => ({
   signallingRuntime: () => ({
+    querySpoolMembership: (
+      farmId: string,
+      agentId: string,
+      binding: { serviceId: string; spoolId: number },
+    ) =>
+      currentWorld().queryAgentInbox(farmId, agentId, {
+        kind: 'spool-membership',
+        farmId,
+        ...binding,
+      }),
     queryAgentInbox: (farmId: string, agentId: string, query: unknown) =>
       currentWorld().queryAgentInbox(farmId, agentId, query),
   }),

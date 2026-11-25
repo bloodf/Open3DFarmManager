@@ -5,13 +5,17 @@ import {
   readPrivateJsonFile,
 } from './local.ts'
 import { parseCollectorConfig as parseLegacy } from './anycubic.ts'
-import { isSupportedSdcpModel } from '../discovery/sdcp.ts'
+import { sdcpProfile } from '../sdcp/models.ts'
 
 export const SdcpBinding = z.strictObject({
   printerKey: z.string().min(1).max(128),
   host: z.ipv4(),
   mainboardId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
-  model: z.string().min(1).max(128).refine(isSupportedSdcpModel),
+  model: z
+    .string()
+    .min(1)
+    .max(128)
+    .refine((model) => sdcpProfile(model) !== undefined),
 })
 const Config = LocalCollectorConfigSchema.options[0]
   .omit({ bambu: true })

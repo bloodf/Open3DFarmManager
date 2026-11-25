@@ -1,3 +1,4 @@
+import { DriverRefusalError } from '../control/driver-refusal.ts'
 import { z } from 'zod'
 import { BedMeshArguments } from '../../../farm-protocol/src/control-actions.ts'
 
@@ -13,12 +14,10 @@ export type BedMeshRefusalReason =
   'state' | 'unsupported-action' | 'invalid-command'
 
 /** Thrown before any write; the dispatcher reports it as not sent. */
-export class BedMeshRefused extends Error {
-  readonly refusal: BedMeshRefusalReason
+export class BedMeshRefused extends DriverRefusalError {
   constructor(refusal: BedMeshRefusalReason) {
-    super(`Bed mesh refused: ${refusal}`)
+    super(refusal, `Bed mesh refused: ${refusal}`)
     this.name = 'BedMeshRefused'
-    this.refusal = refusal
   }
 }
 

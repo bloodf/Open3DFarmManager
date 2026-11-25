@@ -11,7 +11,14 @@ import {
   uploadMoonrakerFile,
   MoonrakerUploadError,
 } from '../moonraker/upload.ts'
-import { uploadCrealityFile } from '../creality/files.ts'
+import {
+  resolveCrealityUploadOrigin,
+  uploadCrealityFile,
+} from '../creality/files.ts'
+import type { resolveCrealityEndpoint } from '../discovery/creality.ts'
+import { uploadSdcpFile } from '../sdcp/files.ts'
+import { sdcpFileName } from '../sdcp/commands.ts'
+import { readSdcpPrinterBinding } from '../control/printer-binding.ts'
 import type {
   createKobraLinkClient,
   PrinterBinding,
@@ -24,7 +31,13 @@ import type { PrinterBinding as LocalPrinterBinding } from '../control/printer-b
 import { uploadBambuFile } from '../bambu/ftps.ts'
 
 export type FileUploadTarget =
-  | { backend: 'creality'; origin: string }
+  | {
+      backend: 'creality'
+      origin: string
+      /** The printer's WebSocket binding; decides plain or secure upload. */
+      endpoint?: Parameters<typeof resolveCrealityEndpoint>[0]
+    }
+  | { backend: 'sdcp'; binding: LocalPrinterBinding }
   | { backend: 'anycubic'; binding?: LocalPrinterBinding }
   | {
       backend: 'kobralink'
@@ -69,6 +82,14 @@ export function supportsFileUpload(
   name: string,
   standalone = false,
 ): boolean {
+  if (target.backend === 'sdcp') {
+    const local = readSdcpPrinterBinding(target.binding)
+    try {
+      return !!local && !!sdcpFileName(local.model, name)
+    } catch {
+      return false
+    }
+  }
   if (target.backend === 'anycubic')
     return standalone && !!target.binding && supportsAnycubicUpload(name)
   return (
@@ -94,9 +115,17 @@ export async function uploadFile(input: {
     await uploadMoonrakerFile({ ...target, ...common })
   else if (target.backend === 'bambu')
     await uploadBambuFile({ ...target, ...common })
-  else if (target.backend === 'creality')
-    await uploadCrealityFile({ ...target, ...common })
-  else if (target.backend === 'anycubic' && target.binding)
+  else if (target.backend === 'sdcp')
+    await uploadSdcpFile({
+      ...common,
+      binding: target.binding,
+      authorized: input.authorize,
+    })
+  else if (target.backend === 'creality') {
+    const destination = await resolveCrealityUploadOrigin(target)
+    if (!input.authorize()) throw Error('unauthorized')
+    await uploadCrealityFile({ ...destination, ...common })
+  } else if (target.backend === 'anycubic' && target.binding)
     await uploadAnycubicFile({
       ...common,
       binding: target.binding,

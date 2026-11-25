@@ -141,6 +141,10 @@ const bytes = (records: readonly TelemetryRecord[]) =>
 // Single-writer durable telemetry only. No commands, keys, credentials or network calls.
 export class TelemetryQueue {
   private records: TelemetryRecord[] = []
+  private readonly ageAnchors = new Map<
+    string,
+    { elapsed: number; monotonic: number }
+  >()
   private readonly path: string
   private readonly lock: string
   private readonly temporary: string
@@ -510,6 +514,7 @@ export class TelemetryQueue {
       queuedAt: now,
       ...body,
     }
+    const queuedMonotonic = performance.now()
     const serialized = line(record)
     if (Buffer.byteLength(serialized) > Math.min(MAX_RECORD, this.maxBytes))
       throw new Error('Queue record exceeds size limit')
@@ -551,7 +556,41 @@ export class TelemetryQueue {
         return dropped()
       }
     }
+    const observedAt =
+      body.kind === 'printer-state'
+        ? body.state.observedAt
+        : body.kind === 'inventory-snapshot'
+          ? body.inventory.observedAt
+          : now
+    if (observedAt <= now)
+      this.ageAnchors.set(record.eventId, {
+        elapsed: now - observedAt,
+        monotonic: queuedMonotonic,
+      })
+    this.pruneAgeAnchors()
     return { eventId: record.eventId, loss: bounded.loss }
+  }
+  private pruneAgeAnchors() {
+    const live = new Set(this.records.map((record) => record.eventId))
+    for (const id of this.ageAnchors.keys())
+      if (!live.has(id)) this.ageAnchors.delete(id)
+  }
+  /** Recovered records lack a trustworthy monotonic anchor and cannot prove freshness. */
+  sendAge(record: TelemetryRecord, now: number): number | undefined {
+    const anchor = this.ageAnchors.get(record.eventId)
+    if (!anchor || record.queuedAt > now) return undefined
+    const observedAt =
+      record.kind === 'printer-state'
+        ? record.state.observedAt
+        : record.kind === 'inventory-snapshot'
+          ? record.inventory.observedAt
+          : now
+    if (observedAt > now) return undefined
+    return Math.max(
+      now - Math.min(observedAt, record.queuedAt),
+      anchor.elapsed +
+        Math.floor(Math.max(0, performance.now() - anchor.monotonic)),
+    )
   }
   batch(
     now: number,
@@ -571,6 +610,7 @@ export class TelemetryQueue {
     const bounded = this.bound(this.records, now)
     if (bounded.loss.expired || bounded.loss.capacity)
       this.replace(bounded.records)
+    this.pruneAgeAnchors()
     const latestHeartbeat = this.records.findLastIndex(
       (record) => record.kind === 'heartbeat',
     )
@@ -626,6 +666,7 @@ export class TelemetryQueue {
     }
     this.ackedBytes += bytes(this.records.slice(0, eventIds.length))
     this.records = rest
+    this.pruneAgeAnchors()
     if (
       !this.degraded &&
       (this.ackedBytes >= this.compactAfterBytes || rest.length === 0)

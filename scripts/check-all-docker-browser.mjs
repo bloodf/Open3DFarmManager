@@ -5,7 +5,7 @@
 // honours OPENFARM_CHROME_PATH as an explicit executable. The gate container
 // has no Google Chrome, and nothing may be downloaded, so the runner supplies
 // the Chromium that the local Node 22 image already holds for Playwright
-// 1.65.0 (/ms-playwright, revision 1254), mounted read-only.
+// 1.65.1 (/ms-playwright, revision 1255), mounted read-only.
 //
 // That Chromium was built for the Node image's Ubuntu userland, while the
 // container's userland is the PostgreSQL image's Debian. A wrapper therefore

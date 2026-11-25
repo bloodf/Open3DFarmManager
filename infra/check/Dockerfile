@@ -1,6 +1,6 @@
 FROM golang:1.26.0-bookworm@sha256:2a0ba12e116687098780d3ce700f9ce3cb340783779646aafbabed748fa6677c AS go
 # Debian 13 (trixie) ships git >= 2.42 (`worktree add --orphan`). Keep linux/amd64.
-FROM node:22.23.5-trixie-slim@sha256:68c76cfad89921b927eae28ba21407475e29d0ce450afcdbe70c1532db042b64
+FROM node:24.22.3-trixie-slim@sha256:4d00acb4bcc42c454c4eb801526f7ad7f772ea3bd4fd168c5cc2e384abcbb9d4
 
 ARG TARGETARCH
 RUN test "${TARGETARCH}" = amd64 || { echo 'The check image requires linux/amd64' >&2; exit 1; }

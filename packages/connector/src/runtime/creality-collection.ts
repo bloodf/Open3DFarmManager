@@ -1,5 +1,6 @@
 import { reportedModelProfile } from './machine-profile.ts'
 import { mapCrealityFirmware } from '../creality/firmware.ts'
+import { CREALITY_SPEED_MODES } from '../creality/commands.ts'
 import { createCrealityTelemetryClient } from '../creality/index.ts'
 import type { CrealityCollectorConfig } from '../config/creality.ts'
 import type { RawPrinterObservation } from './farm-snapshot-provider.ts'
@@ -117,6 +118,7 @@ export function createCrealityCollection(input: {
         ...(finished ? { lastJob: finished } : {}),
         ...values,
         ...(machine ? { machine } : {}),
+        speedModes: [...CREALITY_SPEED_MODES],
         printerKey: input.binding.printerKey,
         observedAt: Date.now(),
       })

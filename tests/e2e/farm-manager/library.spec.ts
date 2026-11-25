@@ -66,6 +66,21 @@ const NOT_SENT = 'O comando não foi enviado ao Connector'
 const OUTCOME =
   /Impressão iniciada|não foi iniciada|Não foi possível confirmar|não foi enviado/
 
+/** The printer's stored state, when the server observed it just now. */
+async function storedState(farm: FarmManager, page: Page, printerKey: string) {
+  const response = await page.request.get(
+    `${farm.origin}/api/farms/${farm.farmId}/printer-states`,
+  )
+  if (!response.ok()) return undefined
+  const { states } = (await response.json()) as {
+    states: Array<{ printerKey: string; state: string; observedAt: number }>
+  }
+  return states.find(
+    (item) =>
+      item.printerKey === printerKey && Date.now() - item.observedAt < 60_000,
+  )?.state
+}
+
 /**
  * Opens the replay dialog, picks the printer and confirms. Every command opens
  * its own signed session, so the Connector's inbox must be listening first; a
@@ -86,10 +101,12 @@ async function replayFromDialog(
     await dialog.getByLabel(printerKey).check()
     await dialog.getByLabel(/mesa está limpa/).check()
     await expect
-      .poll(() => farm.harness.simulatorObservation().pauseInboxReady, {
-        timeout: 90_000,
-      })
+      .poll(() => farm.commandInboxReady(printerKey), { timeout: 90_000 })
       .toBe(true)
+    // The server signs a command capability only from fresh stored controls.
+    await expect
+      .poll(() => storedState(farm, page, printerKey), { timeout: 90_000 })
+      .toBe('idle')
     await dialog
       .getByRole('button', { name: 'Imprimir de novo', exact: true })
       .click()
@@ -336,6 +353,26 @@ test('envia e imprime arquivos da biblioteca com armazenamento no servidor e no 
       dialog.getByRole('button', { name: 'Imprimir de novo', exact: true }),
     ).toBeDisabled()
     await dialog.getByRole('button', { name: 'Fechar' }).click()
+  })
+
+  await test.step('confirma a placa livre do primeiro Moonraker', async () => {
+    // Its finished library job holds new starts until the operator confirms.
+    await farm.openFarm()
+    const confirm = page
+      .locator('li.floor-tile')
+      .filter({ hasText: 'moonraker-a' })
+      .getByRole('button', { name: 'Confirmar placa livre', exact: true })
+    await confirm.click({ timeout: 90_000 })
+    const dialog = page.getByRole('dialog', { name: /Confirmar placa livre/ })
+    await dialog
+      .getByRole('button', { name: 'Confirmar placa livre', exact: true })
+      .click({ timeout: 90_000 })
+    await expect(dialog.getByRole('status')).toHaveText(
+      'Comando confirmado pelo Connector.',
+    )
+    await dialog.getByRole('button', { name: 'Fechar' }).click()
+    await expect(confirm).toBeHidden({ timeout: 90_000 })
+    await page.goto(farm.origin + '/biblioteca')
   })
 
   await test.step('modo Connector: o servidor guarda só metadados e a reimpressão usa o Connector', async () => {

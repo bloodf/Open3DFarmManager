@@ -39,7 +39,7 @@ done > "$ledger/output-baseline.txt"
 image_tag="open3dfarmmanager-local-ci:$(basename "$ledger" | tr '[:upper:].' '[:lower:]-')"
 container_name="$(basename "$ledger" | tr '[:upper:].' '[:lower:]-')-image"
 project_name="$(basename "$ledger" | tr '[:upper:].' '[:lower:]-')-sim"
-sim_image='ghcr.io/mainsail-crew/virtual-klipper-printer@sha256:759f09e063d906832198b7090b7ecce1099a8a1d9ef065bab59a48a4208459cf'
+sim_image='ghcr.io/mainsail-crew/virtual-klipper-printer@sha256:84da96e5d7b96fcc9ba4d781c768815d262d88bccbdb9671af6491a7b350aa1a'
 image_created=0 image_container=0 sim_started=0 sim_image_preexisting=1 cleanup_failed=0
 printf 'image_tag=%s\ncontainer=%s\ncompose_project=%s\nsimulator_image=%s\n' "$image_tag" "$container_name" "$project_name" "$sim_image" >> "$ledger/task.txt"
 cleanup() {

@@ -976,6 +976,18 @@ for (const path of [
         await waitHydrated(page)
         await expect(page.locator('main')).toBeVisible()
         await expect(page.locator('main [aria-busy="true"]')).toHaveCount(0)
+        if (path === '/bobinas') {
+          await expect(
+            page.getByRole('img', { name: 'Nível restante: 75%' }),
+          ).toBeVisible()
+          await page.getByRole('button', { name: 'Editar bobina #1' }).click()
+          const details = page.getByRole('dialog', { name: 'Editar bobina #1' })
+          await expect(
+            details.getByRole('img', { name: 'Nível restante: 75%' }),
+          ).toBeVisible()
+          await page.keyboard.press('Escape')
+          await expect(details).toBeHidden()
+        }
         await assertAxeClean(page, `${path} at ${width}px (${theme})`)
         const fits = await page.evaluate(
           () => document.documentElement.scrollWidth <= window.innerWidth,

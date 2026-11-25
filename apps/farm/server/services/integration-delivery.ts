@@ -438,7 +438,7 @@ export class IntegrationDeliveryService {
       this.now(),
       {
         refusalCode: frame.refusal_code,
-        detail: frame.detail,
+        detail: frame.message ?? frame.detail,
         historyEntryId: frame.history_entry_id,
       },
     )

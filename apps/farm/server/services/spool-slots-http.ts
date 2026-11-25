@@ -118,6 +118,9 @@ export async function spoolSlotsFeature(
         message: 'Solicitação indisponível.',
       })
     if (e && typeof e === 'object' && 'status' in e) throw e
+    // A spool or printer of another farm fails the composite (farm_id, id) key.
+    if (e && typeof e === 'object' && 'code' in e && e.code === '23503')
+      throw createError({ status: 404, message: 'Solicitação indisponível.' })
     throw unavailable()
   }
 }

@@ -277,6 +277,27 @@ export in the response body and writes no server-side file).
 - Evidence: `node scripts/test-spoolman-aux-api.mjs` (disposable PostgreSQL in
   Docker, `tests/integration/spoolman-aux/**`).
 
+## Spool moves (migration `0116_spool_moves`)
+
+`POST /api/farms/{farmId}/spool-library/spools/{id}/move` takes one of:
+
+- `{ "to": "location", "location": "..." | null }`;
+- `{ "to": "slot", "printerId", "slotKind", "slotIndex" }`;
+- `{ "to": "farm", "farmId", "location"? }`.
+
+The caller must be an operator or higher in every farm the move touches. A farm,
+spool or printer outside the caller's farms is a 404. A farm move archives the
+source row, which keeps its usage, bindings and logs, and continues the spool in
+the destination farm under the same identity; moving back revives the old row.
+Vendor and filament are matched or copied into the destination.
+
+`GET .../spools/{id}/moves` returns the journal entries that touch that farm.
+Another farm's details are never returned, and its ids only to its members.
+
+The `spoolLibrary` login must be a member of `farm_spool_library` and
+`farm_spool_features`. Slot assignments made through `.../slots` are recorded in
+the slot assignment history, not in this journal.
+
 ## Evidence
 
 ```

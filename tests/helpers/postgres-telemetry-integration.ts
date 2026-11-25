@@ -41,7 +41,12 @@ function latestStateTableSql(): string {
   )
   const statement = text.slice(0, text.indexOf(';') + 1)
   assert.match(statement, /^CREATE TABLE farm\.printer_latest_state \(/)
-  return statement
+  return (
+    statement +
+    '\nALTER TABLE farm.printer_latest_state ADD COLUMN received_at bigint,' +
+    ' ADD COLUMN age_at_send_ms bigint CHECK (age_at_send_ms >= 0),' +
+    ' ADD COLUMN revision bigint NOT NULL DEFAULT 1;'
+  )
 }
 export async function testTelemetryPersistence(
   sql: Sql,

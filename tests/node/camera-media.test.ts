@@ -19,6 +19,7 @@ import {
   type CameraRuntimeConfig,
 } from '../../packages/connector/src/config/camera.ts'
 import { startCameraMock } from '../../packages/sim-tools/src/camera-mock.ts'
+import { createCrealityWebRtcCameraSimulator } from '../../packages/sim-tools/src/creality-webrtc-camera-sim.ts'
 import { startBambuCameraFixture } from '../journey/bambu-camera-fixture.ts'
 import {
   createFakeEncoder,
@@ -546,4 +547,102 @@ test('selects the target camera when another assigned camera appears first', asy
   )
   await until(() => f.track.sent.length === 3)
   assert.deepEqual(f.opened, ['rtsp-sim'])
+})
+
+test(
+  'runtime routes a Creality webrtc_local camera to the browser track without an encoder',
+  { timeout: 20000 },
+  async (t) => {
+    const simulator = await createCrealityWebRtcCameraSimulator()
+    t.after(() => simulator.close())
+    const assignmentId = randomUUID()
+    const config = parseCameraRuntimeConfig(
+      {
+        helper: { path: '/nonexistent/rtsp-ingest', sha256: 'a'.repeat(64) },
+        cameras: [
+          {
+            cameraId: 'cam-1',
+            assignmentId,
+            source: {
+              kind: 'creality-webrtc',
+              address: '127.0.0.1',
+              port: simulator.port,
+            },
+          },
+        ],
+      },
+      [assignmentId],
+    )
+    const f = await fixture({ runtime: { config, assignmentId } })
+    t.after(() => f.media.stop())
+    f.activate()
+    const statement = await countersign(f)
+    assert.equal(simulator.offers.length, 0, 'no printer contact before proof')
+    f.channel.deliver(
+      await signCameraPurposeProof(
+        statement,
+        'browser',
+        f.browserKeys.privateKey,
+      ),
+    )
+    await until(() => f.track.sent.length >= 2)
+    assert.equal(simulator.offers.length, 1)
+    // The keyframe leads with the parameter sets, as Annex-B.
+    assert.deepEqual(
+      f.track.sent[0]!.subarray(0, 5),
+      Buffer.from([0, 0, 0, 1, 0x67]),
+    )
+    assert.deepEqual(f.violations, [])
+  },
+)
+
+test('runtime status admits Bambu RTSPS only with a CA file and a mapped model', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'camera-runtime-rtsps-'))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const credentialFile = join(directory, 'bambu.json')
+  await writeFile(credentialFile, JSON.stringify({ accessCode: 'synthetic' }), {
+    mode: 0o600,
+  })
+  const caFile = join(directory, 'ca.pem')
+  await writeFile(caFile, 'unused in status')
+  const helperPath = join(directory, 'rtsp-ingest')
+  await writeFile(helperPath, '#!/bin/sh\nexit 0\n', { mode: 0o700 })
+  const helper = {
+    path: helperPath,
+    sha256: createHash('sha256')
+      .update(await readFile(helperPath))
+      .digest('hex'),
+  }
+  const encoder = createFakeEncoder(['synthetic'])
+  t.after(() => encoder.dispose())
+  const scenarios = [
+    ['X1C', { caFile }, true],
+    ['H2S', { caFile }, true],
+    ['X1C', { pinSha256: 'a'.repeat(64) }, false],
+    ['X2D', { caFile }, false],
+    ['P1S', { pinSha256: 'a'.repeat(64) }, true],
+  ] as const
+  const ids = scenarios.map(() => randomUUID())
+  const config = parseCameraRuntimeConfig(
+    {
+      helper,
+      cameras: scenarios.map(([model, trust], index) => ({
+        cameraId: `bambu-${index}`,
+        assignmentId: ids[index],
+        source: {
+          kind: 'bambu-lan',
+          model,
+          address: '127.0.0.1',
+          ...trust,
+          credentialFile,
+          ffmpeg: encoder.ffmpeg,
+        },
+      })),
+    },
+    ids,
+  )
+  assert.deepEqual(
+    getRtspCameraStatus(config).cameras.map(({ available }) => available),
+    scenarios.map(([, , expected]) => expected),
+  )
 })

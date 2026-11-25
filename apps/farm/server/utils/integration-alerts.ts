@@ -31,7 +31,7 @@ export async function recordObservedAlerts(
       alert.kind === 'error' ? 'Impressora em estado de erro.' : alert.label,
   }))
   const resolved =
-    await tx`UPDATE farm.integration_alert_lifecycle SET resolved_at = ${observedAt}
+    await tx`UPDATE farm.integration_alert_lifecycle SET resolved_at = greatest(opened_at, ${observedAt}::bigint)
     WHERE printer_id = ${assignment.id}::uuid AND resolved_at IS NULL
       AND (${state.state} <> 'offline' OR kind = 'offline-or-stale')
       AND NOT (alert_key = ANY(${alerts.map((alert) => alert.id)}::text[]))`

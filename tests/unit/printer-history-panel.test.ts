@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import AxeBuilder from '@axe-core/playwright'
 import { parse } from 'vue/compiler-sfc'
 import { afterEach, describe, expect, it } from 'vitest'
-import { renderFarmComponent } from '../../apps/farm/app/components/farm/render-farm-component.ts'
+import { renderFarmComponent } from '../helpers/render-farm-component.ts'
 import {
   HISTORY_MAX_ROWS,
   HISTORY_PAGE_SIZE,

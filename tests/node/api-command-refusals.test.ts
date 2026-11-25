@@ -12,6 +12,7 @@ import {
   openCommandJournal,
   readCommandOutcome,
 } from '../../packages/connector/src/control/command-journal.ts'
+import { DriverRefusalError } from '../../packages/connector/src/control/driver-refusal.ts'
 import { createPrinterBindingRegistry } from '../../packages/connector/src/control/printer-binding.ts'
 import { createApiCommandRunner } from '../../packages/connector/src/runtime/api-command.ts'
 import {
@@ -173,7 +174,7 @@ test('typed local refusals are not sent; ambiguous failures stay blocked', async
     ['unsupported-action', 'unsupported'],
     ['invalid-command', 'unsupported'],
   ] as const) {
-    failure = { refusal: reason }
+    failure = new DriverRefusalError(reason, 'synthetic refusal')
     const command = await wire()
     const result = await runner.run(command)
     assert.deepEqual(result, { kind: 'refused', code, detail: reason })

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
+import { vueSfcPlugin } from './vue-sfc-plugin.ts'
 
 // The status channel cannot be driven from the mocked-HTTP spec, so the real
 // SpoolInventory.vue is compiled and server-rendered here with fixed props.
@@ -47,6 +48,7 @@ import { createSSRApp as __create } from 'vue'
 import { renderToString as __render } from 'vue/server-renderer'
 export const render = (props) => __render(__create(__component, props))`
   const bundled = await build({
+    plugins: [vueSfcPlugin],
     stdin: {
       contents: entry,
       loader: 'ts',

@@ -7,6 +7,7 @@ import {
   TelemetryQueue,
   type TelemetryRecord,
 } from '../../packages/connector/src/cloud/queue.ts'
+import { durableTelemetryEvent } from '../../apps/farm/server/storage/postgres-telemetry.ts'
 import { drainTelemetryOnce } from '../../packages/connector/src/cloud/drain.ts'
 import { parseBoundedJson } from '../../packages/farm-protocol/src/json.ts'
 import {
@@ -63,7 +64,23 @@ test('synthetic Moonraker state survives outage and restart, then drains to an i
     const delivered = await drainTelemetryOnce(
       reopened,
       async (body) => {
-        assert.equal(body, firstBody)
+        const first = TelemetryBatch.parse(JSON.parse(firstBody))
+        const second = TelemetryBatch.parse(JSON.parse(body))
+        assert.deepEqual(
+          second.map(durableTelemetryEvent),
+          first.map(durableTelemetryEvent),
+        )
+        assert.equal(first[0]?.kind, 'printer-state')
+        if (first[0]?.kind !== 'printer-state')
+          throw new Error('Unexpected record')
+        assert.ok(
+          Number.isSafeInteger(first[0].ageAtSendMs) &&
+            first[0].ageAtSendMs! >= 0,
+        )
+        assert.equal(
+          second[0]?.kind === 'printer-state' && second[0].ageAtSendMs,
+          undefined,
+        )
         ids(body).forEach((id) => received.add(id))
         return ids(body)
       },

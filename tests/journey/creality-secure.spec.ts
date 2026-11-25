@@ -134,6 +134,9 @@ if (journeyEnabled())
         signedControl: true,
         discovery: true,
         secure: true,
+        // Telemetry upload stays open, as a Connector in service does: the
+        // issuer grants only controls advertised in the last two minutes.
+        history: true,
       })
     })
 

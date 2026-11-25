@@ -499,6 +499,103 @@ function physicalSpoolScenarios(): Scenario[] {
         let failPool = false
         let stored: { request_hash: string; response: unknown } | undefined
         const spool = { id: 7, location: 'Gaveta A', revision: '71:(0,1)' }
+        const observedAt = Date.now()
+        const tx = (query: TemplateStringsArray, ...values: unknown[]) => {
+          const text = query.join('')
+          if (!text.trim() || text === 'FOR SHARE OF a, g') return []
+          if (text.includes('farm.integration_app_grants'))
+            return [{ id: 'grant' }]
+          if (text.includes('pg_advisory_xact_lock')) return []
+          if (text.includes('SELECT request_hash, response'))
+            return stored ? [stored] : []
+          if (
+            text.includes(
+              'INSERT INTO farm.integration_physical_spool_registrations',
+            )
+          ) {
+            stored = {
+              request_hash: values[2] as string,
+              response: values[3],
+            }
+            return []
+          }
+          if (text.includes('FROM farm.spool_filaments'))
+            return values[1] === 1 ? [{ id: 1 }] : []
+          if (
+            text.includes(
+              'INSERT INTO farm.integration_physical_spool_bindings',
+            )
+          ) {
+            expect(values).toEqual([ids.farmA, 8, serviceId, spoolId])
+            return []
+          }
+          if (text.includes('FROM farm.integration_physical_spool_bindings')) {
+            // Replay confirms the created spool still holds this binding.
+            if (text.includes('AND spool_id =')) {
+              expect(values).toEqual([ids.farmA, 8, serviceId, spoolId])
+              return [{ exists: true }]
+            }
+            expect(values).toEqual([ids.farmA, serviceId, spoolId])
+            return options.bindingConflict ? [{ exists: true }] : []
+          }
+          if (
+            text.includes('farm.lock_physical_spool_observations') ||
+            text.includes('farm.read_physical_spool_observations')
+          ) {
+            expect(values).toEqual([ids.farmA, serviceId])
+            if (options.missingObservation || stored) return []
+            if (options.targetedObservation) {
+              world.inbox = {
+                kind: 'spool-membership',
+                serviceId,
+                spoolId,
+                present: true,
+                observedAt,
+              }
+            }
+            return [
+              {
+                agentId: ids.agentA,
+                receivedAt: observedAt,
+                databaseNow: observedAt,
+                ageAtSendMs: 0,
+                revision: '1',
+                observedAt,
+                snapshot: {
+                  observedAt,
+                  serviceId,
+                  stale: false,
+                  total: options.targetedObservation ? 9 : 1,
+                  spools: [
+                    {
+                      spoolId: 1,
+                      name: 'PLA',
+                      material: null,
+                      colorHex: null,
+                      remainingGrams: null,
+                      location: null,
+                      archived: false,
+                    },
+                  ],
+                },
+              },
+            ]
+          }
+          if (text.includes('INSERT INTO farm.spools'))
+            return [{ ...spool, id: 8, location: values[3] }]
+          if (text.includes('UPDATE farm.spools'))
+            return [{ ...spool, location: null, revision: '72:(0,2)' }]
+          if (/SELECT 1 FROM farm\.spools/.test(text)) {
+            // Replay of an unbound registration confirms the created spool.
+            expect(values).toEqual([ids.farmA, 8])
+            return [{ exists: true }]
+          }
+          if (text.includes('FROM farm.spools'))
+            return values[1] === spool.id ? [spool] : []
+          throw new Error('Unexpected physical inventory query')
+        }
+        tx.json = (value: unknown) => value
+        world.physicalSpoolRead = tx
         Object.assign(world.pool as object, {
           begin: (
             work: (
@@ -509,83 +606,6 @@ function physicalSpoolScenarios(): Scenario[] {
             ) => unknown,
           ) => {
             if (failPool) throw new Error('pool down')
-            const tx = (query: TemplateStringsArray, ...values: unknown[]) => {
-              const text = query.join('')
-              if (text.includes('farm.integration_app_grants'))
-                return [{ id: 'grant' }]
-              if (text.includes('pg_advisory_xact_lock')) return []
-              if (text.includes('SELECT request_hash, response'))
-                return stored ? [stored] : []
-              if (
-                text.includes(
-                  'INSERT INTO farm.integration_physical_spool_registrations',
-                )
-              ) {
-                stored = {
-                  request_hash: values[2] as string,
-                  response: values[3],
-                }
-                return []
-              }
-              if (text.includes('FROM farm.spool_filaments'))
-                return values[1] === 1 ? [{ id: 1 }] : []
-              if (text.includes('WHERE response @>')) {
-                expect(values[0]).toEqual({
-                  farmId: ids.farmA,
-                  spoolman: {
-                    serviceId,
-                    spoolId,
-                  },
-                })
-                return options.bindingConflict ? [{ exists: true }] : []
-              }
-              if (text.includes('farm.lock_physical_spool_observations')) {
-                expect(values).toEqual([ids.farmA, serviceId])
-                if (options.missingObservation || stored) return []
-                const observedAt = Date.now()
-                if (options.targetedObservation) {
-                  world.inbox = {
-                    kind: 'spool-membership',
-                    serviceId,
-                    spoolId,
-                    present: true,
-                    observedAt,
-                  }
-                }
-                return [
-                  {
-                    agentId: ids.agentA,
-                    receivedAt: observedAt,
-                    observedAt,
-                    snapshot: {
-                      observedAt,
-                      serviceId,
-                      stale: false,
-                      total: options.targetedObservation ? 9 : 1,
-                      spools: [
-                        {
-                          spoolId: 1,
-                          name: 'PLA',
-                          material: null,
-                          colorHex: null,
-                          remainingGrams: null,
-                          location: null,
-                          archived: false,
-                        },
-                      ],
-                    },
-                  },
-                ]
-              }
-              if (text.includes('INSERT INTO farm.spools'))
-                return [{ ...spool, id: 8, location: values[3] }]
-              if (text.includes('UPDATE farm.spools'))
-                return [{ ...spool, location: null, revision: '72:(0,2)' }]
-              if (text.includes('FROM farm.spools'))
-                return values[1] === spool.id ? [spool] : []
-              throw new Error('Unexpected physical inventory query')
-            }
-            tx.json = (value: unknown) => value
             return work(tx)
           },
         })

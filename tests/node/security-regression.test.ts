@@ -152,16 +152,23 @@ test('resigning a claimed payload cannot bypass replay after restart; duplicate 
     rmSync(dir, { recursive: true, force: true })
   }
 })
+// Collect each worker's result after exit and after stdout has drained.
 test(
   'command journal claims serialize across separate OS processes',
-  { timeout: 40_000 },
-  async () => {
+  {
+    timeout: 40_000,
+  },
+  async (t) => {
     const dir = scratch()
-    const workers: ReturnType<typeof spawn>[] = []
-    const exits: Promise<void>[] = []
+    const spawned: ReturnType<typeof spawn>[] = []
+    const exited: Promise<void>[] = []
     let journal: ReturnType<typeof openCommandJournal> | undefined
+    // Also runs when the test times out, unlike the finally below.
+    t.after(() => {
+      for (const child of spawned) if (child.exitCode === null) child.kill()
+    })
     try {
-      // Keep the WAL open for the lifetime of the workers.
+      // Keep the SQLite sidecars alive until all children have exited.
       journal = openCommandJournal({ directory: dir, clock: () => 1000 })
       const authority = await createV2Authority(await nodeSigner())
       const command = decodeCommandV2(await authority.sign())
@@ -169,10 +176,12 @@ test(
         '../../packages/connector/src/control/command-journal.ts',
         import.meta.url,
       ).href
+      // Each worker opens its store (a write of its own), announces 'ready' and
+      // claims only after all four are released together, so the race covers
+      // the claims rather than four concurrent store initialisations.
       const source = `
         const sqlite = process.getBuiltinModule('node:sqlite')
-        // Test serialization even when a process holding the SQLite lock is
-        // descheduled beyond the production busy timeout.
+        // Keep the production lock timeout out of the serialization assertion.
         sqlite.DatabaseSync = class extends sqlite.DatabaseSync {
           constructor(path, options) {
             super(path, { ...options, timeout: 30_000 })
@@ -180,92 +189,100 @@ test(
         }
         const { openCommandJournal, claimCommand, closeCommandJournal } =
           await import(${JSON.stringify(module)})
-        process.once('message', () => {
+        process.stdin.once('data', () => {
           const journal = openCommandJournal({ directory: process.argv[1], clock: () => 1000 })
-          process.once('message', () => {
-            let result
+          process.stdin.once('data', () => {
             try {
-              result = claimCommand(journal, {
+              const result = claimCommand(journal, {
                 command: JSON.parse(process.argv[2]),
                 printerKey: 'printer-1',
                 wireSha256: 'a'.repeat(64),
               })
+              process.stdout.write((result.ok ? 'accepted' : result.reason) + '\\n')
             } finally {
               closeCommandJournal(journal)
+              process.stdin.destroy()
             }
-            process.send(result.ok ? 'accepted' : result.reason, (error) => {
-              if (error) throw error
-              process.disconnect()
-            })
           })
-          process.send('ready')
+          process.stdout.write('ready\\n')
         })
       `
-      const outcomes: (string | undefined)[] = []
-      let readyCount = 0
-      const results = Array.from({ length: 4 }, (_, worker) => {
-        const child = spawn(
-          process.execPath,
-          ['--input-type=module', '-e', source, dir, JSON.stringify(command)],
-          { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] },
-        )
-        workers.push(child)
-        exits.push(
-          new Promise((resolve) => child.once('close', () => resolve())),
-        )
-        return new Promise<string>((resolve, reject) => {
-          let stderr = ''
-          child.stderr.on('data', (chunk: Buffer) => {
-            stderr += chunk
-              .subarray(0, Math.max(0, 4096 - stderr.length))
-              .toString()
-          })
-          child.on('error', reject)
-          child.on('message', (message) => {
-            if (message === 'ready') {
-              // Open one journal at a time. Opening writes to the store too.
-              readyCount++
-              const next = workers[worker + 1]
-              if (next) next.send('open')
-              else for (const each of workers) each.send('claim')
-            } else if (typeof message === 'string') {
-              outcomes[worker] = message
-            }
-          })
-          child.once('close', (status, signal) => {
-            const outcome = outcomes[worker]
-            if (status === 0 && outcome !== undefined) resolve(outcome)
-            else
-              reject(
-                new Error(
-                  `Journal worker ${worker} failed: code=${status}, signal=${signal}, outcome=${outcome}, stderr=${JSON.stringify(stderr)}`,
-                ),
+      let ready = 0
+      const completed = Promise.all(
+        Array.from(
+          { length: 4 },
+          (_, worker) =>
+            new Promise<string>((resolve, reject) => {
+              const child = spawn(
+                process.execPath,
+                [
+                  '--input-type=module',
+                  '-e',
+                  source,
+                  dir,
+                  JSON.stringify(command),
+                ],
+                { stdio: ['pipe', 'pipe', 'pipe'] },
               )
-          })
-        })
-      })
-      workers[0]!.send('open')
-      const claims = await bounded(
-        Promise.all(results),
+              spawned.push(child)
+              exited.push(
+                new Promise((resolve) => child.once('close', () => resolve())),
+              )
+              child.stdin.on('error', reject)
+              let output = ''
+              let stderr = Buffer.alloc(0)
+              child.stderr.on('data', (chunk: Buffer) => {
+                stderr = Buffer.concat([
+                  stderr,
+                  chunk.subarray(0, 4096 - stderr.length),
+                ])
+              })
+              child.stdout.on('data', (chunk) => {
+                const before = output
+                output += chunk
+                if (!before.includes('ready\n') && output.includes('ready\n')) {
+                  if (++ready === 4) {
+                    for (const each of spawned) each.stdin!.end('go\n')
+                  } else {
+                    // The journal open itself writes. Isolate it from the race.
+                    spawned[ready]!.stdin!.write('open\n')
+                  }
+                }
+              })
+              child.on('error', reject)
+              child.on('close', (status, signal) =>
+                status === 0 && /^ready\n[^\n]+\n$/.test(output)
+                  ? resolve(output.replace('ready\n', '').slice(0, -1))
+                  : reject(
+                      new Error(
+                        `Replay worker failed: worker=${worker}, code=${status}, signal=${signal}, stdout=${JSON.stringify(output)}, stderr=${JSON.stringify(stderr.toString('utf8'))}`,
+                      ),
+                    ),
+              )
+            }),
+        ),
+      )
+      spawned[0]!.stdin!.write('open\n')
+      const results = await bounded(
+        completed,
         30_000,
-        () =>
-          `Journal workers timed out: ready=${readyCount}/${workers.length}, outcomes=${JSON.stringify([...outcomes])}`,
+        () => `Replay workers timed out with ${ready}/4 journals open`,
       )
       assert.equal(
-        claims.filter((result) => result === 'accepted').length,
+        results.filter((result) => result === 'accepted').length,
         1,
-        JSON.stringify(claims),
+        JSON.stringify(results),
       )
       assert.equal(
-        claims.filter((result) => result === 'replay').length,
+        results.filter((result) => result === 'replay').length,
         3,
-        JSON.stringify(claims),
+        JSON.stringify(results),
       )
     } finally {
-      for (const child of workers)
+      for (const child of spawned)
         if (child.exitCode === null && child.signalCode === null)
           child.kill('SIGKILL')
-      await Promise.all(exits)
+      await Promise.all(exited)
       if (journal) closeCommandJournal(journal)
       rmSync(dir, { recursive: true, force: true })
     }

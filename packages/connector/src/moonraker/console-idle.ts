@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { checkExtrudeProbe } from './control-extrusion.ts'
 import { ConsoleRefusal } from './control-console.ts'
+import { klipperCommandName } from './klipper-command.ts'
 
 export function idleConsoleQueryWire(
   id: number,
@@ -84,8 +85,11 @@ export function guardIdleConsole(
   const parsed = snapshot.safeParse(live)
   if (!parsed.success) throw new ConsoleRefusal('unknown-state')
   const state = parsed.data.status
-  const [raw, ...parts] = line.trim().toUpperCase().split(/\s+/)
-  if (raw === 'G28') {
+  const [word, ...parts] = line.trim().toUpperCase().split(/\s+/)
+  const command = klipperCommandName(line)
+  // The bounds checks below require every argument to be a separate token.
+  if (word !== command) throw new ConsoleRefusal('invalid')
+  if (command === 'G28') {
     // Homing is the structured `home` action: bare axes, no bounds needed.
     if (
       parts.some((part) => !/^[XYZ]$/.test(part)) ||
@@ -103,7 +107,7 @@ export function guardIdleConsole(
       throw new ConsoleRefusal('limit')
     return bounds.data
   }
-  if (raw === 'BED_MESH_CALIBRATE') {
+  if (command === 'BED_MESH_CALIBRATE') {
     // Probe travel is limited by the configured mesh area inside the axes.
     if (parts.length) throw new ConsoleRefusal('invalid')
     if (
@@ -134,7 +138,12 @@ export function guardIdleConsole(
     if (!Number.isFinite(value)) throw new ConsoleRefusal('invalid')
     values[match[1]!] = value
   }
-  if (raw === 'M104' || raw === 'M109' || raw === 'M140' || raw === 'M190') {
+  if (
+    command === 'M104' ||
+    command === 'M109' ||
+    command === 'M140' ||
+    command === 'M190'
+  ) {
     if (
       Object.keys(values).some((k) => k !== 'S') ||
       values.S === undefined ||
@@ -142,7 +151,9 @@ export function guardIdleConsole(
     )
       throw new ConsoleRefusal('invalid')
     const name =
-      raw === 'M104' || raw === 'M109' ? state.toolhead.extruder : 'heater_bed'
+      command === 'M104' || command === 'M109'
+        ? state.toolhead.extruder
+        : 'heater_bed'
     if (name !== 'heater_bed' && !EXTRUDER.test(name))
       throw new ConsoleRefusal('unknown-state')
     const limit = heater.safeParse(settings[name])
@@ -150,7 +161,8 @@ export function guardIdleConsole(
       throw new ConsoleRefusal('limit')
     return
   }
-  if (raw !== 'G0' && raw !== 'G1') throw new ConsoleRefusal('not-allowed')
+  if (command !== 'G0' && command !== 'G1')
+    throw new ConsoleRefusal('not-allowed')
   if (Object.keys(values).some((k) => !'XYZEF'.includes(k)))
     throw new ConsoleRefusal('invalid')
   const motion = gcodeMove.safeParse(state.gcode_move)

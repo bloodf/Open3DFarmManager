@@ -81,6 +81,7 @@ import {
 import { z } from 'zod'
 import { decodeMoonrakerFrame } from './frame.ts'
 import { guardIdleConsole, idleConsoleQueryWire } from './console-idle.ts'
+import { klipperCommandName } from './klipper-command.ts'
 import {
   ConsoleRefusal,
   idleConsoleClass,
@@ -956,7 +957,7 @@ export function openFixedMoonrakerPause(input: {
       const tool = u1 ? u1ConsoleTool(line.trim(), input.objects) : undefined
       // A macro replaces the classified command, so it is refused in every
       // state. The U1 tool selection is a vendor macro with its own guard.
-      const command = line.trim().split(/\s+/, 1)[0]!.toUpperCase()
+      const command = klipperCommandName(line)
       if (
         !tool &&
         input.objects?.some(

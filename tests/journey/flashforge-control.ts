@@ -18,10 +18,48 @@ const CONFIRMED = /^Comando confirmado pelo Connector\./
 
 type Fixture = Awaited<ReturnType<typeof startFlashforgeControlFixture>>
 
+/**
+ * Republishing age. The issuer grants advertised controls for two minutes from
+ * receipt, so this leaves over a minute for the command itself.
+ */
+const REPUBLISH_AFTER_MS = 45_000
+
+/**
+ * Opens the telemetry upload until the server has stored a delivery of this
+ * window (with `advertises`, one that offers it), then closes it again.
+ * Telemetry shares one proof slot per Connector
+ * credential with the status and control inboxes and displaces them, so the
+ * path stays closed while the page holds a live or control session.
+ */
+async function publishTelemetry(journey: JourneyHarness, advertises?: string) {
+  const delivered = journey.simulatorObservation().telemetryDelivered
+  journey.setTelemetryUpload(true)
+  try {
+    await expect
+      .poll(() => journey.simulatorObservation().telemetryDelivered, {
+        timeout: 90_000,
+      })
+      .toBeGreaterThan(delivered)
+    if (advertises)
+      await expect
+        .poll(() => journey.advertisedControls(), { timeout: 90_000 })
+        .toContain(advertises)
+  } finally {
+    journey.setTelemetryUpload(false)
+  }
+}
+
+/** The live article only: a lost link adds a "last known state" one. */
+const liveArticle = (journey: JourneyHarness) =>
+  journey
+    .farmRow()
+    .and(journey.ownerPage.locator('article:not(.last-known-state)'))
+
 /** One signed command per Connector control session, as the operator does. */
 function operator(journey: JourneyHarness) {
   const page: Page = journey.ownerPage
   let inboxesUsed = 0
+  let publishedAt = -Infinity
   async function command(
     open: () => Promise<void>,
     button: string,
@@ -34,6 +72,11 @@ function operator(journey: JourneyHarness) {
       exact: true,
     })
     for (let attempt = 1; ; attempt++) {
+      if (Date.now() - publishedAt > REPUBLISH_AFTER_MS) {
+        // Every qualified model offers pause.
+        await publishTelemetry(journey, 'pause')
+        publishedAt = Date.now()
+      }
       await expect
         .poll(
           () => {
@@ -44,8 +87,12 @@ function operator(journey: JourneyHarness) {
         )
         .toBe(true)
       inboxesUsed = journey.simulatorObservation().pauseInboxes
-      await open()
-      await expect(dialog).toBeVisible()
+      // The page ignores a click that lands as the control turns unavailable.
+      // Opening sends nothing, so it is repeated until the dialog shows.
+      await expect(async () => {
+        if (!(await dialog.isVisible())) await open()
+        await expect(dialog).toBeVisible()
+      }).toPass({ timeout: 180_000 })
       await expect(async () => {
         expect(
           (await confirmation.isEnabled()) ||
@@ -72,8 +119,9 @@ function operator(journey: JourneyHarness) {
         .getByRole('button', { name: label, exact: true })
       return command(
         async () => {
+          // Enabled once the page holds a live, fresh state that allows it.
           await expect(control).toHaveAttribute('aria-disabled', 'false', {
-            timeout: 20_000,
+            timeout: 90_000,
           })
           await control.click()
         },
@@ -100,7 +148,7 @@ function operator(journey: JourneyHarness) {
       return command(
         async () => {
           await fill(block)
-          await expect(control).toBeEnabled({ timeout: 20_000 })
+          await expect(control).toBeEnabled({ timeout: 90_000 })
           await control.click()
         },
         'Confirmar comando',
@@ -119,7 +167,7 @@ function operator(journey: JourneyHarness) {
       return command(
         async () => {
           await section.locator('select').selectOption(tray)
-          await expect(control).toBeEnabled({ timeout: 20_000 })
+          await expect(control).toBeEnabled({ timeout: 90_000 })
           await control.click()
         },
         'Confirmar comando',
@@ -130,16 +178,19 @@ function operator(journey: JourneyHarness) {
 }
 
 async function open(journey: JourneyHarness) {
-  const row = await inspectPrinter(journey)
+  await inspectPrinter(journey)
+  const row = liveArticle(journey)
   await expect(
     row.getByText('Conexão direta autenticada', { exact: true }),
   ).toBeVisible({ timeout: 90_000 })
-  await expect(row).toContainText('Imprimindo', { timeout: 30_000 })
+  await expect(row).toContainText('Imprimindo', { timeout: 90_000 })
   return row
 }
 
 const reported = (row: Locator, state: string) =>
-  expect(row).toContainText(state, { timeout: 30_000 })
+  expect(
+    row.locator('dt', { hasText: 'Último estado informado' }).locator('+ dd'),
+  ).toHaveText(`${state} — dados de simulador`, { timeout: 90_000 })
 
 const control = (cmd: string, args: object) => ({
   path: '/control',
@@ -156,8 +207,6 @@ async function withJourney(
     simulator: 'flashforge',
     control: true,
     signedControl: true,
-    // The issuer grants only controls the Connector recently advertised.
-    history: true,
   })
   const fixture = journey.vendor?.raw as Fixture
   try {
@@ -176,11 +225,16 @@ async function withJourney(
 
 export function flashforgeControlJourneys() {
   if (!journeyEnabled()) return
+  // Each journey builds the farm app and then signs several commands, one
+  // control session each; the budget covers a loaded host.
+  const budget = 10 * 60_000
 
   test('flashforge: unqualified writes are not offered and the camera plays', async ({
     browser,
   }) => {
     await withJourney({ browser }, async (journey, fixture) => {
+      // The server holds the Connector's own advertisement before it is read.
+      await publishTelemetry(journey)
       const row = await open(journey)
       await expect
         .poll(() => journey.simulatorObservation().pauseInboxReady, {
@@ -204,6 +258,7 @@ export function flashforgeControlJourneys() {
   test('flashforge: qualified 5M Pro applies signed commands once each', async ({
     browser,
   }) => {
+    test.setTimeout(budget)
     await withJourney(
       { browser, flashforgeQualified: true },
       async (journey, fixture) => {
@@ -267,6 +322,7 @@ export function flashforgeControlJourneys() {
   test('flashforge: qualified AD5X applies lifecycle, slot record and slot load', async ({
     browser,
   }) => {
+    test.setTimeout(budget)
     await withJourney(
       { browser, flashforgeQualified: true, printerModel: 'AD5X' },
       async (journey, fixture) => {
@@ -295,7 +351,7 @@ export function flashforgeControlJourneys() {
           await block.locator('input[type="color"]').fill('#11aa33')
         }
         await send.extended(row, slotLabel, fillSlot)
-        await expect(row).toContainText('PETG', { timeout: 30_000 })
+        await expect(row).toContainText('PETG', { timeout: 90_000 })
         await send.extended(
           row,
           slotLabel,

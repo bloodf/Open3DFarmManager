@@ -6,7 +6,7 @@ import {
   type AccountSessionState,
   type SessionPolicy,
 } from '../utils/auth/session-contract.ts'
-import type { ResinLedgerEntry } from '../../common/resin-ledger/entry.ts'
+import type { ResinLedgerEntry } from '../utils/resin-ledger/entry.ts'
 import {
   entryColumns,
   recordFromRow,

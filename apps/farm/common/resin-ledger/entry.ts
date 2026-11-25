@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// The browser's copy of server/utils/resin-ledger/entry.ts, so no client file
+// imports a server module. tests/unit/rv-hygiene.test.ts keeps them in step.
 import { z } from 'zod'
 
 const label = z.string().trim().min(1).max(128)

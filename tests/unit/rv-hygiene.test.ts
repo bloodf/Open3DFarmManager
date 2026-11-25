@@ -2,11 +2,16 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterEach, describe, expect, test, vi } from 'vitest'
-import { loadSlotBindings } from '../../apps/farm/app/utils/slot-bindings-load.ts'
-import { findSpoolsByIds } from '../../apps/farm/server/utils/spool-library/legacy-api/spool.ts'
-import type { SpoolLibraryRepository } from '../../apps/farm/server/utils/spool-library/scope.ts'
-import { MAX_SPOOL_IDS } from '../../apps/farm/common/spool-ids.ts'
+import { afterEach, describe, expect, expectTypeOf, test, vi } from 'vitest'
+import { z } from 'zod'
+import {
+  loadSlotBindings,
+  SPOOL_REQUEST_CONCURRENCY,
+} from '../../apps/farm/app/utils/slot-bindings-load.ts'
+import { resinLedgerEntry as clientEntry } from '../../apps/farm/common/resin-ledger/entry.ts'
+import type * as ClientSummary from '../../apps/farm/common/resin-ledger/summary-types.ts'
+import { resinLedgerEntry as serverEntry } from '../../apps/farm/server/utils/resin-ledger/entry.ts'
+import type * as ServerSummary from '../../apps/farm/server/utils/resin-ledger/summary.ts'
 
 const assignment = (spoolId: number, unassignedAt: number | null = null) => ({
   id: `a${spoolId}`,
@@ -18,29 +23,38 @@ const assignment = (spoolId: number, unassignedAt: number | null = null) => ({
   unassignedAt,
 })
 
-function stubApi(assignments: ReturnType<typeof assignment>[]) {
-  const calls: { url: string; query: unknown }[] = []
-  vi.stubGlobal(
-    '$fetch',
-    async (url: string, options: { query?: Record<string, unknown> }) => {
-      calls.push({ url, query: options.query })
-      if (url.endsWith('/slots')) return { assignments }
-      const ids = String((options.query as { ids?: string } | undefined)?.ids)
-        .split(',')
-        .map(Number)
-      return {
-        items: ids.map((id) => ({
-          id,
-          archived: false,
-          remaining_weight: id,
-          initial_weight: 1000,
-          filament: {},
-        })),
-      }
-    },
-  )
-  return calls
+const api = '/api/farms/farm/spool-library'
+
+function stubApi(
+  assignments: ReturnType<typeof assignment>[],
+  failures: Record<number, number> = {},
+) {
+  const urls: string[] = []
+  const flight = { now: 0, most: 0 }
+  vi.stubGlobal('$fetch', async (url: string) => {
+    urls.push(url)
+    if (url === `${api}/slots`) return { assignments }
+    const id = Number(url.slice(`${api}/spools/`.length))
+    flight.most = Math.max(flight.most, ++flight.now)
+    await Promise.resolve()
+    flight.now--
+    const statusCode = failures[id]
+    if (statusCode)
+      throw Object.assign(new Error('Request failed'), { statusCode })
+    return {
+      item: {
+        id,
+        archived: false,
+        remaining_weight: id,
+        initial_weight: 1000,
+        filament: {},
+      },
+    }
+  })
+  return { urls, flight }
 }
+
+const load = () => loadSlotBindings('farm', new AbortController().signal)
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -48,132 +62,78 @@ afterEach(() => {
 
 describe('assigned-slot spool fetch', () => {
   test('requests only the actively assigned spool ids', async () => {
-    const calls = stubApi([
+    const { urls } = stubApi([
       assignment(9),
       assignment(4),
       assignment(7, 2),
       { ...assignment(9), printerId: 'printer-other' },
     ])
-    const index = await loadSlotBindings('farm', new AbortController().signal)
-    expect(calls).toEqual([
-      { url: '/api/farms/farm/spool-library/slots', query: undefined },
-      { url: '/api/farms/farm/spool-library/spools', query: { ids: '4,9' } },
-    ])
+    const index = await load()
+    expect(urls).toEqual([`${api}/slots`, `${api}/spools/9`, `${api}/spools/4`])
     expect(index.get('printer-4')?.get('ams:0')?.remainingGrams).toBe(4)
+    expect(index.get('printer-other')?.get('ams:0')?.remainingGrams).toBe(9)
     expect(index.has('printer-7')).toBe(false)
   })
 
   test('requests no spool without an active assignment', async () => {
-    const calls = stubApi([assignment(7, 2)])
-    await loadSlotBindings('farm', new AbortController().signal)
-    expect(calls.map((call) => call.url)).toEqual([
-      '/api/farms/farm/spool-library/slots',
-    ])
+    const { urls } = stubApi([assignment(7, 2)])
+    await load()
+    expect(urls).toEqual([`${api}/slots`])
   })
 
-  test('splits many assignments into bounded batches', async () => {
-    const count = MAX_SPOOL_IDS + 1
-    const calls = stubApi(
+  test('bounds the requests in flight', async () => {
+    const count = SPOOL_REQUEST_CONCURRENCY * 2 + 1
+    const { urls, flight } = stubApi(
       Array.from({ length: count }, (_, i) => assignment(i + 1)),
     )
-    const index = await loadSlotBindings('farm', new AbortController().signal)
-    expect(
-      calls
-        .slice(1)
-        .map(
-          (call) =>
-            String((call.query as { ids: string }).ids).split(',').length,
-        ),
-    ).toEqual([MAX_SPOOL_IDS, 1])
-    expect(index.size).toBe(count)
+    expect((await load()).size).toBe(count)
+    expect(urls).toHaveLength(count + 1)
+    expect(flight.most).toBe(SPOOL_REQUEST_CONCURRENCY)
+  })
+
+  test('keeps the other bindings when an assigned spool is missing', async () => {
+    stubApi([assignment(1), assignment(2)], { 1: 404 })
+    expect([...(await load()).keys()]).toEqual(['printer-2'])
+  })
+
+  test('reports any other failure', async () => {
+    stubApi([assignment(1), assignment(2)], { 1: 503 })
+    await expect(load()).rejects.toMatchObject({ statusCode: 503 })
   })
 })
 
-describe('spool ids filter', () => {
-  function repository() {
-    const read: string[] = []
-    const scan = async () => {
-      throw new Error('The ids filter must not scan the library')
-    }
-    const spools = new Map(
-      [
-        { id: 1, archived: false },
-        { id: 2, archived: true },
-        { id: 3, archived: false },
-      ].map((spool) => [
-        spool.id,
-        {
-          ...spool,
-          filamentId: 5,
-          usedWeight: 0,
-          extra: {},
-          registeredAt: 0,
-          firstUsedAt: null,
-          lastUsedAt: null,
-        },
-      ]),
-    )
-    const found = (value: unknown) =>
-      value ? { ok: true, value } : { ok: false, reason: 'not-found' }
-    const repo = {
-      spools: {
-        list: scan,
-        async get(id: number) {
-          read.push(`spool:${id}`)
-          return found(spools.get(id))
-        },
-      },
-      filaments: {
-        list: scan,
-        async get(id: number) {
-          read.push(`filament:${id}`)
-          return found({
-            id,
-            vendorId: null,
-            density: 1.24,
-            diameter: 1.75,
-            weight: 1000,
-            extra: {},
-            registeredAt: 0,
-          })
-        },
-      },
-      vendors: { list: scan, get: scan },
-    } as unknown as SpoolLibraryRepository
-    return { repo, read }
-  }
-
-  test('reads only the named records and skips archived and unknown', async () => {
-    const { repo, read } = repository()
-    const result = await findSpoolsByIds(repo, '3,2,99,1,3')
-    expect(result).toMatchObject({
-      ok: true,
-      value: { status: 200, body: [{ id: 3 }, { id: 1 }] },
-    })
-    expect(read).toEqual([
-      'spool:3',
-      'filament:5',
-      'spool:2',
-      'spool:99',
-      'spool:1',
-    ])
+describe("the browser's resin ledger copy", () => {
+  test('has the same schema as the server', () => {
+    expect(z.toJSONSchema(clientEntry)).toEqual(z.toJSONSchema(serverEntry))
   })
 
   test.each([
-    '',
-    '0',
-    '-1',
-    '1,,2',
-    '1.5',
-    '9007199254740993',
-    Array.from({ length: MAX_SPOOL_IDS + 1 }, (_, i) => i + 1).join(','),
-  ])('refuses the id list %j without reading', async (raw) => {
-    const { repo, read } = repository()
-    expect(await findSpoolsByIds(repo, raw)).toMatchObject({
-      ok: true,
-      value: { status: 422 },
-    })
-    expect(read).toEqual([])
+    { kind: 'vat', name: '  Cuba  ', source: 'manual' },
+    { kind: 'vat', name: '   ', source: 'manual' },
+    { kind: 'vat', name: 'x'.repeat(129), source: 'manual' },
+    { kind: 'bottle', name: 'A', volumeMl: null, source: 'reported' },
+    {
+      kind: 'volume',
+      target: 'vat',
+      name: 'A',
+      volumeMl: -1,
+      source: 'manual',
+    },
+    { kind: 'film', layers: 1.5, source: 'manual' },
+    { kind: 'lcd', hours: Infinity, source: 'manual' },
+    { kind: 'lcd', hours: 2, source: 'manual', extra: true },
+  ])('reads %j as the server does', (input) => {
+    const client = clientEntry.safeParse(input)
+    const server = serverEntry.safeParse(input)
+    expect(client.success).toBe(server.success)
+    expect(client.data).toEqual(server.data)
+  })
+
+  test('has the same summary types as the server', () => {
+    expectTypeOf<ClientSummary.ResinLedgerSummary>().toEqualTypeOf<ServerSummary.ResinLedgerSummary>()
+    expectTypeOf<ClientSummary.Reading<number>>().toEqualTypeOf<
+      ServerSummary.Reading<number>
+    >()
   })
 })
 
@@ -182,12 +142,14 @@ describe('client and server boundary', () => {
   const app = join(root, 'apps/farm/app')
   const server = join(root, 'apps/farm/server')
 
-  const sources = readdirSync(app, { recursive: true, encoding: 'utf8' })
-    .filter((file) => /\.(?:ts|mjs|js|vue)$/.test(file))
-    .map((file) => {
-      const path = join(app, file)
-      return { path, text: readFileSync(path, 'utf8') }
-    })
+  const sources = [app, join(root, 'apps/farm/common')].flatMap((directory) =>
+    readdirSync(directory, { recursive: true, encoding: 'utf8' })
+      .filter((file) => /\.(?:ts|mjs|js|vue)$/.test(file))
+      .map((file) => {
+        const path = join(directory, file)
+        return { path, text: readFileSync(path, 'utf8') }
+      }),
+  )
 
   test('no app file imports apps/farm/server', () => {
     expect(sources.length).toBeGreaterThan(100)

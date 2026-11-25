@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { MAX_SPOOL_IDS } from '../../common/spool-ids.ts'
 import { verifiedSlotBindings, type SlotBindingIndex } from './slot-spools.ts'
 import type { SlotAssignment } from './spool-features-types.ts'
-import type {
-  SpoolItem,
-  SpoolLibraryListResponse,
-} from './spool-library-types.ts'
+import type { SpoolItem } from './spool-library-types.ts'
+
+/** Most spool requests in flight at once. */
+export const SPOOL_REQUEST_CONCURRENCY = 6
 
 /**
- * Verified bindings for the active slot assignments. Reads only the assigned
- * spools, in bounded batches, never the whole library.
+ * Verified bindings for the active slot assignments. Reads each assigned spool
+ * by id, never the whole library.
  */
 export async function loadSlotBindings(
   farmId: string,
@@ -27,17 +26,25 @@ export async function loadSlotBindings(
         .filter((assignment) => assignment.unassignedAt === null)
         .map((assignment) => Number(assignment.spoolId)),
     ),
-  ].sort((a, b) => a - b)
+  ]
   const spools: SpoolItem[] = []
-  for (let start = 0; start < ids.length; start += MAX_SPOOL_IDS) {
-    const { items } = await $fetch<SpoolLibraryListResponse<SpoolItem>>(
-      `${api}/spools`,
-      {
-        ...options,
-        query: { ids: ids.slice(start, start + MAX_SPOOL_IDS).join(',') },
-      },
+  for (let start = 0; start < ids.length; start += SPOOL_REQUEST_CONCURRENCY) {
+    const batch = await Promise.all(
+      ids.slice(start, start + SPOOL_REQUEST_CONCURRENCY).map(async (id) => {
+        try {
+          const { item } = await $fetch<{ item: SpoolItem }>(
+            `${api}/spools/${id}`,
+            options,
+          )
+          return [item]
+        } catch (error) {
+          // A missing spool must not hide the other slots' bindings.
+          if ((error as { statusCode?: unknown }).statusCode === 404) return []
+          throw error
+        }
+      }),
     )
-    spools.push(...items)
+    spools.push(...batch.flat())
   }
   return verifiedSlotBindings(assignments, spools)
 }

@@ -17,10 +17,7 @@ import type {
 } from '../utils/spool-library/scope.ts'
 import { classifyLegacyBody } from '../utils/spool-library/legacy-api/body.ts'
 import { filamentModule } from '../utils/spool-library/legacy-api/filament.ts'
-import {
-  findSpoolsByIds,
-  spoolModule,
-} from '../utils/spool-library/legacy-api/spool.ts'
+import { spoolModule } from '../utils/spool-library/legacy-api/spool.ts'
 import type {
   LegacyApiModule,
   LegacyApiResponse,
@@ -355,9 +352,6 @@ export async function spoolLibraryResource(
   if (target.id !== undefined) apiPath += `/${target.id}`
   if (target.action) apiPath += `/${target.action}`
 
-  const spoolIds =
-    isList && target.resource === 'spools' ? incomingQuery.get('ids') : null
-
   const storage = dependencies?.storage ?? (await spoolLibraryRuntime())
   const scoped = await storage.withScope<{
     response: LegacyApiResponse
@@ -374,15 +368,12 @@ export async function spoolLibraryResource(
     ): Promise<
       Result<{ response: LegacyApiResponse; access: SpoolLibraryAccess }>
     > => {
-      const handled =
-        spoolIds === null
-          ? await module.handle(repository, {
-              method,
-              apiPath,
-              query: incomingQuery,
-              body,
-            })
-          : await findSpoolsByIds(repository, spoolIds)
+      const handled = await module.handle(repository, {
+        method,
+        apiPath,
+        query: incomingQuery,
+        body,
+      })
       if (!handled) return { ok: false, reason: 'not-found' }
       if (!handled.ok) return handled
       return {

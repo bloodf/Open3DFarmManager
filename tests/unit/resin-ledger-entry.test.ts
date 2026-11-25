@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { resinLedgerEntry } from '../../apps/farm/common/resin-ledger/entry.ts'
+import { resinLedgerEntry } from '../../apps/farm/server/utils/resin-ledger/entry.ts'
 
 // spec-derived, not captured: https://github.com/bloodf/openfarm-farm/blob/main/docs/fullfarmmanager/REVIEW.md
 

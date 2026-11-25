@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// The browser's copy of the types in server/utils/resin-ledger/summary.ts.
+// tests/unit/rv-hygiene.test.ts keeps them in step.
 type Source = 'manual' | 'reported'
 export interface Reading<T> {
   value: T

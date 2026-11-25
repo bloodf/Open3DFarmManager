@@ -1,4 +1,5 @@
 import { boundPrinterString } from '@open3dfarmmanager/farm-protocol'
+import { readAnycubicPrintReport } from './alerts.ts'
 
 function estimateSeconds(minutes: unknown) {
   return typeof minutes === 'number' &&
@@ -9,12 +10,59 @@ function estimateSeconds(minutes: unknown) {
     : undefined
 }
 
+// `print/report` names the file as "/<name>". The numbers of an ended job are
+// its reset values, so only a pause keeps them (same reference).
+function printObservation(
+  print: NonNullable<ReturnType<typeof readAnycubicPrintReport>>,
+  data: unknown,
+) {
+  const row =
+    data && typeof data === 'object' && !Array.isArray(data)
+      ? (data as Record<string, unknown>)
+      : {}
+  const observation: Record<string, unknown> = { state: print.state }
+  if (typeof row.filename === 'string') {
+    const filename = row.filename.slice(row.filename.lastIndexOf('/') + 1)
+    if (filename && filename.length <= 1024)
+      observation.filename = boundPrinterString(filename)
+  }
+  if (print.state === 'paused') {
+    for (const [source, target] of [
+      ['progress', 'progress'],
+      ['curr_layer', 'currentLayer'],
+      ['total_layers', 'totalLayer'],
+    ] as const) {
+      const value = row[source]
+      if (
+        typeof value === 'number' &&
+        Number.isFinite(value) &&
+        value >= 0 &&
+        (source !== 'progress' || value <= 100)
+      )
+        observation[target] = value
+    }
+  }
+  return {
+    kind: 'observation' as const,
+    ...observation,
+    ...(print.alert ? { alert: print.alert } : {}),
+  }
+}
+
 export function decodeAnycubicReport(payload: Buffer) {
   if (payload.length > 65536) return { kind: 'invalid' as const }
   try {
     const envelope: unknown = JSON.parse(payload.toString('utf8'))
     if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope))
       return { kind: 'invalid' as const }
+    const head = envelope as Record<string, unknown>
+    // A refused request (any client's) changed nothing on the printer:
+    // bloodf/kobracontrol@c414db4f36d4c96f2b232c368ad6cfe56e3d0408
+    // src/kobracontrol/kobra.py, `succeeded` and `State._on_print`.
+    if (typeof head.type === 'string' && head.state === 'failed')
+      return { kind: 'ignored' as const }
+    const print = readAnycubicPrintReport(head)
+    if (print) return printObservation(print, head.data)
     const data = 'data' in envelope ? envelope.data : envelope
     if (!data || typeof data !== 'object' || Array.isArray(data))
       return { kind: 'invalid' as const }
@@ -40,6 +88,14 @@ export function decodeAnycubicReport(payload: Buffer) {
     const estimateBlocked = state !== undefined && !knownState
     const observation: Record<string, unknown> = {}
     if (knownState) observation.state = state
+    // A Kobra 3 `info/report` nests the temperatures under `temp`. Shape
+    // re-typed (not captured) from
+    // bloodf/kobracontrol@c414db4f36d4c96f2b232c368ad6cfe56e3d0408
+    // tests/test_models.py `K3_INFO`.
+    const temp =
+      row.temp && typeof row.temp === 'object' && !Array.isArray(row.temp)
+        ? (row.temp as Record<string, unknown>)
+        : undefined
     const fields = {
       curr_nozzle_temp: 'toolTemperatureCelsius',
       curr_hotbed_temp: 'bedTemperatureCelsius',
@@ -48,7 +104,7 @@ export function decodeAnycubicReport(payload: Buffer) {
       total_layers: 'totalLayer',
     }
     for (const [source, target] of Object.entries(fields)) {
-      const value = row[source] ?? project?.[source]
+      const value = row[source] ?? temp?.[source] ?? project?.[source]
       if (
         typeof value === 'number' &&
         Number.isFinite(value) &&

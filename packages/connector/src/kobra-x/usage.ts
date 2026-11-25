@@ -1,3 +1,4 @@
+import { isAnycubicFaultCode } from '../anycubic/alerts.ts'
 import type { KobraXFacts, KobraXFactsTracker } from './facts.ts'
 import type { KobraXReport } from './requests.ts'
 
@@ -98,12 +99,7 @@ export function createKobraXUsage(input: {
       if (report.type !== 'print') return
       if (report.state === 'finished') finish('completed', now())
       else if (report.state === 'stoped')
-        finish(
-          report.code === undefined || report.code === 0 || report.code === 200
-            ? 'cancelled'
-            : 'failed',
-          now(),
-        )
+        finish(isAnycubicFaultCode(report.code) ? 'failed' : 'cancelled', now())
     },
     close() {
       unsubscribe()

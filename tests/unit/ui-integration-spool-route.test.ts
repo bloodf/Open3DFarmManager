@@ -48,7 +48,7 @@ afterAll(async () => {
   await harness?.close()
 })
 
-it('updates spool search and reloads once when the route query changes', async () => {
+it('updates spool search and reloads when the route query changes', async () => {
   const requestedQueries: (string | null)[] = []
   const routes: Routes = {
     'GET /api/auth/me': reply({ accountId: 'account-one' }),
@@ -88,6 +88,7 @@ it('updates spool search and reloads once when the route query changes', async (
       target.__pageRoute.query.q = '#42'
     })
     await pw(search).toHaveValue('#42')
+    await pw.poll(() => requestedQueries).toContain('#42')
     await pw
       .poll(() => requestedQueries.filter((q) => q === '#42'))
       .toEqual(['#42'])

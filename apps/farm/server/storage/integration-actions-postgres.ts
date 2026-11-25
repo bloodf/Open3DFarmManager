@@ -7,6 +7,7 @@ import type {
   NewAction,
 } from '../services/integration-actions.ts'
 import type { EnvelopeRecord } from '../services/integration-delivery.ts'
+import { freshAdvertisedActions } from './postgres-pause-authority.ts'
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const actionColumns = (sql: Sql) =>
@@ -23,17 +24,33 @@ export class PostgresIntegrationActions implements IntegrationActionsStore {
 
   async target(printerAssignmentId: string): Promise<ActionTarget | null> {
     if (!uuid.test(printerAssignmentId)) return null
-    const rows = await this.sql<ActionTarget[]>`
+    const rows = await this.sql<
+      (ActionTarget & {
+        observedAt: number | null
+        receivedAt: number | null
+        ageAtSendMs: number | null
+        now: number
+      })[]
+    >`
       SELECT p.farm_id::text AS "farmId", p.agent_id::text AS "agentId",
-        s.state->'controls' AS controls
+        s.state->'controls' AS controls, s.observed_at::float8 AS "observedAt",
+        s.received_at::float8 AS "receivedAt", s.age_at_send_ms::float8 AS "ageAtSendMs",
+        floor(extract(epoch FROM pg_catalog.clock_timestamp())*1000)::float8 AS "now"
       FROM farm.printer_assignments p
       LEFT JOIN farm.printer_latest_state s
         ON s.farm_id = p.farm_id AND s.agent_id = p.agent_id AND s.printer_key = p.printer_key
       WHERE p.id = ${printerAssignmentId}::uuid AND p.revoked_at IS NULL`
     const row = rows[0]
     if (!row) return null
+    // Same freshness rule as browser grants. `null` means no list was reported.
     const controls = Array.isArray(row.controls)
-      ? row.controls.filter((item): item is string => typeof item === 'string')
+      ? freshAdvertisedActions(
+          row.controls,
+          row.ageAtSendMs,
+          row.receivedAt,
+          row.now,
+          row.observedAt,
+        )
       : null
     return { farmId: row.farmId, agentId: row.agentId, controls }
   }

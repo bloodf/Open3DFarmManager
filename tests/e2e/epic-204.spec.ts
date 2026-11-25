@@ -513,13 +513,14 @@ async function publishControls(input: {
   const observedAt = receivedAt + 20_000
   try {
     await sql`INSERT INTO farm.printer_latest_state
-      (farm_id, agent_id, printer_key, observed_at, received_at, state)
+      (farm_id, agent_id, printer_key, observed_at, received_at, age_at_send_ms, state)
       VALUES (
         ${input.farmId}::uuid,
         ${input.agentId}::uuid,
         ${input.printerKey},
         ${observedAt},
         ${receivedAt},
+        0,
         ${sql.json({
           printerKey: input.printerKey,
           state: 'idle',
@@ -529,7 +530,7 @@ async function publishControls(input: {
         })}::jsonb
       )
       ON CONFLICT (farm_id, agent_id, printer_key) DO UPDATE
-      SET observed_at = EXCLUDED.observed_at, received_at = EXCLUDED.received_at, state = EXCLUDED.state
+      SET observed_at = EXCLUDED.observed_at, received_at = EXCLUDED.received_at, age_at_send_ms = EXCLUDED.age_at_send_ms, state = EXCLUDED.state
       WHERE farm.printer_latest_state.observed_at < EXCLUDED.observed_at`
   } finally {
     await sql.end({ timeout: 3 })

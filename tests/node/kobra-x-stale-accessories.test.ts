@@ -183,6 +183,15 @@ test('light and fan evidence clears on the same connection once info omits them'
   assert.deepEqual(f.offered(), [...accessoryActions])
 })
 
+test('removing the ACE still withdraws only its controls', async (t) => {
+  const f = await fixture(t)
+  await f.report('info', full)
+  await f.report('info', { ...full, multi_color_box: [] })
+  assert.deepEqual(f.evidence(), { ace: false, light: true, fan: true })
+  assert.deepEqual(f.offered(), ['set_fan', 'set_light'])
+  assert.equal(f.unavailable.length, 0)
+})
+
 test('a busy info report keeps the fan it names under settings', async (t) => {
   const f = await fixture(t)
   await f.report('info', {

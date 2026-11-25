@@ -196,6 +196,12 @@ export interface KobraXMockOptions {
    * of state queries (`query`, `getInfo`); `all` echoes none. Default: echo.
    */
   printerChosenReportIds?: 'commands' | 'all' | undefined
+  /**
+   * Synthetic, not captured: the reports selected by `printerChosenReportIds`
+   * carry no `msgid` at all. No cited source observed this; it exercises the
+   * missing-ID branch of `printer-assigned` (kobra-x/requests.ts).
+   */
+  omitReplacedReportIds?: boolean | undefined
   printDurationMs?: number | undefined
   preparationPhases?: readonly KobraXJobPhase[] | undefined
   preparationStepMs?: number | undefined
@@ -964,11 +970,17 @@ export async function startKobraXMock(
     } = {},
   ) {
     const echoed = reportOptions.msgid ?? replyMsgid
+    const replaced = echoed !== undefined && replacedIds.has(echoed)
     const body = {
       type,
       action,
+      // `undefined` drops the key from the serialized report.
       msgid:
-        echoed === undefined || replacedIds.has(echoed) ? nextMsgId() : echoed,
+        replaced && options.omitReplacedReportIds
+          ? undefined
+          : echoed === undefined || replaced
+            ? nextMsgId()
+            : echoed,
       timestamp: Date.now(),
       state: reportOptions.state ?? 'done',
       code: reportOptions.code ?? 200,

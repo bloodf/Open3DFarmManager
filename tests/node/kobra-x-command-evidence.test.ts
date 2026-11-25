@@ -546,6 +546,7 @@ async function loopbackDriver(
   t: TestContext,
   printerChosenReportIds: 'commands' | 'all',
   qualification: { reportIdentity?: 'printer-assigned' },
+  omitReplacedReportIds = false,
 ) {
   installNetworkGuard()
   t.after(uninstallNetworkGuard)
@@ -554,6 +555,7 @@ async function loopbackDriver(
     camera: false,
     reportIntervalMs: 0,
     printerChosenReportIds,
+    omitReplacedReportIds,
   })
   t.after(() => printer.close())
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'kx-report-id-')))
@@ -585,6 +587,7 @@ async function loopbackDriver(
     },
   )
   const signal = new AbortController().signal
+  const reportIds: { type: string; msgid: string }[] = []
   const command = openFixedKobraXControl({
     binding,
     connectionGeneration: 1,
@@ -597,11 +600,17 @@ async function loopbackDriver(
         httpPort: printer.httpPort,
         mqttPort: printer.mqttPort,
         resultTimeoutMs: 400,
+        onReport(...received) {
+          const [{ type, msgid }] = received
+          reportIds.push({ type, msgid })
+          options.onReport?.(...received)
+        },
       }),
   })
   t.after(() => command.close())
   return {
     ...command,
+    reportIds,
     request: { binding, signal, beforeSend: () => true },
     writes: (type: string, action: string) =>
       printer.calls.all.filter(
@@ -616,19 +625,39 @@ for (const [label, qualification, acknowledged] of [
   ['production default', {}, false],
   ['qualified printer', { reportIdentity: 'printer-assigned' }, true],
 ] as const) {
-  test(`${label}: a printer-chosen command report ID, then a state read-back`, async (t) => {
-    const fixture = await loopbackDriver(t, 'commands', qualification)
-    await fixture.prepare()
-    assert.deepEqual(
-      await fixture.driver.execute!(
-        'set_temperature',
-        { heater: 'extruder', target_c: 190 },
-        fixture.request,
-      ),
-      { acknowledged },
-    )
-    assert.equal(fixture.writes('tempature', 'set'), 1)
-  })
+  for (const [idLabel, omitted] of [
+    ['a printer-chosen', false],
+    ['a missing', true],
+  ] as const) {
+    test(`${label}: ${idLabel} command report ID, then a state read-back`, async (t) => {
+      const fixture = await loopbackDriver(
+        t,
+        'commands',
+        qualification,
+        omitted,
+      )
+      await fixture.prepare()
+      // `acknowledged: false` after a write is the dispatcher's
+      // `outcome-unknown` (control/pause-dispatcher.ts).
+      assert.deepEqual(
+        await fixture.driver.execute!(
+          'set_temperature',
+          { heater: 'extruder', target_c: 190 },
+          fixture.request,
+        ),
+        { acknowledged },
+      )
+      assert.equal(fixture.writes('tempature', 'set'), 1)
+      // The simulator really answered the write the way this case names.
+      assert.ok(
+        fixture.reportIds.some(
+          ({ type, msgid }) =>
+            type === 'tempature' &&
+            (omitted ? msgid === '' : msgid.startsWith('printer-msg-')),
+        ),
+      )
+    })
+  }
 }
 
 test('a qualified fallback match alone never proves a light command', async (t) => {

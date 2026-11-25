@@ -1,4 +1,4 @@
-import type { TypedFetch } from 'nuxt/app'
+import type { $Fetch } from 'ofetch'
 import {
   BROWSER_DEVICE_HTTP_AUDIENCE,
   BrowserDeviceHttpAccountResponse,
@@ -9,8 +9,8 @@ import {
 import { signBrowserDeviceProof } from '../../../../packages/farm-protocol/src/browser-device-proof.ts'
 import type { DeviceKeyScope, LocalDeviceKey } from './device-key'
 
-// Nuxt installs this global at runtime; use its public type in standalone checks too.
-declare const $fetch: TypedFetch
+// Nuxt installs this ofetch global at runtime; use its type in standalone checks too.
+declare const $fetch: $Fetch
 
 const options = (signal: AbortSignal) => ({
   signal,

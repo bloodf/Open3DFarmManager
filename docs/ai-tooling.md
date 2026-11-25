@@ -2,6 +2,15 @@
 
 Product development was resumed by the owner on 2026-11-11. Deployment, publication of the separate local payload, DNS or credential changes, production services and hardware tests still need separate authorization. Follow the existing security, review and resource ownership rules in `AGENTS.md`.
 
+## Repository checks
+
+Both modes run every step even after a failure, list the failed steps last and exit 1. Each run uses its own `TMPDIR` under `${XDG_CACHE_HOME:-$HOME/.cache}/openfarm-checks/`, removed on exit, and Vitest is capped with `--maxWorkers=50%`.
+
+- `sh scripts/checks.sh unit [base]` checks only the committed changes in `base..HEAD` (`base` defaults to `$ORQ_BASE_SHA`, then `origin/main`): Prettier, the hex colour lint, typecheck, related Vitest tests, matching `tests/node` files and the Go tests, each only when relevant. Node tests are matched by direct imports, so commit first and do not treat this mode as the final gate.
+- `sh scripts/checks.sh final` runs lint, typecheck, the full Vitest and Node suites, the Go and RTSP tests, the build and the default Playwright suite with two workers (also the local default in `playwright.config.ts`). It does not include `test:postgres:security` or `scripts/test-local-ci-regression.mjs`; `npm run check:all` does.
+
+`sh scripts/checks.sh plan unit [base]` or `plan final` prints the commands without running them.
+
 ## CodeGraph
 
 The standalone CLI is pinned by `.codegraph-version`; it is not an application dependency. The reviewed 1.6.2 bundle can be installed on macOS or Linux by downloading and inspecting the installer at `https://raw.githubusercontent.com/colbymchenry/codegraph/f72c9d2efb14454ff4f9fd7b8460abd82f19a287/install.sh`, then running `CODEGRAPH_VERSION=v1.6.2 sh <downloaded-file>`. It requires `curl` and `tar`. Do not upgrade during feature work.

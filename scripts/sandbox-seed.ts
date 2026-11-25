@@ -50,6 +50,7 @@ export async function seedSandbox(
     sandbox_auth: 'farm_password_auth',
     sandbox_signal: 'farm_signalling_reader',
     sandbox_signal_proof: 'farm_connector_credential_acceptor',
+    sandbox_library: 'farm_library',
     sandbox_jobs: undefined,
     sandbox_verify: undefined,
   }
@@ -312,6 +313,8 @@ export async function seedSandbox(
           internalUrl('sandbox_integrations'),
         'NUXT_INTEGRATION_AUTH_SIGNING_KEY=' +
           randomBytes(32).toString('base64url'),
+        'NUXT_LIBRARY_ENABLED=true',
+        'NUXT_LIBRARY_DATABASE_URL=' + internalUrl('sandbox_library'),
         'NUXT_INTEGRATION_JOBS_DATABASE_URL=' + internalUrl('sandbox_jobs'),
         'NUXT_INTEGRATION_JOBS_ENABLED=true',
         'NUXT_INTEGRATION_JOBS_ENVELOPE_SIGNING_KEY=' + envelopeSigningKey,

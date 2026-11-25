@@ -14,13 +14,14 @@ import { afterAll, afterEach, expect, it, vi } from 'vitest'
 
 const state = vi.hoisted(() => ({
   directory: '',
+  enabled: true,
   service: undefined as unknown,
 }))
 
 vi.mock('nuxt/server', () => ({
   useRuntimeConfig: () => ({
     library: {
-      enabled: true,
+      enabled: state.enabled,
       // Never dialled: storing bytes only touches the blob directory.
       databaseUrl: 'postgres://fixture:fixture@127.0.0.1:1/fixture',
       directory: state.directory,
@@ -410,3 +411,50 @@ it.skipIf(!postgresReady)(
   },
   60_000,
 )
+
+it('reports a disabled library runtime clearly', async () => {
+  state.enabled = false
+  state.service = {
+    upload: async () => ({ ok: false, problem: 'service-unavailable' }),
+  }
+  try {
+    const response = (await uploadIntegrationLibrary(
+      new Request('https://farm.test/api/integrations/v1/library', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          farmId: randomUUID(),
+          name: 'part.gcode',
+          contentBase64: gcode.toString('base64'),
+        }),
+      }),
+      {} as IntegrationPrincipal,
+    )) as Response
+    expect(response.status).toBe(503)
+    expect(await response.json()).toMatchObject({
+      code: 'service-unavailable',
+      errors: [{ detail: 'Biblioteca desativada nesta instalação.' }],
+    })
+  } finally {
+    state.enabled = true
+  }
+})
+
+it('returns 201 for a successful upload with the library runtime enabled', async () => {
+  state.service = {
+    upload: async () => ({ ok: true, value: { item: { id: 'fixture' } } }),
+  }
+  const response = (await uploadIntegrationLibrary(
+    new Request('https://farm.test/api/integrations/v1/library', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        farmId: randomUUID(),
+        name: 'part.gcode',
+        contentBase64: gcode.toString('base64'),
+      }),
+    }),
+    {} as IntegrationPrincipal,
+  )) as Response
+  expect(response.status).toBe(201)
+})

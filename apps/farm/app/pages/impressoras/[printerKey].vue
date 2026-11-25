@@ -284,15 +284,17 @@ const displayedMaterials = computed(() =>
 const slotBindings = useFarmSlotBindings(
   () => ready.value?.scope?.farmId,
   () =>
-    !row.value?.observation?.historical && !!displayedMaterials.value?.length,
+    !row.value?.observation?.historical &&
+    !age.value?.stale &&
+    !!displayedMaterials.value?.length,
 )
 const bindings = computed(() =>
-  row.value && !row.value.observation?.historical
+  row.value && !row.value.observation?.historical && !age.value?.stale
     ? slotBindings(row.value.assignment.assignmentId, displayedMaterials.value)
     : undefined,
 )
 const selectedKobraSpools = computed(() => {
-  if (row.value?.observation?.historical) return []
+  if (row.value?.observation?.historical || age.value?.stale) return []
   const materials = selectedKobraInputs.value.flatMap((input) =>
     input ? [input.material] : [],
   )
@@ -1301,7 +1303,7 @@ watch(
         </Button>
       </template>
       <PrinterDetailMaterials
-        v-if="vendorHasMaterials && !row.observation?.historical"
+        v-if="vendorHasMaterials && !row.observation?.historical && !age?.stale"
         :materials="detailMaterials"
         :bindings="bindings"
         :active-spools="activeSpools"
@@ -1316,11 +1318,11 @@ watch(
     </section>
 
     <PrinterDetailMaterials
-      v-if="!vendorHasMaterials || row?.observation?.historical"
+      v-if="!vendorHasMaterials || row?.observation?.historical || age?.stale"
       :materials="displayedMaterials"
       :bindings="bindings"
       :active-spools="activeSpools"
-      :historical="row?.observation?.historical"
+      :historical="row?.observation?.historical || age?.stale"
       class="panel"
     />
 

@@ -82,12 +82,14 @@ const finish = computed(() => {
 // Last-known materials are never drawn: a reel with an old colour and level
 // would pass for the filament that is loaded now.
 const slots = computed(() =>
-  props.observation?.historical
+  props.observation?.historical || age.value?.stale
     ? undefined
     : farmSlotViews(state.value?.materials, props.bindings, props.activeSpools),
 )
 const staleMaterials = computed(
-  () => !!props.observation?.historical && !!state.value?.materials?.length,
+  () =>
+    !!(props.observation?.historical || age.value?.stale) &&
+    !!state.value?.materials?.length,
 )
 
 function temperature(value: number | undefined) {
@@ -164,6 +166,7 @@ const alertKind = (alert: string | FarmAlert) =>
           :color="slot.color"
           :color-name="slot.color && `Cor ${slot.color}`"
           :printer-percent="slot.printerPercent"
+          :spoolman-percent="slot.spoolmanPercent"
           :spoolman-remaining-weight="slot.spoolmanRemainingWeight"
           :spoolman-initial-weight="slot.spoolmanInitialWeight"
           :active="slot.active"
@@ -172,14 +175,6 @@ const alertKind = (alert: string | FarmAlert) =>
           <template v-if="slot.active" #state>
             <strong>Em uso</strong>
           </template>
-          <p
-            v-if="
-              slot.level.kind === 'known' && slot.level.source === 'printer'
-            "
-            class="wall-printer__remaining"
-          >
-            {{ slot.printerPercent }}% restante
-          </p>
         </FarmSlot>
       </li>
     </ul>

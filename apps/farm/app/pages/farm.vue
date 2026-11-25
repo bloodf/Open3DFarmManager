@@ -544,7 +544,8 @@ function cancelPause(event: Event) {
                     <FarmMaterials
                       v-if="
                         row.observation?.state.materials?.length &&
-                        !row.observation.historical
+                        !row.observation.historical &&
+                        !observationAge(row.observation, liveNow()).stale
                       "
                       :materials="row.observation.state.materials"
                       :bindings="bindingsFor(row)"

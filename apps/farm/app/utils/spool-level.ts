@@ -21,6 +21,7 @@ export interface SpoolLevelInput {
   /** Spoolman `initial_weight` of the spool or its filament, in grams. */
   spoolmanInitialWeight?: number | null
   /** Percentage the printer reports for the slot, 0 to 100. */
+  spoolmanPercent?: number | null
   printerPercent?: number | null
 }
 
@@ -39,6 +40,18 @@ export function resolveSpoolLevel(input: SpoolLevelInput): SpoolLevel {
     return {
       kind: 'known',
       fraction: Math.min(1, left / initial),
+      source: 'spoolman',
+    }
+  }
+  const spoolmanPercent = input.spoolmanPercent
+  if (
+    finite(spoolmanPercent) &&
+    spoolmanPercent >= 0 &&
+    spoolmanPercent <= 100
+  ) {
+    return {
+      kind: 'known',
+      fraction: spoolmanPercent / 100,
       source: 'spoolman',
     }
   }

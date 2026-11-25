@@ -63,6 +63,8 @@ export interface MqttBrokerOptions {
       )
     | undefined
   ca?: Buffer | Buffer[] | undefined
+  /** OpenSSL cipher string, for fixtures that imitate weak printer TLS. */
+  ciphers?: string | undefined
   requestCert?: boolean | undefined
   rejectUnauthorized?: boolean | undefined
   validateClientCert?: ((socket: TLSSocket) => boolean) | undefined
@@ -73,6 +75,7 @@ export interface MqttBrokerOptions {
     | {
         username?: string | undefined
         password?: string | undefined
+        clientId?: string | undefined
       }
     | undefined
   authorizeSubscribe?:
@@ -264,6 +267,7 @@ export async function startMqttBroker(
     {
       key: serverKey,
       cert: serverCert,
+      ...(options.ciphers ? { ciphers: options.ciphers } : {}),
       ...(options.requestCert
         ? {
             requestCert: true,
@@ -393,7 +397,7 @@ export async function startMqttBroker(
                 return val
               }
 
-              readField(strict) // clientId
+              const clientId = readField(strict)
               if (flags & 0x04) {
                 if (strict) throw new Error('Will unsupported')
                 readField(false)
@@ -408,8 +412,10 @@ export async function startMqttBroker(
 
               if (
                 options.auth &&
-                ((options.auth.username !== undefined &&
-                  username !== options.auth.username) ||
+                ((options.auth.clientId !== undefined &&
+                  clientId !== options.auth.clientId) ||
+                  (options.auth.username !== undefined &&
+                    username !== options.auth.username) ||
                   (options.auth.password !== undefined &&
                     password !== options.auth.password))
               ) {

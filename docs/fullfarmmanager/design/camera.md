@@ -23,7 +23,7 @@ Mudança apenas visual: rotas, comportamento e textos em pt-BR são os mesmos. A
 
 - `assets/css/ops-screen.css` aplica o contrato `--ops-*` ao kit Vue existente, só dentro de `.ops-screen`: painéis planos com uma borda e cantos de 6 px, título de seção com divisória, controles com 44 px de altura e borda mais forte que a dos painéis, ação principal preenchida e ação destrutiva em `--ops-fault`.
 - Cabeçalho com o nome do produto em fonte mono e o `PageHeader` de 18 px.
-- Biblioteca: cartões com área de miniatura no topo e ação alinhada na base, alternância Grade/Lista como controle segmentado, rótulos mono nos metadados, situação das versões com `StatusBadge` (ícone, texto e hachura para arquivo removido), tabela de versões em um diálogo mais largo. O carretel desenhado (`FarmSpool`) dos materiais continua o mesmo.
+- Biblioteca: cartões com área de miniatura no topo e ação alinhada na base, alternância Grade/Lista como controle segmentado, rótulos mono nos metadados, situação das versões com `StatusBadge` (ícone, texto e hachura para arquivo removido), tabela de versões em um diálogo mais largo. As amostras de cor dos materiais continuam as mesmas: o carretel desenhado ainda não existe na base desta branch.
 - Reimpressão: grupos de impressoras com borda por nível, sempre com o título em texto, e confirmação da mesa destacada. O diálogo também é aberto pelo histórico e recebe esse mesmo ajuste lá.
 - Arquivos: miniaturas em blocos, confirmação de impressão destacada, aviso de conexão indisponível em `--ops-attention` e barra de operação com tom de erro.
 - Câmera: o visor fica em um painel com marcador decorativo ao lado de “Câmera ao vivo.”. `CameraDisplay.vue` não mudou; os ajustes valem só nesta página.

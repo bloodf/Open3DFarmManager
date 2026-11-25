@@ -54,7 +54,7 @@ Set `control: true` on the binding and list the assignment in
 firmware pair in the shipped qualification list, which is empty, so no
 Flashforge write is offered or sent today. Signed actions, readback rules,
 refusals and gaps are in
-[the driver evidence](../fullfarmmanager/evidence/qidi-flashforge.md).
+[the driver evidence](../fullfarmmanager/evidence/flashforge.md).
 
 For the camera, add a camera source of kind `flashforge-mjpeg` with the
 printer's literal local address and port (stock 8080). The path is fixed.

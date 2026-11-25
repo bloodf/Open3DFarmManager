@@ -12,7 +12,7 @@ export type FlashforgeQualification = Readonly<{
 /**
  * Pairs whose writes passed a supervised run on hardware. Empty: no Flashforge
  * write is offered or sent. Add a pair only with that run recorded in
- * docs/fullfarmmanager/evidence/qidi-flashforge.md.
+ * docs/fullfarmmanager/evidence/flashforge.md.
  */
 export const FLASHFORGE_QUALIFIED_WRITES: readonly FlashforgeQualification[] =
   Object.freeze([])

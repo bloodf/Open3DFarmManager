@@ -5,8 +5,8 @@ import { compileScript, parse } from 'vue/compiler-sfc'
 import { expect, test } from 'vitest'
 import { startHttpMock } from '../../packages/sim-tools/src/mocks/http-mock.ts'
 import { withBrowser } from '../helpers/browser.ts'
-import { FarmAssignmentPage } from '../../apps/farm/app/utils/farm-view.ts'
 import { vueSfcPlugin } from '../e2e/vue-sfc-plugin.ts'
+import { FarmAssignmentPage } from '../../apps/farm/app/utils/farm-view.ts'
 
 const ids = [
   '00000000-0000-4000-8000-000000000001',
@@ -43,7 +43,6 @@ test('remembers the table, sorts by keyboard and links to printer details', asyn
     genDefaultAs: 'Wall',
   })
   const bundle = await build({
-    plugins: [vueSfcPlugin],
     stdin: {
       contents: `
         ${script.content}
@@ -68,6 +67,7 @@ test('remembers the table, sorts by keyboard and links to printer details', asyn
       ).pathname,
       loader: 'ts',
     },
+    plugins: [vueSfcPlugin],
     bundle: true,
     write: false,
   })

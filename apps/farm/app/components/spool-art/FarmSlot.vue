@@ -143,9 +143,9 @@ const amount = computed(() => {
     </div>
     <div v-if="!empty" class="farm-slot-amount">
       <p class="farm-slot-amount-text">
-        <strong :aria-hidden="!amount.showsWeight || undefined">{{
-          amount.main
-        }}</strong>
+        <span :aria-hidden="!amount.showsWeight || undefined">
+          <strong>{{ amount.main }}</strong>
+        </span>
         <span
           v-if="amount.note"
           class="farm-slot-muted"

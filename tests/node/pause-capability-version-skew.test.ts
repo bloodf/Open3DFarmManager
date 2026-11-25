@@ -85,6 +85,7 @@ async function issue(
   fixture: V2Authority,
   connectorClaims: PauseCapabilityV1,
   advertised: unknown,
+  ageAtSendMs: number | null = 0,
 ) {
   const { binding, connector, issuer } = fixture
   const sessionId = 'session_test'
@@ -203,9 +204,8 @@ async function issue(
         ? []
         : [
             {
-              // A fresh observation lets this fixture exercise action version skew.
               controls: advertised,
-              age_at_send_ms: 0,
+              age_at_send_ms: ageAtSendMs,
               observed_at: now,
               received_at: now,
             },
@@ -289,6 +289,18 @@ test('only fresh advertised role-allowed actions are signed', async () => {
       ])
       assert.ok(modern.ok)
       assert.deepEqual(modern.capability.actions, ['set_tool_temperature'])
+      const legacy = await issue(
+        fixture,
+        claims,
+        ['pause', 'resume', 'cancel', 'emergency_stop', 'set_tool_temperature'],
+        null,
+      )
+      assert.ok(legacy.ok)
+      assert.deepEqual(legacy.capability.actions, [
+        'pause',
+        'cancel',
+        'emergency_stop',
+      ])
       const empty = await issue(fixture, claims, ['power', 'future_action'])
       assert.deepEqual(empty, { ok: false, reason: 'denied' })
       const missing = await issue(fixture, claims, undefined)

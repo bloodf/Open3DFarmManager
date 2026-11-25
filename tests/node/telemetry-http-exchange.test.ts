@@ -141,17 +141,25 @@ test('lost acknowledgement retries the durable event with a new challenge and co
       identity: {
         signTelemetryProof(input) {
           const sent = JSON.parse(new TextDecoder().decode(input.body))
-          assert.ok(Number.isSafeInteger(sent[0].ageAtSendMs))
-          assert.ok(
-            sent[0].ageAtSendMs >= (challenges === 1 ? 999 : 86_400_000),
-          )
-          assert.deepEqual(
-            sent,
-            records.map((record) => ({
-              ...record,
-              ageAtSendMs: sent[0].ageAtSendMs,
-            })),
-          )
+          if (challenges === 1) {
+            assert.ok(Number.isSafeInteger(sent[0].ageAtSendMs))
+            assert.ok(sent[0].ageAtSendMs >= 999)
+            assert.deepEqual(
+              sent,
+              records.map((record) => ({
+                ...record,
+                ageAtSendMs: sent[0].ageAtSendMs,
+              })),
+            )
+          } else {
+            assert.deepEqual(
+              sent,
+              records.map((record) => ({
+                ...record,
+                ageAtSendMs: 86_400_000,
+              })),
+            )
+          }
           return 'A'.repeat(86)
         },
       },

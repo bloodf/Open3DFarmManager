@@ -77,10 +77,9 @@ test('synthetic Moonraker state survives outage and restart, then drains to an i
           Number.isSafeInteger(first[0].ageAtSendMs) &&
             first[0].ageAtSendMs! >= 0,
         )
-        assert.ok(second[0]?.kind === 'printer-state')
-        assert.ok(
-          Number.isSafeInteger(second[0].ageAtSendMs) &&
-            second[0].ageAtSendMs! >= 86_400_000,
+        assert.equal(
+          second[0]?.kind === 'printer-state' && second[0].ageAtSendMs,
+          86_400_000,
         )
         ids(body).forEach((id) => received.add(id))
         return ids(body)

@@ -79,6 +79,15 @@ test(
           assert.equal(
             replay,
             JSON.stringify(
+              records.map((record) => ({
+                ...record,
+                ageAtSendMs: 86_400_000,
+              })),
+            ),
+          )
+          assert.equal(
+            JSON.stringify(queue!.batch(1001).records),
+            JSON.stringify(
               records.map(({ ageAtSendMs: _age, ...record }) => record),
             ),
           )

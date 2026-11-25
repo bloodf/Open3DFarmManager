@@ -43,6 +43,19 @@ for (const [printerType, models] of journeyEnabled() ? identities : [])
       ).toBeVisible({ timeout: 90_000 })
       await expect(row).toContainText('Imprimindo')
       await readOnly()
+      // Buddy states with no normalized equivalent stay readable and read-only.
+      fixture.askForAttention()
+      await expect(row).toContainText('A impressora pede atenção na tela', {
+        timeout: 30_000,
+      })
+      await readOnly()
+      fixture.getBusy()
+      await expect(row).toContainText('Impressora ocupada', {
+        timeout: 30_000,
+      })
+      await readOnly()
+      fixture.resumePrinting()
+      await expect(row).toContainText('Imprimindo', { timeout: 30_000 })
       const count = fixture.requests.length
       fixture.loseConnection()
       await expect

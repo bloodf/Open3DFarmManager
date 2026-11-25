@@ -32,6 +32,63 @@ it an SDCP assignment stays read-only. A non-zero `Ack`, a missing `Ack` or a
 missing state change ends the attempt; nothing is retried. Identity (board ID
 and model) is rediscovered before every command session and upload.
 
+## Print history
+
+Read-only, resin models only (Saturn 4 Ultra, Saturn 4 Ultra 16K, Mars 5
+Ultra). SPEC documents Cmd 320 (`HistoryData`, task ids) and Cmd 321 (`{Id}` to
+`HistoryDetailList`); S16K reports both working on firmware V1.5.6. The printer
+detail page asks over the read-only direct connection; the Connector
+rediscovers the board, reads up to 48 ids in batches of 16 and shows
+`TaskName`, `BeginTime`, `EndTime` and `TaskStatus` (1 completed, 2 failed,
+3 cancelled). Status 0 ("other") and incomplete entries are not listed. No
+totals are documented, so totals stay unavailable.
+
+## Camera
+
+SPEC documents Cmd 386 `{Enable}`, answering `{Ack, VideoUrl}` with an RTSP
+address; S16K reports `rtsp://<ip>:554/video`, a single client in practice, and
+sessions that leak until a power cycle when not disabled.
+
+Cmd 386 changes printer state, so it is a signed command, gated like start. It
+uses the existing `power` action with the device `Câmera`, and only the SDCP
+control driver sends it: signature, owner or admin role, replay journal, rate
+limit (2 a minute) and fresh printer state are checked first. It is browser
+only, since `power` is not an API action.
+
+`SDCP_QUALIFIED_VIDEO` (`packages/connector/src/sdcp/models.ts`) **is empty, so
+no printer is offered the command or a camera, and Cmd 386 is never sent**. An
+unqualified request is refused with `DriverRefusalError` before the write. The
+test-only override is an argument of `runConnectorAgent`; the CLI, the runtime
+file and the wire cannot set it. Control must also be opted in for the
+assignment, as for pause.
+
+For a qualified pair with a runtime camera entry
+
+```json
+{
+  "kind": "sdcp-rtsp",
+  "address": "192.168.1.20",
+  "mainboardId": "<board id>",
+  "model": "Saturn 4 Ultra"
+}
+```
+
+and the pinned `rtsp-ingest` helper:
+
+- The detail page's Sistema tab shows `Câmera` with `Ligar` or `Desligar`.
+- The printer reports no stream state, so the command's result is always
+  "unknown", never "applied". `Ligado` means the Connector asked for a stream,
+  or the printer answered `Ack: 1` (limit reached, so one is open). Nothing is
+  retried, and no other write follows an answer.
+- The camera path writes nothing. It relays the `rtsp://` address from the
+  signed reply (that printer only, no credentials or query) through the helper,
+  to one viewer per printer. Reload the page after switching it on.
+- A `VideoUrl` in another form is not opened; `Desligar` turns the stream off.
+- Only `Desligar` closes the printer's session. Closing the page or stopping the
+  Connector leaves it open, and after a restart the Connector shows `Desligado`
+  without knowing. `Ligar` then answers `Ack: 1`, which offers `Desligar` again.
+  S16K reports that a leaked session may need a power cycle.
+
 ## Start qualification
 
 Cmd 128 is neither offered nor sent unless the exact model and firmware pair is
@@ -78,7 +135,7 @@ Neptune and OrangeStorm Giga models are Klipper machines, outside SDCP.
 - CENT `docs/PROTOCOL.md`: on the Centauri Carbon an unknown command or an
   unexpected payload shape can crash the firmware process and kill the running
   print. The Connector builds only Cmd 0, 128, 129, 130 and 131 in the exact
-  documented shapes.
+  documented shapes, plus 320, 321 and 386 for resin models only.
 - HA `README.md` and `__init__.py` state that Cmd 128 crashed the first-generation
   Centauri Carbon and resin printers (they cite their #297), and HA exposes no
   start service for them. This conflicts with CENT (start confirmed on the
@@ -92,6 +149,11 @@ Neptune and OrangeStorm Giga models are Klipper machines, outside SDCP.
 | Request                                                                | Refusal                                                                                    |
 | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
 | Temperature, fan, light, speed, homing, motion, G-code, emergency stop | Not advertised. No documented command in SPEC; Carbon Cmd 403 variants are out of scope.   |
+| Camera on any resin model                                              | Not offered and Cmd 386 not sent: the video qualification list is empty.                   |
+| Camera switch through the API                                          | `power` is not an API action.                                                              |
+| Camera on the Centauri Carbon                                          | CENT lists Cmd 386 as untested and warns that unexpected commands crash the firmware.      |
+| History on the Centauri Carbon                                         | CENT confirms 320/321 only on OpenCentauri V0.3.0-o, not stock; SPEC covers resin boards.  |
+| Time-lapse (Cmd 387, `TimeLapseVideoUrl`), history totals              | Not implemented; no URL format is documented and SPEC has no totals.                       |
 | `start_library_print`                                                  | Not advertised: the library holds no CTB/GOO and SDCP telemetry reports no nozzle profile. |
 | Plate or AMS mapping arguments                                         | Rejected before sending. Canvas mapping is not implemented.                                |
 | File listing and deletion (Cmd 258, 259)                               | Not implemented.                                                                           |
@@ -111,8 +173,9 @@ source documents the effect of an upload during a resin print.
 applies Cmd 128 to 131 to a printer model, answers the `Ack`, reports the
 resulting status (resin and Carbon shapes), stores a chunked upload after
 checking offsets and MD5, and can ignore or refuse a command or reject a chunk.
-An unknown command or payload shape drops the connection. The shipped
-qualification list is empty, so start tests pass their own list in code.
+For resin it also answers Cmd 320, 321 and 386 (one stream) and records a
+cancelled job. An unknown command or payload shape drops the connection. The
+shipped qualification lists are empty, so tests pass their own list in code.
 
 Every refusal before the write is typed (`DriverRefusalError`), so it is
 recorded as not sent with a reason and does not block later commands. After the
@@ -129,7 +192,19 @@ write, a failure is still an unknown outcome.
 - `tests/node/sdcp-upload.test.ts`: chunking and stored content on all four
   models, start of the stored file on the Carbon (resin refuses a bare start),
   rejected chunk, revoked authority, changed identity, file-type limits.
+- `tests/node/sdcp-media.test.ts`: the signed `power` command through the
+  shipped dispatcher and journal (refused unsent as shipped; one enable and one
+  disable with a test qualification; operator role and unknown device refused),
+  rejected addresses and answers, history batching and outcomes, nothing sent to
+  the Carbon.
+- `tests/journey/sdcp-control.spec.ts` (Saturn 4 Ultra simulator, needs Go):
+  signed pause, resume and cancel from the farm page, history on the detail
+  page, start and camera not offered and no Cmd 386; then, with the Connector
+  run from source with a test-only video qualification, the signed camera switch
+  on from the detail page, decoded frames through the real ingest helper, and
+  the signed switch off.
 
 Not covered: real firmware timing (heating, levelling and resin preheat),
-transitional frames from hardware, upload speed, connection limits, the browser
-journey for control, and the runtime file-transfer channel end to end.
+transitional frames from hardware, upload speed, connection limits, the order
+and size of a real history list, the real `VideoUrl` and stream format, and the
+runtime file-transfer channel end to end.

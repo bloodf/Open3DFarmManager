@@ -24,6 +24,10 @@ export type SdcpProfile = Readonly<{
   timestampMs: boolean
   /** Printable file types the upload and start accept. */
   extensions: readonly string[]
+  /** Cmd 320/321 print history as the CBD spec documents it. */
+  history: boolean
+  /** Cmd 386 video stream (RTSP) as the CBD spec documents it. */
+  camera: boolean
 }>
 
 const resin: SdcpProfile = Object.freeze({
@@ -32,6 +36,8 @@ const resin: SdcpProfile = Object.freeze({
   from: 0,
   timestampMs: false,
   extensions: Object.freeze(['.ctb', '.goo']),
+  history: true,
+  camera: true,
 })
 const carbon: SdcpProfile = Object.freeze({
   family: 'fdm',
@@ -39,6 +45,11 @@ const carbon: SdcpProfile = Object.freeze({
   from: 1,
   timestampMs: true,
   extensions: Object.freeze(['.gcode']),
+  // The CBD spec is written for resin boards. On the Carbon, pycentauri
+  // lists Cmd 386 as untested and saw 320/321 only on OpenCentauri firmware,
+  // and an unexpected command can crash the firmware: neither is sent.
+  history: false,
+  camera: false,
 })
 
 const profiles = new Map<string, SdcpProfile>([
@@ -88,6 +99,38 @@ export function sdcpStartQualified(
     (pair) =>
       sdcpModelKey(pair.model) === sdcpModelKey(model) &&
       pair.firmwareVersion === firmwareVersion,
+  )
+}
+
+/**
+ * Pairs allowed to receive the video stream write (Cmd 386), which only the
+ * signed `power` command sends. Empty: no printer is offered the command or a
+ * camera. Add a pair only with a supervised run on hardware recorded in
+ * docs/fullfarmmanager/evidence/elegoo.md.
+ */
+export const SDCP_QUALIFIED_VIDEO: readonly SdcpQualification[] = Object.freeze(
+  [],
+)
+
+export function sdcpVideoQualified(
+  model: string,
+  firmwareVersion: string,
+  qualified: readonly SdcpQualification[] = SDCP_QUALIFIED_VIDEO,
+): boolean {
+  return (
+    sdcpProfile(model)?.camera === true &&
+    sdcpStartQualified(model, firmwareVersion, qualified)
+  )
+}
+
+/** Whether any pair of this model is listed; otherwise nothing is offered. */
+export function sdcpVideoOffered(
+  model: string,
+  qualified: readonly SdcpQualification[] = SDCP_QUALIFIED_VIDEO,
+): boolean {
+  return (
+    sdcpProfile(model)?.camera === true &&
+    qualified.some((pair) => sdcpModelKey(pair.model) === sdcpModelKey(model))
   )
 }
 

@@ -151,6 +151,8 @@ type PauseControlInput = {
   dataDirectory: string
   signal: AbortSignal
   onDiagnostic(value: PauseControlDiagnostic): void
+  /** SDCP camera stream state shared with the camera and detail paths. */
+  sdcpVideo?: import('../sdcp/video.ts').SdcpVideo
   /** Read-only capabilities from the same router used by the relay. */
   onMacroParams?: (
     read: (assignmentId: string) => MacroParamMap | undefined,
@@ -390,6 +392,7 @@ async function runAssignmentControl(
           ? input.kobraXControlEvidenceFor?.(mapping.printer_key)
           : undefined
       },
+      sdcpVideo: input.sdcpVideo,
       gcodeConsole: (binding) =>
         binding === printerBinding &&
         pause.control?.consoleAssignmentIds?.includes(assignmentId) === true,

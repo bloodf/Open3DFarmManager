@@ -6,7 +6,11 @@
  *   src/lan/adapters/elegoo_fdm_cc/elegoo_fdm_cc_message_adapter.cpp: the
  *   Centauri Carbon start payload and command mapping table.
  *
- * Only these five commands are ever built. bjan/pycentauri @ 2f6d9ed
+ * - History (320 {}, 321 {Id}) and video stream (386 {Enable}):
+ *   cbd-tech/SDCP-Smart-Device-Control-Protocol-V3.0.0 @ f977215, built only
+ *   for profiles that declare them (resin).
+ *
+ * No other command is ever built. bjan/pycentauri @ 2f6d9ed
  * docs/PROTOCOL.md reports that an unknown command or an unexpected payload
  * shape can kill the Carbon's firmware process, and the running print with it.
  */
@@ -83,6 +87,38 @@ export function buildSdcpCommand(
         `Unsupported SDCP action '${String(action)}'`,
       )
   }
+}
+
+const TASK_ID = /^[A-Za-z0-9_-]{1,64}$/
+export const isSdcpTaskId = (value: unknown): value is string =>
+  typeof value === 'string' && TASK_ID.test(value)
+
+function requireFeature(model: string, feature: 'history' | 'camera') {
+  if (!sdcpProfile(model)?.[feature])
+    throw new DriverRefusalError(
+      'unsupported-action',
+      `SDCP ${feature} is not documented for this model`,
+    )
+}
+
+/** Read-only print history: the id list, or the details of those ids. */
+export function buildSdcpHistoryCommand(
+  model: string,
+  ids?: readonly string[],
+): { Cmd: 320 | 321; Data: Record<string, unknown> } {
+  requireFeature(model, 'history')
+  if (!ids) return { Cmd: 320, Data: {} }
+  if (!ids.length || ids.length > 16 || !ids.every(isSdcpTaskId))
+    throw new DriverRefusalError('invalid-command', 'Invalid SDCP task ids')
+  return { Cmd: 321, Data: { Id: [...ids] } }
+}
+
+export function buildSdcpVideoCommand(
+  model: string,
+  enable: boolean,
+): { Cmd: number; Data: Record<string, unknown> } {
+  requireFeature(model, 'camera')
+  return { Cmd: 386, Data: { Enable: enable ? 1 : 0 } }
 }
 
 export function sdcpRequest(

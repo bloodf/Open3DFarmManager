@@ -76,8 +76,11 @@ const when = (value: number) => formatDateTime(value, 'short') ?? 'Indisponível
             <td>{{ setting.origin }}</td>
             <td>{{ setting.serviceId ?? 'Não informado' }}</td>
             <td>
-              {{ describeSpoolmanStatus(setting.status)
-              }}{{ setting.configured ? '' : ' (não aplicado)' }}
+              <span
+                :data-status="setting.configured ? setting.status : 'unapplied'"
+                >{{ describeSpoolmanStatus(setting.status)
+                }}{{ setting.configured ? '' : ' (não aplicado)' }}</span
+              >
             </td>
             <td>{{ when(setting.checkedAt) }}</td>
           </tr>

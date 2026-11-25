@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import '../assets/css/ops-screen.css'
 import { resolveFarmScope } from '../utils/farm-scope.ts'
 import { fetchFarmMemberships } from '../composables/useFarmMemberships.ts'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
@@ -177,7 +178,7 @@ async function submit() {
 </script>
 
 <template>
-  <main class="spoolman-page">
+  <main class="spoolman-page ops-screen">
     <header class="page-header">
       <h1>Spoolman da farm</h1>
       <p class="intro">
@@ -253,211 +254,137 @@ async function submit() {
 </template>
 
 <style scoped>
-.spoolman-page {
-  display: grid;
-  gap: var(--space-4);
-  align-content: start;
-}
-.page-header {
-  display: grid;
-  gap: var(--space-2);
-}
-.page-header h1 {
-  margin: 0;
-  max-width: 40rem;
-  overflow-wrap: anywhere;
-}
-.intro {
-  margin: 0;
-  max-width: 40rem;
-  color: var(--color-text-muted);
-}
-.panel,
-.results > :deep(section) {
-  display: grid;
-  gap: var(--space-3);
-  align-content: start;
-  min-width: 0;
-  padding: var(--space-4);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-raised);
-}
-.panel h2,
-.results :deep(h2) {
-  margin: 0;
-  font-size: var(--font-size-lg);
-  line-height: var(--line-height-tight);
-}
-.panel p,
-.results :deep(p) {
-  margin: 0;
-}
-.loading {
-  gap: var(--space-3);
-}
 .loading :deep(.skeleton) {
-  min-block-size: var(--space-5);
+  min-block-size: var(--ops-space-5);
 }
 .layout {
   display: grid;
-  gap: var(--space-4);
+  gap: var(--ops-space-4);
   align-items: start;
   min-width: 0;
 }
 .results {
   display: grid;
-  gap: var(--space-4);
+  gap: var(--ops-space-4);
   min-width: 0;
 }
 .notice,
 .spoolman-error {
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--color-border);
-  border-inline-start: var(--space-1) solid var(--color-accent);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface-raised);
+  padding: var(--ops-space-2) var(--ops-space-3);
+  border: 1px solid var(--ops-border);
+  border-inline-start: 3px solid var(--ops-action);
+  border-radius: var(--ops-radius-sm);
+  background: var(--ops-panel);
 }
 .spoolman-error {
-  border-inline-start-color: var(--printer-error);
+  border-inline-start-color: var(--ops-fault);
   overflow-wrap: anywhere;
 }
 .spoolman-error:focus-visible {
   outline: var(--focus-ring-width) solid var(--color-focus-ring);
   outline-offset: var(--focus-ring-offset);
 }
-.spoolman-error :deep(.ui-card),
-.panel :deep(.ui-card),
-.results :deep(.ui-card),
-.spoolman-page > :deep(.ui-card) {
+/* The error card already sits inside the alert box: no second frame. */
+.spoolman-error :deep(.ui-card.ui-card) {
   padding: 0;
-  box-shadow: none;
+  border: 0;
   background: transparent;
-}
-.spoolman-page > :deep(.ui-card) {
-  padding: var(--space-4);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-raised);
-}
-.spoolman-page :deep(.ui-card h2),
-.spoolman-page :deep(.ui-card h3) {
-  margin: 0 0 var(--space-2);
-  font-size: var(--font-size-lg);
-  line-height: var(--line-height-tight);
 }
 .actions {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2);
+  gap: var(--ops-space-2);
   align-items: center;
-  margin-top: var(--space-3);
-}
-.cta {
-  display: inline-flex;
-  align-items: center;
-  min-height: 2.75rem;
-  padding: var(--space-2) var(--space-4);
-  border: 1px solid var(--color-accent);
-  border-radius: var(--radius-sm);
-  font-weight: var(--font-weight-semibold);
 }
 
 /* SpoolmanForm: stacked, labelled, touch-sized controls. */
 .panel :deep(.spoolman-form) {
   display: grid;
-  max-width: 32rem;
-  gap: var(--space-2);
+  gap: var(--ops-space-1);
 }
-.panel :deep(.spoolman-form label) {
-  margin-top: var(--space-2);
-  font-weight: var(--font-weight-semibold);
-}
-.panel :deep(.spoolman-form label:first-child) {
-  margin-top: 0;
+.panel :deep(.spoolman-form label:not(:first-child)) {
+  margin-top: var(--ops-space-3);
 }
 .panel :deep(.spoolman-form input) {
   width: 100%;
-  min-height: 2.75rem;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--color-text-muted);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  color: var(--color-text);
-  font: inherit;
-}
-.panel :deep(.spoolman-form input:focus-visible),
-.panel :deep(.spoolman-form button:focus-visible) {
-  outline: var(--focus-ring-width) solid var(--color-focus-ring);
-  outline-offset: var(--focus-ring-offset);
 }
 .panel :deep(.spoolman-form p) {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-muted);
+  font-size: var(--ops-text-small);
+  line-height: 18px;
+  color: var(--ops-muted);
+}
+.panel :deep(.spoolman-form .service-id-error) {
+  color: var(--ops-fault);
+  font-weight: 600;
 }
 .panel :deep(.spoolman-form p[role='status']) {
-  padding: var(--space-3);
-  border: 1px solid var(--color-border);
-  border-inline-start: var(--space-1) solid var(--printer-paused);
-  border-radius: var(--radius-sm);
-  color: var(--color-text);
+  padding: var(--ops-space-2) var(--ops-space-3);
+  border: 1px solid var(--ops-attention);
+  border-radius: var(--ops-radius-sm);
+  background: var(--ops-attention-bg);
+  color: var(--ops-attention);
 }
 .panel :deep(.spoolman-form button) {
   justify-self: start;
-  margin-top: var(--space-2);
-  min-height: 2.75rem;
-  padding: var(--space-2) var(--space-4);
-  border: 1px solid var(--color-accent);
-  border-radius: var(--radius-sm);
-  background: var(--color-accent);
-  color: var(--color-on-accent);
-  font: inherit;
-  font-weight: var(--font-weight-semibold);
-  cursor: pointer;
-}
-.panel :deep(.spoolman-form button:disabled) {
-  opacity: 0.6;
-  cursor: not-allowed;
+  margin-top: var(--ops-space-3);
 }
 
 /* SpoolmanResults: result list and saved-settings table. */
 .results :deep(.spoolman-results) {
   display: grid;
-  gap: var(--space-2);
+  gap: var(--ops-space-2);
   margin: 0;
   padding: 0;
   list-style: none;
 }
 .results :deep(.spoolman-results li) {
-  padding: var(--space-3);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  padding: var(--ops-space-2) var(--ops-space-3);
+  border: 1px solid var(--ops-border);
+  border-radius: var(--ops-radius-sm);
   overflow-wrap: anywhere;
 }
 .results :deep([data-status]) {
-  font-weight: var(--font-weight-semibold);
+  display: inline-block;
+  padding: 1px var(--ops-space-2);
+  border: 1px solid currentColor;
+  border-radius: var(--ops-radius-sm);
+  font-size: var(--ops-text-small);
+  font-weight: 600;
+  line-height: 18px;
+}
+.results :deep(li [data-status]) {
+  margin-inline: var(--ops-space-1);
 }
 .results :deep([data-status='reachable']) {
-  color: var(--printer-idle);
+  color: var(--ops-action);
+  background: var(--ops-idle-bg);
 }
 .results :deep([data-status='unreachable']),
 .results :deep([data-status='failed']) {
-  color: var(--printer-error);
+  color: var(--ops-fault);
+  background: var(--ops-fault-bg);
 }
-.results :deep([data-status='unauthorized']) {
-  color: var(--printer-paused);
+.results :deep([data-status='unauthorized']),
+.results :deep([data-status='unapplied']) {
+  color: var(--ops-attention);
+  background: var(--ops-attention-bg);
 }
 .results :deep(table) {
   width: 100%;
   border-collapse: collapse;
-  font-size: var(--font-size-sm);
 }
 .results :deep(th),
 .results :deep(td) {
-  padding: var(--space-2);
-  border-bottom: 1px solid var(--color-border);
   text-align: start;
   vertical-align: top;
+}
+.results :deep(td:first-child),
+.results :deep(td:nth-child(2)),
+.results :deep(td:nth-child(3)),
+.results :deep(td:last-child) {
+  font-family: var(--ops-font-mono);
+  font-size: var(--ops-text-small);
+  font-variant-numeric: tabular-nums;
 }
 .results :deep(td:first-child) {
   white-space: nowrap;
@@ -466,29 +393,18 @@ async function submit() {
   min-width: 8rem;
   overflow-wrap: anywhere;
 }
-.results :deep(th) {
-  color: var(--color-text-muted);
-  font-weight: var(--font-weight-semibold);
-}
 .results :deep(tbody tr:last-child td) {
   border-bottom: 0;
 }
 @media (min-width: 64rem) {
   .layout {
-    grid-template-columns: minmax(20rem, 2fr) minmax(0, 3fr);
+    grid-template-columns: minmax(20rem, 24rem) minmax(0, 1fr);
   }
 }
 @media (max-width: 30rem) {
-  .panel,
-  .results > :deep(section) {
-    padding: var(--space-3);
-  }
-  .results :deep(table) {
-    font-size: 0.75rem;
-  }
   .results :deep(th),
   .results :deep(td) {
-    padding-inline: var(--space-1);
+    padding-inline: var(--ops-space-1);
   }
   .results :deep(td:nth-child(2)) {
     min-width: 5rem;

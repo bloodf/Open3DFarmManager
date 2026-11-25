@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import '../assets/css/ops-screen.css'
 import { computed, ref } from 'vue'
 import {
   fleetCatalog,
@@ -35,13 +36,13 @@ const products = computed(() =>
 </script>
 
 <template>
-  <main id="conteudo" class="compat-page">
+  <main id="conteudo" class="compat-page ops-screen">
     <OverviewHeader
       eyebrow="Open3DFarmManager"
       title="Compatibilidade de impressoras"
       intro="Este catálogo reúne informações e limitações conhecidas. Documentação e simulação não comprovam integração ou suporte ao hardware. Os rótulos não habilitam comandos."
     />
-    <p class="back">
+    <p class="back chips">
       <NuxtLink to="/impressoras">Voltar para impressoras</NuxtLink>
     </p>
     <form
@@ -68,7 +69,11 @@ const products = computed(() =>
     >
       <Button v-if="search" @click="search = ''">Limpar busca</Button>
     </EmptyState>
-    <section v-if="reviewed.length" aria-labelledby="reviewed-title">
+    <section
+      v-if="reviewed.length"
+      class="reviewed"
+      aria-labelledby="reviewed-title"
+    >
       <h2 id="reviewed-title">Modelos revisados</h2>
       <p>
         Especificações publicadas e evidências de protocolo; não habilitam
@@ -106,78 +111,66 @@ const products = computed(() =>
         </ul>
       </article>
     </section>
-    <CompatibilityProduct
-      v-for="product in products"
-      :key="product.id"
-      :product="product"
-      :klipper-family="klipperFamilyIds.has(product.id)"
-    />
+    <div v-if="products.length" class="products">
+      <CompatibilityProduct
+        v-for="product in products"
+        :key="product.id"
+        :product="product"
+        :klipper-family="klipperFamilyIds.has(product.id)"
+      />
+    </div>
   </main>
 </template>
 
 <style scoped>
-.compat-page {
+.reviewed {
   display: grid;
-  gap: var(--space-4);
-  align-content: start;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr));
+  gap: var(--ops-space-3);
+}
+.reviewed > h2,
+.reviewed > p {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+.reviewed > p {
+  color: var(--ops-muted);
 }
 .reviewed-model {
-  padding: var(--space-4);
-  border: 1px solid var(--color-border);
   overflow-wrap: anywhere;
+}
+.reviewed-model h3 {
+  margin-block-end: 0;
+}
+.reviewed-model ul {
+  margin: 0;
+  padding-inline-start: var(--ops-space-5);
 }
 .reviewed-model a {
   display: inline-flex;
   align-items: center;
   min-block-size: 2.75rem;
 }
+.products {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 30rem), 1fr));
+  gap: var(--ops-space-3);
+  align-items: start;
+}
 .back,
 .count {
   margin: 0;
 }
-.search {
-  display: grid;
-  gap: var(--space-2);
-  margin: 0;
-  padding: var(--space-5);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-raised);
+.compat-page .search {
+  grid-template-columns: minmax(0, 28rem);
 }
-label {
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
-}
-input {
+.search input {
   width: 100%;
-  min-height: 2.75rem;
-  padding: var(--space-2) var(--space-3);
-  font: inherit;
-  color: inherit;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-}
-input:focus-visible {
-  outline: var(--focus-ring-width) solid var(--color-focus-ring);
-  outline-offset: var(--focus-ring-offset);
 }
 .count {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-muted);
-}
-a:focus-visible {
-  outline: var(--focus-ring-width) solid var(--color-focus-ring);
-  outline-offset: var(--focus-ring-offset);
-}
-/* Same bordered surface as the search and product panels. */
-.compat-page :deep(.ui-card) {
-  border: 1px solid var(--color-border);
-  box-shadow: none;
-}
-@media (max-width: 30rem) {
-  .search {
-    padding: var(--space-4);
-  }
+  font-family: var(--ops-font-mono);
+  font-size: var(--ops-text-small);
+  font-variant-numeric: tabular-nums;
+  color: var(--ops-muted);
 }
 </style>

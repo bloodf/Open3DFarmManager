@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import '../assets/css/ops-screen.css'
 import { useFarmSelection } from '../composables/useFarmRoute.ts'
 import { fetchFarmMemberships } from '../composables/useFarmMemberships.ts'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
@@ -266,7 +267,11 @@ watch(farmId, (id) => {
 </script>
 
 <template>
-  <main id="conteudo" class="bambu-page" :aria-busy="loading || pending">
+  <main
+    id="conteudo"
+    class="bambu-page ops-screen"
+    :aria-busy="loading || pending"
+  >
     <header class="page-header">
       <p class="eyebrow">Open3DFarmManager</p>
       <h1>Conta Bambu Cloud</h1>
@@ -342,7 +347,7 @@ watch(farmId, (id) => {
         <dl class="facts">
           <div>
             <dt>Conta</dt>
-            <dd class="wrap">{{ account.account }}</dd>
+            <dd class="ops-data">{{ account.account }}</dd>
           </div>
           <div>
             <dt>Região</dt>
@@ -352,7 +357,7 @@ watch(farmId, (id) => {
             <dt>
               {{ account.expired ? 'Token expirou em' : 'Token válido até' }}
             </dt>
-            <dd>{{ expiryLabel || 'Indisponível' }}</dd>
+            <dd class="ops-data">{{ expiryLabel || 'Indisponível' }}</dd>
           </div>
         </dl>
         <div class="actions">
@@ -533,114 +538,78 @@ watch(farmId, (id) => {
         </form>
       </section>
     </template>
-    <p class="back"><NuxtLink to="/conta">Voltar para a conta</NuxtLink></p>
+    <p class="back chips">
+      <NuxtLink to="/conta">Voltar para a conta</NuxtLink>
+    </p>
   </main>
 </template>
 
 <style scoped>
-.bambu-page {
-  display: grid;
-  gap: var(--space-4);
-  align-content: start;
+.bambu-page > * {
+  inline-size: 100%;
+  max-inline-size: 48rem;
 }
-.page-header {
-  display: grid;
-  gap: var(--space-2);
-}
-.eyebrow {
-  margin: 0;
-  font-size: var(--font-size-sm);
-  letter-spacing: 0.04em;
-  color: var(--color-text-muted);
-}
-.page-header h1 {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-.intro {
-  margin: 0;
-  max-width: 40rem;
-  color: var(--color-text-muted);
+.bambu-page > header {
+  max-inline-size: none;
 }
 .alert:focus-visible {
   outline: var(--focus-ring-width) solid var(--color-focus-ring);
   outline-offset: var(--focus-ring-offset);
-  border-radius: var(--radius-md);
+  border-radius: var(--ops-radius-lg);
 }
 .alert:empty {
   display: none;
 }
-.notice {
-  margin: 0;
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-raised);
+.bambu-page .notice {
+  padding: var(--ops-space-2) var(--ops-space-3);
+  border: 1px solid var(--ops-border);
+  border-inline-start: 3px solid var(--ops-action);
+  border-radius: var(--ops-radius-sm);
+  background: var(--ops-panel);
 }
-.notice-error {
-  border-color: var(--printer-error);
-  color: var(--printer-error);
-  font-weight: var(--font-weight-semibold);
-}
-.panel {
-  margin: 0;
-  padding: var(--space-5);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-raised);
-  min-width: 0;
-}
-.loading {
-  display: grid;
-  gap: var(--space-3);
-}
-.loading p {
-  margin: 0;
-}
-h2 {
-  margin: 0 0 var(--space-3);
-  font-size: var(--font-size-lg);
-  line-height: var(--line-height-tight);
+.bambu-page .notice-error {
+  border-color: var(--ops-fault);
+  background: var(--ops-fault-bg);
+  color: var(--ops-fault);
+  font-weight: 600;
 }
 .panel-head {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  gap: var(--space-2) var(--space-3);
+  gap: var(--ops-space-2) var(--ops-space-3);
 }
 .facts {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
-  gap: var(--space-3) var(--space-4);
+  gap: var(--ops-space-3) var(--ops-space-4);
   margin: 0;
 }
-.facts dt {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-muted);
+.facts > div {
+  display: grid;
+  align-content: start;
+  gap: var(--ops-space-1);
 }
 .facts dd {
   margin: 0;
-  font-weight: var(--font-weight-semibold);
+  font-weight: 600;
 }
 .form {
   display: grid;
-  gap: var(--space-3);
+  gap: var(--ops-space-3);
   max-width: 28rem;
 }
 .field {
   display: grid;
-  gap: var(--space-1);
+  gap: var(--ops-space-1);
   min-width: 0;
-}
-label,
-legend {
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
 }
 legend {
   padding: 0;
-  margin-bottom: var(--space-1);
+  margin-bottom: var(--ops-space-1);
+  font-size: var(--ops-text-small);
+  font-weight: 600;
 }
 fieldset {
   display: grid;
@@ -649,35 +618,22 @@ fieldset {
   border: 0;
   min-width: 0;
 }
-.check {
+.bambu-page .check {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--ops-space-2);
   min-height: 2.75rem;
-  font-size: var(--font-size-base);
+  font-size: var(--ops-text-body);
   font-weight: 400;
 }
 .check input {
   flex: 0 0 auto;
   width: 1.25rem;
   height: 1.25rem;
-  accent-color: var(--color-accent);
 }
 select,
 input:not([type='radio']) {
   width: 100%;
-  min-height: 2.75rem;
-  padding: var(--space-2) var(--space-3);
-  font: inherit;
-  color: inherit;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-}
-select:focus-visible,
-input:focus-visible {
-  outline: var(--focus-ring-width) solid var(--color-focus-ring);
-  outline-offset: var(--focus-ring-offset);
 }
 select:disabled,
 input:disabled {
@@ -686,27 +642,10 @@ input:disabled {
 .actions {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2) var(--space-3);
+  gap: var(--ops-space-2);
   align-items: center;
-  margin-top: var(--space-3);
-}
-.wrap {
-  overflow-wrap: anywhere;
-}
-.bambu-page :deep(.danger) {
-  border-color: var(--printer-error);
-  color: var(--printer-error);
-}
-.bambu-page :deep(.ui-card) {
-  border: 1px solid var(--color-border);
-  box-shadow: none;
 }
 .back {
   margin: 0;
-}
-@media (max-width: 30rem) {
-  .panel {
-    padding: var(--space-4);
-  }
 }
 </style>

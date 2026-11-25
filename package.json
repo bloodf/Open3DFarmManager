@@ -47,7 +47,7 @@
     "@redocly/openapi-core": "2.83.0",
     "@types/node": "24.19.2",
     "@types/ws": "8.18.2",
-    "effect": "4.1.4",
+    "effect": "4.1.5",
     "esbuild": "0.28.2",
     "node-datachannel": "0.33.6",
     "nuxt": "4.6.4",

@@ -140,13 +140,21 @@ it('announces search results and exposes the keyboard-selected option', async ()
     const option = page.locator(`#${active}`)
     expect(await option.getAttribute('role')).toBe('option')
     expect(await option.getAttribute('aria-selected')).toBe('true')
-    const href = await option.locator('a').getAttribute('href')
+    expect(await option.textContent()).toContain('Conta')
+    const destinations: Record<string, string> = {
+      'Conta Bambu Cloud': '/bambu-cloud',
+      Conta: '/conta',
+      'Criar conta': '/criar-conta',
+      'Sair da conta': '/sair',
+    }
+    const href = destinations[(await option.textContent())!.trim()]
+    expect(href).toBeDefined()
     await input.press('Enter')
     expect(
       await page.evaluate(
         () => (window as unknown as { destination: string }).destination,
       ),
-    ).toBe(href)
+    ).toBe(`${href}?farm=test`)
   } finally {
     await page.close()
   }

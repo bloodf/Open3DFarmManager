@@ -11,9 +11,13 @@ defineProps<{ busy: boolean; connectorCount: number }>()
 const emit = defineEmits<{ submit: [] }>()
 const serviceIdError = ref('')
 
-watch(serviceId, () => {
-  serviceIdError.value = ''
-})
+watch(
+  serviceId,
+  () => {
+    serviceIdError.value = ''
+  },
+  { flush: 'sync' },
+)
 
 function validateServiceId() {
   serviceId.value = serviceId.value.trim()

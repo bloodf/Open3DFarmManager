@@ -12,6 +12,7 @@ import {
   buildArgs,
   confirmationError,
   defaultPrinter,
+  effectiveSlotColour,
   groupPrinters,
   replayOutcomeText,
   suggestMapping,
@@ -118,7 +119,7 @@ function chosen(index: number): MatchedSlot | null {
     label: `Slot ${m.slot || at + 1}`,
     materialType: m.materialType,
     // Spoolman's active spool first, as the local reel did; else the printer.
-    colorHex: m.spoolmanColorHex ?? m.colorHex,
+    colorHex: effectiveSlotColour(m),
     remainingPercent: m.remainingPercent,
     spoolmanRemainingPercent: m.spoolmanRemainingPercent,
   }
@@ -273,7 +274,11 @@ function confirmPrinterChecked() {
               :value="slotValue(m, slot)"
             >
               {{ slotLabel(m, slot) }}
-              {{ m.colorHex ? `· #${m.colorHex.slice(0, 6)}` : '' }}
+              {{
+                effectiveSlotColour(m)
+                  ? `· #${effectiveSlotColour(m)!.slice(0, 6)}`
+                  : ''
+              }}
             </option>
           </select>
           <FilamentMatch

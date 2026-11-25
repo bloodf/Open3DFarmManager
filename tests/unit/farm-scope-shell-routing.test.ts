@@ -157,11 +157,13 @@ it('keeps focus, farms and account links while updating the selected farm role',
     await browserExpect(select).toBeFocused()
     await page.getByRole('button', { name: /Buscar/ }).click()
     await browserExpect(
-      page.getByRole('link', { name: 'Sair da conta' }),
+      page.getByRole('option', { name: 'Sair da conta' }),
     ).toBeVisible()
     await browserExpect
       .poll(() => opened.calls('GET', '/api/browser-devices'))
       .toBe(2)
+    await page.getByRole('option', { name: 'Sair da conta' }).click()
+    expect((await opened.navigated()).at(-1)).toBe(`/sair?farm=${B}`)
     expect(opened.calls('GET', '/api/auth/me')).toBe(authCalls)
     expect(opened.calls('GET', '/api/farms?limit=20')).toBe(membershipCalls)
   } finally {

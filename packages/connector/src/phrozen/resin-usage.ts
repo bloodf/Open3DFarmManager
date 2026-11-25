@@ -17,7 +17,7 @@ import type { PhrozenTaskUsage } from './operations.ts'
  * Debits the printer-reported volume of a finished run from the resin ledger,
  * at most once per run key.
  *
- * The existing ledger (apps/farm/server/utils/resin-ledger/entry.ts) has no
+ * The existing ledger (apps/farm/common/resin-ledger/entry.ts) has no
  * consumption entry. Its `volume` entry is the volume left in a vat, and the
  * summary takes the latest one. So a debit appends "last vat reading minus
  * reported usage", and only when that subtraction is known to be complete.

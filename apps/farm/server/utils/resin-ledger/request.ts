@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { resinLedgerEntry } from './entry.ts'
+import { resinLedgerEntry } from '../../../common/resin-ledger/entry.ts'
 
 const uuid = z.uuid()
 const printerKey = z.string().min(1).max(128)

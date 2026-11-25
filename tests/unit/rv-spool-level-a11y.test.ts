@@ -52,7 +52,7 @@ async function render(name: string, props: Record<string, unknown>) {
   return renderToString(createSSRApp(module.exports.default!, props))
 }
 
-import { renderFarmComponent } from '../../apps/farm/app/components/farm/render-farm-component.ts'
+import { renderFarmComponent } from '../helpers/render-farm-component.ts'
 import { spoolRemainingFraction } from '../../apps/farm/app/utils/spool-library-format.ts'
 import { farmSlotViews } from '../../apps/farm/app/utils/slot-spools.ts'
 

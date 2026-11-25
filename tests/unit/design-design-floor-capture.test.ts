@@ -156,7 +156,7 @@ it('keeps the three floor routes available and captures their fixtures on reques
 
 it('keeps spool assignment read-only when the printer feed is disconnected or stale', async () => {
   const { renderFarmComponent } =
-    await import('../../apps/farm/app/components/farm/render-farm-component.ts')
+    await import('../helpers/render-farm-component.ts')
   const now = { wall: 1_700_000_100_000, mono: 100_000 }
   const assignment = {
     assignmentId: 'a',

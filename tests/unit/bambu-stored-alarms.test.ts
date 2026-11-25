@@ -1,6 +1,6 @@
 import type { Sql } from 'postgres'
 import { expect, it, vi } from 'vitest'
-import { renderFarmComponent } from '../../apps/farm/app/components/farm/render-farm-component.ts'
+import { renderFarmComponent } from '../helpers/render-farm-component.ts'
 import { parseLastKnownStates } from '../../apps/farm/app/composables/useLastKnownStates-core.ts'
 import { parseStatusSummary } from '../../apps/farm/app/utils/status-summary.ts'
 import { projectPrinterState } from '../../apps/farm/server/services/printer-states-core.ts'

@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import Button from '../ui/Button.vue'
 import { formatDateTime, formatNumber } from '../../utils/ui-format.ts'
-import type { ResinLedgerSummary } from '../../../server/utils/resin-ledger/summary.ts'
+import type { ResinLedgerSummary } from '../../../common/resin-ledger/summary-types.ts'
 import {
   emptyResinForm,
   resinEntryFromForm,

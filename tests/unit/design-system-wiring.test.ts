@@ -1,6 +1,6 @@
 import { expect as browserExpect } from '@playwright/test'
 import { afterAll, beforeAll, expect, it, vi } from 'vitest'
-import { renderFarmComponent } from '../../apps/farm/app/components/farm/render-farm-component.ts'
+import { renderFarmComponent } from '../helpers/render-farm-component.ts'
 import {
   createPageHarness,
   reply,

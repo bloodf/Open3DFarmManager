@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { build } from 'esbuild'
 import { compileScript, parse } from 'vue/compiler-sfc'
 import { expect, it } from 'vitest'
-import { renderFarmComponent } from '../../apps/farm/app/components/farm/render-farm-component.ts'
+import { renderFarmComponent } from '../helpers/render-farm-component.ts'
 import type {
   FarmObservation,
   FarmRow,

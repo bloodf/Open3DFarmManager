@@ -1,4 +1,4 @@
-import { resinLedgerEntry } from '../../../server/utils/resin-ledger/entry.ts'
+import { resinLedgerEntry } from '../../../common/resin-ledger/entry.ts'
 
 export type ResinKind = 'vat' | 'bottle' | 'volume' | 'film' | 'lcd'
 export interface ResinFormState {

@@ -4,7 +4,7 @@ import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import test from 'node:test'
 import { decodeApiEnvelopeFrame } from '../../packages/farm-protocol/src/api-envelope.ts'
-import { renderFarmComponent } from '../../apps/farm/app/components/farm/render-farm-component.ts'
+import { renderFarmComponent } from '../helpers/render-farm-component.ts'
 import {
   APPROVER_ROLES,
   IntegrationApprovalService,

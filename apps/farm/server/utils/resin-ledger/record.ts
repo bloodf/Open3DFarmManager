@@ -1,4 +1,7 @@
-import { resinLedgerEntry, type ResinLedgerEntry } from './entry.ts'
+import {
+  resinLedgerEntry,
+  type ResinLedgerEntry,
+} from '../../../common/resin-ledger/entry.ts'
 
 /** Column values for farm.resin_ledger_entries. Absent readings are NULL, never 0. */
 export interface ResinLedgerColumns {

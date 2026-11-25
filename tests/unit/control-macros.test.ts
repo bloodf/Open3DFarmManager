@@ -25,7 +25,7 @@ import {
 import { ControlArguments } from '../../packages/farm-protocol/src/control-actions.ts'
 import { PrinterState } from '../../packages/farm-protocol/src/state.ts'
 import { createPauseDriverRouter } from '../../packages/connector/src/runtime/pause-driver-router.ts'
-import { renderFarmComponent } from '../../apps/farm/app/components/farm/render-farm-component.ts'
+import { renderFarmComponent } from '../helpers/render-farm-component.ts'
 import { pauseFixture } from '../../packages/connector/test/moonraker-pause-fixture.ts'
 
 // Loopback fixture only (127.0.0.1, port 0). The authority, capability and

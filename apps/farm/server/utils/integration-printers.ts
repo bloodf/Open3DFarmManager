@@ -229,6 +229,7 @@ export async function getIntegrationPrinterStatus(
     model?: string
     activeSpools?: ReturnType<typeof activeSpoolsFromMaterials>
     observedAt?: number
+    timestampSkewed?: boolean
     plate?: { state: 'awaiting-collection'; attemptId?: string }
   } = {
     printerId: row.id,
@@ -261,6 +262,9 @@ export async function getIntegrationPrinterStatus(
     const plate = awaitingCollectionPlate(parsed.data)
     if (plate) status.plate = plate
   }
-  if (row.observedAt !== null) status.observedAt = row.observedAt
+  if (row.observedAt !== null) {
+    if (row.observedAt <= Date.now()) status.observedAt = row.observedAt
+    else status.timestampSkewed = true
+  }
   return status
 }

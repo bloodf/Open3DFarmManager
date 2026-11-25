@@ -12,7 +12,7 @@ import { createTelemetryHttpHandler } from '../../apps/farm/server/services/tele
 import { createAuthenticatedTelemetrySender } from '../../packages/connector/src/cloud/authenticated-http-telemetry.ts'
 import type { PostgresConnectorCredentialAcceptance } from '../../apps/farm/server/storage/postgres-connector-credential-acceptance.ts'
 
-test('lost acknowledgement retries the durable event with a fresh age and challenge', async () => {
+test('lost acknowledgement retries the durable event with a new challenge and conservative recovered age', async () => {
   const agentId = randomUUID(),
     farmId = randomUUID(),
     jti = randomUUID()
@@ -140,13 +140,21 @@ test('lost acknowledgement retries the durable event with a fresh age and challe
       allowLoopbackHttpForTests: true,
       identity: {
         signTelemetryProof(input) {
-          const expected = JSON.stringify(
-            records.map((record) => ({
-              ...record,
-              ageAtSendMs: challenges === 1 ? 999 : 1000,
-            })),
-          )
-          assert.deepEqual(input.body, new TextEncoder().encode(expected))
+          const sent = JSON.parse(new TextDecoder().decode(input.body))
+          if (challenges === 1) {
+            assert.ok(Number.isSafeInteger(sent[0].ageAtSendMs))
+            assert.ok(sent[0].ageAtSendMs >= 999)
+            assert.deepEqual(
+              sent,
+              records.map((record) => ({
+                ...record,
+                ageAtSendMs: sent[0].ageAtSendMs,
+              })),
+            )
+          } else {
+            // A restart loses the monotonic anchor, so freshness is unknown.
+            assert.deepEqual(sent, records)
+          }
           return 'A'.repeat(86)
         },
       },

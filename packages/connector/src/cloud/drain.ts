@@ -28,15 +28,15 @@ export type DrainResult =
 const active = new WeakSet<TelemetryQueue>()
 const MAX_BATCH_RECORDS = 100
 
-function withSendAge(record: TelemetryRecord, now: number): TelemetryRecord {
+function withSendAge(
+  queue: TelemetryQueue,
+  record: TelemetryRecord,
+  now: number,
+): TelemetryRecord {
   if (record.kind !== 'printer-state' && record.kind !== 'inventory-snapshot')
     return record
-  const observedAt =
-    record.kind === 'printer-state'
-      ? record.state.observedAt
-      : record.inventory.observedAt
-  if (observedAt > now || record.queuedAt > now) return record
-  return { ...record, ageAtSendMs: now - Math.min(observedAt, record.queuedAt) }
+  const ageAtSendMs = queue.sendAge(record, now)
+  return ageAtSendMs === undefined ? record : { ...record, ageAtSendMs }
 }
 
 function withinBatchLimits(records: readonly TelemetryRecord[]): boolean {
@@ -125,7 +125,7 @@ export async function drainTelemetryOnce(
       if (signal.aborted)
         return { status: 'retained', reason: 'cancelled', loss }
       records = fittingPrefix(
-        batch.records.map((record) => withSendAge(record, batchNow)),
+        batch.records.map((record) => withSendAge(queue, record, batchNow)),
       )
       if (records.length) break
       if (!queue.depth) return { status: 'empty', loss }

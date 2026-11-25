@@ -2,6 +2,7 @@ import {
   canonicalize,
   type TelemetryEvent,
 } from '@open3dfarmmanager/farm-protocol'
+import { durableTelemetryEvent } from '../../apps/farm/server/storage/postgres-telemetry.ts'
 import type { TelemetryEventStore } from '../../apps/farm/server/services/telemetry.ts'
 
 /** TEST ONLY: transactional ordering model, no database or restart durability. */
@@ -18,7 +19,7 @@ export class MemoryTelemetryStore implements TelemetryEventStore {
     const staged = new Map(this.#events)
     for (const record of records) {
       const key = JSON.stringify([scope.farmId, scope.agentId, record.eventId])
-      const value = canonicalize(record)
+      const value = canonicalize(durableTelemetryEvent(record))
       const previous = staged.get(key)
       if (previous !== undefined && previous !== value) return 'conflict'
       staged.set(key, value)

@@ -78,7 +78,7 @@ test('assignment reads use farm scope and exclude revocations', async () => {
   )
 })
 
-test('migration uses a strict timestamp comparison and has a down migration', async () => {
+test('writes advance the row revision independently of timestamps and have a down migration', async () => {
   const source = await readFile(
     new URL(
       '../../apps/farm/server/storage/postgres-printer-latest-state.ts',
@@ -93,9 +93,7 @@ test('migration uses a strict timestamp comparison and has a down migration', as
     ),
     'utf8',
   )
-  assert.match(
-    source,
-    /printer_latest_state\.observed_at < EXCLUDED\.observed_at/,
-  )
+  assert.match(source, /revision = printer_latest_state\.revision \+ 1/)
+  assert.doesNotMatch(source, /WHERE.*observed_at/)
   assert.match(down, /DROP TABLE farm\.printer_latest_state/)
 })

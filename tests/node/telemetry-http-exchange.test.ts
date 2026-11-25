@@ -12,7 +12,7 @@ import { createTelemetryHttpHandler } from '../../apps/farm/server/services/tele
 import { createAuthenticatedTelemetrySender } from '../../packages/connector/src/cloud/authenticated-http-telemetry.ts'
 import type { PostgresConnectorCredentialAcceptance } from '../../apps/farm/server/storage/postgres-connector-credential-acceptance.ts'
 
-test('lost acknowledgement retries identical event bytes with a fresh challenge', async () => {
+test('lost acknowledgement retries the durable event with a fresh age and challenge', async () => {
   const agentId = randomUUID(),
     farmId = randomUUID(),
     jti = randomUUID()
@@ -29,7 +29,8 @@ test('lost acknowledgement retries identical event bytes with a fresh challenge'
     1000,
   )
   const eventId = record.eventId
-  const body = JSON.stringify(queue.batch(1000, 100, 65536).records)
+  const records = queue.batch(1000, 100, 65536).records
+  const body = JSON.stringify(records)
   let issued: Uint8Array | undefined
   let wrongAgent = false,
     redirect = false,
@@ -139,7 +140,13 @@ test('lost acknowledgement retries identical event bytes with a fresh challenge'
       allowLoopbackHttpForTests: true,
       identity: {
         signTelemetryProof(input) {
-          assert.deepEqual(input.body, new TextEncoder().encode(body))
+          const expected = JSON.stringify(
+            records.map((record) => ({
+              ...record,
+              ageAtSendMs: challenges === 1 ? 999 : 1000,
+            })),
+          )
+          assert.deepEqual(input.body, new TextEncoder().encode(expected))
           return 'A'.repeat(86)
         },
       },

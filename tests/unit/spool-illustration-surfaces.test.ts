@@ -73,7 +73,9 @@ describe('spool illustration surfaces', () => {
             .getAttribute('data-unknown'),
         ).toBe('true')
         expect(
-          await aceSlots.locator('.farm-spool').getAttribute('data-level'),
+          await aceSlots
+            .locator('.farm-spool[data-unknown="true"]')
+            .getAttribute('data-level'),
         ).toBe('1')
         const wallSlots = page.getByRole('list', { name: 'Slots de filamento' })
         for (const [material, percent, level] of [

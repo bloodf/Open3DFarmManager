@@ -28,6 +28,17 @@ export type DrainResult =
 const active = new WeakSet<TelemetryQueue>()
 const MAX_BATCH_RECORDS = 100
 
+function withSendAge(record: TelemetryRecord, now: number): TelemetryRecord {
+  if (record.kind !== 'printer-state' && record.kind !== 'inventory-snapshot')
+    return record
+  const observedAt =
+    record.kind === 'printer-state'
+      ? record.state.observedAt
+      : record.inventory.observedAt
+  if (observedAt > now || record.queuedAt > now) return record
+  return { ...record, ageAtSendMs: now - Math.min(observedAt, record.queuedAt) }
+}
+
 function withinBatchLimits(records: readonly TelemetryRecord[]): boolean {
   try {
     TelemetryBatch.parse(
@@ -113,7 +124,9 @@ export async function drainTelemetryOnce(
       }
       if (signal.aborted)
         return { status: 'retained', reason: 'cancelled', loss }
-      records = fittingPrefix(batch.records)
+      records = fittingPrefix(
+        batch.records.map((record) => withSendAge(record, batchNow)),
+      )
       if (records.length) break
       if (!queue.depth) return { status: 'empty', loss }
       // Batch preparation and removal are synchronous. The unencodable head

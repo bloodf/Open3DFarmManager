@@ -4,7 +4,7 @@ import { z } from 'zod'
 import {
   type MembershipEvidence,
   type ReadSpoolMembership,
-  hasCurrentSpoolObservation,
+  checkCurrentSpoolObservation,
   prefetchSpoolMembership,
 } from '../storage/postgres-inventory-snapshot.ts'
 
@@ -124,79 +124,82 @@ export async function registerPhysicalSpool(
       readMembership,
     )
   }
-  return authorized(sql, access, async (tx) => {
-    const hash = createHash('sha256')
-      .update(
-        JSON.stringify([
-          access.farmId,
-          input.filamentId,
-          input.location,
-          input.initialWeightGrams ?? null,
-          ...(input.spoolman
-            ? [input.spoolman.serviceId, input.spoolman.spoolId]
-            : []),
-        ]),
-      )
-      .digest('hex')
-    await tx`SELECT pg_advisory_xact_lock(hashtextextended(${access.appId + ':' + key}, 0))`
-    const [existing] = await tx<
-      {
-        request_hash: string
-        response: ReturnType<typeof physicalSpool> & {
-          spoolman?: typeof input.spoolman
-        }
-      }[]
-    >`
+  const register = () =>
+    authorized(sql, access, async (tx) => {
+      const hash = createHash('sha256')
+        .update(
+          JSON.stringify([
+            access.farmId,
+            input.filamentId,
+            input.location,
+            input.initialWeightGrams ?? null,
+            ...(input.spoolman
+              ? [input.spoolman.serviceId, input.spoolman.spoolId]
+              : []),
+          ]),
+        )
+        .digest('hex')
+      await tx`SELECT pg_advisory_xact_lock(hashtextextended(${access.appId + ':' + key}, 0))`
+      const [existing] = await tx<
+        {
+          request_hash: string
+          response: ReturnType<typeof physicalSpool> & {
+            spoolman?: typeof input.spoolman
+          }
+        }[]
+      >`
       SELECT request_hash, response FROM farm.integration_physical_spool_registrations
       WHERE app_id = ${access.appId}::uuid AND idempotency_key = ${key}`
-    if (existing) {
-      if (existing.request_hash !== hash)
-        return { outcome: 'key-reused' as const }
-      const { spoolman: bound, ...spool } = existing.response
-      // A receipt outlives its spool. Never replay a deleted one as registered.
-      // A reused spool number does not carry the old binding.
-      const [current] = bound
-        ? await tx`
+      if (existing) {
+        if (existing.request_hash !== hash)
+          return { outcome: 'key-reused' as const }
+        const { spoolman: bound, ...spool } = existing.response
+        // A receipt outlives its spool. Never replay a deleted one as registered.
+        // A reused spool number does not carry the old binding.
+        const [current] = bound
+          ? await tx`
             SELECT 1 FROM farm.integration_physical_spool_bindings
             WHERE farm_id = ${access.farmId}::uuid AND spool_id = ${spool.spoolId}
               AND spoolman_service_id = ${bound.serviceId}::uuid
               AND spoolman_spool_id = ${bound.spoolId}`
-        : await tx`
+          : await tx`
             SELECT 1 FROM farm.spools
             WHERE farm_id = ${access.farmId}::uuid AND id = ${spool.spoolId}`
-      if (!current) return { outcome: 'deleted' as const }
-      return { outcome: 'registered' as const, spool }
-    }
-    const [filament] = await tx`
+        if (!current) return { outcome: 'deleted' as const }
+        return { outcome: 'registered' as const, spool }
+      }
+      const [filament] = await tx`
       SELECT id FROM farm.spool_filaments
       WHERE farm_id = ${access.farmId}::uuid AND id = ${input.filamentId}
       FOR KEY SHARE`
-    if (!filament) return null
-    if (input.spoolman) {
-      const lock = JSON.stringify([
-        access.farmId,
-        input.spoolman.serviceId,
-        input.spoolman.spoolId,
-      ])
-      await tx`SELECT pg_advisory_xact_lock(hashtextextended(${'physical-spool-binding:' + lock}, 0))`
-      const [duplicate] = await tx`
+      if (!filament) return null
+      if (input.spoolman) {
+        const lock = JSON.stringify([
+          access.farmId,
+          input.spoolman.serviceId,
+          input.spoolman.spoolId,
+        ])
+        await tx`SELECT pg_advisory_xact_lock(hashtextextended(${'physical-spool-binding:' + lock}, 0))`
+        const [duplicate] = await tx`
         SELECT 1 FROM farm.integration_physical_spool_bindings
         WHERE farm_id = ${access.farmId}::uuid
           AND spoolman_service_id = ${input.spoolman.serviceId}::uuid
           AND spoolman_spool_id = ${input.spoolman.spoolId}`
-      if (duplicate) return { outcome: 'already-bound' as const }
-      if (
-        !(await hasCurrentSpoolObservation(
+        if (duplicate) return { outcome: 'already-bound' as const }
+        const observation = await checkCurrentSpoolObservation(
           tx,
           access.farmId,
           input.spoolman,
           membership,
-        ))
-      )
-        return { outcome: 'spool-not-observed' as const }
-    }
-    // Use the Spoolman-compatible library allocator, including its per-farm lock.
-    const [row] = await tx<SpoolRow[]>`
+        )
+        if (!observation.present)
+          return {
+            outcome: 'spool-not-observed' as const,
+            retryAgents: observation.newerAgents,
+          }
+      }
+      // Use the Spoolman-compatible library allocator, including its per-farm lock.
+      const [row] = await tx<SpoolRow[]>`
       WITH allocated AS (
         INSERT INTO farm.spool_library_counters (farm_id, kind, last_id)
         VALUES (${access.farmId}::uuid, 'spool', 1)
@@ -209,22 +212,42 @@ export async function registerPhysicalSpool(
         ${input.location}, ${input.initialWeightGrams ?? null}::float8, ${Date.now()}::bigint
       FROM allocated
       RETURNING id::float8 AS id, location, xmin::text || ':' || ctid::text AS revision`
-    if (!row) throw new Error('Spool allocation returned no row')
-    const spool = physicalSpool(access.farmId, row)
-    if (input.spoolman)
-      await tx`INSERT INTO farm.integration_physical_spool_bindings
+      if (!row) throw new Error('Spool allocation returned no row')
+      const spool = physicalSpool(access.farmId, row)
+      if (input.spoolman)
+        await tx`INSERT INTO farm.integration_physical_spool_bindings
         (farm_id, spool_id, spoolman_service_id, spoolman_spool_id)
         VALUES (${access.farmId}::uuid, ${row.id},
           ${input.spoolman.serviceId}::uuid, ${input.spoolman.spoolId})`
-    // The insert-only receipt serves idempotent replay only.
-    const receipt = input.spoolman
-      ? { ...spool, spoolman: input.spoolman }
-      : spool
-    await tx`INSERT INTO farm.integration_physical_spool_registrations
+      // The insert-only receipt serves idempotent replay only.
+      const receipt = input.spoolman
+        ? { ...spool, spoolman: input.spoolman }
+        : spool
+      await tx`INSERT INTO farm.integration_physical_spool_registrations
       (app_id, idempotency_key, request_hash, response)
       VALUES (${access.appId}::uuid, ${key}, ${hash}, ${tx.json(receipt)})`
-    return { outcome: 'registered' as const, spool }
-  })
+      return { outcome: 'registered' as const, spool }
+    })
+  let result = await register()
+  if (
+    result?.outcome === 'spool-not-observed' &&
+    result.retryAgents.size &&
+    input.spoolman &&
+    readMembership
+  ) {
+    if (!(await findGrant(sql, access, false))) return null
+    membership = await prefetchSpoolMembership(
+      sql,
+      access.farmId,
+      input.spoolman,
+      readMembership,
+      result.retryAgents,
+    )
+    result = await register()
+  }
+  return result?.outcome === 'spool-not-observed'
+    ? { outcome: result.outcome }
+    : result
 }
 
 export function readPhysicalSpool(sql: Sql, access: Access, spoolId: number) {

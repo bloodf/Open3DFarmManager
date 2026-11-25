@@ -1,4 +1,3 @@
-import { MAX_FUTURE_OBSERVATION_MS } from './telemetry-clock-skew.ts'
 import { ExtendedControlAction } from '../../../../packages/farm-protocol/src/control-actions.ts'
 import {
   actionsForControlRole,
@@ -91,18 +90,17 @@ const denied = (): PauseAuthorityFailure => ({ ok: false, reason: 'denied' })
 /** An issuer may only grant controls from a current telemetry observation. */
 export function freshAdvertisedActions(
   controls: unknown,
-  observedAt: unknown,
+  ageAtSendMs: unknown,
   receivedAt: unknown,
   now: number,
 ): ExtendedControlAction[] {
-  const observed = time.safeParse(observedAt)
+  const sendAge = time.safeParse(ageAtSendMs)
   const received = time.safeParse(receivedAt)
   if (
-    !observed.success ||
+    !sendAge.success ||
     !received.success ||
-    observed.data > received.data + MAX_FUTURE_OBSERVATION_MS ||
     received.data > now ||
-    now - received.data > OBSERVATION_FRESH_MS ||
+    sendAge.data + (now - received.data) > OBSERVATION_FRESH_MS ||
     !Array.isArray(controls)
   )
     return []
@@ -456,14 +454,18 @@ export class PostgresPauseAuthority {
     now: number,
   ): Promise<readonly ExtendedControlAction[]> {
     const [latest] = await tx<
-      { controls: unknown; observed_at: number; received_at: number | null }[]
+      {
+        controls: unknown
+        age_at_send_ms: number | null
+        received_at: number | null
+      }[]
     >`
-      SELECT controls, observed_at::float8 AS observed_at, received_at::float8 AS received_at FROM farm.pause_authority_advertised_controls
+      SELECT controls, age_at_send_ms::float8 AS age_at_send_ms, received_at::float8 AS received_at FROM farm.pause_authority_advertised_controls
       WHERE farm_id=${binding.farm_id}::uuid AND agent_id=${binding.agent_id}::uuid
         AND printer_key=${printerKey}`
     return freshAdvertisedActions(
       latest?.controls,
-      latest?.observed_at,
+      latest?.age_at_send_ms,
       latest?.received_at,
       now,
     )

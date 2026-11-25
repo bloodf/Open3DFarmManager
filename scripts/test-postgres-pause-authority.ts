@@ -271,49 +271,45 @@ try {
       agentId = randomUUID(),
       now = Date.now(),
       staleReceipt = now - OBSERVATION_FRESH_MS - 1
-    await admin`INSERT INTO farm.printer_latest_state (farm_id, agent_id, printer_key, observed_at, received_at, state) VALUES (${farmId}::uuid, ${agentId}::uuid, 'freshness-fixture', ${staleReceipt + 20_000}, ${staleReceipt}, ${admin.json({ controls: ['pause', 'start_print'] })})`
+    await admin`INSERT INTO farm.printer_latest_state (farm_id, agent_id, printer_key, observed_at, received_at, age_at_send_ms, state) VALUES (${farmId}::uuid, ${agentId}::uuid, 'freshness-fixture', ${staleReceipt + 20_000}, ${staleReceipt}, 0, ${admin.json({ controls: ['pause', 'start_print'] })})`
     const readControls = () =>
-      admin`SELECT controls, observed_at::float8 AS observed_at, received_at::float8 AS received_at FROM farm.pause_authority_advertised_controls WHERE farm_id=${farmId}::uuid AND agent_id=${agentId}::uuid AND printer_key='freshness-fixture'`
+      admin`SELECT controls, age_at_send_ms::float8 AS age_at_send_ms, received_at::float8 AS received_at, floor(extract(epoch FROM pg_catalog.clock_timestamp())*1000)::float8 AS now FROM farm.pause_authority_advertised_controls WHERE farm_id=${farmId}::uuid AND agent_id=${agentId}::uuid AND printer_key='freshness-fixture'`
     const stale = (await readControls())[0]!
     assert.deepEqual(
       freshAdvertisedActions(
         stale.controls,
-        stale.observed_at,
+        stale.age_at_send_ms,
         stale.received_at,
-        now,
+        stale.now,
       ),
       [],
     )
     // A pre-migration row may already contain a poisoned timestamp.
     await admin`UPDATE farm.printer_latest_state SET observed_at=${now + 120_000}, received_at=NULL WHERE farm_id=${farmId}::uuid AND agent_id=${agentId}::uuid AND printer_key='freshness-fixture'`
     await admin.begin((tx) =>
-      recordLatestStates(
-        tx,
-        { farmId, agentId },
-        [
-          {
-            eventId: randomUUID(),
-            queuedAt: now,
-            kind: 'printer-state',
-            state: {
-              printerKey: 'freshness-fixture',
-              observedAt: now + 20_000,
-              state: 'paused',
-              progress: 0.5,
-              controls: ['pause', 'start_print'],
-            },
+      recordLatestStates(tx, { farmId, agentId }, [
+        {
+          eventId: randomUUID(),
+          queuedAt: now,
+          kind: 'printer-state',
+          ageAtSendMs: 0,
+          state: {
+            printerKey: 'freshness-fixture',
+            observedAt: now + 20_000,
+            state: 'paused',
+            progress: 0.5,
+            controls: ['pause', 'start_print'],
           },
-        ],
-        now,
-      ),
+        },
+      ]),
     )
     const released = (await readControls())[0]!
     assert.deepEqual(
       freshAdvertisedActions(
         released.controls,
-        released.observed_at,
+        released.age_at_send_ms,
         released.received_at,
-        now,
+        released.now,
       ),
       ['pause', 'start_print'],
     )

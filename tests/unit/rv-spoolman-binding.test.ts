@@ -134,7 +134,7 @@ async function publish(farmId: string, agentId: string, serviceId: string) {
       tx,
       { farmId, agentId },
       snapshotOf(farmId, serviceId),
-      Date.now(),
+      0,
     )
   })
 }
@@ -289,7 +289,10 @@ beforeAll(async () => {
   await enroll(farmId, agentId)
   await root`INSERT INTO farm.spoolman_connector_settings (farm_id, agent_id, origin, status, configured, checked_at, updated_by)
     VALUES (${farmId}, ${agentId}, ${origin}, 'reachable', true, 0, 'rv-owner')`
-  await publish(farmId, agentId, serviceId)
+  const priorSnapshot = snapshotOf(farmId, serviceId)
+  await root`INSERT INTO farm.connector_inventory_snapshots
+    (farm_id, agent_id, observed_at, received_at, snapshot)
+    VALUES (${farmId}, ${agentId}, ${priorSnapshot.observedAt}, ${Date.now()}, ${root.json(priorSnapshot)})`
   await root`INSERT INTO farm.spools (farm_id, id, filament_id, registered_at) VALUES (${farmId}, 1, 1, 0)`
   // Receipt 2 is orphaned: its spool was deleted before the upgrade.
   for (const spoolId of [1, 2])
@@ -508,8 +511,10 @@ describe('migration rollback', () => {
     const down = (id: string) =>
       runMigrations(root, through(id), { kind: 'down', expectedLastId: id })
     const last = catalog.at(-1)!.id
-    expect(last).toBe('0118_spoolman_effective_service_id')
+    expect(last).toBe('0120_inventory_observation_freshness')
     await down(last)
+    await down('0119_printer_observation_freshness')
+    await down('0118_spoolman_effective_service_id')
     await expect(down('0117_physical_spool_bindings')).rejects.toThrow(
       'Cannot roll back',
     )
@@ -520,6 +525,8 @@ describe('migration rollback', () => {
     expect(await runMigrations(root, catalog, { kind: 'up' })).toEqual([
       '0117_physical_spool_bindings',
       '0118_spoolman_effective_service_id',
+      '0119_printer_observation_freshness',
+      '0120_inventory_observation_freshness',
     ])
   })
 })

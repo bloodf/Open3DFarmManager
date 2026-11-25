@@ -31,7 +31,7 @@ const make = (
   observedAt: number,
   state: 'printing' | 'paused' = 'printing',
   eventId: string = randomUUID(),
-): TelemetryEvent => ({
+): Extract<TelemetryEvent, { kind: 'printer-state' }> => ({
   eventId,
   queuedAt: observedAt,
   kind: 'printer-state',
@@ -44,14 +44,14 @@ try {
   const store = new PostgresTelemetryStore(sql)
   const read = () => readLatestStateByAssignment(sql, { farmId, assignmentId })
   assert.equal(
-    await store.commitBatch({ farmId, agentId }, [make(20), make(10)]),
+    await store.commitBatch({ farmId, agentId }, [make(10), make(20)]),
     'committed',
   )
   assert.equal((await read())?.observedAt, 20)
   assert.equal(
     await store.commitBatch({ farmId, agentId }, [
-      make(15),
       make(20, 'paused'),
+      make(15),
     ]),
     'committed',
   )
@@ -69,6 +69,24 @@ try {
     'conflict',
   )
   assert.equal((await read())?.observedAt, 25)
+  const clockStep = { ...make(5, 'paused'), ageAtSendMs: 0 }
+  assert.equal(
+    await store.commitBatch({ farmId, agentId }, [clockStep]),
+    'committed',
+  )
+  assert.equal((await read())?.observedAt, 5)
+  assert.equal((await read())?.state, 'paused')
+  assert.equal(
+    await store.commitBatch({ farmId, agentId }, [
+      { ...original, ageAtSendMs: 10 },
+    ]),
+    'committed',
+  )
+  assert.equal(
+    (await read())?.observedAt,
+    5,
+    'replay cannot advance the latest row',
+  )
   await sql`SET session_replication_role = replica`
   await sql`UPDATE farm.printer_assignments SET revoked_at=2, revoked_by='fixture' WHERE id=${assignmentId}`
   await sql`SET session_replication_role = origin`

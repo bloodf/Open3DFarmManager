@@ -1,0 +1,20 @@
+// reference-derived, not captured. One failed G-code script, as the console
+// report and as the RPC reply. Klipper3d/klipper
+// c9559fa04ec6b11fb1a9a1610903546319fcf310: klippy/gcode.py (_respond_error
+// prefixes "!! ") and klippy/toolhead.py (move_error message format).
+// Arksine/moonraker b559b9a81161f958a43c2f527b6ad96f73310d5d:
+// moonraker/components/klippy_connection.py (_process_command raises the
+// Klippy error message with code 400) and
+// docs/external_api/jsonrpc_notifications.md (notify_gcode_response).
+// The coordinates are synthetic.
+{
+  "notification": {
+    "jsonrpc": "2.0",
+    "method": "notify_gcode_response",
+    "params": ["!! Move out of range: 0.000 0.000 500.000 [0.000]"],
+  },
+  "error": {
+    "code": 400,
+    "message": "Move out of range: 0.000 0.000 500.000 [0.000]",
+  },
+}

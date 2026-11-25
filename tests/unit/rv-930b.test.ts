@@ -1,11 +1,13 @@
 import { createHash, generateKeyPairSync, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import type { TransactionSql } from 'postgres'
 import { describe, expect, it } from 'vitest'
+import { recordInventorySnapshot } from '../../apps/farm/server/storage/postgres-inventory-snapshot.ts'
 import { createAuthenticatedTelemetrySender } from '../../packages/connector/src/cloud/authenticated-http-telemetry.ts'
 import { drainTelemetryOnce } from '../../packages/connector/src/cloud/drain.ts'
 import { TelemetryQueue } from '../../packages/connector/src/cloud/queue.ts'
@@ -235,5 +237,57 @@ describe('idle progress across server releases', () => {
     } finally {
       server.close()
     }
+  })
+})
+
+describe('Spoolman observation statement order', () => {
+  it('locks snapshot rows before settings rows in the current lock function', () => {
+    const directory = new URL('../../infra/db/migrations/', import.meta.url)
+    // The last migration that defines the function is the one in force.
+    const body = readdirSync(directory)
+      .filter((name) => name.endsWith('.up.sql'))
+      .sort()
+      .flatMap((name) => {
+        const sql = readFileSync(new URL(name, directory), 'utf8')
+        const match =
+          /FUNCTION farm\.lock_spool_observation_provenance\([\s\S]*?AS \$\$([\s\S]*?)\$\$;/.exec(
+            sql,
+          )
+        return match ? [match[1]!] : []
+      })
+      .at(-1)!
+    const statements = body
+      .replace(/--.*$/gm, '')
+      .split(';')
+      .map((statement) => statement.replace(/\s+/g, ' ').trim())
+    const locking = statements.filter((statement) =>
+      /\bFOR (SHARE|UPDATE|KEY SHARE|NO KEY UPDATE)\b/.test(statement),
+    )
+    expect(locking).toHaveLength(2)
+    expect(locking[0]).toContain('farm.connector_inventory_snapshots')
+    expect(locking[0]).not.toContain('farm.spoolman_connector_settings')
+    expect(locking[1]).toContain('farm.spoolman_connector_settings')
+    expect(locking[1]).not.toContain('farm.connector_inventory_snapshots')
+  })
+
+  it('writes a snapshot with one statement that never locks settings itself', async () => {
+    const statements: string[] = []
+    const tx = Object.assign(
+      async (parts: TemplateStringsArray) => {
+        statements.push(parts.join('?'))
+        return []
+      },
+      { json: (value: unknown) => value },
+    )
+    await recordInventorySnapshot(
+      tx as unknown as TransactionSql,
+      { farmId: randomUUID(), agentId: randomUUID() },
+      { observedAt: 1, stale: false, total: 0, spools: [] },
+    )
+    expect(statements).toHaveLength(1)
+    expect(statements[0]).toMatch(
+      /^INSERT INTO farm\.connector_inventory_snapshots/,
+    )
+    expect(statements[0]).not.toContain('spoolman_connector_settings')
   })
 })

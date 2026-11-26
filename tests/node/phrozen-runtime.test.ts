@@ -5,6 +5,8 @@ import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { test, type TestContext } from 'node:test'
 import { DriverRefusalError } from '../../packages/connector/src/control/driver-refusal.ts'
+import { openFixedPhrozenControl } from '../../packages/connector/src/phrozen/control-driver.ts'
+import { supportsPhrozenUpload } from '../../packages/connector/src/phrozen/upload.ts'
 import {
   provisionPhrozenPrinter,
   type PrinterBinding,
@@ -128,10 +130,66 @@ test('start is refused before the write even for a qualified pair', async (t) =>
   let guarded = false
   await assert.rejects(
     attempt(router(QUALIFIED), binding, 'start_print', () => (guarded = true)),
-    refusal('unsupported-action'),
+    (error: unknown) =>
+      refusal('unsupported-action')(error) &&
+      (error as Error).message === 'resin-artifact-requires-library-version',
   )
   assert.equal(guarded, false)
   assert.deepEqual(writes(), [])
+})
+
+test('the direct driver refuses start before the write for a qualified pair', async (t) => {
+  const { sim, binding, writes } = await printer(t)
+  sim.addFile('part.ctb')
+  sim.reset()
+  const signal = new AbortController().signal
+  const control = openFixedPhrozenControl({
+    binding,
+    connectionGeneration: 1,
+    clock: { monotonicNow: () => performance.now() },
+    publish: () => {},
+    signal,
+    phrozenQualifiedWrites: QUALIFIED,
+  })
+  t.after(() => control.close())
+  await control.prepare()
+  let guarded = false
+  await assert.rejects(
+    control.driver.execute!(
+      'start_print',
+      { file: 'part.ctb' },
+      {
+        binding,
+        signal,
+        beforeSend: () => (guarded = true),
+      },
+    ),
+    (error: unknown) =>
+      refusal('unsupported-action')(error) &&
+      (error as Error).message === 'resin-artifact-requires-library-version',
+  )
+  assert.equal(guarded, false)
+  assert.deepEqual(writes(), [])
+})
+
+test('upload eligibility enforces filename boundaries independently of the adapter', async (t) => {
+  const { binding } = await printer(t)
+  const target = { binding, qualifiedWrites: QUALIFIED }
+  for (const name of ['a.ctb', 'A-_.PRZ', `${'a'.repeat(124)}.ctb`])
+    assert.equal(supportsPhrozenUpload(target, name), true, name)
+  for (const name of [
+    '',
+    '.ctb',
+    '-a.ctb',
+    'a b.ctb',
+    'a/b.ctb',
+    'a\\b.ctb',
+    'a..b.ctb',
+    'a.txt',
+    'a.ctb\n',
+    `${'a'.repeat(125)}.ctb`,
+  ])
+    assert.equal(supportsPhrozenUpload(target, name), false, name)
 })
 
 test('a denied write guard sends nothing', async (t) => {

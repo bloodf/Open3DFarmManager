@@ -42,6 +42,7 @@ Owners can grant one or more scopes across a farm or limit them to a printer ass
 | `inventory:write`     | Register and withdraw physical spools.                                       |
 | `environment:control` | Control drying programs, smart plugs and extraction.                         |
 | `alerts:manage`       | Change alert rules and configure or test notification channels.              |
+| `control:emergency`   | Emergency stop. The API cannot recover the printer afterwards.               |
 
 Each scope in the table authorizes the operations listed above.
 `environment:control` is used by the environment control endpoints below.
@@ -532,8 +533,8 @@ another request. The service never automatically retries an uncertain write.
 ## Request actions
 
 `POST /printers/{printerId}/actions` also requires an `Idempotency-Key`.
-`pause`, `resume` and `cancel` require `control:basic`; other supported actions
-require `control:extended`. Send the action and its `args` as specified by the
+`pause`, `resume` and `cancel` require `control:basic`; `emergency_stop` requires
+`control:emergency`; other supported actions require `control:extended`. Send the action and its `args` as specified by the
 OpenAPI schema (use `{}` for actions without arguments), then track the result
 with `GET /actions/{actionId}`. The printer must advertise the action. Check
 printer state immediately before each command and account for the possibility
@@ -543,6 +544,26 @@ Never automatically retry an uncertain command. Reuse the same idempotency key
 and identical body only when intentionally retrying a request whose outcome is
 known to be safe; changed bodies with a reused key receive
 `idempotency-key-reused`.
+
+### Emergency stop
+
+`emergency_stop` has its own scope, `control:emergency`. `control:extended` does
+not include it, and grants made before this scope existed do not receive it: the
+owner must make a new grant that names it. `GET /printers` lists
+`emergency_stop` in a printer's `controls` only when the access token holds
+`control:emergency` for that printer.
+
+The command stops the printer immediately. **The API cannot recover the
+printer.** `firmware_restart` is never an API action, so after an emergency stop
+someone must act at the printer or send the firmware restart from the OpenFarm
+browser.
+
+Deploy order: apply the database migration and deploy the server first, then the
+Connectors. A new Connector refuses an `emergency_stop` envelope from an older
+server, which signs it as `control:extended`, so it fails closed. An older
+Connector does not know the new scope and does not execute an `emergency_stop`
+from a newer server; the action does not complete, so upgrade the Connector
+before relying on it.
 
 ## Handle errors and Connector refusals
 

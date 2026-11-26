@@ -82,14 +82,14 @@ function apiWithStaleControls(controls: readonly string[]) {
   ]) as unknown as Sql)
   const principal: IntegrationPrincipal = {
     appId,
-    scopes: ['control:basic', 'control:extended'],
+    scopes: ['control:basic', 'control:extended', 'control:emergency'],
     grants: [
       {
         id: randomUUID(),
         appId,
         farmId,
         printerAssignmentId: printerId,
-        scopes: ['control:basic', 'control:extended'],
+        scopes: ['control:basic', 'control:extended', 'control:emergency'],
         requiresApproval: true,
         createdAt: 1,
         disabledAt: null,

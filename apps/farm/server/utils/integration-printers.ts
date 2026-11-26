@@ -140,15 +140,19 @@ export function printerSpecs(
   return Object.keys(specs).length ? specs : undefined
 }
 
-function toPrinter(row: IntegrationPrinterRow) {
+function toPrinter(row: IntegrationPrinterRow, mayStop: boolean) {
   const parsed = parsedState(row)
   const data = {
     id: row.id,
     farmId: row.farmId,
     printerKey: row.printerKey,
     // `clear_hold` is a browser-only operator action, never an API action.
+    // `emergency_stop` is offered only to an app granted control:emergency.
     controls: parsed.success
-      ? (parsed.data.controls ?? []).filter((action) => action !== 'clear_hold')
+      ? (parsed.data.controls ?? []).filter(
+          (action) =>
+            action !== 'clear_hold' && (mayStop || action !== 'emergency_stop'),
+        )
       : [],
     sandbox: row.sandbox,
   } as Record<string, unknown>
@@ -198,7 +202,20 @@ export async function listIntegrationPrinters(
   const hasMore = rows.length > limit
   const page = rows.slice(0, limit)
   return {
-    data: page.map(toPrinter),
+    data: page.map((row) =>
+      toPrinter(
+        row,
+        !!integrationGrantFor(
+          {
+            ...principal,
+            grants: principal.emergencyGrants ?? principal.grants,
+          },
+          'control:emergency',
+          row.farmId,
+          row.id,
+        ),
+      ),
+    ),
     nextCursor: hasMore
       ? encodedCursor(page[page.length - 1]!.id, snapshotAt)
       : null,

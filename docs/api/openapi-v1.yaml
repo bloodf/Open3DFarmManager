@@ -644,7 +644,11 @@ paths:
         `pause`, `resume` and `cancel` require `control:basic`.
         `confirm_collection` requires `plates:confirm` and the current plate
         attempt id (`plate.attemptId` on the printer status, or the job plate
-        read). Confirming the current attempt again is safe. Every other
+        read). Confirming the current attempt again is safe.
+        `emergency_stop` requires `control:emergency`, a separate owner grant
+        that `control:extended` does not include. It stops the printer
+        immediately. The API cannot recover the printer: someone must act at
+        the printer or in the OpenFarm browser (firmware restart). Every other
         action requires `control:extended`. An action the printer does not
         advertise answers 422 `unsupported` and is never delivered. Otherwise
         the action is delivered to the Connector or, when the grant requires
@@ -653,6 +657,7 @@ paths:
       security:
         - clientCredentials: ['control:basic']
         - clientCredentials: ['control:extended']
+        - clientCredentials: ['control:emergency']
         - clientCredentials: ['plates:confirm']
       parameters:
         - $ref: '#/components/parameters/PrinterId'
@@ -2213,6 +2218,7 @@ paths:
       security:
         - clientCredentials: ['control:basic']
         - clientCredentials: ['control:extended']
+        - clientCredentials: ['control:emergency']
         - clientCredentials: ['plates:confirm']
       parameters:
         - name: actionId
@@ -3001,6 +3007,7 @@ components:
             inventory:write: Register and withdraw physical spools.
             environment:control: Control drying programs, smart plugs and extraction.
             alerts:manage: Change alert rules and configure or test notification channels.
+            control:emergency: Emergency stop. The API cannot recover the printer afterwards.
   parameters:
     PhysicalSpoolFarmId:
       name: farmId

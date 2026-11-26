@@ -42,6 +42,8 @@ export interface IntegrationPrincipal {
   appId: string
   scopes: readonly IntegrationScope[]
   grants: readonly IntegrationGrant[]
+  /** Grants with control:emergency, kept where a route narrows `grants`. */
+  emergencyGrants?: readonly IntegrationGrant[]
 }
 
 const context = 'openfarm-integrations-v1.'

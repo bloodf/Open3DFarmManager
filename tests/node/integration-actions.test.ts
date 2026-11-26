@@ -219,13 +219,22 @@ test('API emergency stop requires its grant and an advertised control', async ()
     ),
     { ok: false, problem: 'insufficient-scope' },
   )
+  assert.deepEqual(
+    await advertised.service.submit(
+      principal(['control:extended']),
+      printerId,
+      'stop-extended-only',
+      request,
+    ),
+    { ok: false, problem: 'insufficient-scope' },
+  )
   assert.equal(advertised.issued.length, 0)
   assert.equal(
     (
       await advertised.service.submit(
-        principal(['control:extended']),
+        principal(['control:emergency']),
         printerId,
-        'stop-extended',
+        'stop-emergency',
         request,
       )
     ).ok,
@@ -235,7 +244,7 @@ test('API emergency stop requires its grant and an advertised control', async ()
   const missing = fixture(null)
   assert.deepEqual(
     await missing.service.submit(
-      principal(['control:extended']),
+      principal(['control:emergency']),
       printerId,
       'stop-no-list',
       request,

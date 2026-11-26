@@ -1,6 +1,9 @@
 import { createSocket } from 'node:dgram'
 import { isIPv4 } from 'node:net'
-import { createPhrozenOperations } from './operations.ts'
+import {
+  createPhrozenOperations,
+  type PhrozenOperationLock,
+} from './operations.ts'
 import { exchange, object, parse, type PhrozenSession } from './transport.ts'
 
 // Phrozen demonstrates ChituManager on the Revo 14K with V138:
@@ -51,6 +54,7 @@ export async function connectPhrozen(
     uploadTimeoutMs = 30_000,
     signal = undefined as AbortSignal | undefined,
     session = undefined as PhrozenSession | undefined,
+    lock = undefined as PhrozenOperationLock | undefined,
   } = {},
 ) {
   if (!isIPv4(host))
@@ -158,6 +162,7 @@ export async function connectPhrozen(
       confirmTimeoutMs,
       pollMs,
       uploadTimeoutMs,
+      lock,
     }),
   })
 }

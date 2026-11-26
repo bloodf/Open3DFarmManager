@@ -32,7 +32,10 @@ const readOnlyVendors = {
   phrozen: 'Phrozen',
 } as const
 
-/** Status-only vendors expire one printer at a time: they grant no controls. */
+/**
+ * Status-only vendors expire one printer at a time: an expired reading grants
+ * no controls.
+ */
 export type RawPrinterUnavailable = RawMoonrakerUnavailable & {
   readOnly?: Readonly<{
     family: keyof typeof readOnlyVendors
@@ -288,9 +291,14 @@ export function createFarmSnapshotSource(input: {
         ? input.macroParamsFor?.(ref.assignmentId)
         : undefined
       const provenance = entry.fieldObservedAtMonoMs
-      const controls = readOnlyFamily(provenance)
-        ? (input.readOnlyControlsFor?.(ref.assignmentId) ?? [])
-        : input.controlsFor?.(ref.assignmentId)
+      const readOnly = readOnlyFamily(provenance)
+      // Phrozen without progress has no command binding yet to advertise:
+      // controls require progress (PrinterState).
+      const controls = !readOnly
+        ? input.controlsFor?.(ref.assignmentId)
+        : readOnly === 'phrozen' && entry.printer.progress === undefined
+          ? []
+          : (input.readOnlyControlsFor?.(ref.assignmentId) ?? [])
       const advertisedControls =
         controls !== undefined ? { controls: [...controls] } : {}
       const {

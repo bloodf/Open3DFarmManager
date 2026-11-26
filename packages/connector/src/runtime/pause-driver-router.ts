@@ -57,7 +57,18 @@ import {
   type SdcpQualification,
 } from '../sdcp/models.ts'
 import type { SdcpVideo } from '../sdcp/video.ts'
-import { readSdcpPrinterBinding } from '../control/printer-binding.ts'
+import {
+  readSdcpPrinterBinding,
+  readPhrozenPrinterBinding,
+} from '../control/printer-binding.ts'
+import { openFixedPhrozenControl } from '../phrozen/control-driver.ts'
+import {
+  PHROZEN_CONTROL_ACTIONS,
+  PHROZEN_QUALIFIED_WRITES,
+  phrozenUnqualifiedMessage,
+  phrozenWriteQualified,
+  type PhrozenQualification,
+} from '../phrozen/qualification.ts'
 import { bambuControls } from '../bambu/control-support.ts'
 import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
 import {
@@ -146,6 +157,11 @@ export function createPauseDriverRouter(config: {
    * simulator tests; production composition never sets it.
    */
   sdcpQualifiedStarts?: readonly SdcpQualification[]
+  /**
+   * Replaces the shipped Phrozen write qualification list, which is empty. For
+   * simulator tests; production composition never sets it.
+   */
+  phrozenQualifiedWrites?: readonly PhrozenQualification[] | undefined
   /** Open Photon resin sessions; the collection owns them. */
   photonResinSessions?: PhotonResinSessions | undefined
   /** Replaces the shipped resin write list, which is empty. Tests only. */
@@ -177,6 +193,8 @@ export function createPauseDriverRouter(config: {
   const moonrakerMacroParams = new WeakMap<PrinterBinding, MacroParamMap>()
   const sdcpFirmware = new WeakMap<PrinterBinding, string>()
   const sdcpQualified = config.sdcpQualifiedStarts ?? SDCP_QUALIFIED_STARTS
+  const phrozenQualified =
+    config.phrozenQualifiedWrites ?? PHROZEN_QUALIFIED_WRITES
   const flashforgeFirmware = new WeakMap<PrinterBinding, string>()
   const flashforgeQualified =
     config.flashforgeQualifiedWrites ?? FLASHFORGE_QUALIFIED_WRITES
@@ -246,6 +264,16 @@ export function createPauseDriverRouter(config: {
         ? [...lifecycle, 'power']
         : lifecycle
     }
+    const phrozen = readPhrozenPrinterBinding(binding)
+    if (phrozen)
+      // The driver rechecks this pair against the printer's own identity.
+      return phrozenWriteQualified(
+        phrozen.expect.model,
+        phrozen.expect.firmware,
+        phrozenQualified,
+      )
+        ? PHROZEN_CONTROL_ACTIONS
+        : []
     const anycubic = readAnycubicPrinterBinding(binding)
     if (anycubic) return anycubicControls(anycubic.modelId)
     const bambu = readBambuPrinterBinding(binding)
@@ -271,6 +299,12 @@ export function createPauseDriverRouter(config: {
   return Object.freeze({
     controls,
     startUnavailableMessage(binding: PrinterBinding) {
+      const phrozen = readPhrozenPrinterBinding(binding)
+      if (phrozen && !controls(binding).includes('start_print'))
+        return phrozenUnqualifiedMessage(
+          phrozen.expect.model,
+          phrozen.expect.firmware,
+        )
       if (readFlashforgePrinterBinding(binding) && !controls(binding).length)
         return flashforgeUnqualifiedMessage()
       if (readPhotonResinPrinterBinding(binding))
@@ -354,6 +388,7 @@ export function createPauseDriverRouter(config: {
         !readCrealityPrinterBinding(binding) &&
         !readKobraXPrinterBinding(binding) &&
         !readSdcpPrinterBinding(binding) &&
+        !readPhrozenPrinterBinding(binding) &&
         !readPhotonResinPrinterBinding(binding) &&
         !readAnycubicPrinterBinding(binding)
       ) {
@@ -425,15 +460,17 @@ export function createPauseDriverRouter(config: {
                 ? openFixedKobraXControl
                 : readAnycubicPrinterBinding(binding)
                   ? openFixedAnycubicControl
-                  : readPhotonResinPrinterBinding(binding)
-                    ? openFixedPhotonResinControl
-                    : readSdcpPrinterBinding(binding)
-                      ? openFixedSdcpControl
-                      : readCrealityPrinterBinding(binding)
-                        ? openFixedCrealityControl
-                        : readBambuPrinterBinding(binding)
-                          ? openFixedBambuControl
-                          : openFixedMoonrakerPause
+                  : readPhrozenPrinterBinding(binding)
+                    ? openFixedPhrozenControl
+                    : readPhotonResinPrinterBinding(binding)
+                      ? openFixedPhotonResinControl
+                      : readSdcpPrinterBinding(binding)
+                        ? openFixedSdcpControl
+                        : readCrealityPrinterBinding(binding)
+                          ? openFixedCrealityControl
+                          : readBambuPrinterBinding(binding)
+                            ? openFixedBambuControl
+                            : openFixedMoonrakerPause
         )({
           binding,
           fetch: config.kobraLinkFetch,
@@ -443,6 +480,7 @@ export function createPauseDriverRouter(config: {
           connectionGeneration: generation,
           objects: moonrakerObjects.get(binding),
           qualifiedStarts: config.sdcpQualifiedStarts,
+          phrozenQualifiedWrites: config.phrozenQualifiedWrites,
           photonResinSessions: config.photonResinSessions,
           photonResinQualifiedWrites: config.photonResinQualifiedWrites,
           video: config.sdcpVideo,

@@ -74,6 +74,7 @@ import {
   readBambuPrinterBinding,
   readCrealityPrinterBinding,
   readFlashforgePrinterBinding,
+  readPhrozenPrinterBinding,
   readSdcpPrinterBinding,
 } from '../control/printer-binding.ts'
 import {
@@ -170,6 +171,10 @@ const systemClock: AgentClock = { now: () => Date.now() }
 
 type AgentInput = {
   trustedKeys?: TrustedKeyAuthority
+  /** Test override only; the CLI never sets it. The shipped list is empty. */
+  phrozenQualifiedWrites?: Parameters<
+    typeof import('./pause-control.ts').runPauseControl
+  >[0]['phrozenQualifiedWrites']
   resinCapabilities?: Parameters<
     typeof import('./pause-control.ts').runPauseControl
   >[0]['resinCapabilities']
@@ -221,6 +226,7 @@ async function runConnectorAgentOnce(
   const config = readAgentRuntimeConfig(
     input.configPath,
     readCredentialEnvelope(input.credentialPath, identity.fingerprint),
+    { phrozenQualifiedWrites: input.phrozenQualifiedWrites },
   )
   // One startup line whenever the operator widened the ICE bind beyond loopback.
   if (!isLoopbackBindAddress(config.rtc.bindAddress))
@@ -694,10 +700,13 @@ async function runConnectorAgentOnce(
               return []
             return controlsFor?.(id)
           },
-          // Only a Flashforge binding opted in to control advertises any.
+          // Only a Flashforge or Phrozen binding opted in to control
+          // advertises any.
           readOnlyControlsFor: (id) => {
             const local = config.bindingFor(id)
-            return local && readFlashforgePrinterBinding(local)
+            return local &&
+              (readFlashforgePrinterBinding(local) ||
+                readPhrozenPrinterBinding(local))
               ? controlsFor?.(id)
               : []
           },
@@ -1071,6 +1080,7 @@ async function runConnectorAgentOnce(
             )
           },
           ...(input.trustedKeys ? { trustedKeys: input.trustedKeys } : {}),
+          phrozenQualifiedWrites: input.phrozenQualifiedWrites,
           ...(input.resinCapabilities
             ? { resinCapabilities: input.resinCapabilities }
             : {}),

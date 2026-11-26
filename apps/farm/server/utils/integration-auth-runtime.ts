@@ -9,20 +9,30 @@ import {
 let active:
   { pool: ReturnType<typeof postgres>; auth: IntegrationAuth } | undefined
 
+export function integrationAuthConfigured() {
+  const config: unknown = useRuntimeConfig().integrationAuth
+  return (
+    typeof config === 'object' &&
+    config !== null &&
+    'enabled' in config &&
+    config.enabled === true
+  )
+}
+
 function integrationRuntime() {
   if (active) return active
   const config = useRuntimeConfig().integrationAuth
+  if (!integrationAuthConfigured())
+    throw new Error('Autenticação de integrações indisponível.')
   if (
     typeof config !== 'object' ||
     config === null ||
-    !('enabled' in config) ||
-    config.enabled !== true ||
     !('signingKey' in config) ||
     !('tokenTtlSeconds' in config) ||
     !('databaseUrl' in config) ||
     typeof config.databaseUrl !== 'string'
   )
-    throw new Error('Autenticação de integrações indisponível.')
+    throw new Error('Configuração de autenticação de integrações inválida.')
   const token = parseIntegrationTokenConfig(config)
   const url = new URL(config.databaseUrl)
   if (

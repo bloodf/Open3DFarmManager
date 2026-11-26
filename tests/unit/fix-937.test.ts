@@ -188,6 +188,114 @@ describe.skipIf(!postgresReady)('#937 migration 0128', () => {
   const stop = { action: 'emergency_stop', args: {} }
   const path = `/printers/${printer}/actions`
 
+  it('closes control:extended emergency stops created before 0128', async () => {
+    const appId = randomUUID()
+    const grantId = randomUUID()
+    const heldAppId = randomUUID()
+    const heldGrantId = randomUUID()
+    for (const [app, grant, held] of [
+      [appId, grantId, false],
+      [heldAppId, heldGrantId, true],
+    ] as const) {
+      await sql`INSERT INTO farm.integration_apps (id, farm_id, name, sandbox, created_at, created_by) VALUES (${app}::uuid, ${farm}::uuid, 'before', false, 1, ${owner})`
+      await sql`INSERT INTO farm.integration_app_grants (id, app_id, farm_id, printer_assignment_id, scopes, requires_approval, created_at, created_by) VALUES (${grant}::uuid, ${app}::uuid, ${farm}::uuid, ${printer}::uuid, ${['control:extended']}::text[], ${held}, 1, ${owner})`
+    }
+    const action = async (
+      app: string,
+      grant: string,
+      name: string,
+      status: 'held' | 'submitted',
+    ) => {
+      const id = randomUUID()
+      await sql`INSERT INTO farm.integration_actions (id, app_id, grant_id, farm_id, printer_assignment_id, idempotency_key, request_hash, action, required_scope, status, created_at, updated_at)
+        VALUES (${id}::uuid, ${app}::uuid, ${grant}::uuid, ${farm}::uuid, ${printer}::uuid, ${randomUUID()}, ${'a'.repeat(64)}, ${sql.json({ action: name, args: {} })}, 'control:extended', ${status}, ${Date.now()}, ${Date.now()})`
+      return id
+    }
+    const envelope = async (resourceId: string, name: string) => {
+      const cmdId = randomUUID()
+      const now = Date.now()
+      const wire = JSON.stringify({
+        envelope: { action: { action: name, args: {} }, kind: 'action' },
+      })
+      await sql`INSERT INTO farm.integration_envelopes (cmd_id, app_id, grant_id, farm_id, agent_id, printer_assignment_id, kind, resource_id, required_scope, nonce, wire, issued_at, expires_at, created_at, updated_at)
+        VALUES (${cmdId}::uuid, ${appId}::uuid, ${grantId}::uuid, ${farm}::uuid, ${agent}::uuid, ${printer}::uuid, 'action', ${resourceId}::uuid, 'control:extended', ${cmdId.replaceAll('-', '').slice(0, 22)}, ${wire}, ${now}, ${now + 300_000}, ${now}, ${now})`
+      return cmdId
+    }
+    const submitted = () =>
+      action(appId, grantId, 'emergency_stop', 'submitted')
+    const pending = await envelope(await submitted(), 'emergency_stop')
+    // Claimed during the migration, then handed back for lack of an inbox.
+    const claimed = await envelope(await submitted(), 'emergency_stop')
+    await sql`UPDATE farm.integration_envelopes SET status = 'sending' WHERE cmd_id = ${claimed}::uuid`
+    const home = await envelope(
+      await action(appId, grantId, 'home', 'submitted'),
+      'home',
+    )
+    const orphan = await submitted()
+    const held = await action(heldAppId, heldGrantId, 'emergency_stop', 'held')
+    const heldHome = await action(heldAppId, heldGrantId, 'home', 'held')
+    await up()
+
+    const store = new PostgresIntegrationDelivery(sql)
+    const envelopeStatus = async (cmdId: string) =>
+      (await store.get(cmdId))!.status
+    const actionStatus = async (id: string) =>
+      (
+        await sql`SELECT status FROM farm.integration_actions WHERE id = ${id}::uuid`
+      )[0]!.status
+    const closed = async () => {
+      expect(await envelopeStatus(pending)).toBe('rejected')
+      expect(await actionStatus(held)).toBe('rejected')
+      expect(await store.claim(pending, Date.now())).toBeNull()
+    }
+    await closed()
+    expect(await envelopeStatus(home)).toBe('pending')
+    expect(await actionStatus(heldHome)).toBe('held')
+    expect(await store.claim(home, Date.now())).not.toBeNull()
+
+    await sql`UPDATE farm.integration_envelopes SET status = 'pending' WHERE cmd_id = ${claimed}::uuid`
+    expect(await store.claim(claimed, Date.now())).toBeNull()
+    expect((await store.settleUnclaimable(claimed, Date.now()))?.status).toBe(
+      'rejected',
+    )
+
+    // A submitted action without an envelope can never get one.
+    const now = Date.now()
+    for (const requiredScope of [
+      'control:emergency',
+      'control:extended',
+    ] as const) {
+      const issued = await store.insert(
+        {
+          cmdId: randomUUID(),
+          appId,
+          grantId,
+          farmId: farm,
+          agentId: agent,
+          printerAssignmentId: printer,
+          kind: 'action',
+          resourceId: orphan,
+          requiredScope,
+          nonce: requiredScope.slice(8).padEnd(22, 'n'),
+          wire: JSON.stringify({ action: 'emergency_stop' }),
+          issuedAt: now,
+          expiresAt: now + 60_000,
+        },
+        now,
+      )
+      // The old grant lacks the new scope; an old-scope row is unclaimable.
+      if (requiredScope === 'control:emergency')
+        expect(issued).toEqual({ kind: 'refused' })
+      else {
+        if (issued.kind !== 'created') throw new Error(issued.kind)
+        expect(await store.claim(issued.record.cmdId, now)).toBeNull()
+      }
+    }
+
+    await down()
+    await closed()
+  })
+
   it('rolls back to the 0125 definitions while the scope is unused', async () => {
     await up()
     expect(await definitions(sql)).not.toEqual(before)
@@ -244,6 +352,8 @@ describe.skipIf(!postgresReady)('#937 migration 0128', () => {
     expect(decodeApiEnvelopeFrame(sent[0]!).envelope.scope).toBe(
       'control:emergency',
     )
+    // The delivery check matches the real canonical frame.
+    expect(sent[0]).toContain('"action":"emergency_stop"')
     const read = await app.authorize(`/actions/${result.action.id}`)
     expect(read).not.toBeInstanceOf(Response)
     // The new scope covers nothing else.

@@ -8,7 +8,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs'
-import { networkInterfaces, tmpdir } from 'node:os'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   MoonrakerConfigurationTarget,
@@ -16,7 +16,11 @@ import {
 } from '../../packages/farm-protocol/src/configuration-target.ts'
 import type { ConfigurationRequestFrame } from '../../packages/farm-protocol/src/configuration-frames.ts'
 import { ConnectorIdentity } from '../../packages/connector/src/identity/store.ts'
-import { createProvisioningEngine } from '../../packages/connector/src/provisioning/engine.ts'
+import {
+  createProvisioningEngine,
+  type ProvisioningEngineOptions,
+} from '../../packages/connector/src/provisioning/engine.ts'
+import { MoonrakerClientError } from '../../packages/connector/src/moonraker/client.ts'
 import { createPrinterNetworkPolicy } from '../../packages/connector/src/provisioning/policy.ts'
 import {
   trustProvisioningAuthority,
@@ -55,7 +59,7 @@ function spoolmanTarget(origin: string) {
 
 function world(
   options: {
-    printerNetworks?: readonly string[]
+    moonrakerDiscovery?: ProvisioningEngineOptions['moonrakerDiscovery']
     spoolmanFetch?: typeof fetch
     bootstrapOrigins?: string[]
   } = {},
@@ -90,7 +94,10 @@ function world(
     runtime: { runtimeConfigPath, agent_id: agent, farm_id: farm },
     connector: signer,
     managedBridge: null,
-    printerNetworks: options.printerNetworks ?? NETWORKS,
+    printerNetworks: NETWORKS,
+    ...(options.moonrakerDiscovery
+      ? { moonrakerDiscovery: options.moonrakerDiscovery }
+      : {}),
     ...(options.spoolmanFetch ? { spoolmanFetch: options.spoolmanFetch } : {}),
     authority: trustProvisioningAuthority({
       isCurrent: async (context) => context.role === 'owner',
@@ -139,26 +146,6 @@ function allowedOrigins(path: string): string[] {
   return JSON.parse(readFileSync(path, 'utf8')).collection.allowedOrigins
 }
 
-function localRfc1918(): { ip: string; cidr: string } | null {
-  for (const entries of Object.values(networkInterfaces())) {
-    for (const entry of entries ?? []) {
-      if (entry.family !== 'IPv4' || entry.internal) continue
-      const parts = entry.address.split('.').map(Number)
-      if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part)))
-        continue
-      const [a, b] = parts
-      let cidr: string | null = null
-      if (a === 10) cidr = '10.0.0.0/8'
-      else if (a === 172 && b !== undefined && b >= 16 && b <= 31)
-        cidr = '172.16.0.0/12'
-      else if (a === 192 && b === 168) cidr = '192.168.0.0/16'
-      if (cidr && createPrinterNetworkPolicy([cidr]).allows(entry.address))
-        return { ip: entry.address, cidr }
-    }
-  }
-  return null
-}
-
 test('refuses .0 and .255 hosts inside an allowed private printer CIDR', () => {
   const policy = createPrinterNetworkPolicy(['192.168.1.0/24'])
   assert.equal(policy.allows('192.168.1.0'), false)
@@ -174,7 +161,11 @@ test('refuses loopback, link-local and public origins for moonraker and spoolman
       headers: { 'content-type': 'application/json' },
     })
   }) as typeof fetch
-  const w = world({ spoolmanFetch })
+  const moonrakerDiscovery = async ({ origin }: { origin: string }) => {
+    seen.push(origin)
+    throw new MoonrakerClientError('offline')
+  }
+  const w = world({ moonrakerDiscovery, spoolmanFetch })
 
   for (const host of REFUSED_HOSTS) {
     const moonraker = await w.send(
@@ -220,16 +211,18 @@ test('accepts a private LAN Spoolman origin', async () => {
 })
 
 test('accepts a private LAN Moonraker origin past the network policy gate', async () => {
-  const lan = localRfc1918()
-  assert.ok(lan, 'test host needs a private RFC1918 address')
-  const w = world({ printerNetworks: [lan.cidr] })
-  // Closed port on a local private address: policy allows, probe fails fast.
-  const response = await w.send(
-    prepareFrame(moonrakerTarget(`http://${lan.ip}:1`)),
-  )
+  const origin = 'http://192.168.1.10:7125'
+  const seen: string[] = []
+  const w = world({
+    moonrakerDiscovery: async (input) => {
+      seen.push(input.origin)
+      throw new MoonrakerClientError('offline')
+    },
+  })
+  const response = await w.send(prepareFrame(moonrakerTarget(origin)))
+  assert.deepEqual(seen, [origin])
   assert.equal(response.type, 'error')
   if (response.type === 'error') {
-    assert.notEqual(response.code, 'invalid-request')
     assert.equal(response.code, 'moonraker-unavailable')
   }
   assert.deepEqual(allowedOrigins(w.runtimeConfigPath), [])

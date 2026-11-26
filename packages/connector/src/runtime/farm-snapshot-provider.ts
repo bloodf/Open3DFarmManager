@@ -1,5 +1,6 @@
 import { PRINTER_STRING_MAX_UNITS } from '@open3dfarmmanager/farm-protocol'
 import type { MacroParamMap } from '../moonraker/control-macros.ts'
+import { connectorVersionMetadata } from '../status/version.ts'
 import type { ExtendedControlAction } from '../../../farm-protocol/src/control-actions.ts'
 import { moonrakerLastJob } from '../moonraker/normalize.ts'
 import { moonrakerFilamentUsage } from './job-filament-usage.ts'
@@ -131,6 +132,15 @@ function fieldTimes(timing: RawPrinterObservation['fieldObservedAtMonoMs']) {
 }
 
 const FRAME_LIMIT = 'Application frame limit'
+// Fit the first frame too, when the sender adds version and RTC scope metadata.
+// Use the longer scope and allow for degraded storage on every frame.
+const sizingHeader = {
+  t: 'snapshot',
+  seq: 1024,
+  ...connectorVersionMetadata,
+  rtcScope: 'loopback',
+  storage: 'degraded',
+} as const
 
 /** Display evidence only. No enrollment, command permission, or wall-clock authority. */
 export function createFarmSnapshotSource(input: {
@@ -381,19 +391,13 @@ export function createFarmSnapshotSource(input: {
     // Fit as many spools as the frame cap allows; the total stays truthful.
     let message
     try {
-      message = validatedStatusMessage(
-        { t: 'snapshot', seq: 1024, printers },
-        refs,
-      )
+      message = validatedStatusMessage({ ...sizingHeader, printers }, refs)
     } catch (error) {
       if (!(error instanceof Error && error.message === FRAME_LIMIT))
         throw error
       if (!printers.some((printer) => printer.linkHealth)) throw error
       for (const printer of printers) delete printer.linkHealth
-      message = validatedStatusMessage(
-        { t: 'snapshot', seq: 1024, printers },
-        refs,
-      )
+      message = validatedStatusMessage({ ...sizingHeader, printers }, refs)
     }
     if (spoolState) {
       const elapsed = now - spoolState.receivedMono
@@ -401,8 +405,7 @@ export function createFarmSnapshotSource(input: {
         try {
           message = validatedStatusMessage(
             {
-              t: 'snapshot',
-              seq: 1024,
+              ...sizingHeader,
               printers,
               inventory: inventoryAt(spoolState.value, elapsed, Date.now(), n),
             },

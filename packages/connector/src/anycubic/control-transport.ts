@@ -263,5 +263,37 @@ export function createAnycubicControlTransport(
       })
     })
   }
-  return { done, close, publish, publishFile }
+  /**
+   * Requests of the `models.ts` models go to the `web` topic: the one their
+   * reference was validated with on hardware (evidence doc, source H1).
+   */
+  function publishWeb(
+    request: Readonly<{ type: string }>,
+    beforeSend: () => boolean,
+  ): Promise<void> {
+    const payload = JSON.stringify(request)
+    if (
+      stopped ||
+      !client.connected ||
+      !['info', 'light', 'print'].includes(request.type) ||
+      Buffer.byteLength(payload) > 1024
+    )
+      return Promise.reject(new Error('Anycubic request unavailable'))
+    return new Promise((resolve, reject) => {
+      if (!beforeSend()) {
+        reject(new Error('Anycubic request denied'))
+        return
+      }
+      client.publish(
+        `anycubic/anycubicCloud/v1/web/printer/${serial}/${request.type}`,
+        payload,
+        { qos: 0, retain: false },
+        (error) => {
+          if (error) reject(new Error('Anycubic request unavailable'))
+          else resolve()
+        },
+      )
+    })
+  }
+  return { done, close, publish, publishFile, publishWeb }
 }

@@ -254,6 +254,8 @@ export function createFarmSnapshotSource(input: {
               'estimatedRemainingSeconds',
               'toolTemperatureCelsius',
               'bedTemperatureCelsius',
+              'chamberTemperatureCelsius',
+              'chamberTargetCelsius',
             ] as const)
           : []
       const independent: readonly string[] = [
@@ -491,6 +493,13 @@ export function createFarmSnapshotSource(input: {
               'bedTemperatureCelsius',
               'fans',
               'light',
+              // Only the Anycubic collection stamps its chamber readings.
+              ...('anycubic' in timing
+                ? ([
+                    'chamberTemperatureCelsius',
+                    'chamberTargetCelsius',
+                  ] as const)
+                : []),
             ] as const
           ).filter((field) => value.printer[field] !== undefined),
         ]

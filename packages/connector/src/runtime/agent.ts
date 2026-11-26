@@ -175,6 +175,10 @@ type AgentInput = {
   phrozenQualifiedWrites?: Parameters<
     typeof import('./pause-control.ts').runPauseControl
   >[0]['phrozenQualifiedWrites']
+  /** Test override only; the CLI never sets it. The shipped list is empty. */
+  anycubicQualifiedWrites?: Parameters<
+    typeof import('./pause-control.ts').runPauseControl
+  >[0]['anycubicQualifiedWrites']
   resinCapabilities?: Parameters<
     typeof import('./pause-control.ts').runPauseControl
   >[0]['resinCapabilities']
@@ -1081,6 +1085,7 @@ async function runConnectorAgentOnce(
           },
           ...(input.trustedKeys ? { trustedKeys: input.trustedKeys } : {}),
           phrozenQualifiedWrites: input.phrozenQualifiedWrites,
+          anycubicQualifiedWrites: input.anycubicQualifiedWrites,
           ...(input.resinCapabilities
             ? { resinCapabilities: input.resinCapabilities }
             : {}),

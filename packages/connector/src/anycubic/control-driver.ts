@@ -20,6 +20,8 @@ import {
   buildAnycubicControlCommand,
   anycubicControls,
 } from './control-support.ts'
+import { openQualifiedAnycubicControl } from './lan-control-driver.ts'
+import { anycubicLanModel, type AnycubicQualification } from './models.ts'
 import { createAnycubicControlTransport } from './control-transport.ts'
 
 const lifecycle = (action: ExtendedControlAction | undefined) =>
@@ -111,8 +113,11 @@ export function openFixedAnycubicControl(input: {
   publish(observation: ControlObservation | null): void
   signal: AbortSignal
   timeoutMs?: number
+  anycubicQualifiedWrites?: readonly AnycubicQualification[] | undefined
 }) {
   const local = readAnycubicPrinterBinding(input.binding)
+  if (local && anycubicLanModel(local.modelId))
+    return openQualifiedAnycubicControl(input)
   const mapping = readPrinterBinding(input.binding)
   if (
     !local ||

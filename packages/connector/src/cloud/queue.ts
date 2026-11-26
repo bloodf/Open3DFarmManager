@@ -150,6 +150,9 @@ export class TelemetryQueue {
   private readonly temporary: string
   private readonly cursor: string
   private readonly cursorTemporary: string
+  private readonly refusals: string
+  private readonly refusalsTemporary: string
+  private refused = 0
   private readonly compactAfterBytes: number
   /** Bytes of acknowledged records still present at the head of the log. */
   private ackedBytes = 0
@@ -199,6 +202,8 @@ export class TelemetryQueue {
     this.temporary = join(directory, 'telemetry.compact')
     this.cursor = join(directory, 'telemetry.ack')
     this.cursorTemporary = join(directory, 'telemetry.ack.tmp')
+    this.refusals = join(directory, 'telemetry.refused')
+    this.refusalsTemporary = join(directory, 'telemetry.refused.tmp')
     const lock = acquireQueueLock(this.lock)
     this.recoveredStaleLock = lock.recovered
     this.recoveryMutexLeft = lock.mutexLeft === true
@@ -276,7 +281,12 @@ export class TelemetryQueue {
         this.records = this.records.slice(head + 1)
       }
       // Validate the committed log before cleaning leftover compaction/cursor files.
-      for (const leftover of [this.temporary, this.cursorTemporary]) {
+      this.refused = this.readRefusals()
+      for (const leftover of [
+        this.temporary,
+        this.cursorTemporary,
+        this.refusalsTemporary,
+      ]) {
         if (!existsSync(leftover)) continue
         privateEntry(leftover)
         if (lstatSync(leftover).size > MAX_BYTES + COMPACT_BYTES)
@@ -358,6 +368,37 @@ export class TelemetryQueue {
     renameSync(this.cursorTemporary, this.cursor)
     this.syncDirectory()
   }
+  private readRefusals(): number {
+    if (!lstatSync(this.refusals, { throwIfNoEntry: false })) return 0
+    privateEntry(this.refusals)
+    const fd = openSync(
+      this.refusals,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    )
+    let text: string
+    try {
+      const stat = fstatSync(fd)
+      privateStat(stat)
+      if (stat.size > 64) throw new Error('Invalid queue refusal count')
+      text = readFileSync(fd, 'utf8')
+    } finally {
+      closeSync(fd)
+    }
+    if (!/^[1-9][0-9]{0,14}$/.test(text))
+      throw new Error('Invalid queue refusal count')
+    return Number(text)
+  }
+  private writeRefusals() {
+    const fd = openSync(this.refusalsTemporary, 'wx', 0o600)
+    try {
+      writeFileSync(fd, String(this.refused))
+      fsyncSync(fd)
+    } finally {
+      closeSync(fd)
+    }
+    renameSync(this.refusalsTemporary, this.refusals)
+    this.syncDirectory()
+  }
   private syncDirectory() {
     const fd = openSync(this.directory, 'r')
     try {
@@ -379,6 +420,10 @@ export class TelemetryQueue {
   get storageLost(): number {
     return this.lost
   }
+  /** Records dropped because the server refused them, kept across restarts. */
+  get refusedRecords(): number {
+    return this.refused
+  }
   /**
    * One bounded recovery attempt: rewrites the log from the in-memory records,
    * which include every acknowledgement accepted while degraded. Returns false
@@ -389,10 +434,15 @@ export class TelemetryQueue {
       throw new Error('Queue is closed or requires recovery')
     if (!this.degraded) return true
     try {
-      for (const leftover of [this.temporary, this.cursorTemporary])
+      for (const leftover of [
+        this.temporary,
+        this.cursorTemporary,
+        this.refusalsTemporary,
+      ])
         if (lstatSync(leftover, { throwIfNoEntry: false })) unlinkSync(leftover)
       this.degraded = false
       this.replace(this.records)
+      if (this.refused) this.writeRefusals()
       return true
     } catch (error) {
       this.fault(error)
@@ -701,6 +751,22 @@ export class TelemetryQueue {
     }
     this.records = rest
     this.pruneAgeAnchors()
+  }
+  /** Removes records the server refused and counts them durably. */
+  refuse(eventIds: readonly string[], now: number): void {
+    const before = this.records.length
+    this.remove(eventIds, now)
+    const removed = before - this.records.length
+    if (!removed) return
+    this.refused += removed
+    // While degraded the count is persisted by `retryStorage`.
+    if (this.degraded) return
+    try {
+      this.writeRefusals()
+    } catch (error) {
+      this.fault(error)
+      if (this.failed) throw error
+    }
   }
   discardHead(now: number): void {
     const head = this.records[0]

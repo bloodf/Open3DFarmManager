@@ -810,13 +810,23 @@ export async function startVendorSimulator(
       const deviceId = options.deviceId ?? 'JOURNEY'
       const username = 'journey-user'
       const password = 'journey-password'
+      // `printerModel` selects one of the simulated models; default Kobra 3.
+      const model =
+        options.printerModel === '20028' || options.printerModel === '20029'
+          ? options.printerModel
+          : undefined
+      const modelId = model ?? MODEL_ID
       const sim = await startAnycubicSimulator({
-        serial: `${MODEL_ID}/${deviceId}`,
-        lanFiles: { firmware: '2.4.6.7' },
+        serial: `${modelId}/${deviceId}`,
         credentials: { username, password },
-        initialState: 'RUNNING',
-        // A started file prints for a few seconds, then completes by itself.
-        printDurationMs: 8000,
+        ...(model
+          ? { modelId: model }
+          : {
+              lanFiles: { firmware: '2.4.6.7' },
+              initialState: 'RUNNING' as const,
+              // A started file prints for a few seconds, then completes.
+              printDurationMs: 8000,
+            }),
         // State changes are reported at once; the repeated report is slow
         // enough for the Connector's telemetry queue to run empty between
         // uploads. A queue that never empties uploads without pause and keeps
@@ -839,9 +849,12 @@ export async function startVendorSimulator(
         port: infoPort,
         probe: () => probeAnycubic('127.0.0.1', infoPort),
       }
-      const anycubicCamera = await startCamera('anycubic-rinkhals', undo)
-      camera = anycubicCamera.camera
-      cameraSection = anycubicCamera.section
+      // No camera claim for the other models.
+      if (!model) {
+        const anycubicCamera = await startCamera('anycubic-rinkhals', undo)
+        camera = anycubicCamera.camera
+        cameraSection = anycubicCamera.section
+      }
       runtime = async (scope) => {
         const passwordFile = join(directory, 'anycubic-password.json')
         await privateJson(passwordFile, password)
@@ -861,8 +874,8 @@ export async function startVendorSimulator(
                   printerKey: scope.printerKey,
                   host: sim.host,
                   port: sim.port,
-                  uploadPort: sim.uploadPort,
-                  modelId: MODEL_ID,
+                  ...(sim.uploadPort ? { uploadPort: sim.uploadPort } : {}),
+                  modelId,
                   deviceId,
                   username,
                   pinSha256: pinOf(sim.syntheticTrust),

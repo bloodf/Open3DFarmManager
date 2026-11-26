@@ -11,6 +11,16 @@ import type { ThrowawayTlsMaterial } from './mocks/tls.ts'
 
 export { encodePacket as packet }
 
+/**
+ * Firmware each simulated model reports. `2.6.9.6` is the version the S1 Max
+ * reference was captured on; no source gives a Kobra 4 version, so its value
+ * is visibly synthetic.
+ */
+export const ANYCUBIC_SIM_FIRMWARE = Object.freeze({
+  '20028': 'sim-kobra-4',
+  '20029': '2.6.9.6',
+})
+
 export interface AnycubicSimulatorState {
   lifecycle: 'idle' | 'printing' | 'paused' | 'finished' | 'error'
   progress: number
@@ -19,6 +29,14 @@ export interface AnycubicSimulatorState {
 }
 
 export interface AnycubicSimulatorOptions {
+  /**
+   * Simulates the report shapes and `web` topic requests of one of these
+   * models (docs/fullfarmmanager/evidence/anycubic-fdm-models.md). The serial
+   * must start with this id. Never captured by this project.
+   */
+  modelId?: keyof typeof ANYCUBIC_SIM_FIRMWARE | undefined
+  /** Firmware of a `modelId` simulation; defaults to the table above. */
+  firmware?: string | undefined
   serial?: string | undefined
   port?: number | undefined
   /** `listReply` and `uploadCode` model refusals; see the `file/report` below. */
@@ -48,7 +66,9 @@ export interface AnycubicSimulatorOptions {
 }
 
 export async function startAnycubicSimulator({
-  serial = 'SYNTHETIC',
+  modelId,
+  firmware = modelId ? ANYCUBIC_SIM_FIRMWARE[modelId] : undefined,
+  serial = modelId ? `${modelId}/SYNTHETIC` : 'SYNTHETIC',
   port = 0,
   lanFiles,
   initialState,
@@ -64,6 +84,8 @@ export async function startAnycubicSimulator({
 }: AnycubicSimulatorOptions = {}) {
   if (!/^[A-Za-z0-9_/-]{1,128}$/.test(serial))
     throw new Error('Invalid synthetic serial')
+  if (modelId && !serial.startsWith(`${modelId}/`))
+    throw new Error('Serial does not carry the model id')
   if (
     !Number.isFinite(printDurationMs) ||
     printDurationMs <= 0 ||
@@ -100,6 +122,158 @@ export async function startAnycubicSimulator({
 
   let brokerRef: MqttMockInstance | undefined
   let closed = false
+
+  // State of a `modelId` simulation.
+  let online = true
+  let resumed = false
+  // Reference values of an idle-to-printing S1 Max; the rest is made up.
+  const heat = { nozzle: 215, bed: 60, chamber: 43 }
+  // Kobra 4 lists both lamps although only the camera light (3) exists.
+  const lamps = new Map<number, number>([[2, 0]])
+  if (modelId === '20028') lamps.set(3, 0)
+  const writes: { type: string; action: string; data: unknown }[] = []
+  const queries: string[] = []
+  const modelTopic = (type: string) =>
+    reportTopic.replace('/info/report', `/${type}/report`)
+  const envelope = (type: string, action: string, data: unknown) => ({
+    type,
+    action,
+    msgid: randomUUID(),
+    timestamp: Date.now(),
+    state: 'done',
+    code: 200,
+    data,
+  })
+
+  function modelTemperatures() {
+    const target = {
+      nozzle: settings.target_nozzle_temp ?? heat.nozzle,
+      bed: settings.target_hotbed_temp ?? heat.bed,
+    }
+    return {
+      curr_nozzle_temp: target.nozzle,
+      curr_hotbed_temp: target.bed,
+      target_nozzle_temp: target.nozzle,
+      target_hotbed_temp: target.bed,
+      ...(modelId === '20029'
+        ? { curr_chamber_temp: heat.chamber, target_chamber_temp: 0 }
+        : {}),
+    }
+  }
+
+  function modelInfo() {
+    const active = lifecycle === 'printing' || lifecycle === 'paused'
+    return envelope('info', 'report', {
+      printerName: 'Synthetic printer',
+      model: modelId === '20029' ? 'Anycubic Kobra S1 Max' : 'Anycubic Kobra 4',
+      version: firmware,
+      state: active ? 'busy' : 'free',
+      temp: modelTemperatures(),
+      fan_speed_pct: settings.fan_speed_pct ?? 0,
+      aux_fan_speed_pct: 0,
+      box_fan_level: 0,
+      project: active
+        ? {
+            progress,
+            curr_layer: Math.floor((progress * totalLayers) / 100),
+            total_layers: totalLayers,
+            remain_time: remainingMinutes ?? 30,
+            state:
+              lifecycle === 'paused'
+                ? 'paused'
+                : resumed
+                  ? 'resumed'
+                  : 'printing',
+            pause: lifecycle === 'paused' ? 1 : 0,
+            filename: filename ?? 'synthetic.gcode.3mf',
+          }
+        : null,
+    })
+  }
+
+  const modelLights = () =>
+    envelope('light', 'query', {
+      lights: [...lamps].map(([type, status]) => ({
+        type,
+        status,
+        brightness: status * 100,
+      })),
+    })
+
+  function publishModel() {
+    if (!online) return
+    brokerRef?.control.publish(reportTopic, modelInfo())
+    brokerRef?.control.publish(
+      modelTopic('tempature'),
+      envelope('tempature', 'report', modelTemperatures()),
+    )
+    brokerRef?.control.publish(modelTopic('light'), modelLights())
+  }
+
+  /** `web` topic requests; anything else is not part of these models. */
+  function handleModelRequest(topicName: string, raw: any) {
+    const type = topicName.slice(
+      `anycubic/anycubicCloud/v1/web/printer/${serial}/`.length,
+    )
+    if (
+      topicName !==
+        `anycubic/anycubicCloud/v1/web/printer/${serial}/${raw?.type}` ||
+      typeof raw.msgid !== 'string'
+    )
+      throw new Error('Invalid request topic')
+    if (!online) return
+    if (raw.action === 'query' && (type === 'info' || type === 'light')) {
+      queries.push(type)
+      brokerRef?.control.publish(
+        modelTopic(type),
+        type === 'info' ? modelInfo() : modelLights(),
+      )
+      return
+    }
+    writes.push({ type, action: raw.action, data: raw.data })
+    if (!confirmCommands) return
+    if (type === 'light' && raw.action === 'control') {
+      const { type: lamp, status } = raw.data ?? {}
+      if (!lamps.has(lamp) || (status !== 0 && status !== 1))
+        throw new Error('Invalid light request')
+      lamps.set(lamp, status)
+      // A control is answered with the bare light object.
+      brokerRef?.control.publish(
+        modelTopic('light'),
+        envelope('light', 'control', raw.data),
+      )
+      return
+    }
+    if (type !== 'print') throw new Error('Invalid request')
+    if (raw.action === 'update') {
+      for (const [key, value] of Object.entries(raw.data?.settings ?? {})) {
+        if (
+          ![
+            'target_nozzle_temp',
+            'target_hotbed_temp',
+            'fan_speed_pct',
+          ].includes(key) ||
+          !Number.isInteger(value)
+        )
+          throw new Error('Invalid update request')
+        settings[key] = value as number
+      }
+    } else if (raw.action === 'pause' && lifecycle === 'printing') {
+      stopTimer()
+      lifecycle = 'paused'
+    } else if (raw.action === 'resume' && lifecycle === 'paused') {
+      lifecycle = 'printing'
+      resumed = true
+    } else if (
+      raw.action === 'stop' &&
+      (lifecycle === 'printing' || lifecycle === 'paused')
+    ) {
+      stopTimer()
+      lifecycle = 'idle'
+    } else if (!['pause', 'resume', 'stop'].includes(raw.action))
+      throw new Error('Invalid request')
+    publishModel()
+  }
 
   function currentReportPayload() {
     const layer = Math.floor((progress * totalLayers) / 100)
@@ -154,7 +328,8 @@ export async function startAnycubicSimulator({
   }
 
   function broadcast() {
-    brokerRef?.control.publish(reportTopic, currentReportPayload())
+    if (modelId) publishModel()
+    else brokerRef?.control.publish(reportTopic, currentReportPayload())
   }
 
   function stopTimer() {
@@ -222,7 +397,7 @@ export async function startAnycubicSimulator({
     authorizeSubscribe: (topic) =>
       topic === reportTopic || topic === wildcardReportTopic,
     onSubscribe: () => {
-      if (gcodeState) broadcast()
+      if (gcodeState || modelId) broadcast()
       if (environmentReport !== undefined) {
         broker.control.publish(reportTopic, environmentReport)
       }
@@ -230,6 +405,7 @@ export async function startAnycubicSimulator({
     onPublish: async (msg) => {
       const topicName = msg.topic
       const raw = JSON.parse(msg.payload.toString('utf8'))
+      if (modelId) return handleModelRequest(topicName, raw)
       if (lanFiles && typeof raw?.msgid === 'string') {
         if (
           topicName === slicerTopic + '/info' &&
@@ -546,7 +722,7 @@ export async function startAnycubicSimulator({
   }
 
   const periodicReports = setInterval(() => {
-    if (gcodeState && hasSubscribers()) broadcast()
+    if ((gcodeState || modelId) && hasSubscribers()) broadcast()
   }, reportIntervalMs)
 
   const tlsMaterial = broker.control.tlsMaterial
@@ -609,6 +785,7 @@ export async function startAnycubicSimulator({
         throw new Error('Invalid progress')
       stopTimer()
       scripted = true
+      resumed = false
       lifecycle = 'printing'
       progress = percent
       broadcast()
@@ -658,6 +835,23 @@ export async function startAnycubicSimulator({
     },
     publishReport,
     disconnectClients,
+    /** `modelId` only: requests other than queries, as received. */
+    get writes() {
+      return [...writes]
+    },
+    /** `modelId` only: the `info` and `light` queries received. */
+    get queries() {
+      return [...queries]
+    },
+    /**
+     * `modelId` only. Offline drops every client; a reconnecting client then
+     * hears nothing until the printer is back.
+     */
+    async setOnline(next: boolean) {
+      online = next
+      if (next) publishModel()
+      else await disconnectClients()
+    },
     close() {
       closed = true
       stopTimer()

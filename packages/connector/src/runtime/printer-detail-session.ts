@@ -1,3 +1,4 @@
+import { anycubicLanModel } from '../anycubic/models.ts'
 import { anycubicPrinterDetail } from '../anycubic/printer-detail.ts'
 import { kobraXPrinterDetail } from '../kobra-x/printer-detail.ts'
 import type { PrinterState } from '../../../farm-protocol/src/state.ts'
@@ -143,7 +144,11 @@ export function createPrinterDetailSources(
   }
   if (config.collection.version === 5) {
     for (const binding of config.collection.anycubic.printers) {
-      if (!['20024', '20030'].includes(binding.modelId)) continue
+      if (
+        !['20024', '20030'].includes(binding.modelId) &&
+        !anycubicLanModel(binding.modelId)
+      )
+        continue
       const assignment = config.assignments.find(
         ({ printer_key }) => printer_key === binding.printerKey,
       )

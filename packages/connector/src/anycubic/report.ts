@@ -5,6 +5,7 @@ import {
   mergeAnycubicMaterials,
 } from './ace.ts'
 import { readAnycubicPrintReport } from './alerts.ts'
+import { anycubicLanModel } from './models.ts'
 
 function estimateSeconds(minutes: unknown) {
   return typeof minutes === 'number' &&
@@ -54,7 +55,9 @@ function printObservation(
   }
 }
 
-export function decodeAnycubicReport(payload: Buffer) {
+/** `modelId` selects the per-model rules of `models.ts`; others are unchanged. */
+export function decodeAnycubicReport(payload: Buffer, modelId = '') {
+  const model = anycubicLanModel(modelId)
   if (payload.length > 65536) return { kind: 'invalid' as const }
   try {
     const envelope: unknown = JSON.parse(payload.toString('utf8'))
@@ -93,6 +96,9 @@ export function decodeAnycubicReport(payload: Buffer) {
       state = project?.state
       if (state === 'printing' && project?.pause === 1) state = 'paused'
       if (state === 'finish') state = 'finished'
+      // These models keep a job in `resumed` after a pause.
+      if (model && state === 'resumed')
+        state = project?.pause === 1 ? 'paused' : 'printing'
     }
     const active = state === 'printing' || state === 'paused'
     const knownState =
@@ -101,6 +107,9 @@ export function decodeAnycubicReport(payload: Buffer) {
     const estimateBlocked = state !== undefined && !knownState
     const observation: Record<string, unknown> = {}
     if (knownState) observation.state = state
+    // `free` carries `project: null`, and only a state with progress is
+    // published: an idle printer of these models reports 0, as Phrozen does.
+    if (model && row.state === 'free' && !project) observation.progress = 0
     // A Kobra 3 `info/report` nests the temperatures under `temp`. Shape
     // re-typed (not captured) from
     // bloodf/kobracontrol@c414db4f36d4c96f2b232c368ad6cfe56e3d0408
@@ -126,6 +135,15 @@ export function decodeAnycubicReport(payload: Buffer) {
       )
         observation[target] = value
     }
+    if (model?.chamber)
+      for (const [source, target] of Object.entries({
+        curr_chamber_temp: 'chamberTemperatureCelsius',
+        target_chamber_temp: 'chamberTargetCelsius',
+      })) {
+        const value = row[source] ?? temp?.[source]
+        if (typeof value === 'number' && Number.isFinite(value) && value >= 0)
+          observation[target] = value
+      }
     // Simulator-verified, hardware-unqualified. Kobra 3 LAN reports minutes:
     // https://github.com/rvanderp3/kobra-connect#known-limitations
     // The estimate is in info's project or directly in a print progress report:
@@ -148,7 +166,9 @@ export function decodeAnycubicReport(payload: Buffer) {
         typeof value === 'number' &&
         Number.isInteger(value) &&
         value >= 0 &&
-        value <= 100
+        value <= 100 &&
+        // The box fan exists only in an enclosed printer.
+        (target !== 'chamber' || model?.chamber !== false)
       )
         fans[target] = value
     }
@@ -156,6 +176,7 @@ export function decodeAnycubicReport(payload: Buffer) {
     const lights = Array.isArray(row.lights) ? row.lights : [row]
     const chamber = lights.find(
       (value: unknown) =>
+        model?.chamberLight !== false &&
         value &&
         typeof value === 'object' &&
         !Array.isArray(value) &&

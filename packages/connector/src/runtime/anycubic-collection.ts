@@ -104,7 +104,7 @@ export function createAnycubicCollection(input: {
       if (state !== 'connected') invalidate()
     },
     onReport(payload) {
-      const report = decodeAnycubicReport(payload)
+      const report = decodeAnycubicReport(payload, input.binding.modelId)
       if (report.kind === 'invalid') return
       const now = performance.now()
       const firmware = mapAnycubicFirmware(JSON.parse(payload.toString('utf8')))

@@ -187,6 +187,9 @@ type PauseControlInput = {
   phrozenQualifiedWrites?:
     | readonly import('../phrozen/qualification.ts').PhrozenQualification[]
     | undefined
+  /** Test override only; the shipped Anycubic FDM list is empty. */
+  anycubicQualifiedWrites?:
+    readonly import('../anycubic/models.ts').AnycubicQualification[] | undefined
   resinCapabilities?: Parameters<
     typeof receiveApiCommand
   >[0]['resinCapabilities']
@@ -400,6 +403,7 @@ async function runAssignmentControl(
       limits: config.collection.limits,
       clock,
       phrozenQualifiedWrites: input.phrozenQualifiedWrites,
+      anycubicQualifiedWrites: input.anycubicQualifiedWrites,
       photonResinSessions: input.photonResinSessions,
       photonResinQualifiedWrites: input.photonResinQualifiedWrites,
       kobraXControlEvidence(binding) {

@@ -19,7 +19,7 @@ export function supportedAnycubicActions(model: string): AnycubicAction[] {
 
 export function buildAnycubicCommand(
   action: AnycubicAction,
-  args: { value?: number; taskId?: string } = {},
+  args: { value?: number; taskId?: string; lightType?: 2 | 3 } = {},
 ) {
   if (!actions.includes(action)) throw new Error('Unsupported Anycubic action')
   const common = { timestamp: Date.now(), msgid: randomUUID() }
@@ -45,7 +45,11 @@ export function buildAnycubicCommand(
       type: 'light',
       action: 'control',
       ...common,
-      data: { type: 3, status: value, brightness: value * 100 },
+      data: {
+        type: args.lightType ?? 3,
+        status: value,
+        brightness: value * 100,
+      },
     }
   }
   const key =

@@ -31,6 +31,14 @@ import { KOBRALINK_CONTROLS } from '../kobralink/extended-control.ts'
 import type { KobraLinkFetch } from '../kobralink/client.ts'
 import { readKobraLinkPrinterBinding } from '../control/printer-binding.ts'
 import { openFixedAnycubicControl } from '../anycubic/control-driver.ts'
+import { readAnycubicFirmware } from '../anycubic/lan-control-driver.ts'
+import {
+  ANYCUBIC_LAN_START_MESSAGE,
+  ANYCUBIC_QUALIFIED_WRITES,
+  anycubicLanModel,
+  anycubicUnqualifiedMessage,
+  type AnycubicQualification,
+} from '../anycubic/models.ts'
 import {
   KOBRA_X_SIGNED_ACTIONS,
   openFixedKobraXControl,
@@ -162,6 +170,11 @@ export function createPauseDriverRouter(config: {
    * simulator tests; production composition never sets it.
    */
   phrozenQualifiedWrites?: readonly PhrozenQualification[] | undefined
+  /**
+   * Replaces the shipped Anycubic FDM write list, which is empty. For
+   * simulator tests; production composition never sets it.
+   */
+  anycubicQualifiedWrites?: readonly AnycubicQualification[] | undefined
   /** Open Photon resin sessions; the collection owns them. */
   photonResinSessions?: PhotonResinSessions | undefined
   /** Replaces the shipped resin write list, which is empty. Tests only. */
@@ -198,6 +211,9 @@ export function createPauseDriverRouter(config: {
   const flashforgeFirmware = new WeakMap<PrinterBinding, string>()
   const flashforgeQualified =
     config.flashforgeQualifiedWrites ?? FLASHFORGE_QUALIFIED_WRITES
+  const anycubicFirmware = new WeakMap<PrinterBinding, string>()
+  const anycubicQualified =
+    config.anycubicQualifiedWrites ?? ANYCUBIC_QUALIFIED_WRITES
   // KobraLink bindings are read-only handles with no command mapping, so they
   // resolve to no binding here and advertise nothing.
   function controls(binding: PrinterBinding): readonly ExtendedControlAction[] {
@@ -275,7 +291,13 @@ export function createPauseDriverRouter(config: {
         ? PHROZEN_CONTROL_ACTIONS
         : []
     const anycubic = readAnycubicPrinterBinding(binding)
-    if (anycubic) return anycubicControls(anycubic.modelId)
+    if (anycubic)
+      // Unknown firmware is not a qualified pair (`anycubic/models.ts`).
+      return anycubicControls(
+        anycubic.modelId,
+        anycubicFirmware.get(binding),
+        anycubicQualified,
+      )
     const bambu = readBambuPrinterBinding(binding)
     if (bambu)
       return bambu.control
@@ -305,6 +327,11 @@ export function createPauseDriverRouter(config: {
           phrozen.expect.model,
           phrozen.expect.firmware,
         )
+      const anycubic = readAnycubicPrinterBinding(binding)
+      if (anycubic && anycubicLanModel(anycubic.modelId))
+        return controls(binding).length
+          ? ANYCUBIC_LAN_START_MESSAGE
+          : anycubicUnqualifiedMessage(anycubic.modelId)
       if (readFlashforgePrinterBinding(binding) && !controls(binding).length)
         return flashforgeUnqualifiedMessage()
       if (readPhotonResinPrinterBinding(binding))
@@ -356,6 +383,22 @@ export function createPauseDriverRouter(config: {
           sdcpFirmware.set(binding, target.firmwareVersion)
         } catch {
           // A failed firmware read cannot establish start qualification.
+        }
+      }
+      const anycubic = readAnycubicPrinterBinding(binding)
+      // Nothing is published to a printer whose model has no qualified pair.
+      if (
+        anycubic &&
+        anycubicQualified.some((pair) => pair.modelId === anycubic.modelId)
+      ) {
+        anycubicFirmware.delete(binding)
+        try {
+          anycubicFirmware.set(
+            binding,
+            await readAnycubicFirmware(binding, signal),
+          )
+        } catch {
+          // A failed firmware read cannot establish write qualification.
         }
       }
       const flashforge = readFlashforgePrinterBinding(binding)
@@ -481,6 +524,7 @@ export function createPauseDriverRouter(config: {
           objects: moonrakerObjects.get(binding),
           qualifiedStarts: config.sdcpQualifiedStarts,
           phrozenQualifiedWrites: config.phrozenQualifiedWrites,
+          anycubicQualifiedWrites: config.anycubicQualifiedWrites,
           photonResinSessions: config.photonResinSessions,
           photonResinQualifiedWrites: config.photonResinQualifiedWrites,
           video: config.sdcpVideo,

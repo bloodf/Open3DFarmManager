@@ -269,7 +269,12 @@ test('UDP loss rate tracks the configured probability and is reproducible', asyn
     const client = createSocket('udp4')
     client.bind(0, '127.0.0.1')
     await once(client, 'listening')
-    for (let i = 0; i < 400; i++) client.send('x', udp.port, '127.0.0.1')
+    // Avoid overflowing the OS receive queue before the proxy can observe the
+    // datagrams; kernel drops are outside the configured loss model.
+    for (let i = 0; i < 400; i++) {
+      client.send('x', udp.port, '127.0.0.1')
+      await new Promise((done) => setTimeout(done, 1))
+    }
     await new Promise((done) => setTimeout(done, 400))
     client.close()
     assert.equal(received + udp.stats.droppedByLoss, 400)

@@ -122,6 +122,18 @@ const Observation = z.strictObject({
         observedMono: mono,
       }),
       z.strictObject({
+        kind: z.literal('camera-stream'),
+        on: z.boolean(),
+        observedMono: mono,
+      }),
+      z.strictObject({
+        kind: z.literal('filament-slot'),
+        tray: z.number().int().min(0).max(3),
+        material: z.string().max(16),
+        color: z.string().max(7),
+        observedMono: mono,
+      }),
+      z.strictObject({
         kind: z.literal('filament'),
         tray: z.number().int().min(0).max(15).nullable(),
         observedMono: mono,
@@ -197,6 +209,15 @@ export function controlEffectMatches(
       return effect.kind === 'excluded-object' && effect.name === args.name
     case 'set_light':
       return effect.kind === 'light' && effect.on === args.on
+    case 'set_camera_stream':
+      return effect.kind === 'camera-stream' && effect.on === args.on
+    case 'set_filament_slot':
+      return (
+        effect.kind === 'filament-slot' &&
+        effect.tray === args.tray &&
+        effect.material === args.material &&
+        effect.color === args.color
+      )
     case 'load_filament':
       return effect.kind === 'filament' && effect.tray === args.tray
     case 'unload_filament':
@@ -299,6 +320,8 @@ export type PauseDispatchResult =
       code?: ControlResultCode
       message?: string
     }
+const STOP_PROBE_WAIT_MS = 250
+
 type Sample = { wall: number; mono: number }
 
 /** A driver's window may only widen the default, and never past the U1 ceiling. */
@@ -528,12 +551,16 @@ export function createPauseDispatcher(config: {
       const mapping = candidateMapping
       let observationVersion: object | undefined
       let generationInstalled = false
-      const preempt = probes.get(mapping.assignment_id)
-      if (preempt && command.action === 'emergency_stop')
-        return preempt().then(() => dispatcher.dispatch(input))
-      if (slots.size >= 8 || slots.has(mapping.assignment_id))
+      const assignmentId = mapping.assignment_id
+      // Stops authenticate independently while the readiness probe owns the slot.
+      const probe =
+        command.action === 'emergency_stop'
+          ? probes.get(assignmentId)
+          : undefined
+      if (!probe && (slots.size >= 8 || slots.has(assignmentId)))
         return Promise.resolve({ kind: 'rejected', reason: 'busy' })
-      slots.add(mapping.assignment_id) // No wait list. Retained until underlying asynchronous work actually settles.
+      let ownsSlot = !probe
+      if (ownsSlot) slots.add(assignmentId) // Keep the slot until asynchronous work settles.
       let settleWork: () => void = () => {}
       const work = new Promise<void>((resolve) => {
         settleWork = resolve
@@ -545,7 +572,7 @@ export function createPauseDispatcher(config: {
       })
       const start = sample()
       if (!start) {
-        slots.delete(mapping.assignment_id)
+        if (ownsSlot) slots.delete(assignmentId)
         settleWork()
         return Promise.resolve({ kind: 'rejected', reason: 'expired' })
       }
@@ -861,6 +888,7 @@ export function createPauseDispatcher(config: {
               : null
           if (
             !terminal &&
+            !preempted.signal.aborted &&
             seen?.ready &&
             seen.printState !== 'unknown' &&
             seen.connectionGeneration === prepared.connectionGeneration
@@ -883,6 +911,34 @@ export function createPauseDispatcher(config: {
             finalize('rejected', 'busy', 'guard-denied')
         }
       }
+      async function waitForProbe(preempt: () => Promise<void>): Promise<void> {
+        let timeout: ReturnType<typeof setTimeout> | undefined
+        let onAbort: () => void = () => {}
+        try {
+          await Promise.race([
+            new Promise<void>((resolve) => {
+              onAbort = resolve
+              controller.signal.addEventListener('abort', onAbort, {
+                once: true,
+              })
+              timeout = setTimeout(() => {
+                finalize(
+                  'rejected',
+                  'busy',
+                  'guard-denied',
+                  undefined,
+                  'A parada de emergência não foi enviada porque a verificação da impressora demorou demais.',
+                )
+                resolve()
+              }, STOP_PROBE_WAIT_MS)
+            }),
+            preempt(),
+          ])
+        } finally {
+          clearTimeout(timeout)
+          controller.signal.removeEventListener('abort', onAbort)
+        }
+      }
       // An unresolved crypto/driver promise keeps its slot even after the bounded result is returned.
       void (async () => {
         try {
@@ -902,6 +958,17 @@ export function createPauseDispatcher(config: {
           if (denial) {
             finalize('rejected', denial, 'guard-denied')
             return
+          }
+          if (probe) {
+            if (probes.get(assignmentId) === probe) await waitForProbe(probe)
+            if (terminal) return
+            denial = live()
+            if (denial || slots.has(assignmentId) || slots.size >= 8) {
+              finalize('rejected', denial ?? 'busy', 'guard-denied')
+              return
+            }
+            slots.add(assignmentId)
+            ownsSlot = true
           }
           // `clear_hold` is a Connector journal write, whatever the driver.
           if (
@@ -1250,7 +1317,7 @@ export function createPauseDispatcher(config: {
                 }
             }
           }
-          slots.delete(mapping.assignment_id)
+          if (ownsSlot) slots.delete(assignmentId)
           slotFreed()
           clearTimeout(timer)
           if (terminal) resolveResult(terminal)

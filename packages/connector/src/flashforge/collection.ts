@@ -22,6 +22,39 @@ export type FlashforgeObservation = Omit<
   fieldObservedAtMonoMs: { flashforge: Partial<Record<keyof Printer, number>> }
 }
 
+type Status = Awaited<
+  ReturnType<ReturnType<typeof createFlashforgeAdapter>['readStatus']>
+>
+
+/**
+ * AD5X trays for the farm page, named `ifs:0` to `ifs:3`. Published only with
+ * the station's 1-4 numbering, so a tray never names the wrong slot.
+ */
+function stationMaterials(
+  slots: Status['slots'],
+  station: Status['station'],
+): Printer['materials'] {
+  if (
+    !slots?.length ||
+    slots.some((slot) => slot.id < 1) ||
+    new Set(slots.map((slot) => slot.id)).size !== slots.length
+  )
+    return undefined
+  return slots.map((slot) => {
+    const color = /^#?([0-9a-fA-F]{6})$/.exec(slot.color ?? '')?.[1]
+    return {
+      slot: `ifs:${slot.id - 1}`,
+      ...(slot.material && slot.material.length <= 64
+        ? { materialType: slot.material }
+        : {}),
+      ...(color ? { colorHex: `${color.toUpperCase()}FF` } : {}),
+      ...(station?.currentSlot === undefined
+        ? {}
+        : { active: station.currentSlot === slot.id }),
+    }
+  })
+}
+
 export function createFlashforgeCollection(input: {
   binding: FlashforgeBinding
   allowedOrigins: readonly string[]
@@ -62,6 +95,7 @@ export function createFlashforgeCollection(input: {
               ? 'error'
               : 'unknown'
     const mono = performance.now()
+    const materials = stationMaterials(result.slots, result.station)
     const progress = result.progress
     if (
       progress === undefined &&
@@ -76,6 +110,7 @@ export function createFlashforgeCollection(input: {
         printerKey: binding.printerKey,
         state,
         ...(progress === undefined ? {} : { progress }),
+        ...(materials ? { materials } : {}),
         identity: {
           vendor: 'Flashforge',
           model: result.model,
@@ -92,6 +127,7 @@ export function createFlashforgeCollection(input: {
           state: mono,
           identity: mono,
           statusReason: mono,
+          ...(materials ? { materials: mono } : {}),
           ...(progress === undefined ? {} : { progress: mono }),
         },
       },

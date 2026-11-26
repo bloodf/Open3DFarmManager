@@ -193,6 +193,7 @@ it.each([
         .get()
       if (typeof row?.sql !== 'string') throw new Error('Missing action table')
       const prior = row.sql
+        .replace(",'set_camera_stream','set_filament_slot'", '')
         .replace(",'set_tool_temperature'", '')
         .replace(",'start_library_print'", '')
         .replace(",'config_write'", '')

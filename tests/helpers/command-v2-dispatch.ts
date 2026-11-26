@@ -311,7 +311,11 @@ export async function openV2Dispatch(
   let admitted: Awaited<ReturnType<typeof dispatcher.admit>>
   let generation = 0
   /** Admits one capability for `binding` on this dispatcher. */
-  async function admit(binding: ControlSessionBinding, expiresAt: number) {
+  async function admit(
+    binding: ControlSessionBinding,
+    expiresAt: number,
+    identity = authority,
+  ) {
     const peer = dispatcher.createPeer(++generation)
     const admission = dispatcher.beginAdmission({
       binding,
@@ -324,22 +328,22 @@ export async function openV2Dispatch(
     const capability: PauseCapabilityV1 = {
       v: 1,
       purpose: 'pause-authority',
-      capability_id: authority.ids.capability_id,
+      capability_id: identity.ids.capability_id,
       kid: 'issuer-1',
       issuer: 'farm:issuer',
       audience: binding.audience,
       origin: binding.origin,
       issued_at: issuedAt,
       expires_at: expiresAt,
-      account_id: authority.ids.account_id,
+      account_id: identity.ids.account_id,
       role: 'operator',
-      farm_id: authority.ids.farm_id,
-      agent_id: authority.ids.agent_id,
-      key_id: authority.ids.key_id,
-      assignment_id: authority.ids.assignment_id,
-      transport_id: authority.ids.transport_id,
-      browser_public_key: authority.publicKey,
-      browser_thumbprint: authority.thumbprint,
+      farm_id: identity.ids.farm_id,
+      agent_id: identity.ids.agent_id,
+      key_id: identity.ids.key_id,
+      assignment_id: identity.ids.assignment_id,
+      transport_id: identity.ids.transport_id,
+      browser_public_key: identity.publicKey,
+      browser_thumbprint: identity.thumbprint,
       connector_fingerprint: binding.connector_fingerprint,
       credential_jti: binding.credential_jti,
       printer_key: authority.printerKey,
@@ -352,13 +356,13 @@ export async function openV2Dispatch(
       v: 1,
       purpose: 'pause-admission',
       challenge_id: randomUUID(),
-      farm_id: authority.ids.farm_id,
-      agent_id: authority.ids.agent_id,
-      key_id: authority.ids.key_id,
-      assignment_id: authority.ids.assignment_id,
-      transport_id: authority.ids.transport_id,
-      account_id: authority.ids.account_id,
-      browser_thumbprint: authority.thumbprint,
+      farm_id: identity.ids.farm_id,
+      agent_id: identity.ids.agent_id,
+      key_id: identity.ids.key_id,
+      assignment_id: identity.ids.assignment_id,
+      transport_id: identity.ids.transport_id,
+      account_id: identity.ids.account_id,
+      browser_thumbprint: identity.thumbprint,
       origin: binding.origin,
       audience: binding.audience,
       control_binding_sha256: bindingHash,
@@ -371,13 +375,13 @@ export async function openV2Dispatch(
         await signPauseCapability(capability, authority.issuer.privateKey),
       ),
       admissionProofWire: encodePauseAdmissionProof(
-        await authority.signer.signAdmissionProof(challenge),
+        await identity.signer.signAdmissionProof(challenge),
       ),
       browserProofWire: encodeControlProof({
         v: 1,
         role: 'browser',
         binding,
-        signature: await authority.signer.signControlProof(binding),
+        signature: await identity.signer.signControlProof(binding),
       }),
       connectorProofWire: encodeControlProof({
         v: 1,
@@ -421,6 +425,12 @@ export async function openV2Dispatch(
         capability: handle.length ? handle[0] : handleNow,
         printerBinding,
       })
+    },
+    async admitAs(identity: V2Authority) {
+      const next = await admit(identity.binding, 30000, identity)
+      if (!next.ok)
+        throw new Error(`Capability admission failed: ${next.reason}`)
+      return next.handle
     },
     /** Rows the durable journal accepted (claims), read from disk. */
     claims(): number {

@@ -718,7 +718,7 @@ describe('command journal', () => {
       ).sql
       expect(sql).toContain("'config_write','start_library_print'")
       db.exec(
-        `DROP INDEX pause_active_assignment; DROP INDEX pause_active_printer; CREATE UNIQUE INDEX pause_active_assignment ON pause_commands(assignment_id) WHERE status IN ('claimed','write-started','outcome-unknown'); CREATE UNIQUE INDEX pause_active_printer ON pause_commands(farm_id,printer_key) WHERE status IN ('claimed','write-started','outcome-unknown'); DROP TABLE control_command_restarts; DROP TABLE control_tool_temperature_args;DROP TABLE control_command_actions; ${sql.replace(",'start_library_print'", '').replace(",'set_tool_temperature'", '')}; INSERT INTO control_command_actions VALUES ('retained', 'config_write'); PRAGMA user_version=15;`,
+        `DROP INDEX pause_active_assignment; DROP INDEX pause_active_printer; CREATE UNIQUE INDEX pause_active_assignment ON pause_commands(assignment_id) WHERE status IN ('claimed','write-started','outcome-unknown'); CREATE UNIQUE INDEX pause_active_printer ON pause_commands(farm_id,printer_key) WHERE status IN ('claimed','write-started','outcome-unknown'); DROP TABLE control_command_restarts; DROP TABLE control_tool_temperature_args;DROP TABLE control_command_actions; ${sql.replace(",'start_library_print'", '').replace(",'set_camera_stream','set_filament_slot'", '').replace(",'set_tool_temperature'", '')}; INSERT INTO control_command_actions VALUES ('retained', 'config_write'); PRAGMA user_version=15;`,
       )
     } finally {
       db.close()
@@ -735,7 +735,7 @@ describe('command journal', () => {
         .prepare('INSERT INTO control_command_actions VALUES (?,?)')
         .run('library', 'start_library_print')
       expect(upgraded.prepare('PRAGMA user_version').get()).toEqual({
-        user_version: 19,
+        user_version: 20,
       })
     } finally {
       upgraded.close()

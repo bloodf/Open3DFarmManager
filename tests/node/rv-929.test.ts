@@ -224,6 +224,17 @@ test('journal: upgrading a version 18 journal keeps recent restart actions', (t)
       const database = new DatabaseSync(
         join(f.directory, 'pause-commands.sqlite'),
       )
+      // Version 18 also predates the camera-stream and filament-slot actions.
+      const actions = String(
+        database
+          .prepare(
+            "SELECT sql FROM sqlite_schema WHERE name='control_command_actions'",
+          )
+          .get()!.sql,
+      ).replace(",'set_camera_stream','set_filament_slot'", '')
+      database.exec(
+        `ALTER TABLE control_command_actions RENAME TO current_actions; ${actions}; INSERT INTO control_command_actions SELECT cmd_id,action FROM current_actions; DROP TABLE current_actions`,
+      )
       database.exec(
         'DROP TABLE control_command_restarts; PRAGMA user_version=18',
       )

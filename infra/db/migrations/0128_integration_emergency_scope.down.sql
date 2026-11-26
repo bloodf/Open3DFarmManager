@@ -14,6 +14,8 @@ BEGIN
 END;
 $$;
 
+-- Envelopes and actions the up step closed stay closed.
+
 CREATE OR REPLACE FUNCTION farm.integration_action_guard() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, farm, pg_temp AS $$
 DECLARE grant_row farm.integration_app_grants%ROWTYPE; app_sandbox boolean; farm_sandbox boolean;

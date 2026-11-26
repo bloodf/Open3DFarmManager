@@ -17,7 +17,11 @@ const columns = (sql: Sql) =>
 const returning = (sql: Sql) =>
   sql`cmd_id::text AS "cmdId", app_id::text AS "appId", grant_id::text AS "grantId", farm_id::text AS "farmId", agent_id::text AS "agentId", printer_assignment_id::text AS "printerAssignmentId", kind, resource_id::text AS "resourceId", required_scope AS "requiredScope", nonce, wire, issued_at::float8 AS "issuedAt", expires_at::float8 AS "expiresAt", status, refusal_code AS "refusalCode", result_detail AS "resultDetail", result_message AS "resultMessage", history_entry_id AS "historyEntryId", created_at::float8 AS "createdAt", updated_at::float8 AS "updatedAt"`
 
-/** True while the envelope's app, grant and assignment still allow delivery. */
+/**
+ * True while the envelope's app, grant and assignment still allow delivery.
+ * The stored scope is not trusted for emergency stop: the action in the signed
+ * frame (canonical JSON) decides, so one stored as `control:extended` is dead.
+ */
 const authorityActive = (sql: Sql) => sql`
   EXISTS (
     SELECT 1 FROM farm.integration_app_grants g
@@ -27,6 +31,7 @@ const authorityActive = (sql: Sql) => sql`
     WHERE g.id = e.grant_id AND g.app_id = e.app_id AND g.farm_id = e.farm_id
     AND (g.printer_assignment_id IS NULL OR g.printer_assignment_id = p.id)
     AND e.required_scope = ANY(g.scopes)
+    AND (e.required_scope = 'control:emergency' OR strpos(e.wire, '"action":"emergency_stop"') = 0)
     AND (NOT a.sandbox OR f.sandbox)
     AND g.disabled_at IS NULL AND a.revoked_at IS NULL
       AND p.revoked_at IS NULL AND p.farm_id = e.farm_id AND p.agent_id = e.agent_id)`

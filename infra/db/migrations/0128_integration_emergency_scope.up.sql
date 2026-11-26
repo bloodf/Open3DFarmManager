@@ -43,3 +43,21 @@ BEGIN
   IF NEW.updated_at < OLD.updated_at THEN RAISE EXCEPTION 'Action time moves forward'; END IF;
   RETURN NEW;
 END; $$;
+
+-- #937: nothing created before this migration may still deliver an emergency
+-- stop. Close the unclaimed envelopes and the held actions with their normal
+-- terminal statuses. Neither status can be left again, also after a rollback.
+UPDATE farm.integration_envelopes e
+SET status = CASE WHEN e.expires_at <= t.now_ms THEN 'expired' ELSE 'rejected' END,
+    updated_at = GREATEST(t.now_ms, e.updated_at)
+FROM (SELECT floor(extract(epoch FROM pg_catalog.clock_timestamp()) * 1000)::bigint AS now_ms) t
+WHERE e.kind = 'action' AND e.status = 'pending' AND e.required_scope = 'control:extended'
+  AND strpos(e.wire, '"action":"emergency_stop"') > 0;
+
+UPDATE farm.integration_actions a
+SET status = 'rejected',
+    updated_at = GREATEST(floor(extract(epoch FROM pg_catalog.clock_timestamp()) * 1000)::bigint, a.updated_at)
+WHERE a.status = 'held' AND a.required_scope = 'control:extended'
+  AND a.action->>'action' = 'emergency_stop';
+-- Submitted actions are final and stay as they are. Grants are immutable, so no
+-- envelope can be issued for them with control:emergency.

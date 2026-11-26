@@ -146,6 +146,8 @@ export interface ProvisioningEngineOptions {
   bambuProbe?: BambuProbe
   /** Native Kobra X connection confirmation. Tests drive the loopback mock. */
   kobraXProbe?: KobraXProbe
+  /** Read-only Moonraker discovery. Tests inject a fixture. */
+  moonrakerDiscovery?: Parameters<typeof prepareMoonraker>[3]
   /** Connection-test transport for Spoolman. Tests inject a fixture. */
   spoolmanFetch?: typeof fetch
   timeoutMs?: number
@@ -950,6 +952,7 @@ export function createProvisioningEngine(options: ProvisioningEngineOptions) {
         options.stateDirectory,
         op.operation_id,
         frame.target,
+        options.moonrakerDiscovery,
       )
       if (!probe.ok) return describe(frame, await fail(op, probe.code))
       if (!(await stillCurrent(context)))

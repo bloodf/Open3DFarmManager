@@ -62,6 +62,7 @@ export async function prepareMoonraker(
   directory: string,
   operationId: string,
   target: MoonrakerConfigurationTarget,
+  discover: typeof discoverMoonraker = discoverMoonraker,
 ) {
   const origin = new URL(target.origin).origin
   ensurePrivateDirectory(join(directory, 'credentials'))
@@ -74,7 +75,7 @@ export async function prepareMoonraker(
       : {}),
   })
   try {
-    await discoverMoonraker({
+    await discover({
       origin,
       ...(target.api_key || target.username ? { apiKeyFile: path } : {}),
       limits,

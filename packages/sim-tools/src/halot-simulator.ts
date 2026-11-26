@@ -29,6 +29,8 @@ export type HalotSimulatorFault =
   | 'malformed'
   /** Acknowledges print commands without applying them. */
   | 'ignore'
+  /** Applies a print command, then drops the socket before any reply. */
+  | 'drop-after-command'
 
 export async function startHalotSimulator(
   options: {
@@ -116,6 +118,7 @@ export async function startHalotSimulator(
               ? pauseWord
               : 'PRINT_PROCESSING'
       }
+      if (fault === 'drop-after-command') return socket.terminate()
       send({ cmd, status: 'CMD_SUCCES' })
     })
   })

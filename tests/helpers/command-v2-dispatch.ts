@@ -183,6 +183,16 @@ export type V2DispatchOptions = {
   storageDegraded?: () => boolean
   /** Extra actions the fake driver supports (through `execute`). */
   controls?: ExtendedControlAction[]
+  /**
+   * Provisions the printer binding instead of a Moonraker one, for example a
+   * HALOT binding from `provisionHalotPrinter`.
+   */
+  provision?(scope: {
+    assignment_id: string
+    farm_id: string
+    agent_id: string
+    printer_key: string
+  }): PrinterBinding
   loopback?: {
     origin: string
     driver(input: {
@@ -222,16 +232,18 @@ export async function openV2Dispatch(
     ...(options.journalCapacity ? { capacity: options.journalCapacity } : {}),
   })
   const origin = options.loopback?.origin ?? 'http://localhost:7125'
-  const bindings = createPrinterBindingRegistry({
-    allowedOrigins: [origin],
-  })
-  const printerBinding = bindings.provision({
+  const scope = {
     assignment_id: authority.ids.assignment_id,
     farm_id: authority.ids.farm_id,
     agent_id: authority.ids.agent_id,
     printer_key: authority.printerKey,
-    moonraker_origin: origin,
-  })
+  }
+  const printerBinding = options.provision
+    ? options.provision(scope)
+    : createPrinterBindingRegistry({ allowedOrigins: [origin] }).provision({
+        ...scope,
+        moonraker_origin: origin,
+      })
   let sequence = 1
   const observation = () => ({
     assignmentId: authority.ids.assignment_id,

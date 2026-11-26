@@ -4,6 +4,11 @@ import { once } from 'node:events'
 import { createServer } from 'node:http'
 import { test } from 'node:test'
 import { createAuthenticatedTelemetrySender } from '../../packages/connector/src/cloud/authenticated-http-telemetry.ts'
+import { mkdtemp, rm, stat, utimes } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { createLibraryStore } from '../../packages/connector/src/runtime/library-store.ts'
+import { LIBRARY_ORPHAN_GRACE_MS } from '../../packages/farm-protocol/src/library-storage.ts'
 
 // Loopback fixture: emulate servers that reject unknown telemetry fields.
 test('heartbeat fallback preserves send age and tries older shapes in order', async () => {
@@ -163,5 +168,28 @@ test('heartbeat fallback preserves send age and tries older shapes in order', as
     await new Promise<void>((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),
     )
+  }
+})
+
+test('deduplicating an old orphan renews its grace before the server records it', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'fix-959-library-'))
+  try {
+    const now = Date.now()
+    const store = await createLibraryStore({ directory, clock: () => now })
+    const bytes = Buffer.from('fixture gcode')
+    const source = async function* () {
+      yield bytes
+    }
+    const first = await store.put(source())
+    const path = join(directory, first.sha256)
+    const old = new Date(now - LIBRARY_ORPHAN_GRACE_MS - 60_000)
+    await utimes(path, old, old)
+    const second = await store.put(source())
+    assert.equal(second.deduplicated, true)
+    assert.deepEqual(await store.sweep([]), [])
+    assert.ok((await stat(path)).mtimeMs > old.getTime())
+    assert.equal(await store.has(first.sha256), true)
+  } finally {
+    await rm(directory, { recursive: true, force: true })
   }
 })

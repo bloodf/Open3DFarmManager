@@ -6,6 +6,7 @@ import {
   existsSync,
   fsyncSync,
   ftruncateSync,
+  futimesSync,
   lstatSync,
   mkdirSync,
   openSync,
@@ -153,6 +154,8 @@ export class TelemetryQueue {
   private readonly refusals: string
   private readonly refusalsTemporary: string
   private refused = 0
+  /** Queue clock of the last refusal, kept as the count file's mtime. */
+  private refusedAt = 0
   private readonly compactAfterBytes: number
   /** Bytes of acknowledged records still present at the head of the log. */
   private ackedBytes = 0
@@ -379,19 +382,23 @@ export class TelemetryQueue {
     try {
       const stat = fstatSync(fd)
       privateStat(stat)
-      if (stat.size > 64) throw new Error('Invalid queue refusal count')
-      text = readFileSync(fd, 'utf8')
+      this.refusedAt = Math.round(stat.mtimeMs)
+      text = stat.size > 64 ? '' : readFileSync(fd, 'utf8')
     } finally {
       closeSync(fd)
     }
-    if (!/^[1-9][0-9]{0,14}$/.test(text))
-      throw new Error('Invalid queue refusal count')
-    return Number(text)
+    if (/^[1-9][0-9]{0,14}$/.test(text)) return Number(text)
+    // The count is only a notice: a damaged one never stops the queue.
+    console.warn('telemetry-refused-count-reset')
+    unlinkSync(this.refusals)
+    this.syncDirectory()
+    return 0
   }
   private writeRefusals() {
     const fd = openSync(this.refusalsTemporary, 'wx', 0o600)
     try {
       writeFileSync(fd, String(this.refused))
+      futimesSync(fd, new Date(this.refusedAt), new Date(this.refusedAt))
       fsyncSync(fd)
     } finally {
       closeSync(fd)
@@ -420,9 +427,12 @@ export class TelemetryQueue {
   get storageLost(): number {
     return this.lost
   }
-  /** Records dropped because the server refused them, kept across restarts. */
+  /**
+   * Records dropped because the server refused them, kept across restarts until
+   * a full retention window passes without another refusal.
+   */
   get refusedRecords(): number {
-    return this.refused
+    return this.lastNow - this.refusedAt < MAX_AGE ? this.refused : 0
   }
   /**
    * One bounded recovery attempt: rewrites the log from the in-memory records,
@@ -758,7 +768,8 @@ export class TelemetryQueue {
     this.remove(eventIds, now)
     const removed = before - this.records.length
     if (!removed) return
-    this.refused += removed
+    this.refused = this.refusedRecords + removed
+    this.refusedAt = now
     // While degraded the count is persisted by `retryStorage`.
     if (this.degraded) return
     try {

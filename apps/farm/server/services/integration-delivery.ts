@@ -46,6 +46,7 @@ export type RequiredScope =
   | 'jobs:write'
   | 'control:basic'
   | 'control:extended'
+  | 'control:emergency'
   | 'plates:confirm'
 /** What the Connector can report, in the order a command can progress. */
 export type ConnectorOutcome =

@@ -100,7 +100,7 @@ test('envelope schema accepts a job and an action and rejects everything else', 
       kind: 'action',
       action: { action: 'emergency_stop', args: {} },
     }),
-    'control:extended',
+    'control:emergency',
   )
   const bad = (extra: Record<string, unknown>) =>
     assert.equal(ApiEnvelopeV1.safeParse(claims(extra)).success, false)

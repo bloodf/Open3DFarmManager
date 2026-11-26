@@ -39,7 +39,10 @@ export interface NewAction {
   action: ApiEnvelopeAction
   requiredScope: Extract<
     IntegrationScope,
-    'control:basic' | 'control:extended' | 'plates:confirm'
+    | 'control:basic'
+    | 'control:extended'
+    | 'control:emergency'
+    | 'plates:confirm'
   >
   status: 'held' | 'submitted'
 }

@@ -181,6 +181,13 @@ export type ApiCommandResult =
 
 const MAX_EXECUTE_MS = 5000
 
+/** Operator text for an emergency stop without its own scope (#937). */
+const EMERGENCY_SCOPE_MESSAGE =
+  'Parada de emergência recusada: o aplicativo precisa do escopo control:emergency, concedido pelo proprietário.'
+
+/** Code, reason and, optionally, operator text. */
+type CommandRefusal = [ApiEnvelopeRefusalCode, string, (string | undefined)?]
+
 /** The scope a grant must hold for this envelope; mirrors the server's issue check. */
 export function apiEnvelopeScope(envelope: ApiEnvelopeV1): string {
   if (envelope.kind === 'job') return 'jobs:start'
@@ -275,15 +282,19 @@ export function createApiCommandRunner(config: {
   function authorityRefusal(
     envelope: ApiEnvelopeV1,
     now: AuthoritySample,
-  ): [ApiEnvelopeRefusalCode, string] | null {
+  ): CommandRefusal | null {
     if (config.signal?.aborted)
       return ['grant-revoked', 'inbox authority ended']
     if (now.wall >= envelope.expires_at) return ['expired', 'envelope expired']
+    const scopeMessage =
+      apiEnvelopeScope(envelope) === 'control:emergency'
+        ? EMERGENCY_SCOPE_MESSAGE
+        : undefined
     if (
       envelope.scope !== undefined &&
       envelope.scope !== apiEnvelopeScope(envelope)
     )
-      return ['grant-revoked', 'action outside the signed scope']
+      return ['grant-revoked', 'action outside the signed scope', scopeMessage]
     const grant = config.grants.lookup(envelope.grant_id)
     if (
       !grant ||
@@ -300,7 +311,7 @@ export function createApiCommandRunner(config: {
       (ApiResinReplay.safeParse(envelope.action).success &&
         !grant.scopes.includes('jobs:start'))
     )
-      return ['grant-revoked', 'action outside the granted scope']
+      return ['grant-revoked', 'action outside the granted scope', scopeMessage]
     return null
   }
   function jobTarget(binding: PrinterBinding): FileUploadTarget | undefined {
@@ -636,7 +647,7 @@ export function createApiCommandRunner(config: {
       return stateRefusal(action, binding)
     }
     let refusalMessage: string | undefined
-    let lastRefusal: [ApiEnvelopeRefusalCode, string] | null = null
+    let lastRefusal: CommandRefusal | null = null
     let guardCalled = false
     let permitted = false
     let acknowledged = false
@@ -1004,16 +1015,16 @@ export function createApiCommandRunner(config: {
     }
     if (!permitted) {
       finishCommand(config.journal, receipt, 'not-sent', 'guard-denied')
-      const [code, detail]: [ApiEnvelopeRefusalCode, string] = (lastRefusal as
-        [ApiEnvelopeRefusalCode, string] | null) ?? [
-        'not-ready',
-        'printer not reachable',
-      ]
+      const [code, detail, message]: CommandRefusal =
+        (lastRefusal as CommandRefusal | null) ?? [
+          'not-ready',
+          'printer not reachable',
+        ]
       return refuse(
         envelope,
         code,
         detail,
-        refusalMessage ?? startMessage(detail),
+        refusalMessage ?? message ?? startMessage(detail),
       )
     }
     if (threw || interrupted || !acknowledged) {

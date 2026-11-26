@@ -83,7 +83,9 @@ describe('Cofre3D integration scopes', () => {
       'library:read',
       'library:write',
     ])
-    expect(INTEGRATION_SCOPES.slice(15)).toEqual([...NEW_SCOPES])
+    expect(INTEGRATION_SCOPES.slice(15, 18)).toEqual([...NEW_SCOPES])
+    // #937 appended after them, so their mask bits did not move.
+    expect(INTEGRATION_SCOPES.slice(18)).toEqual(['control:emergency'])
     // Masks are 32-bit bitwise values.
     expect(INTEGRATION_SCOPES.length).toBeLessThanOrEqual(31)
   })
@@ -177,11 +179,11 @@ describe('Cofre3D integration scopes', () => {
       new URL('0103_integration_cofre3d_scopes_2.down.sql', dir),
       'utf8',
     )
-    const quoted = INTEGRATION_SCOPES.map((scope) => `'${scope}'`).join(',')
+    // Scopes known at 0103; later ones come with their own migration.
+    const known = INTEGRATION_SCOPES.slice(0, 18)
+    const quoted = known.map((scope) => `'${scope}'`).join(',')
     expect(up).toContain(`ARRAY[${quoted}]::text[]`)
-    expect(up).toContain(
-      `cardinality(scopes) BETWEEN 1 AND ${INTEGRATION_SCOPES.length}`,
-    )
+    expect(up).toContain(`cardinality(scopes) BETWEEN 1 AND ${known.length}`)
     expect(down).toContain('FROM farm.integration_app_grants')
     expect(down).toContain('RAISE EXCEPTION')
     for (const scope of NEW_SCOPES) expect(down).toContain(`'${scope}'`)

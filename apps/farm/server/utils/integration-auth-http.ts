@@ -254,7 +254,12 @@ const policies: RoutePolicy[] = [
   {
     method: 'POST',
     path: /^\/printers\/[^/]+\/actions$/,
-    scopes: ['control:basic', 'control:extended', 'plates:confirm'],
+    scopes: [
+      'control:basic',
+      'control:extended',
+      'control:emergency',
+      'plates:confirm',
+    ],
   },
   {
     method: 'GET',
@@ -356,7 +361,12 @@ const policies: RoutePolicy[] = [
   {
     method: 'GET',
     path: /^\/actions\/[^/]+$/,
-    scopes: ['control:basic', 'control:extended', 'plates:confirm'],
+    scopes: [
+      'control:basic',
+      'control:extended',
+      'control:emergency',
+      'plates:confirm',
+    ],
   },
   { method: 'GET', path: /^\/webhooks$/, scopes: ['events:subscribe'] },
   {
@@ -430,6 +440,7 @@ async function readActionScope(request: Request) {
   }
   if (typeof action !== 'string') return 'invalid-request'
   if (action === 'confirm_collection') return 'plates:confirm'
+  if (action === 'emergency_stop') return 'control:emergency'
   return ['pause', 'resume', 'cancel'].includes(action)
     ? 'control:basic'
     : 'control:extended'
@@ -587,7 +598,19 @@ export async function authorizeIntegrationRequest(
     if ((targetFarm || printerId) && !grants.length)
       return integrationProblem('not-found', headers)
 
-    return { principal: { ...principal, scopes, grants }, headers }
+    // The printer list offers emergency_stop only where the token may use it.
+    const emergency =
+      path === '/printers'
+        ? {
+            emergencyGrants: principal.grants.filter((grant) =>
+              grant.scopes.includes('control:emergency'),
+            ),
+          }
+        : {}
+    return {
+      principal: { ...principal, ...emergency, scopes, grants },
+      headers,
+    }
   } catch {
     return integrationProblem('service-unavailable', headers)
   }

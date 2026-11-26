@@ -81,6 +81,7 @@ const scopeLabels: Record<IntegrationScope, string> = {
   'inventory:write': 'Registrar e retirar carretéis',
   'environment:control': 'Controlar ambiente',
   'alerts:manage': 'Gerenciar regras de alerta e testar notificações',
+  'control:emergency': 'Parada de emergência',
 }
 const scopeOptions = INTEGRATION_SCOPES.map(
   (scope) => [scope, scopeLabels[scope]] as const,
@@ -527,10 +528,21 @@ function grantDraft(appId: string) {
                     v-model="grantDraft(app.id).scopes"
                     type="checkbox"
                     :value="scope"
+                    :aria-describedby="
+                      scope === 'control:emergency'
+                        ? `emergency-consent-${app.id}`
+                        : undefined
+                    "
                   />
                   <span>{{ label }} ({{ scope }})</span>
                 </label>
               </div>
+              <p :id="`emergency-consent-${app.id}`" class="meta">
+                Ao conceder “Parada de emergência”, o aplicativo poderá parar a
+                impressora imediatamente. A API não consegue recuperar a
+                impressora: depois da parada, será preciso agir na própria
+                impressora ou no OpenFarm pelo navegador (reiniciar o firmware).
+              </p>
             </fieldset>
             <div class="field">
               <label :for="`printer-${app.id}`"

@@ -19,5 +19,6 @@ export const INTEGRATION_SCOPES = [
   'inventory:write',
   'environment:control',
   'alerts:manage',
+  'control:emergency',
 ] as const
 export type IntegrationScope = (typeof INTEGRATION_SCOPES)[number]

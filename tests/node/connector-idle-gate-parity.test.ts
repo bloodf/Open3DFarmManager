@@ -364,7 +364,12 @@ async function apiDecision(
     grant_id: GRANT,
     app_id: APP,
     farm_id: FARM,
-    scopes: ['control:basic', 'control:extended', 'jobs:start'],
+    scopes: [
+      'control:basic',
+      'control:extended',
+      'control:emergency',
+      'jobs:start',
+    ],
     revoked: false,
   } as ApiGrant
   const writes: string[] = []

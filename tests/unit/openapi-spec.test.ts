@@ -97,6 +97,7 @@ describe('integration API v1 OpenAPI spec', () => {
       'inventory:write',
       'environment:control',
       'alerts:manage',
+      'control:emergency',
     ])
     expect(Object.keys(committed.paths).sort()).toEqual(
       [

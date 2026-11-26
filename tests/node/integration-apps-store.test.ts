@@ -42,7 +42,7 @@ test('scopes match the OpenAPI contract and the migration check', () => {
   )
   assert.deepEqual([...INTEGRATION_SCOPES].sort(), declared.sort())
   const scopesMigration = read(
-    'infra/db/migrations/0103_integration_cofre3d_scopes_2.up.sql',
+    'infra/db/migrations/0128_integration_emergency_scope.up.sql',
   )
   const inSql = [...scopesMigration.matchAll(/ARRAY\[([^\]]+)\]::text\[\]/g)]
     .map((m) => m[1]!.match(/'([^']+)'/g)!.map((s) => s.slice(1, -1)))

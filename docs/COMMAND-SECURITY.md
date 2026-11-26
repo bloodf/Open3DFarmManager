@@ -44,6 +44,7 @@ When receiving an API-originated command envelope, the Connector executes the fo
 5. **Owner-granted scope authorization (`unauthorized`, `scope-denied`):**
    - Verifies that the envelope carries an owner-granted scope authorizing the specific action; library print starts use `jobs:write`.
    - Refuses commands if the required scope was not granted by the farm owner for the calling application.
+   - API `emergency_stop` requires `control:emergency`; see [API emergency stop](#api-emergency-stop).
 
 6. **Freshness and clock validation (`invalid-clock`, `command-expired`, `clock-window`):**
    - Validates monotonic time against system wall clock; detects and fails closed on backwards clock regression.
@@ -68,6 +69,14 @@ When receiving an API-originated command envelope, the Connector executes the fo
 10. **Single consumption and uncertainty policy:**
     - Consumes the replay claim exactly once; no automatic retry of uncertain commands.
     - If the physical dispatch result or connection to the printer driver fails or is ambiguous, the Connector records and reports uncertainty explicitly rather than retrying.
+
+## API emergency stop
+
+An API `emergency_stop` needs its own owner-granted scope, `control:emergency`. `control:extended` does not cover it, and a grant made before the scope existed does not gain it: the owner must grant it again. The server and the database action guard require the scope. The Connector refuses, before any write and with a pt-BR reason, an `emergency_stop` envelope whose signed or inbox scope is anything else. Browser capabilities are unchanged.
+
+Recovery limitation: the API cannot recover a stopped printer, because `firmware_restart` is never an API action. Someone must act at the printer or send the firmware restart from the OpenFarm browser.
+
+Deploy order: apply the database migration and deploy the server first, then the Connectors. A new Connector refuses an `emergency_stop` envelope from an older server, which signs it as `control:extended`; this fails closed. An older Connector does not know `control:emergency` and does not execute the stop from a newer server, so upgrade Connectors before relying on it.
 
 ## Full printer control rules
 

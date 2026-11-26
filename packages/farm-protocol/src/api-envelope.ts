@@ -48,7 +48,12 @@ const httpsUrl = z
     }
   })
 
-/** Actions an API app may request; emergency stop, start_print and firmware restart are never API actions; start_library_print needs jobs:write. */
+/**
+ * Actions an API app may request. emergency_stop needs its own owner-granted
+ * scope, control:emergency; start_library_print needs jobs:write; start_print
+ * and firmware_restart are never API actions, so an app cannot recover a
+ * printer it has stopped.
+ */
 export const API_ENVELOPE_ACTIONS = [
   'pause',
   'resume',
@@ -163,6 +168,7 @@ export const ApiEnvelopeScope = z.enum([
   'jobs:write',
   'control:basic',
   'control:extended',
+  'control:emergency',
   'plates:confirm',
   'environment:control',
 ])
@@ -180,6 +186,8 @@ export function scopeForApiAction(action: ApiEnvelopeAction['action']) {
     case 'resume':
     case 'cancel':
       return 'control:basic'
+    case 'emergency_stop':
+      return 'control:emergency'
     default:
       return 'control:extended'
   }

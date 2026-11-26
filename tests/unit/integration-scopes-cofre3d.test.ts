@@ -89,6 +89,7 @@ describe('Cofre3D integration scopes', () => {
       'inventory:write',
       'environment:control',
       'alerts:manage',
+      'control:emergency',
     ])
     // Masks are 32-bit bitwise values.
     expect(INTEGRATION_SCOPES.length).toBeLessThanOrEqual(31)

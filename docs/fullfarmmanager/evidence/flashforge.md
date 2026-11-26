@@ -9,14 +9,14 @@ against the simulator only.
 
 ## Models
 
-| Model                                         | Accepted firmware   | Observed in the simulator and gaps                                                                                                                                                            |
-| --------------------------------------------- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Adventurer 5M (0x0023)                        | 3.2.7, 5.1.8        | UDP identity, authenticated detail and flat file listing. Adapter upload, start, pause, resume, cancel, nozzle and bed targets, and cooling fan readback. Base fixture reports no camera URL. |
-| Adventurer 5M Pro (0x0024)                    | 3.2.7, 5.1.8        | Same operations plus filtration state and MJPEG stream read. Signed lifecycle, temperatures, fan and camera activation under a test-only qualification. Camera frames over WebRTC.            |
-| AD5X (0x0026)                                 | 1.1.7, 1.2.1, 3.1.0 | Identity, detail, detailed files, optional MJPEG and IFS trays. Signed lifecycle, temperatures, fan, slot load and slot record under a test-only qualification. Start and upload refused.     |
-| Adventurer 3 and 4 Pro                        | Outside allowlist   | PID refusal in discovery and authenticated detail. These families use the legacy TCP protocol.                                                                                                |
-| Guider 2, Finder 3, Guider 4 and Guider 4 Pro | Outside allowlist   | PID refusal in discovery and authenticated detail. Adapter-specific firmware and protocol evidence is pending.                                                                                |
-| Creator 5 and Creator 5 Pro                   | Outside allowlist   | PID refusal in discovery and authenticated detail. Their HTTP interface describes a separate four-tool schema and command set.                                                                |
+| Model                                         | Accepted firmware   | Observed in the simulator and gaps                                                                                                                                                                                                                                                                                                                      |
+| --------------------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Adventurer 5M (0x0023)                        | 3.2.7, 5.1.8        | UDP identity, authenticated detail and flat file listing. Adapter upload, start, pause, resume, cancel, nozzle and bed targets, and cooling fan readback. Base fixture reports no camera URL. Browser journey covers status loss/recovery, shipped read-only behavior and test-only qualified lifecycle, temperatures, fan and optional camera control. |
+| Adventurer 5M Pro (0x0024)                    | 3.2.7, 5.1.8        | Same operations plus filtration state and MJPEG stream read. Signed lifecycle, temperatures, fan and camera activation under a test-only qualification. Camera frames over WebRTC.                                                                                                                                                                      |
+| AD5X (0x0026)                                 | 1.1.7, 1.2.1, 3.1.0 | Identity, detail, detailed files, optional MJPEG and IFS trays. Signed lifecycle, temperatures, fan, slot load and slot record under a test-only qualification. Start and upload refused.                                                                                                                                                               |
+| Adventurer 3 and 4 Pro                        | Outside allowlist   | PID refusal in discovery and authenticated detail. These families use the legacy TCP protocol.                                                                                                                                                                                                                                                          |
+| Guider 2, Finder 3, Guider 4 and Guider 4 Pro | Outside allowlist   | PID refusal in discovery and authenticated detail. Adapter-specific firmware and protocol evidence is pending.                                                                                                                                                                                                                                          |
+| Creator 5 and Creator 5 Pro                   | Outside allowlist   | PID refusal in discovery and authenticated detail. Their HTTP interface describes a separate four-tool schema and command set.                                                                                                                                                                                                                          |
 
 ## Sources
 
@@ -114,7 +114,7 @@ and [HTTP REST operations](https://github.com/Parallel-7/flashforge-api-docs/wik
   command journal. `flashforge.spec.ts` runs the shipped build (no command, no
   write), then edits the freshly built Connector for the run to qualify one
   pair, and restores it. No runtime setting can qualify a pair. The browser
-  runs cover every signed action: the 5M Pro actions including a camera off
+  runs cover every signed action: the 5M and 5M Pro actions including a camera off
   refused during the print and camera off and on after it, and on AD5X pause, cancel, slot record and slot load. The AD5X journey
   also verifies that a signed repeat of the same slot record is refused before
   any additional printer write.
@@ -149,7 +149,7 @@ earlier rejection of slot 4, and refuses a load when any reported slot is 0.
 ## Browser journey
 
 `flashforge.spec.ts` runs one harness per model and build: status loss and
-recovery, the shipped build, a qualified 5M Pro and a qualified AD5X. The
+recovery and the shipped build for the 5M and 5M Pro, and test-only qualified 5M, 5M Pro and AD5X. The 5M journey fixture reports an optional camera stream, while the base fixture covers absent camera metadata. [PID assignments](https://github.com/Parallel-7/flashforge-api-docs/wiki/Printer-PIDs), [5M series](https://github.com/Parallel-7/flashforge-api-docs/wiki/Adventurer-5M-Series), and the [HTTP API](https://github.com/Parallel-7/flashforge-api-docs/wiki/HTTP-REST-API) document identity and commands. The
 command journeys open the telemetry upload only until the server holds the
 advertised controls, then close it. Telemetry, status and control inboxes share
 one proof slot per Connector credential, and a permanently open upload keeps

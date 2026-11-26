@@ -54,6 +54,10 @@ export async function startFlashforgeControlFixture(input: {
       status: 'printing',
       printFileName: 'journey.gcode',
       printProgress: 0.25,
+      // Exercise the 5M's optional camera; the base fixture covers its absence.
+      ...(model.pid === 35
+        ? { cameraStreamUrl: 'http://127.0.0.1:8080/?action=stream' }
+        : {}),
       ...(model.pid === 38
         ? {
             matlStationInfo: {

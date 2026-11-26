@@ -91,6 +91,17 @@ and [HTTP REST operations](https://github.com/Parallel-7/flashforge-api-docs/wik
   otherwise the stream URL. A request for the state already reported is refused,
   as is one without an explicit report. A 5M without a camera acknowledges and
   does nothing, which ends as an unknown outcome.
+- **Camera off during a print is refused** (#956). The stream-control section of
+  the [5M Pro features page](https://github.com/Parallel-7/flashforge-api-docs/wiki/Adventurer-5M-Pro-Features#stream-control)
+  documents `open` and `close` and states no print-state rule, so the source does
+  not show that closing is harmless during a job. The camera is the operator's
+  remote view of the print, and nothing in a print needs it off, so the Connector
+  sends `close` only when the send-time `/detail` read says `ready`, `completed`
+  or `cancel`. During `printing` or `pause` the operator gets "A câmera não pode
+  ser desligada durante uma impressão, para não interromper o monitoramento
+  remoto."; the other states were already refused. `open` stays allowed during a
+  print. Closing the view in the browser does not stop the printer's stream. The
+  printer's own touchscreen and apps are outside this rule.
 - A slot record sends `msConfig_cmd` with a listed material and a colour. It
   needs a ready printer, an idle station and a record that differs from the
   report, and is confirmed by that slot's `materialName` and `materialColor`.
@@ -103,8 +114,8 @@ and [HTTP REST operations](https://github.com/Parallel-7/flashforge-api-docs/wik
   command journal. `flashforge.spec.ts` runs the shipped build (no command, no
   write), then edits the freshly built Connector for the run to qualify one
   pair, and restores it. No runtime setting can qualify a pair. The browser
-  runs cover every signed action: the 5M Pro actions including camera off and
-  on, and on AD5X pause, cancel, slot record and slot load. The AD5X journey
+  runs cover every signed action: the 5M Pro actions including a camera off
+  refused during the print and camera off and on after it, and on AD5X pause, cancel, slot record and slot load. The AD5X journey
   also verifies that a signed repeat of the same slot record is refused before
   any additional printer write.
 

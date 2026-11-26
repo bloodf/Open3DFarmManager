@@ -228,21 +228,31 @@ async function sweepServer(
 }
 
 async function sweepConnectors(deps: RetentionDeps): Promise<number> {
+  // A host that reported its library may hold a failed upload's leftover with
+  // no blob row at all.
   const hosts = await deps.sql<
     { agentId: string }[]
-  >`SELECT DISTINCT agent_id AS "agentId" FROM farm.library_blobs WHERE storage_location='connector'`
+  >`SELECT DISTINCT agent_id AS "agentId" FROM farm.library_blobs WHERE storage_location='connector'
+    UNION SELECT agent_id FROM farm.library_connector_storage`
   let removed = 0
+  let failure: unknown
   for (const { agentId } of hosts) {
-    const referenced = await deps.sql<
-      { sha256: string }[]
-    >`SELECT sha256 FROM farm.library_blobs WHERE agent_id=${agentId}::uuid AND purged_at IS NULL`
-    removed += (
-      await deps.connectors!.sweep(
-        agentId,
-        referenced.map((row) => row.sha256),
-      )
-    ).length
+    // One unreachable host never keeps the others from being swept.
+    try {
+      const referenced = await deps.sql<
+        { sha256: string }[]
+      >`SELECT sha256 FROM farm.library_blobs WHERE agent_id=${agentId}::uuid AND purged_at IS NULL`
+      removed += (
+        await deps.connectors!.sweep(
+          agentId,
+          referenced.map((row) => row.sha256),
+        )
+      ).length
+    } catch (error) {
+      failure = error
+    }
   }
+  if (failure) throw failure
   return removed
 }
 

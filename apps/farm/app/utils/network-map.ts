@@ -6,7 +6,11 @@ export interface NetworkConnector {
   fingerprint: string
   status: 'pending' | 'approved' | 'revoked'
   lastSeenAt: number | null
-  health: { version: string; storage: 'healthy' | 'degraded' } | null
+  health: {
+    version: string
+    storage: 'healthy' | 'degraded'
+    refusedRecords?: number
+  } | null
 }
 export interface NetworkPrinter {
   assignmentId: string
@@ -172,6 +176,14 @@ function connectorStatus(
   return { status: 'connected', statusText: 'Conectado', lastSeenAt: seen }
 }
 
+/** Telemetry the server refused and the Connector dropped, when there is any. */
+function refusedNote(records: number | undefined) {
+  if (!records) return ''
+  return records === 1
+    ? ' · 1 registro descartado'
+    : ` · ${records} registros descartados`
+}
+
 /** Flattens the server read model, with any live overlay, into one list for the map and the table. */
 export function buildEntries(
   data: NetworkData,
@@ -242,6 +254,12 @@ export function buildEntries(
       lastSeenAt,
       href: `/impressoras/${encodeURIComponent(printer.printerKey)}`,
     })
+  }
+  // Added after the printers, which repeat only their Connector's status.
+  for (const connector of data.connectors) {
+    const entry = connectors.get(connector.agentId)
+    if (entry && connector.status === 'approved')
+      entry.statusText += refusedNote(connector.health?.refusedRecords)
   }
   data.discovered.forEach((found, index) => {
     const parent = connectors.get(found.agentId)

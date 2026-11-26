@@ -18,9 +18,14 @@ import {
   provisionKobraLinkPrinter,
   provisionKobraXPrinter,
   provisionSdcpPrinter,
+  provisionPhrozenPrinter,
   provisionPhotonResinPrinter,
   type PrinterBinding,
 } from '../control/printer-binding.ts'
+import {
+  phrozenWriteQualified,
+  type PhrozenQualification,
+} from '../phrozen/qualification.ts'
 import { readVersionedRuntimeConfig } from './version.ts'
 import { validateMoonrakerInput } from './moonraker.ts'
 import type { RuntimeCredential } from './credential.ts'
@@ -108,6 +113,10 @@ const Runtime = z.strictObject({
 export function readAgentRuntimeConfig(
   path: string,
   credential: Pick<RuntimeCredential, 'agent_id' | 'farm_id'>,
+  /** Test override only; the shipped Phrozen qualification list is empty. */
+  options: {
+    phrozenQualifiedWrites?: readonly PhrozenQualification[] | undefined
+  } = {},
 ) {
   const input = Runtime.parse(readVersionedRuntimeConfig(path, false))
   const kobraX = readKobraXOnboardedConfig(path, credential)
@@ -203,6 +212,25 @@ export function readAgentRuntimeConfig(
           )
             throw Error('Read-only driver assignment mismatch')
           const readonly = provisionReadonlyPrinter(value)
+          if (driver.family === 'phrozen') {
+            const { assignment_id, farm_id, agent_id, printer_key } =
+              readRuntimePrinterBinding(readonly)!
+            // Printer writes need a local opt-in and a qualified pair. An
+            // opted-in unqualified pair stays read-only and fails below.
+            if (
+              !pause?.control?.assignmentIds.includes(assignment_id) ||
+              !phrozenWriteQualified(
+                driver.expect.model,
+                driver.expect.firmware,
+                options.phrozenQualifiedWrites,
+              )
+            )
+              return readonly
+            return provisionPhrozenPrinter(
+              { assignment_id, farm_id, agent_id, printer_key },
+              driver,
+            )
+          }
           if (driver.family === 'flashforge' && driver.control) {
             const { assignment_id, farm_id, agent_id, printer_key } =
               readRuntimePrinterBinding(readonly)!

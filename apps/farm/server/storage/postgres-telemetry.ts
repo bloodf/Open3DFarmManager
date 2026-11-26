@@ -19,10 +19,17 @@ export function durableTelemetryEvent(event: TelemetryEvent) {
 /**
  * The Connector adds progress 0 to an idle printer only for a server that
  * requires it, so a resend after a server upgrade or rollback can differ from
- * the stored copy in just that. Both forms are one observation: this returns
- * the other form, or undefined when the event has only one.
+ * the stored copy in just that. It likewise drops a heartbeat's refused-record
+ * count only for a server that does not know it, so a resend after an upgrade
+ * can add the count. Both forms are one observation: this returns the other
+ * form, or undefined when the event has only one.
  */
 export function equivalentTelemetryResend(event: TelemetryEvent) {
+  if (event.kind === 'heartbeat') {
+    const { refusedRecords, ...connector } = event.health.connector
+    if (refusedRecords === undefined) return
+    return { ...event, health: { ...event.health, connector } }
+  }
   if (event.kind !== 'printer-state' || event.state.state !== 'idle') return
   const { progress, ...state } = event.state
   if (progress !== undefined && progress !== 0) return

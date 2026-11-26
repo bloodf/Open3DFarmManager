@@ -19,6 +19,8 @@ import type { resolveCrealityEndpoint } from '../discovery/creality.ts'
 import { uploadSdcpFile } from '../sdcp/files.ts'
 import { sdcpFileName } from '../sdcp/commands.ts'
 import { readSdcpPrinterBinding } from '../control/printer-binding.ts'
+import { supportsPhrozenUpload, uploadPhrozenFile } from '../phrozen/upload.ts'
+import type { PhrozenQualification } from '../phrozen/qualification.ts'
 import type {
   createKobraLinkClient,
   PrinterBinding,
@@ -39,6 +41,12 @@ export type FileUploadTarget =
     }
   | { backend: 'sdcp'; binding: LocalPrinterBinding }
   | { backend: 'anycubic'; binding?: LocalPrinterBinding }
+  | {
+      backend: 'phrozen'
+      binding: LocalPrinterBinding
+      /** Test override of the empty shipped qualification list. */
+      qualifiedWrites?: readonly PhrozenQualification[] | undefined
+    }
   | {
       backend: 'kobralink'
       client(
@@ -90,6 +98,9 @@ export function supportsFileUpload(
       return false
     }
   }
+  // Standalone only: a job delivery would need a start, which is refused.
+  if (target.backend === 'phrozen')
+    return standalone && supportsPhrozenUpload(target, name)
   if (target.backend === 'anycubic')
     return standalone && !!target.binding && supportsAnycubicUpload(name)
   return (
@@ -119,6 +130,12 @@ export async function uploadFile(input: {
     await uploadSdcpFile({
       ...common,
       binding: target.binding,
+      authorized: input.authorize,
+    })
+  else if (target.backend === 'phrozen')
+    await uploadPhrozenFile({
+      ...target,
+      ...common,
       authorized: input.authorize,
     })
   else if (target.backend === 'creality') {

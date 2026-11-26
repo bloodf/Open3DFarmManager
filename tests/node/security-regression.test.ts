@@ -14,6 +14,7 @@ import {
   type V2Dispatch,
 } from '../helpers/command-v2-dispatch.ts'
 import { spawn, execFileSync } from 'node:child_process'
+import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
@@ -163,6 +164,7 @@ test(
     const spawned: ReturnType<typeof spawn>[] = []
     const exited: Promise<void>[] = []
     let journal: ReturnType<typeof openCommandJournal> | undefined
+    let blocker: DatabaseSync | undefined
     // Also runs when the test times out, unlike the finally below.
     t.after(() => {
       for (const child of spawned) if (child.exitCode === null) child.kill()
@@ -170,6 +172,7 @@ test(
     try {
       // Keep the SQLite sidecars alive until all children have exited.
       journal = openCommandJournal({ directory: dir, clock: () => 1000 })
+      blocker = new DatabaseSync(join(dir, 'pause-commands.sqlite'))
       const authority = await createV2Authority(await nodeSigner())
       const command = decodeCommandV2(await authority.sign())
       const module = new URL(
@@ -178,36 +181,46 @@ test(
       ).href
       // Each worker opens its store (a write of its own), announces 'ready' and
       // claims only after all four are released together, so the race covers
-      // the claims rather than four concurrent store initialisations.
+      // the claims rather than four concurrent store initialisations. Workers
+      // keep the production 100 ms busy timeout. The first claim runs while
+      // this process holds the write lock, so it must fail closed; the race
+      // starts once the lock is released.
       const source = `
-        const sqlite = process.getBuiltinModule('node:sqlite')
-        // Keep the production lock timeout out of the serialization assertion.
-        sqlite.DatabaseSync = class extends sqlite.DatabaseSync {
-          constructor(path, options) {
-            super(path, { ...options, timeout: 30_000 })
-          }
-        }
         const { openCommandJournal, claimCommand, closeCommandJournal } =
           await import(${JSON.stringify(module)})
         process.stdin.once('data', () => {
           const journal = openCommandJournal({ directory: process.argv[1], clock: () => 1000 })
+          const claim = () => {
+            const result = claimCommand(journal, {
+              command: JSON.parse(process.argv[2]),
+              printerKey: 'printer-1',
+              wireSha256: 'a'.repeat(64),
+            })
+            return result.ok ? 'accepted' : result.reason
+          }
           process.stdin.once('data', () => {
-            try {
-              const result = claimCommand(journal, {
-                command: JSON.parse(process.argv[2]),
-                printerKey: 'printer-1',
-                wireSha256: 'a'.repeat(64),
-              })
-              process.stdout.write((result.ok ? 'accepted' : result.reason) + '\\n')
-            } finally {
-              closeCommandJournal(journal)
-              process.stdin.destroy()
-            }
+            process.stdin.once('data', async () => {
+              try {
+                // Only a refusal that claimed nothing is tried again.
+                let result = claim()
+                const deadline = Date.now() + 20_000
+                while (result === 'storage-unavailable' && Date.now() < deadline) {
+                  await new Promise((resolve) => setTimeout(resolve, 1 + Math.random() * 20))
+                  result = claim()
+                }
+                process.stdout.write(result + '\\n')
+              } finally {
+                closeCommandJournal(journal)
+                process.stdin.destroy()
+              }
+            })
+            process.stdout.write(claim() + '\\n')
           })
           process.stdout.write('ready\\n')
         })
       `
       let ready = 0
+      const locked: string[] = []
       const completed = Promise.all(
         Array.from(
           { length: 4 },
@@ -242,17 +255,26 @@ test(
                 output += chunk
                 if (!before.includes('ready\n') && output.includes('ready\n')) {
                   if (++ready === 4) {
-                    for (const each of spawned) each.stdin!.end('go\n')
+                    blocker!.exec('BEGIN IMMEDIATE')
+                    for (const each of spawned) each.stdin!.write('go\n')
                   } else {
                     // The journal open itself writes. Isolate it from the race.
                     spawned[ready]!.stdin!.write('open\n')
                   }
                 }
+                const first = /^ready\n([^\n]+)\n/
+                if (!first.test(before) && first.test(output)) {
+                  locked.push(first.exec(output)![1]!)
+                  if (locked.length === 4) {
+                    blocker!.exec('ROLLBACK')
+                    for (const each of spawned) each.stdin!.end('again\n')
+                  }
+                }
               })
               child.on('error', reject)
               child.on('close', (status, signal) =>
-                status === 0 && /^ready\n[^\n]+\n$/.test(output)
-                  ? resolve(output.replace('ready\n', '').slice(0, -1))
+                status === 0 && /^ready\n[^\n]+\n[^\n]+\n$/.test(output)
+                  ? resolve(output.split('\n')[2]!)
                   : reject(
                       new Error(
                         `Replay worker failed: worker=${worker}, code=${status}, signal=${signal}, stdout=${JSON.stringify(output)}, stderr=${JSON.stringify(stderr.toString('utf8'))}`,
@@ -268,6 +290,7 @@ test(
         30_000,
         () => `Replay workers timed out with ${ready}/4 journals open`,
       )
+      assert.deepEqual(locked, Array(4).fill('storage-unavailable'))
       assert.equal(
         results.filter((result) => result === 'accepted').length,
         1,
@@ -283,6 +306,7 @@ test(
         if (child.exitCode === null && child.signalCode === null)
           child.kill('SIGKILL')
       await Promise.all(exited)
+      blocker?.close()
       if (journal) closeCommandJournal(journal)
       rmSync(dir, { recursive: true, force: true })
     }

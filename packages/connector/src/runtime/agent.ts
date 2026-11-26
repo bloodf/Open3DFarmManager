@@ -74,6 +74,7 @@ import {
   readBambuPrinterBinding,
   readCrealityPrinterBinding,
   readFlashforgePrinterBinding,
+  readPhrozenPrinterBinding,
   readSdcpPrinterBinding,
 } from '../control/printer-binding.ts'
 import {
@@ -170,6 +171,10 @@ const systemClock: AgentClock = { now: () => Date.now() }
 
 type AgentInput = {
   trustedKeys?: TrustedKeyAuthority
+  /** Test override only; the CLI never sets it. The shipped list is empty. */
+  phrozenQualifiedWrites?: Parameters<
+    typeof import('./pause-control.ts').runPauseControl
+  >[0]['phrozenQualifiedWrites']
   resinCapabilities?: Parameters<
     typeof import('./pause-control.ts').runPauseControl
   >[0]['resinCapabilities']
@@ -221,6 +226,7 @@ async function runConnectorAgentOnce(
   const config = readAgentRuntimeConfig(
     input.configPath,
     readCredentialEnvelope(input.credentialPath, identity.fingerprint),
+    { phrozenQualifiedWrites: input.phrozenQualifiedWrites },
   )
   // One startup line whenever the operator widened the ICE bind beyond loopback.
   if (!isLoopbackBindAddress(config.rtc.bindAddress))
@@ -291,8 +297,6 @@ async function runConnectorAgentOnce(
     capacity: 0,
     credentialExpired: false,
   }
-  /** Records dropped since start because the server refused them. */
-  let refusedRecords = 0
   function diagnostic(value: AgentDiagnostic) {
     if (value.kind === 'drain-loss') {
       logger.warn('queue-loss', { ...value })
@@ -544,7 +548,7 @@ async function runConnectorAgentOnce(
             totals.credentialExpired || clock.now() >= credential.expires_at,
           storageDegraded: queue.storageDegraded,
           storageLost: queue.storageLost,
-          refusedRecords,
+          refusedRecords: queue.refusedRecords,
           rtc: rtcBackend,
         }),
         onError: fail,
@@ -604,6 +608,10 @@ async function runConnectorAgentOnce(
           version: connectorVersionMetadata.connectorVersion,
           uptimeMs: Math.floor(performance.now() - startedAt),
           queueBacklog: queue.depth,
+          // Absent while zero, so a healthy heartbeat keeps its shape.
+          ...(queue.refusedRecords
+            ? { refusedRecords: queue.refusedRecords }
+            : {}),
           storage: queue.storageDegraded ? 'degraded' : 'healthy',
           rtcScope:
             !lookupId || rtcBackend.mode !== 'direct'
@@ -692,10 +700,13 @@ async function runConnectorAgentOnce(
               return []
             return controlsFor?.(id)
           },
-          // Only a Flashforge binding opted in to control advertises any.
+          // Only a Flashforge or Phrozen binding opted in to control
+          // advertises any.
           readOnlyControlsFor: (id) => {
             const local = config.bindingFor(id)
-            return local && readFlashforgePrinterBinding(local)
+            return local &&
+              (readFlashforgePrinterBinding(local) ||
+                readPhrozenPrinterBinding(local))
               ? controlsFor?.(id)
               : []
           },
@@ -1069,6 +1080,7 @@ async function runConnectorAgentOnce(
             )
           },
           ...(input.trustedKeys ? { trustedKeys: input.trustedKeys } : {}),
+          phrozenQualifiedWrites: input.phrozenQualifiedWrites,
           ...(input.resinCapabilities
             ? { resinCapabilities: input.resinCapabilities }
             : {}),
@@ -1161,11 +1173,10 @@ async function runConnectorAgentOnce(
             attemptSignal,
             () => diagnostic({ kind: 'telemetry-entry-dropped' }),
             (records) => {
-              refusedRecords += records
               diagnostic({
                 kind: 'telemetry-batch-refused',
                 records,
-                total: refusedRecords,
+                total: queue.refusedRecords,
               })
             },
           )
@@ -1340,7 +1351,7 @@ async function runConnectorAgentOnce(
         kind: 'agent-summary',
         ...totals,
         storageLost: queue.storageLost,
-        refusedRecords,
+        refusedRecords: queue.refusedRecords,
       })
     } catch (error) {
       fail(error)

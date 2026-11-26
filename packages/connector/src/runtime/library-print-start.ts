@@ -413,10 +413,12 @@ export function withLibraryPrint<D extends PreparedPauseDriver>(
       const target = config.targetFor(binding)
       // Not for SDCP: the library holds no CTB/GOO, SDCP telemetry reports no
       // nozzle profile, and a transferring printer reports no startable state.
+      // Not for Phrozen: every start there is refused.
       return base.includes('start_print') &&
         !base.includes('start_library_print') &&
         target &&
-        target.backend !== 'sdcp'
+        target.backend !== 'sdcp' &&
+        target.backend !== 'phrozen'
         ? Object.freeze([...base, 'start_library_print' as const])
         : base
     },

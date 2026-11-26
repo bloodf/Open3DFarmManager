@@ -347,13 +347,17 @@ export class PostgresLibrary {
    * Runs `discard` for bytes an upload wrote only while no record points at
    * them. It holds the upload locks, so none can appear meanwhile. A server
    * file (no `agentId`) is shared by every farm.
+   *
+   * It gives up quickly on a busy lock, leaving the file to the retention sweep:
+   * an upload that already holds these locks can reach here through the relay,
+   * and waiting would only stall it.
    */
   async discardUnused(
     file: { farmId: string; sha256: string; agentId?: string },
     discard: () => Promise<void>,
   ): Promise<void> {
     await this.sql.begin(async (tx) => {
-      await tx`SET LOCAL lock_timeout = '2000ms'`
+      await tx`SET LOCAL lock_timeout = '100ms'`
       await tx`SELECT pg_advisory_xact_lock(hashtextextended(${'library:' + file.farmId}, 0))`
       await lockLibraryBlob(tx as unknown as Sql, file.sha256)
       const kept =

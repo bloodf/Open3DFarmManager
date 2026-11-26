@@ -56,9 +56,12 @@ export function exchange(
   {
     session,
     signal,
+    guard,
   }: {
     session?: PhrozenSession | undefined
     signal?: AbortSignal | undefined
+    /** Last check before the request leaves; false sends nothing. */
+    guard?: (() => boolean) | undefined
   } = {},
 ) {
   return new Promise<PhrozenReply>((resolve, reject) => {
@@ -101,6 +104,8 @@ export function exchange(
 
     const send = () => {
       if (settled) return
+      if (guard && !guard())
+        return fail(new Error('Phrozen request not permitted'))
       sent = true
       socket.send(
         JSON.stringify({

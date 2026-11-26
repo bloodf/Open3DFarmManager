@@ -41,6 +41,10 @@ export const FLASHFORGE_LOAD_WINDOW_MS = 24_000
 const NOT_QUALIFIED =
   'Os comandos desta impressora Flashforge ainda não foram qualificados para este modelo e firmware.'
 const NOT_READY = 'A impressora não está em um estado que aceite este comando.'
+const CAMERA_NEEDED =
+  'A câmera não pode ser desligada durante uma impressão, para não interromper o monitoramento remoto.'
+/** The only reports that show no job in progress. */
+const NO_JOB = ['ready', 'completed', 'cancel']
 
 export function flashforgeUnqualifiedMessage() {
   return NOT_QUALIFIED
@@ -359,6 +363,19 @@ export function openFixedFlashforgeControl(input: {
       await adapter.execute(next, (observation) => {
         if (!qualified(observation)) {
           refused = unqualified()
+          return false
+        }
+        // The camera is the remote view of a print: judged on the fresh read.
+        if (
+          next.kind === 'camera' &&
+          !next.on &&
+          !NO_JOB.includes(observation.status)
+        ) {
+          refused = new DriverRefusalError(
+            'state',
+            'Flashforge camera stays on during a job',
+            { userMessage: CAMERA_NEEDED },
+          )
           return false
         }
         if (

@@ -185,7 +185,7 @@ export async function drainTelemetryOnce(
         // A server that names no record of this batch refuses all of it.
         const refused = conflicting.length ? conflicting : ids
         try {
-          queue.remove(refused, now())
+          queue.refuse(refused, now())
         } catch {
           return { status: 'uncertain', reason: 'queue', loss }
         }

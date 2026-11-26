@@ -88,6 +88,8 @@ export function openScopedTelemetryQueue(input: {
       'telemetry.compact',
       'telemetry.ack',
       'telemetry.ack.tmp',
+      'telemetry.refused',
+      'telemetry.refused.tmp',
       RECEIPT,
       PENDING,
     ]) {
@@ -108,6 +110,8 @@ export function openScopedTelemetryQueue(input: {
             'telemetry.compact',
             'telemetry.ack',
             'telemetry.ack.tmp',
+            'telemetry.refused',
+            'telemetry.refused.tmp',
             RECEIPT,
             PENDING,
           ]) {

@@ -58,6 +58,15 @@ export type PhrozenUncertain = { outcome: 'uncertain'; reason: string }
 export type PhrozenResult<T> =
   ({ outcome: 'confirmed' } & T) | PhrozenRefusal | PhrozenUncertain
 
+/** Last check before a write leaves this process; false sends nothing. */
+export type PhrozenWriteGuard = () => boolean
+
+/**
+ * One state-changing operation at a time. Shared by every session of one
+ * printer, so an uncertain result still holds after a reconnect.
+ */
+export type PhrozenOperationLock = { busy: boolean; held: boolean }
+
 export type PhrozenTaskUsage = Readonly<{
   board: string
   taskId: string
@@ -105,6 +114,29 @@ function job(status: Record<string, unknown>) {
 }
 type Job = NonNullable<ReturnType<typeof job>>
 
+/** The reported job, reduced to what the Connector's command path compares. */
+export function phrozenPrintState(status: Record<string, unknown>): {
+  state: 'printing' | 'paused' | 'idle' | 'cancelled' | 'unknown'
+  taskId: string
+} {
+  const seen = job(status)
+  if (!seen) return { state: 'unknown', taskId: '' }
+  const { print, taskId } = seen
+  const state =
+    print === STOPPED
+      ? 'cancelled'
+      : seen.printing
+        ? print === PAUSED
+          ? 'paused'
+          : print === HOMING || ACTIVE.includes(print)
+            ? 'printing'
+            : 'unknown'
+        : seen.idle && SETTLED.includes(print)
+          ? 'idle'
+          : 'unknown'
+  return { state, taskId }
+}
+
 const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1)
 
 const safeFilename = (name: string) =>
@@ -122,10 +154,10 @@ export function createPhrozenOperations(input: {
   confirmTimeoutMs: number
   pollMs: number
   uploadTimeoutMs: number
+  lock?: PhrozenOperationLock | undefined
 }) {
   const { endpoint, firmware } = input
-  let busy = false
-  let held = false
+  const lock = input.lock ?? { busy: false, held: false }
 
   /**
    * One state-changing operation at a time. An uncertain result holds every
@@ -134,15 +166,15 @@ export function createPhrozenOperations(input: {
   async function exclusive<T>(
     work: () => Promise<PhrozenResult<T>>,
   ): Promise<PhrozenResult<T>> {
-    if (held) return refused('uncertain-result-unacknowledged')
-    if (busy) return refused('operation-in-progress')
-    busy = true
+    if (lock.held) return refused('uncertain-result-unacknowledged')
+    if (lock.busy) return refused('operation-in-progress')
+    lock.busy = true
     try {
       const result = await work()
-      if (result.outcome === 'uncertain') held = true
+      if (result.outcome === 'uncertain') lock.held = true
       return result
     } finally {
-      busy = false
+      lock.busy = false
     }
   }
 
@@ -212,9 +244,12 @@ export function createPhrozenOperations(input: {
     cmd: number,
     payload: Record<string, unknown>,
     reasons: Record<number, string> = {},
+    guard?: PhrozenWriteGuard,
   ): Promise<PhrozenReply | PhrozenRefusal | PhrozenUncertain> {
     try {
-      const reply = await exchange(endpoint, cmd, payload)
+      const reply = await exchange(endpoint, cmd, payload, undefined, {
+        guard,
+      })
       return reply.ack === 0
         ? reply
         : refused(reasons[reply.ack] ?? `printer-ack-${reply.ack}`)
@@ -231,6 +266,7 @@ export function createPhrozenOperations(input: {
     refusal: (before: Job) => string | undefined,
     reached: (after: Job, before: Job) => boolean,
     reasons?: Record<number, string>,
+    guard?: PhrozenWriteGuard,
   ): Promise<PhrozenResult<{ taskId: string }>> {
     const attributes = await gate('PRINT_CONTROL')
     if (isRefusal(attributes)) return attributes
@@ -238,7 +274,7 @@ export function createPhrozenOperations(input: {
     if ('outcome' in before) return before
     const reason = refusal(before)
     if (reason) return refused(reason)
-    const reply = await send(cmd, payload, reasons)
+    const reply = await send(cmd, payload, reasons, guard)
     if ('outcome' in reply) return reply
     const after = await observe(async () => {
       const seen = job(await input.readStatus())
@@ -296,10 +332,10 @@ export function createPhrozenOperations(input: {
 
     /** Clears the hold. Call only after a person has checked the printer. */
     acknowledgeUncertain() {
-      held = false
+      lock.held = false
     },
 
-    pause: (taskId: string) =>
+    pause: (taskId: string, guard?: PhrozenWriteGuard) =>
       exclusive(() =>
         command(
           129,
@@ -311,10 +347,12 @@ export function createPhrozenOperations(input: {
                 ? 'not-printing'
                 : undefined,
           (s) => sameTask(s, taskId) && s.print === PAUSED,
+          undefined,
+          guard,
         ),
       ),
 
-    resume: (taskId: string) =>
+    resume: (taskId: string, guard?: PhrozenWriteGuard) =>
       exclusive(() =>
         command(
           131,
@@ -328,10 +366,12 @@ export function createPhrozenOperations(input: {
                   ? 'print-error-reported'
                   : undefined,
           (s) => sameTask(s, taskId) && s.printing && ACTIVE.includes(s.print),
+          undefined,
+          guard,
         ),
       ),
 
-    stop: (taskId: string) =>
+    stop: (taskId: string, guard?: PhrozenWriteGuard) =>
       exclusive(() =>
         command(
           130,
@@ -343,6 +383,8 @@ export function createPhrozenOperations(input: {
                 ? 'not-printing'
                 : undefined,
           (s) => sameTask(s, taskId) && s.print === STOPPED,
+          undefined,
+          guard,
         ),
       ),
 
@@ -379,7 +421,7 @@ export function createPhrozenOperations(input: {
      * SDCP "Send File Interface": 1 MiB multipart packets sharing one Uuid.
      * Never overwrites, and confirms from the printer's own file list.
      */
-    upload: (filename: string, bytes: Uint8Array) =>
+    upload: (filename: string, bytes: Uint8Array, guard?: PhrozenWriteGuard) =>
       exclusive<{ filename: string; md5: string }>(async () => {
         if (!safeFilename(filename)) return refused('invalid-filename')
         if (!bytes.length || bytes.length > MAX_FILE_BYTES)
@@ -423,6 +465,12 @@ export function createPhrozenOperations(input: {
             ]),
             filename,
           )
+          // Rechecked before every packet. After the first one the printer
+          // holds a partial transfer, so a later denial is not "unsent".
+          if (guard && !guard())
+            return offset
+              ? uncertain('upload-authority-lost')
+              : refused('not-permitted')
           const failure = await postChunk(form)
           if (failure) return failure
         }

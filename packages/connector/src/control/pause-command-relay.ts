@@ -191,7 +191,10 @@ const CAPABILITY_MS = PAUSE_POLICY_HARD_MAXIMUMS.capabilityMs
 
 /** Bounded peer map. A peer beyond the cap is refused, never queued. */
 export const PAUSE_RELAY_MAX_PEERS = 16
-/** Bounded concurrent dispatches. A command beyond the cap is refused. */
+/**
+ * Bounded concurrent dispatches. A command beyond the cap is refused, except an
+ * emergency stop: each peer sends one command, so the peer cap bounds stops.
+ */
 export const PAUSE_RELAY_MAX_COMMANDS = 8
 /** Bounded retained asynchronous work. */
 export const PAUSE_RELAY_MAX_PENDING_WORK = 32
@@ -587,9 +590,11 @@ export function createPauseCommandRelay(
     if (peer.command) return peer.command
     let commandId: string
     let libraryStart: boolean
+    let stop: boolean
     try {
       const command = decodeCommandV2(input.wire)
       commandId = command.cmd_id
+      stop = command.action === 'emergency_stop'
       libraryStart = command.action === 'start_library_print'
     } catch {
       // Without a decoded command id there is no correlation for a result frame.
@@ -598,7 +603,7 @@ export function createPauseCommandRelay(
       return Promise.resolve('rejected')
     }
     if (
-      running >= PAUSE_RELAY_MAX_COMMANDS ||
+      (!stop && running >= PAUSE_RELAY_MAX_COMMANDS) ||
       pending.size >= PAUSE_RELAY_MAX_PENDING_WORK
     ) {
       // No wait list. A command beyond the bound is refused, never queued.

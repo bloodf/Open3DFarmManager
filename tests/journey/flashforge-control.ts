@@ -290,13 +290,18 @@ export function flashforgeControlJourneys() {
         expect(sim.detail.platTargetTemp).toBe(65)
         await set('Definir ventilador', 'part', '40')
         expect(sim.detail.coolingFanSpeed).toBe(40)
-        const camera = (choice: string) =>
-          send.extended(row, 'Controlar transmissão da câmera', (block) =>
-            block.locator('select').selectOption(choice),
+        const camera = (choice: string, message?: string) =>
+          send.extended(
+            row,
+            'Controlar transmissão da câmera',
+            (block) => block.locator('select').selectOption(choice),
+            message,
           )
-        await camera('off')
-        expect(sim.detail.cameraStreamUrl).toBe('')
-        await camera('on')
+        // The camera stays on while the print runs.
+        await camera(
+          'off',
+          'A câmera não pode ser desligada durante uma impressão, para não interromper o monitoramento remoto.',
+        )
         expect(sim.detail.cameraStreamUrl).not.toBe('')
         await send.lifecycle(
           row,
@@ -305,15 +310,19 @@ export function flashforgeControlJourneys() {
           'Impressão cancelada. O Connector confirmou o cancelamento.',
         )
         await reported(row, 'Ociosa')
+        await camera('off')
+        expect(sim.detail.cameraStreamUrl).toBe('')
+        await camera('on')
+        expect(sim.detail.cameraStreamUrl).not.toBe('')
         expect(sim.writes).toEqual([
           job('pause'),
           job('continue'),
           control('temperatureCtl_cmd', { rightNozzle: 200 }),
           control('temperatureCtl_cmd', { platform: 65 }),
           control('printerCtl_cmd', { coolingFan: 40 }),
+          job('cancel'),
           control('streamCtrl_cmd', { action: 'close' }),
           control('streamCtrl_cmd', { action: 'open' }),
-          job('cancel'),
         ])
       },
     )

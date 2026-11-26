@@ -6,6 +6,7 @@ import { parseTelemetryRuntimeConfig } from '../services/telemetry-runtime-confi
 import { PostgresConnectorLibraryDownloads } from '../utils/library/connector-download.ts'
 import { recordConnectorStorage } from '../utils/library/quota.ts'
 import { startConnectorLibraryRelay } from '../utils/library/connector-relay.ts'
+import { PostgresLibrary } from '../utils/library/store.ts'
 
 const logger = createLogger('farm-library')
 const RETRY_MIN_MS = 1000
@@ -76,6 +77,8 @@ export default defineNitroPlugin((nitro) => {
           })
           return result.ok
         },
+        discardUnused: (file, discard) =>
+          new PostgresLibrary(pool).discardUnused(file, discard),
       }).stop
       sql = pool
     } catch (error) {

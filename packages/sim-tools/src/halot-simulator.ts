@@ -37,11 +37,14 @@ export async function startHalotSimulator(
     version?: string
     /** The word a pause leads to; sources record both (see the protocol note). */
     pauseWord?: 'PRINT_PAUSE' | 'PRINT_STOP'
+    /** The word a stop leads to; `PRINT_STOP` is how one source reads it. */
+    stopWord?: 'PRINT_END' | 'PRINT_STOP'
     port?: number
   } = {},
 ) {
   const token = options.token ?? HALOT_SIMULATOR_TOKEN
   const pauseWord = options.pauseWord ?? 'PRINT_PAUSE'
+  const stopWord = options.stopWord ?? 'PRINT_END'
   const machine = {
     printStatus: 'PRINT_GENERAL',
     filename: '',
@@ -106,7 +109,7 @@ export async function startHalotSimulator(
         const active = ['PRINT_PROCESSING', pauseWord].includes(
           machine.printStatus,
         )
-        if (active && cmd === 'PRINT_STOP') machine.printStatus = 'PRINT_END'
+        if (active && cmd === 'PRINT_STOP') machine.printStatus = stopWord
         else if (active)
           machine.printStatus =
             machine.printStatus === 'PRINT_PROCESSING'

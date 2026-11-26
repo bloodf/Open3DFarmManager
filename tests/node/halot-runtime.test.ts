@@ -221,6 +221,17 @@ test('an unapplied command stays uncertain and holds later writes', async (t) =>
   assert.deepEqual(sim.writes(), ['PRINT_PAUSE'])
 })
 
+test('PRINT_STOP may mean paused, so it never confirms a stop', async (t) => {
+  const { sim, binding } = await printer(t, { stopWord: 'PRINT_STOP' })
+  await assert.rejects(
+    attempt(binding, 'cancel'),
+    (error: unknown) =>
+      !(error instanceof DriverRefusalError) &&
+      /uncertain/.test((error as Error).message),
+  )
+  assert.deepEqual(sim.writes(), ['PRINT_STOP'])
+})
+
 test('a write whose link drops before confirmation is held too', async (t) => {
   const { sim, binding } = await printer(t)
   await assert.rejects(

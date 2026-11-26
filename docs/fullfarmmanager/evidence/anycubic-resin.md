@@ -33,6 +33,12 @@ The sources conflict. H1 ended at a refused broker, and C1 later records a worki
 
 The manual and wiki links repeat the 2026-11-22 review in [the protocol note](../../protocols/anycubic-resin.md). On 2026-11-25 the wiki pages tried returned only a title or 404, and the store pages tried returned 429, so their text was not re-read. `photonResinModels` in `packages/connector/src/anycubic-resin/models.ts` holds this table. These rows have no read access through the adapter either.
 
+## Model journey assessment (2026-11-26)
+
+The five fleet models above are not supported sessions: `Binding` admits only P1 Max and the adapter checks its identity. The Workshop manual shows M7 Max and M7 Pro in its printer list and a LAN transfer workflow for Mono 4 Ultra; it does not specify their identity response, broker handshake or status reports. The M5s manual describes app operation, and the M3 Max wiki documents USB input. These sources do not establish that any of the five speaks the P1 Max protocol; they do not establish a protocol difference either. P1 Max's captured model ID 132 and reports cannot be assigned to another model.
+
+Accordingly there is no simulator identity or status/loss/recovery journey for any of these five models. The runtime configuration regression checks that each remains refused before a session can start. A model-specific recorded identity and read-only session, including disconnect/recovery behavior, is needed to add a truthful simulator and journey. This is an evidence gap, not a claim that the hardware lacks networking. The source links for each model are in the table above.
+
 ## How a session earns capabilities
 
 1. `openSession` needs the printer's serial and an owner-supplied SHA-256 pin of the broker certificate or public key. A bad pin value stops before any exchange.

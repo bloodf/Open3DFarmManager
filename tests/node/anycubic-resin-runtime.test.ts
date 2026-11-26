@@ -135,10 +135,21 @@ test('ships with no qualified write and refuses other models', () => {
     limits: { staleAfterMs: 5000 },
   })
   parseCollectorConfig(config(model))
-  assert.throws(
-    () => parseCollectorConfig(config('Anycubic Photon Mono M7 Pro')),
-    /No LAN session for Anycubic Photon Mono M7 Pro/,
-  )
+  for (const unsupported of [
+    'Anycubic Photon Mono M7 Max',
+    'Anycubic Photon Mono M7 Pro',
+    'Anycubic Photon Mono 4 Ultra',
+    'Anycubic Photon Mono M5s',
+    'Anycubic Photon M3 Max',
+  ]) {
+    assert.throws(
+      () => parseCollectorConfig(config(unsupported)),
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes(`No LAN session for ${unsupported}`),
+      unsupported,
+    )
+  }
 })
 
 test('collects a read-only observation and withdraws it on a lost session', async (t) => {

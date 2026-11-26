@@ -13,16 +13,12 @@ async function noControls(surface: Locator, name: RegExp) {
     .toHaveCount(0, { timeout: 2000 })
 }
 
-export function statusJourney(name: StatusVendor, model?: string) {
+export function statusJourney(name: StatusVendor) {
   if (journeyEnabled())
-    test(`${name}${model ? ` ${model}` : ''}: status is withdrawn and recovers read-only`, async ({
+    test(`${name}: status is withdrawn and recovers read-only`, async ({
       browser,
     }, testInfo) => {
-      const journey = await startJourneyHarness({
-        browser,
-        simulator: name,
-        ...(model ? { printerModel: model } : {}),
-      })
+      const journey = await startJourneyHarness({ browser, simulator: name })
       const page = journey.ownerPage
       const diagnostics = recordJourneyDiagnostics()
       diagnostics.watch('owner', page)

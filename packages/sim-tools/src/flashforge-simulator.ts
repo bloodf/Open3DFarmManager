@@ -82,10 +82,14 @@ export async function startStatefulFlashforgeSimulator(fixture: {
   const requests: string[] = []
   const writes: { path: string; payload?: unknown }[] = []
   /** `/control` acknowledges commands it ignores (wiki HTTP-REST-API). */
-  const faults = { ignoreControl: false }
+  const faults = { ignoreControl: false, offline: false }
 
   const simulator = await startFlashforgeSimulator(async (req, res, body) => {
     requests.push(`${req.method} ${req.url}`)
+    if (faults.offline) {
+      res.writeHead(503).end()
+      return
+    }
     const send = (payload: object) => res.end(JSON.stringify(payload))
     const reject = () => {
       send({ code: 1 })

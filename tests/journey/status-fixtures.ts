@@ -5,7 +5,6 @@ import { startFlashforgeSimulator } from '../../packages/sim-tools/src/flashforg
 import { startPhrozenSimulator } from '../../packages/sim-tools/src/phrozen-simulator.ts'
 import qidiData from '../fixtures/qidi/moonraker.json' with { type: 'json' }
 import { qidiVariant } from '../fixtures/qidi/variants.ts'
-import { flashforgeModels } from '../fixtures/flashforge/models.ts'
 import flashforgeData from '../fixtures/flashforge/detail.json' with { type: 'json' }
 import phrozenData from '../fixtures/phrozen/synthetic-revo-14k-v153.json' with { type: 'json' }
 
@@ -14,15 +13,12 @@ export type StatusVendor = 'qidi' | 'flashforge' | 'phrozen'
 export async function startStatusFixture(
   name: StatusVendor,
   directory: string,
-  /** Provisioned model for Qidi and Flashforge. */
-  model?: string,
+  /** Qidi only: the provisioned model and its fixture objects. */
+  model = 'Q1 Pro',
 ) {
   if (name === 'qidi') {
     const data = structuredClone(qidiData)
-    Object.assign(
-      data.state.result.status,
-      qidiVariant(model ?? 'Q1 Pro').objects,
-    )
+    Object.assign(data.state.result.status, qidiVariant(model).objects)
     const simulator = await startQidiSimulator({
       ...data,
       snapshot: new Uint8Array(),
@@ -39,7 +35,7 @@ export async function startStatusFixture(
         family: name,
         origin: simulator.origin,
         simulated: true,
-        expect: { model: model ?? 'Q1 Pro', moonrakerVersion: 'v0.8.0' },
+        expect: { model, moonrakerVersion: 'v0.8.0' },
         auth: { kind: 'api-key', credentialFile },
       },
       requests: simulator.requests,
@@ -52,10 +48,6 @@ export async function startStatusFixture(
     }
   }
   if (name === 'flashforge') {
-    const variant = flashforgeModels.find(
-      (entry) => entry.name === (model ?? 'Adventurer 5M Pro'),
-    )
-    if (!variant) throw new Error('Unknown Flashforge journey model')
     let online = true
     let status = 'printing'
     const requests: string[] = []
@@ -73,18 +65,13 @@ export async function startStatusFixture(
           JSON.stringify(
             online && authorized
               ? {
-                  code: 0,
-                  detail: {
-                    ...variant.detail,
-                    status,
-                    printFileName: flashforgeData.detail.printFileName,
-                    printProgress: flashforgeData.detail.printProgress,
-                  },
+                  ...flashforgeData,
+                  detail: { ...flashforgeData.detail, status },
                 }
               : {},
           ),
         )
-    }, variant.pid)
+    })
     const origin = `http://${simulator.host}:${simulator.port}`
     const credentialFile = join(directory, 'flashforge-key.json')
     await writeFile(
@@ -103,7 +90,7 @@ export async function startStatusFixture(
         origin,
         credentialFile,
         simulated: true,
-        expect: { serialNumber: 'FIXTURE-SERIAL', model: variant.name },
+        expect: { serialNumber: 'FIXTURE-SERIAL', model: 'Adventurer 5M Pro' },
       },
       requests,
       loseConnection: () => {

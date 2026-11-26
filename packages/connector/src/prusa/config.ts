@@ -12,6 +12,7 @@ import { readSpoolmanAuthorization } from '../spoolman/credential.ts'
 import { Binding as QidiBinding, readQidiAuth } from '../qidi/config.ts'
 import { Binding as PhrozenBinding } from '../phrozen/config.ts'
 import { Binding as PhotonResinBinding } from '../anycubic-resin/config.ts'
+import { Binding as HalotBinding, readHalotPassword } from '../halot/config.ts'
 import {
   FlashforgeBindingSchema,
   readFlashforgeCredentials,
@@ -57,8 +58,13 @@ const DriverBinding = z.discriminatedUnion('family', [
   PhrozenBinding,
   FlashforgeBindingSchema,
   PhotonResinBinding,
+  HalotBinding,
 ])
-const CollectorOrigin = z.union([LocalOrigin, PhrozenBinding.shape.origin])
+const CollectorOrigin = z.union([
+  LocalOrigin,
+  PhrozenBinding.shape.origin,
+  HalotBinding.shape.origin,
+])
 const Config = LocalCollectorConfigSchema.options[0]
   .omit({ bambu: true })
   .extend({
@@ -127,6 +133,7 @@ export function parseCollectorConfig(input: unknown, nativeKobraX = false) {
   for (const driver of drivers) {
     if (driver.family === 'prusa-link') readPrusaLinkApiKey(driver)
     if (driver.family === 'qidi') readQidiAuth(driver)
+    if (driver.family === 'halot') readHalotPassword(driver)
     if (driver.family === 'flashforge') readFlashforgeCredentials(driver)
   }
   return config

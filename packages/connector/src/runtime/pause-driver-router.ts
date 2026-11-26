@@ -25,6 +25,14 @@ import {
 import { photonResinStatus } from '../anycubic-resin/status.ts'
 import { readPhotonResinPrinterBinding } from '../control/printer-binding.ts'
 import { RESIN_LIBRARY_START_MESSAGE } from '../sdcp/models.ts'
+import { openFixedHalotControl } from '../halot/control-driver.ts'
+import {
+  halotControls,
+  halotUnqualifiedMessage,
+  HALOT_START_MESSAGE,
+  type HalotQualification,
+} from '../halot/qualification.ts'
+import { readHalotPrinterBinding } from '../control/printer-binding.ts'
 import { advertisedMoonrakerMacros } from '../control/macro-support.ts'
 import { openFixedKobraLinkControl } from '../kobralink/control-driver.ts'
 import { KOBRALINK_CONTROLS } from '../kobralink/extended-control.ts'
@@ -175,6 +183,8 @@ export function createPauseDriverRouter(config: {
    * simulator tests; production composition never sets it.
    */
   anycubicQualifiedWrites?: readonly AnycubicQualification[] | undefined
+  /** Replaces the shipped HALOT write list, which is empty. Tests only. */
+  halotQualifiedWrites?: readonly HalotQualification[] | undefined
   /** Open Photon resin sessions; the collection owns them. */
   photonResinSessions?: PhotonResinSessions | undefined
   /** Replaces the shipped resin write list, which is empty. Tests only. */
@@ -251,6 +261,9 @@ export function createPauseDriverRouter(config: {
           )
         : offered
     }
+    const halot = readHalotPrinterBinding(binding)
+    if (halot)
+      return halotControls(halot.expect.model, config.halotQualifiedWrites)
     const resin = readPhotonResinPrinterBinding(binding)
     if (resin) {
       // Stop only: qualified, and only while a current report names the job.
@@ -336,6 +349,11 @@ export function createPauseDriverRouter(config: {
         return flashforgeUnqualifiedMessage()
       if (readPhotonResinPrinterBinding(binding))
         return RESIN_LIBRARY_START_MESSAGE
+      const halot = readHalotPrinterBinding(binding)
+      if (halot)
+        return controls(binding).length
+          ? HALOT_START_MESSAGE
+          : halotUnqualifiedMessage(halot.expect.model)
       const sdcp = readSdcpPrinterBinding(binding)
       if (sdcp && !controls(binding).includes('start_print'))
         return sdcpStartUnavailableMessage(
@@ -433,6 +451,7 @@ export function createPauseDriverRouter(config: {
         !readSdcpPrinterBinding(binding) &&
         !readPhrozenPrinterBinding(binding) &&
         !readPhotonResinPrinterBinding(binding) &&
+        !readHalotPrinterBinding(binding) &&
         !readAnycubicPrinterBinding(binding)
       ) {
         const detect = {
@@ -507,13 +526,15 @@ export function createPauseDriverRouter(config: {
                     ? openFixedPhrozenControl
                     : readPhotonResinPrinterBinding(binding)
                       ? openFixedPhotonResinControl
-                      : readSdcpPrinterBinding(binding)
-                        ? openFixedSdcpControl
-                        : readCrealityPrinterBinding(binding)
-                          ? openFixedCrealityControl
-                          : readBambuPrinterBinding(binding)
-                            ? openFixedBambuControl
-                            : openFixedMoonrakerPause
+                      : readHalotPrinterBinding(binding)
+                        ? openFixedHalotControl
+                        : readSdcpPrinterBinding(binding)
+                          ? openFixedSdcpControl
+                          : readCrealityPrinterBinding(binding)
+                            ? openFixedCrealityControl
+                            : readBambuPrinterBinding(binding)
+                              ? openFixedBambuControl
+                              : openFixedMoonrakerPause
         )({
           binding,
           fetch: config.kobraLinkFetch,
@@ -524,6 +545,7 @@ export function createPauseDriverRouter(config: {
           objects: moonrakerObjects.get(binding),
           qualifiedStarts: config.sdcpQualifiedStarts,
           phrozenQualifiedWrites: config.phrozenQualifiedWrites,
+          halotQualifiedWrites: config.halotQualifiedWrites,
           anycubicQualifiedWrites: config.anycubicQualifiedWrites,
           photonResinSessions: config.photonResinSessions,
           photonResinQualifiedWrites: config.photonResinQualifiedWrites,

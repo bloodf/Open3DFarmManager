@@ -187,6 +187,10 @@ type PauseControlInput = {
   phrozenQualifiedWrites?:
     | readonly import('../phrozen/qualification.ts').PhrozenQualification[]
     | undefined
+  /** Test override only; the shipped HALOT list is empty. */
+  halotQualifiedWrites?:
+    | readonly import('../halot/qualification.ts').HalotQualification[]
+    | undefined
   /** Test override only; the shipped Anycubic FDM list is empty. */
   anycubicQualifiedWrites?:
     readonly import('../anycubic/models.ts').AnycubicQualification[] | undefined
@@ -403,6 +407,7 @@ async function runAssignmentControl(
       limits: config.collection.limits,
       clock,
       phrozenQualifiedWrites: input.phrozenQualifiedWrites,
+      halotQualifiedWrites: input.halotQualifiedWrites,
       anycubicQualifiedWrites: input.anycubicQualifiedWrites,
       photonResinSessions: input.photonResinSessions,
       photonResinQualifiedWrites: input.photonResinQualifiedWrites,

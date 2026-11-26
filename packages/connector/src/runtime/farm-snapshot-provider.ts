@@ -30,6 +30,7 @@ const readOnlyVendors = {
   qidi: 'Qidi',
   flashforge: 'Flashforge',
   phrozen: 'Phrozen',
+  halot: 'Creality',
 } as const
 
 /**
@@ -48,6 +49,7 @@ function readOnlyFamily(
 ) {
   if ('qidi' in timing) return 'qidi'
   if ('flashforge' in timing) return 'flashforge'
+  if ('halot' in timing) return 'halot'
   return 'phrozen' in timing ? 'phrozen' : undefined
 }
 
@@ -81,6 +83,9 @@ export type RawPrinterObservation = Omit<
       | Readonly<{
           phrozen: Readonly<Partial<Record<keyof PrinterState, number>>>
         }>
+      | Readonly<{
+          halot: Readonly<Partial<Record<keyof PrinterState, number>>>
+        }>
       | RawMoonrakerObservation['fieldObservedAtMonoMs']
       | Readonly<{ connection: number }>
       | Readonly<{
@@ -110,6 +115,7 @@ function fieldTimes(timing: RawPrinterObservation['fieldObservedAtMonoMs']) {
   if ('qidi' in timing) return timing.qidi
   if ('flashforge' in timing) return timing.flashforge
   if ('phrozen' in timing) return timing.phrozen
+  if ('halot' in timing) return timing.halot
   if ('prusaLink' in timing) return timing.prusaLink
   if ('anycubicResin' in timing) return timing.anycubicResin
   if ('formlabs' in timing) return timing.formlabs
@@ -294,11 +300,12 @@ export function createFarmSnapshotSource(input: {
         : undefined
       const provenance = entry.fieldObservedAtMonoMs
       const readOnly = readOnlyFamily(provenance)
-      // Phrozen without progress has no command binding yet to advertise:
-      // controls require progress (PrinterState).
+      // Phrozen or HALOT without progress advertises no control: controls
+      // require progress (PrinterState).
       const controls = !readOnly
         ? input.controlsFor?.(ref.assignmentId)
-        : readOnly === 'phrozen' && entry.printer.progress === undefined
+        : (readOnly === 'phrozen' || readOnly === 'halot') &&
+            entry.printer.progress === undefined
           ? []
           : (input.readOnlyControlsFor?.(ref.assignmentId) ?? [])
       const advertisedControls =

@@ -19,6 +19,7 @@ import {
   provisionKobraXPrinter,
   provisionSdcpPrinter,
   provisionPhrozenPrinter,
+  provisionHalotPrinter,
   provisionPhotonResinPrinter,
   type PrinterBinding,
 } from '../control/printer-binding.ts'
@@ -26,6 +27,10 @@ import {
   phrozenWriteQualified,
   type PhrozenQualification,
 } from '../phrozen/qualification.ts'
+import {
+  halotControls,
+  type HalotQualification,
+} from '../halot/qualification.ts'
 import { readVersionedRuntimeConfig } from './version.ts'
 import { validateMoonrakerInput } from './moonraker.ts'
 import type { RuntimeCredential } from './credential.ts'
@@ -113,9 +118,10 @@ const Runtime = z.strictObject({
 export function readAgentRuntimeConfig(
   path: string,
   credential: Pick<RuntimeCredential, 'agent_id' | 'farm_id'>,
-  /** Test override only; the shipped Phrozen qualification list is empty. */
+  /** Test overrides only; the shipped qualification lists are empty. */
   options: {
     phrozenQualifiedWrites?: readonly PhrozenQualification[] | undefined
+    halotQualifiedWrites?: readonly HalotQualification[] | undefined
   } = {},
 ) {
   const input = Runtime.parse(readVersionedRuntimeConfig(path, false))
@@ -227,6 +233,21 @@ export function readAgentRuntimeConfig(
             )
               return readonly
             return provisionPhrozenPrinter(
+              { assignment_id, farm_id, agent_id, printer_key },
+              driver,
+            )
+          }
+          if (driver.family === 'halot') {
+            const { assignment_id, farm_id, agent_id, printer_key } =
+              readRuntimePrinterBinding(readonly)!
+            // Printer writes need a local opt-in and a qualified model.
+            if (
+              !pause?.control?.assignmentIds.includes(assignment_id) ||
+              !halotControls(driver.expect.model, options.halotQualifiedWrites)
+                .length
+            )
+              return readonly
+            return provisionHalotPrinter(
               { assignment_id, farm_id, agent_id, printer_key },
               driver,
             )

@@ -634,18 +634,7 @@ function suite(title: string) {
         const journey = started()
         const page = journey.ownerPage
         const sim = simulator()
-        // Start-print authorization needs a fresh advertised capability.
-        // After it is persisted, reserve the shared proof slot for WebRTC.
-        const delivered = journey.simulatorObservation().telemetryDelivered
-        await expect
-          .poll(() => journey.simulatorObservation().telemetryDelivered, {
-            timeout: 90_000,
-          })
-          .toBeGreaterThan(delivered)
-        await expect
-          .poll(() => journey.advertisedControls(), { timeout: 90_000 })
-          .toContain('start_print')
-        journey.setTelemetryUpload(false)
+        // Telemetry keeps uploading throughout, as a real Connector does.
         sim.upload(STORED_FILE, Buffer.from('G28\nG1 X10 Y10\n'))
         await openFiles(page)
 
@@ -664,8 +653,6 @@ function suite(title: string) {
         expect(sim.uploadCount).toBe(uploadsBefore + 1)
         expect(sim.lifecycle.state).toBe('idle')
 
-        // List and start on a new live lease, before preparing the file choice.
-        await openFiles(page)
         const consult = page.getByRole('button', {
           name: 'Consultar arquivos',
           exact: true,
@@ -728,7 +715,6 @@ function suite(title: string) {
         await page.goto(journey.origin + '/historico', {
           waitUntil: 'domcontentloaded',
         })
-        journey.setTelemetryUpload(true)
         await expect(
           page.getByRole('heading', { name: 'Histórico de trabalhos' }),
         ).toBeVisible()
@@ -758,7 +744,6 @@ function suite(title: string) {
         const cancelled = jobs.filter({ hasText: 'Cancelado' })
         await expect(cancelled).toHaveCount(1)
         await expect(cancelled).toContainText(journey.printerKey)
-        journey.setTelemetryUpload(false)
         expect(journey.simulatorObservation()).toMatchObject({ failure: false })
       })
     })

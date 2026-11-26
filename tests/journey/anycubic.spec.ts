@@ -1,4 +1,3 @@
-import { openFarmInspector } from '../helpers/farm-inspector.ts'
 import { fileURLToPath } from 'node:url'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import type { startAnycubicSimulator } from '../../packages/sim-tools/src/anycubic-simulator.ts'
@@ -121,7 +120,7 @@ function suite(title: string) {
         })
     async function openFarm(page: Page = started().ownerPage) {
       await started().openFarm(page)
-      return openFarmInspector(page, started().printerKey)
+      return printerRow(page)
     }
     /**
      * The direct session lasts 30 s and the page reopens it by itself, but it
@@ -440,6 +439,8 @@ function suite(title: string) {
         signedControl: true,
         history: true,
         discovery: true,
+        // Stored states can occupy the wall while the direct feed reconnects.
+        openFarmInspector: true,
       })
       // Fields are disabled between live sessions: fail fast and try again.
       harness.ownerPage.setDefaultTimeout(15_000)

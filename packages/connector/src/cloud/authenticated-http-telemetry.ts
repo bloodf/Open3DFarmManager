@@ -55,14 +55,16 @@ function olderShapes(body: string): string[] {
     const { ageAtSendMs: _age, ...rest } = record
     return rest
   })
-  const withoutRefused = withoutAge.map((record) => {
+  const removeRefused = (record: (typeof withProgress)[number]) => {
     if (record.kind !== 'heartbeat') return record
     const { refusedRecords: _refused, ...connector } = record.health.connector
     return { ...record, health: { ...record.health, connector } }
-  })
+  }
+  const withoutRefused = withProgress.map(removeRefused)
+  const withoutAgeOrRefused = withoutAge.map(removeRefused)
   const shapes = new Set(
-    [withProgress, withoutAge, withoutRefused].map((shape) =>
-      JSON.stringify(shape),
+    [withProgress, withoutRefused, withoutAge, withoutAgeOrRefused].map(
+      (shape) => JSON.stringify(shape),
     ),
   )
   shapes.delete(JSON.stringify(records))

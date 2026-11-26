@@ -80,6 +80,19 @@ test(
     f.printer.holdCloseOpen = release.promise
     const pause = c.send('pause')
     await reading.promise
+    // Both copies must pass verification and wait on the probe before it ends.
+    const verified = Promise.withResolvers<void>()
+    const verify = crypto.subtle.verify.bind(crypto.subtle)
+    let verifications = 0
+    t.mock.method(
+      crypto.subtle,
+      'verify',
+      async (...args: Parameters<SubtleCrypto['verify']>) => {
+        const valid = await verify(...args)
+        if (++verifications === 2) verified.resolve()
+        return valid
+      },
+    )
     const first = c.d.dispatch(wire)
     await closing.promise
     let repeatSettled = false
@@ -94,24 +107,16 @@ test(
         false,
         'the repeat can verify during probe shutdown',
       )
+      await verified.promise
+      await new Promise((resolve) => setImmediate(resolve))
     } finally {
       release.resolve()
       await Promise.all([first, repeat, pause])
     }
     const results = await Promise.all([first, repeat])
-    assert.ok(
-      results.some(
-        (result) =>
-          result.kind === 'outcome-unknown' &&
-          result.reason === 'state-unconfirmed',
-      ),
-    )
-    assert.ok(
-      results.some(
-        (result) =>
-          result.kind === 'rejected' &&
-          (result.reason === 'busy' || result.reason === 'replay'),
-      ),
+    assert.deepEqual(
+      results.map((result) => `${result.kind}:${result.reason}`).sort(),
+      ['outcome-unknown:state-unconfirmed', 'rejected:busy'],
     )
     assert.equal(await pause, 'rejected:busy')
     assert.deepEqual(f.sent, ['firmware_restart', 'emergency_stop'])

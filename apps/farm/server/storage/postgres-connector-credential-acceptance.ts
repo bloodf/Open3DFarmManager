@@ -540,14 +540,31 @@ export class PostgresConnectorCredentialAcceptance {
               slot.status === 'pending' &&
               slot.expires_at !== null &&
               verifiedAt < slot.expires_at
-            )
-              return sameContext
-                ? retainIdentity({
-                    ok: true,
-                    kind: 'challenge',
-                    challenge: challengeFor(slot),
-                  })
-                : busy(slot.expires_at - verifiedAt)
+            ) {
+              if (sameContext)
+                return retainIdentity({
+                  ok: true,
+                  kind: 'challenge',
+                  challenge: challengeFor(slot),
+                })
+              // One slot serves every proof of this credential. Telemetry
+              // uploads keep it pending for most of each second, so a WebRTC
+              // admission waiting for that challenge to lapse can miss its
+              // own deadline. An interactive (generic) issuance therefore
+              // retires a pending telemetry challenge. That challenge then
+              // fails closed under this row lock: its proof finds the slot
+              // expired, nothing was committed for it, and the Connector
+              // keeps the batch for a later upload. Telemetry never retires
+              // another challenge, and generic challenges never replace each
+              // other.
+              if (
+                operation.kind !== 'generic' ||
+                this.config.purpose === 'telemetry-ingestion' ||
+                slot.proof_version !== 2
+              )
+                return busy(slot.expires_at - verifiedAt)
+              await expireProof(verifiedAt)
+            }
             if (slot.generation >= Number.MAX_SAFE_INTEGER) return deny
             const expiresAt = Math.min(
               verifiedAt + this.config.proofTtlMs,

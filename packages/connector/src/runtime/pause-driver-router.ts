@@ -404,9 +404,10 @@ export function createPauseDriverRouter(config: {
         }
       }
       const anycubic = readAnycubicPrinterBinding(binding)
-      // Nothing is published to a printer whose model has no qualified pair.
+      // Startup reads require both a LAN model entry and a qualified pair.
       if (
         anycubic &&
+        anycubicLanModel(anycubic.modelId) !== undefined &&
         anycubicQualified.some((pair) => pair.modelId === anycubic.modelId)
       ) {
         anycubicFirmware.delete(binding)

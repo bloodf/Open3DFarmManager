@@ -650,6 +650,12 @@ export function createAuthenticatedRtcFixtureExtension(): SignallingFixtureExten
                 packagedFiles: runtime.packagedFiles,
               }),
           )
+          if (process.env.SIGNALLING_HTTPS_FARM_PAUSE === 'yes') {
+            if (!input.waitForPauseTelemetry)
+              throw Error('Farm pause telemetry fixture unavailable')
+            await input.waitForPauseTelemetry()
+            await session.note('farm-page-pause-control-telemetry-committed')
+          }
           if (process.env.SIGNALLING_HTTPS_SIM_PRINTING_PAUSE === 'sv06') {
             const { testPrintingPausePage } =
               await import('./rtc-farm-printing-pause-page.ts')

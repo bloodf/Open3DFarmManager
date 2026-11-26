@@ -32,6 +32,7 @@ import { assertSupportedNodeRuntime } from '../tests/helpers/node-version.ts'
 import { signallingHttpsProxy } from '../tests/helpers/signalling-https-proxy.ts'
 import { assertSignallingCatalog } from '../tests/helpers/signalling-https-catalog.ts'
 import {
+  requestPauseTelemetryReady,
   requestProxyDisconnect,
   serveProxyDisconnect,
 } from '../tests/helpers/signalling-https-disconnect-ipc.ts'
@@ -340,8 +341,13 @@ if (mode === '--prepare-layer') {
   } = process.env
   if (!origin || !ca || !farmId || !owner || !admin || !password)
     throw new Error('Missing disposable acceptance fixture')
-  const { rtcFixture, pauseFixture, pauseRtcFixture, admissionOnly } =
-    fixtureMode()
+  const {
+    rtcFixture,
+    pauseFixture,
+    pauseRtcFixture,
+    farmPause,
+    admissionOnly,
+  } = fixtureMode()
   const extensionPath = '../tests/helpers/signalling-authenticated-rtc.ts'
   const extensionModule:
     | { createAuthenticatedRtcFixtureExtension(): SignallingFixtureExtension }
@@ -418,6 +424,9 @@ if (mode === '--prepare-layer') {
                   extensionModule.createAuthenticatedRtcFixtureExtension(),
                 caPath: ca,
                 disconnectSignalling: requestProxyDisconnect,
+                ...(farmPause
+                  ? { waitForPauseTelemetry: requestPauseTelemetryReady }
+                  : {}),
               }
             : {}),
         }),
@@ -494,6 +503,7 @@ if (mode === '--prepare-layer') {
     connection: { statement_timeout: 3000, lock_timeout: 1000 },
   })
   const prefix = 'signal_http_' + randomUUID().replaceAll('-', '')
+  const ingestPauseTelemetry = pauseExecution || farmPause
   const capabilities = [
     'farm_password_auth',
     'farm_connector_inventory',
@@ -508,7 +518,7 @@ if (mode === '--prepare-layer') {
     ...(pauseFixture || pauseRtcFixture || farmPause
       ? ['farm_pause_authority']
       : []),
-    ...(pauseExecution ? ['farm_connector_telemetry_writer'] : []),
+    ...(ingestPauseTelemetry ? ['farm_connector_telemetry_writer'] : []),
   ] as const
   const roles = capabilities.map((_, index) => `${prefix}_${index}`)
   const secrets = roles.map(() => randomBytes(24).toString('hex'))
@@ -768,7 +778,7 @@ if (mode === '--prepare-layer') {
         NUXT_AUTH_DATABASE_URL: dbUrl(0),
         NUXT_PRINTER_ASSIGNMENTS_ENABLED: 'true',
         NUXT_PRINTER_ASSIGNMENTS_DATABASE_URL: dbUrl(8),
-        ...(pauseExecution
+        ...(ingestPauseTelemetry
           ? {
               NUXT_CONNECTOR_TELEMETRY_ENABLED: 'true',
               NUXT_CONNECTOR_TELEMETRY_DATABASE_URL: dbUrl(10),
@@ -924,7 +934,33 @@ if (mode === '--prepare-layer') {
       })
     }
     if (rtcFixture || pauseRtcFixture)
-      serveProxyDisconnect(child, () => proxy!.disconnectUpgrades())
+      serveProxyDisconnect(
+        child,
+        () => proxy!.disconnectUpgrades(),
+        farmPause
+          ? async () => {
+              // A delivery diagnostic may acknowledge inventory or a heartbeat.
+              // Wait for the committed state used by pause issuance instead.
+              const deadline = performance.now() + 10000
+              while (performance.now() < deadline) {
+                const [ready] = await sql`
+                  SELECT 1 FROM farm.pause_authority_advertised_controls
+                  WHERE farm_id = ${farmId}::uuid AND controls ? 'pause'
+                    AND age_at_send_ms IS NOT NULL
+                  LIMIT 1
+                `
+                if (ready) return
+                await pause(100)
+              }
+              await note(
+                'Farm-page simulator pause-control telemetry timed out',
+              )
+              throw new Error(
+                'Simulator pause-control telemetry was not committed',
+              )
+            }
+          : undefined,
+      )
     child.stdout?.on('data', (chunk: Buffer) =>
       captured.append('acceptance.stdout', chunk),
     )

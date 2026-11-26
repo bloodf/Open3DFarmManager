@@ -46,6 +46,7 @@ export type ProvisionedSignallingFixture = SignallingIdentityInput &
     identities: FixtureIdentityHandles
     revokeConnector(): Promise<void>
     disconnectSignalling(): Promise<void>
+    waitForPauseTelemetry?(): Promise<void>
   }>
 export type SignallingFixtureExtension = Readonly<{
   identityHandles(

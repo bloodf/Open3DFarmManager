@@ -383,6 +383,7 @@ export async function runSignallingHttpsAcceptance(input: {
   admissionOnly?: boolean
   signal?: AbortSignal
   disconnectSignalling?: () => Promise<void>
+  waitForPauseTelemetry?: () => Promise<void>
 }) {
   const parsedOrigin = new URL(input.origin)
   if (
@@ -583,6 +584,9 @@ export async function runSignallingHttpsAcceptance(input: {
         browserThumbprint: challenge.thumbprint,
         assignmentRefs: [{ assignmentId, agentId: claim.agent_id, printerKey }],
         disconnectSignalling: input.disconnectSignalling,
+        ...(input.waitForPauseTelemetry
+          ? { waitForPauseTelemetry: input.waitForPauseTelemetry }
+          : {}),
         revokeConnector: async () => {
           await pagePost(
             owner,

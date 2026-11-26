@@ -71,12 +71,84 @@ function accepted(reply: Record<string, unknown>) {
 
 // Reuse short-lived sessions so repeated viewers do not crowd out control.
 type HistorySession = Awaited<ReturnType<typeof openSdcpSession>>
-const sessions = new Map<string, Promise<HistorySession>>()
+/**
+ * One connection shared by every viewer of a board. It closes only when no
+ * read is using it and it is either retired (expired, failed or dropped) or
+ * every viewer that used it has left.
+ */
+type SharedSession = {
+  opening: Promise<HistorySession>
+  join(viewer: AbortSignal): void
+  /** Ends one read. */
+  leave(): void
+  /** Stops handing the connection to new reads. */
+  retire(): void
+}
+const sessions = new Map<string, SharedSession>()
 const SESSION_LIFETIME_MS = 10000
 const MAX_SESSIONS = 32
 
-async function historySession(endpoint: SdcpEndpoint, signal: AbortSignal) {
-  signal.throwIfAborted()
+function openShared(key: string, endpoint: SdcpEndpoint): SharedSession {
+  const cancel = new AbortController()
+  const viewers = new Map<AbortSignal, () => void>()
+  let reads = 0
+  let retired = false
+  let session: HistorySession | undefined
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const evict = () => {
+    if (sessions.get(key) === shared) sessions.delete(key)
+  }
+  const closeIfUnused = () => {
+    if (reads > 0 || (!retired && viewers.size > 0)) return
+    evict()
+    clearTimeout(timer)
+    for (const [viewer, left] of viewers)
+      viewer.removeEventListener('abort', left)
+    viewers.clear()
+    cancel.abort()
+    session?.close()
+  }
+  const retire = () => {
+    retired = true
+    evict()
+    closeIfUnused()
+  }
+  const open = async () => {
+    const opened = await openSdcpSession(endpoint, { signal: cancel.signal })
+    if (!opened.connected || cancel.signal.aborted) {
+      opened.close()
+      throw new Error('SDCP history session closed')
+    }
+    session = opened
+    timer = setTimeout(retire, SESSION_LIFETIME_MS)
+    timer.unref()
+    opened.onClose(retire)
+    return opened
+  }
+  const shared: SharedSession = {
+    opening: open(),
+    join(viewer) {
+      reads++
+      if (viewers.has(viewer)) return
+      const left = () => {
+        viewers.delete(viewer)
+        closeIfUnused()
+      }
+      viewers.set(viewer, left)
+      viewer.addEventListener('abort', left, { once: true })
+    },
+    leave() {
+      reads--
+      closeIfUnused()
+    },
+    retire,
+  }
+  // Every viewer may leave before the connection opens.
+  shared.opening.catch(retire)
+  return shared
+}
+
+function historySession(endpoint: SdcpEndpoint) {
   const key = JSON.stringify([
     endpoint.host,
     endpoint.mainboardId,
@@ -84,39 +156,25 @@ async function historySession(endpoint: SdcpEndpoint, signal: AbortSignal) {
     endpoint.discoveryPort ?? 3000,
     endpoint.websocketPort ?? 3030,
   ])
-  let pending = sessions.get(key)
-  if (pending) return pending
+  let shared = sessions.get(key)
+  if (shared) return shared
   if (sessions.size >= MAX_SESSIONS)
     throw new Error('Too many SDCP history sessions')
-  pending = openSdcpSession(endpoint, { signal })
-  sessions.set(key, pending)
-  const entry = pending
-  const evict = () => {
-    if (sessions.get(key) === entry) sessions.delete(key)
-  }
-  try {
-    const session = await pending
-    if (!session.connected || signal.aborted) {
-      session.close()
-      throw new Error('SDCP history session closed')
-    }
-    const close = () => {
-      evict()
-      session.close()
-    }
-    const timer = setTimeout(close, SESSION_LIFETIME_MS)
-    timer.unref()
-    session.onClose(() => {
-      clearTimeout(timer)
-      signal.removeEventListener('abort', close)
-      evict()
-    })
-    signal.addEventListener('abort', close, { once: true })
-    return session
-  } catch (error) {
-    evict()
-    throw error
-  }
+  shared = openShared(key, endpoint)
+  sessions.set(key, shared)
+  return shared
+}
+
+/** Waits for the shared connection no longer than this read may. */
+function until<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason)
+    if (signal.aborted) return abort()
+    signal.addEventListener('abort', abort, { once: true })
+    pending
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener('abort', abort))
+  })
 }
 
 export async function readSdcpHistory(
@@ -126,8 +184,11 @@ export async function readSdcpHistory(
   // Refuses a model without documented history before any connection.
   const list = buildSdcpHistoryCommand(endpoint.model)
   const bounded = AbortSignal.any([signal, AbortSignal.timeout(8000)])
-  const session = await historySession(endpoint, signal)
+  signal.throwIfAborted()
+  const shared = historySession(endpoint)
+  shared.join(signal)
   try {
+    const session = await until(shared.opening, bounded)
     const reply = accepted(await session.request(list, bounded))
     if (!Array.isArray(reply.HistoryData))
       throw new Error('SDCP history malformed')
@@ -153,7 +214,11 @@ export async function readSdcpHistory(
     }
     return jobs.sort((a, b) => b.startedAtMs - a.startedAtMs)
   } catch (error) {
-    session.close()
+    // A viewer leaving says nothing about the connection. Any other failure
+    // retires it: new reads reconnect, reads in flight keep using it.
+    if (!signal.aborted) shared.retire()
     throw error
+  } finally {
+    shared.leave()
   }
 }

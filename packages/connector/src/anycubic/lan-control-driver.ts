@@ -345,9 +345,9 @@ export function openQualifiedAnycubicControl(input: {
         sequence: ++sequence,
         ready: true,
         printState:
-          state === 'printing' || state === 'paused'
+          state === 'printing' || state === 'paused' || state === 'finished'
             ? state
-            : action === 'cancel' && attempted
+            : state === 'idle' && action === 'cancel' && attempted
               ? 'cancelled'
               : 'idle',
         readyObservedMono: now,

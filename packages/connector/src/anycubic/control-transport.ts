@@ -2,6 +2,8 @@ import type { buildAnycubicCommand } from './commands.ts'
 import { connect as tlsConnect } from 'node:tls'
 import { createHash } from 'node:crypto'
 import { MqttClient } from 'mqtt'
+import { anycubicLanModel } from './models.ts'
+import { connectAnycubicTls } from './tls-trust.ts'
 
 export interface AnycubicControlTransportOptions {
   host: string
@@ -62,6 +64,7 @@ export function createAnycubicControlTransport(
   )
     throw new Error('Invalid Anycubic transport options')
   const topic = `anycubic/anycubicCloud/v1/printer/public/${serial}/+/report`
+  const lanModel = anycubicLanModel(serial.split('/', 1)[0] ?? '')
   function matches(value: string) {
     const prefix = `anycubic/anycubicCloud/v1/printer/public/${serial}/`
     return (
@@ -84,17 +87,19 @@ export function createAnycubicControlTransport(
       let body = 0
       let header = true
       inflight = 0
-      const socket = tlsConnect({
+      const tlsOptions = {
         host,
         port,
         ca: options.caPem,
         ...(options.certPem && options.keyPem
           ? { cert: options.certPem, key: options.keyPem }
           : {}),
-        minVersion: 'TLSv1.2',
-        // A configured exact certificate pin is an alternative trust anchor.
-        rejectUnauthorized: !options.pinSha256,
-      })
+        minVersion: 'TLSv1.2' as const,
+      }
+      const pin = options.pinSha256?.toLowerCase()
+      const socket = lanModel
+        ? connectAnycubicTls(tlsOptions, pin)
+        : tlsConnect({ ...tlsOptions, rejectUnauthorized: !pin })
       socket.prependListener('data', (chunk: Buffer) => {
         for (const byte of chunk) {
           if (body > 0) {
@@ -119,15 +124,16 @@ export function createAnycubicControlTransport(
           }
         }
       })
-      socket.once('secureConnect', () => {
-        if (
-          options.pinSha256 &&
-          createHash('sha256')
-            .update(socket.getPeerCertificate().raw)
-            .digest('hex') !== options.pinSha256.toLowerCase()
-        )
-          socket.destroy(new Error('TLS pin mismatch'))
-      })
+      if (!lanModel && pin) {
+        socket.once('secureConnect', () => {
+          if (
+            createHash('sha256')
+              .update(socket.getPeerCertificate().raw)
+              .digest('hex') !== pin
+          )
+            socket.destroy(new Error('TLS pin mismatch'))
+        })
+      }
       return socket
     },
     {

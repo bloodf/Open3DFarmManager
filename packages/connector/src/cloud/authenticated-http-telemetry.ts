@@ -34,9 +34,10 @@ async function conflictingIds(response: Response): Promise<string[]> {
 
 /**
  * Older servers parse records strictly and refuse the whole batch for a shape
- * they do not know: an idle printer with no progress, or a send age. This
- * returns the shapes to try after a refusal, least changed first. Idle
- * progress is 0 only for such a server; the queue keeps the record as observed.
+ * they do not know: an idle printer with no progress, a send age, or a
+ * heartbeat's refused-record count. This returns the shapes to try after a
+ * refusal, least changed first. Only such a server gets idle progress 0 or a
+ * heartbeat without the count; the queue keeps the record as observed.
  */
 function olderShapes(body: string): string[] {
   const records = TelemetryBatch.parse(
@@ -54,8 +55,15 @@ function olderShapes(body: string): string[] {
     const { ageAtSendMs: _age, ...rest } = record
     return rest
   })
+  const withoutRefused = withoutAge.map((record) => {
+    if (record.kind !== 'heartbeat') return record
+    const { refusedRecords: _refused, ...connector } = record.health.connector
+    return { ...record, health: { ...record.health, connector } }
+  })
   const shapes = new Set(
-    [withProgress, withoutAge].map((shape) => JSON.stringify(shape)),
+    [withProgress, withoutAge, withoutRefused].map((shape) =>
+      JSON.stringify(shape),
+    ),
   )
   shapes.delete(JSON.stringify(records))
   return [...shapes]

@@ -244,6 +244,190 @@ test(
   },
 )
 
+test(
+  'a superseded telemetry proof never consumes cooldown reserved for the interactive proof',
+  { timeout: 120_000, skip: missing || false },
+  async (t) => {
+    const database = disposablePostgres({
+      ...vitestPostgresOptions('openfarm-fix-973r'),
+      isolated: true,
+    })
+    t.after(() => database.stop())
+    const admin = await database.start()
+    const fixture = await enrol(admin)
+    const pools: Sql[] = []
+    t.after(() => Promise.all(pools.map((sql) => sql.end({ timeout: 3 }))))
+    const password = randomBytes(24).toString('hex')
+    const login = async (role: string, parent: string) => {
+      await admin.unsafe(
+        `CREATE ROLE ${role} LOGIN PASSWORD '${password}' IN ROLE ${parent}`,
+      )
+      const sql = postgres({
+        host: '127.0.0.1',
+        port: database.port,
+        database: 'fixture',
+        username: role,
+        password,
+        ssl: false,
+        max: 2,
+        connect_timeout: 3,
+        onnotice: () => {},
+      })
+      pools.push(sql)
+      return sql
+    }
+    let now = Date.now()
+    const config = {
+      issuer: ORIGIN,
+      audience: AUDIENCE,
+      origin: ORIGIN,
+      purpose: 'signalling' as const,
+      publicKeys: new Map([[KID, fixture.signer.publicKey]]),
+      ttlSeconds: TTL_SECONDS,
+      proofTtlMs: 8000,
+    }
+    const signalling = new PostgresConnectorCredentialAcceptance(
+      await login('fix_973r_signalling', 'farm_connector_credential_acceptor'),
+      config,
+      () => now,
+    )
+    const telemetry = new PostgresConnectorCredentialAcceptance(
+      await login('fix_973r_telemetry', 'farm_connector_telemetry_writer'),
+      { ...config, purpose: 'telemetry-ingestion' },
+      () => now,
+    )
+    const { identity } = fixture
+    const committedEvents = async (eventId: string) =>
+      (
+        await admin`SELECT count(*)::int AS n FROM farm.telemetry_events WHERE event_id=${eventId}::uuid`
+      )[0]!.n as number
+
+    for (const [kind, token, jti] of [
+      ['root', fixture.root, fixture.rootJti],
+      ['successor', fixture.successor, fixture.successorJti],
+    ] as const) {
+      const slot = async () =>
+        (kind === 'root'
+          ? await admin`SELECT status,generation::float8,failures,next_attempt_at::float8,proof_version FROM farm.connector_credential_proofs WHERE jti=${jti}::uuid`
+          : await admin`SELECT status,generation::float8,failures,next_attempt_at::float8,proof_version FROM farm.connector_successor_proofs WHERE jti=${jti}::uuid`)[0] as {
+          status: string
+          generation: number
+          failures: number
+          next_attempt_at: number
+          proof_version: number
+        }
+      const common = { token, agentId: fixture.agentId, farmId: fixture.farmId }
+      const eventId = randomUUID()
+      const body = Buffer.from(
+        JSON.stringify([
+          {
+            eventId,
+            queuedAt: now,
+            kind: 'printer-state',
+            state: {
+              printerKey: fixture.printerKey,
+              state: 'idle',
+              progress: 0,
+              observedAt: now,
+            },
+          },
+        ]),
+      )
+
+      // 1. A telemetry upload holds the slot; the Connector signs at once.
+      const upload = { ...common, connectionId: randomUUID() }
+      const uploadIssued = await telemetry.issueTelemetryChallenge(upload, body)
+      assert.ok(uploadIssued.ok && uploadIssued.kind === 'challenge', kind)
+      const superseded = {
+        ...upload,
+        challenge: uploadIssued.challenge,
+        signature: identity.signTelemetryProof({
+          challenge: uploadIssued.challenge,
+          token,
+          body,
+          expectedOrigin: ORIGIN,
+          expectedAudience: AUDIENCE,
+          expectedConnectionId: upload.connectionId,
+          now,
+        }),
+      }
+
+      // 2. After the cooldown, WebRTC admission retires that challenge. Its
+      // issuance reserves the next cooldown window for the interactive proof.
+      now += 1000
+      const admission = { ...common, connectionId: randomUUID() }
+      const admissionIssued = await signalling.issue(admission)
+      assert.ok(
+        admissionIssued.ok && admissionIssued.kind === 'challenge',
+        `${kind}: ${JSON.stringify(admissionIssued)}`,
+      )
+      const reserved = await slot()
+      assert.equal(reserved.status, 'pending', kind)
+      assert.equal(reserved.proof_version, 1, kind)
+      assert.equal(reserved.next_attempt_at, now + 1000, kind)
+      const signed = {
+        ...admission,
+        challenge: admissionIssued.challenge,
+        signature: identity.signCredentialProof({
+          challenge: admissionIssued.challenge,
+          token,
+          expectedOrigin: ORIGIN,
+          expectedAudience: AUDIENCE,
+          expectedPurpose: 'signalling',
+          expectedConnectionId: admission.connectionId,
+          now,
+        }),
+      }
+
+      // 3. Inside that cooldown window the superseded telemetry proof is
+      // denied outright (not told to wait and retry) and touches nothing.
+      now += 500
+      assert.deepEqual(
+        await telemetry.commitTelemetryWithProof(superseded, body),
+        { ok: false, reason: 'denied' },
+        kind,
+      )
+      assert.deepEqual(await slot(), reserved, kind)
+
+      // 4. The window opens. The superseded proof arrives first, at the same
+      // instant as the interactive proof. It is denied without advancing the
+      // shared cooldown, the failure counter or the pending challenge.
+      now += 500
+      assert.deepEqual(
+        await telemetry.commitTelemetryWithProof(superseded, body),
+        { ok: false, reason: 'denied' },
+        kind,
+      )
+      assert.deepEqual(await slot(), reserved, kind)
+
+      // 5. So the interactive proof is admitted at once, not told to wait.
+      const accepted = await signalling.accept(signed)
+      assert.ok(
+        accepted.ok && accepted.kind === 'accepted',
+        `${kind}: interactive proof must not be delayed by superseded telemetry; got ${JSON.stringify(accepted)}`,
+      )
+      const consumed = await slot()
+      assert.equal(consumed.status, 'consumed', kind)
+      assert.equal(consumed.failures, 0, kind)
+
+      // 6. Single-use holds for both: neither proof can be replayed and the
+      // superseded batch committed nothing.
+      now += 1000
+      assert.deepEqual(await signalling.accept(signed), {
+        ok: false,
+        reason: 'denied',
+      })
+      now += 1000
+      assert.deepEqual(
+        await telemetry.commitTelemetryWithProof(superseded, body),
+        { ok: false, reason: 'denied' },
+      )
+      assert.equal(await committedEvents(eventId), 0, kind)
+      now += 1000
+    }
+  },
+)
+
 async function enrol(admin: Sql) {
   const issuedAt = Math.floor(Date.now() / 1000)
   const account = randomUUID()
@@ -294,6 +478,8 @@ async function enrol(admin: Sql) {
   return {
     agentId,
     farmId,
+    rootJti,
+    successorJti,
     printerKey,
     signer,
     identity,

@@ -12,7 +12,9 @@ export async function startFlashforgeSimulator(
     response: ServerResponse,
     body: Buffer,
   ) => void | Promise<void>,
-  discoveryPid = 36,
+  // Printer-PIDs: 0x0023 is Adventurer 5M; 0x0024 is 5M Pro.
+  // https://github.com/Parallel-7/flashforge-api-docs/wiki/Printer-PIDs
+  discoveryPid: number = 0x0024,
 ) {
   const host = '127.0.0.1'
   const server = createServer(async (req, res) => {

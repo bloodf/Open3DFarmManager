@@ -229,104 +229,113 @@ export function flashforgeControlJourneys() {
   // control session each; the budget covers a loaded host.
   const budget = 10 * 60_000
 
-  test('flashforge: unqualified writes are not offered and the camera plays', async ({
-    browser,
-  }) => {
-    await withJourney({ browser }, async (journey, fixture) => {
-      // The server holds the Connector's own advertisement before it is read.
-      await publishTelemetry(journey)
-      const row = await open(journey)
-      await expect
-        .poll(() => journey.simulatorObservation().pauseInboxReady, {
-          timeout: 90_000,
-        })
-        .toBe(true)
-      expect(await journey.advertisedControls()).toEqual([])
-      const inspector = journey.ownerPage.getByRole('dialog', {
-        name: 'Inspeção da impressora',
-      })
-      await expect(row.getByRole('button', { name: COMMANDS })).toHaveCount(0)
-      await expect(
-        inspector.getByRole('button', { name: COMMANDS }),
-      ).toHaveCount(0)
-      await expectCameraFrames(journey)
-      expect(fixture.sim.writes).toEqual([])
-      expect(new Set(fixture.sim.requests)).toEqual(new Set(['POST /detail']))
-    })
-  })
-
-  test('flashforge: qualified 5M Pro applies signed commands once each', async ({
-    browser,
-  }) => {
-    test.setTimeout(budget)
-    await withJourney(
-      { browser, flashforgeQualified: true },
-      async (journey, fixture) => {
-        const row = await open(journey)
-        const { sim } = fixture
-        const send = operator(journey)
-        await send.lifecycle(
-          row,
-          'Pausar',
-          'Confirmar pausa',
-          'Impressão pausada. O Connector confirmou a pausa.',
-        )
-        await reported(row, 'Pausada')
-        await send.lifecycle(
-          row,
-          'Retomar',
-          'Confirmar retomada',
-          'Impressão retomada. O Connector confirmou a retomada.',
-        )
-        await reported(row, 'Imprimindo')
-        const set = (label: string, choice: string, value: string) =>
-          send.extended(row, label, async (block) => {
-            await block.locator('select').selectOption(choice)
-            await block.locator('input').fill(value)
+  for (const model of ['Adventurer 5M Pro', 'Adventurer 5M']) {
+    test(`flashforge ${model}: unqualified writes are not offered`, async ({
+      browser,
+    }) => {
+      await withJourney(
+        { browser, printerModel: model },
+        async (journey, fixture) => {
+          // The server holds the Connector's own advertisement before it is read.
+          await publishTelemetry(journey)
+          const row = await open(journey)
+          await expect
+            .poll(() => journey.simulatorObservation().pauseInboxReady, {
+              timeout: 90_000,
+            })
+            .toBe(true)
+          expect(await journey.advertisedControls()).toEqual([])
+          const inspector = journey.ownerPage.getByRole('dialog', {
+            name: 'Inspeção da impressora',
           })
-        await set('Definir temperatura', 'extruder', '200')
-        expect(sim.detail.rightTargetTemp).toBe(200)
-        await set('Definir temperatura', 'bed', '65')
-        expect(sim.detail.platTargetTemp).toBe(65)
-        await set('Definir ventilador', 'part', '40')
-        expect(sim.detail.coolingFanSpeed).toBe(40)
-        const camera = (choice: string, message?: string) =>
-          send.extended(
-            row,
-            'Controlar transmissão da câmera',
-            (block) => block.locator('select').selectOption(choice),
-            message,
+          await expect(row.getByRole('button', { name: COMMANDS })).toHaveCount(
+            0,
           )
-        // The camera stays on while the print runs.
-        await camera(
-          'off',
-          'A câmera não pode ser desligada durante uma impressão, para não interromper o monitoramento remoto.',
-        )
-        expect(sim.detail.cameraStreamUrl).not.toBe('')
-        await send.lifecycle(
-          row,
-          'Cancelar',
-          'Confirmar cancelamento',
-          'Impressão cancelada. O Connector confirmou o cancelamento.',
-        )
-        await reported(row, 'Ociosa')
-        await camera('off')
-        expect(sim.detail.cameraStreamUrl).toBe('')
-        await camera('on')
-        expect(sim.detail.cameraStreamUrl).not.toBe('')
-        expect(sim.writes).toEqual([
-          job('pause'),
-          job('continue'),
-          control('temperatureCtl_cmd', { rightNozzle: 200 }),
-          control('temperatureCtl_cmd', { platform: 65 }),
-          control('printerCtl_cmd', { coolingFan: 40 }),
-          job('cancel'),
-          control('streamCtrl_cmd', { action: 'close' }),
-          control('streamCtrl_cmd', { action: 'open' }),
-        ])
-      },
-    )
-  })
+          await expect(
+            inspector.getByRole('button', { name: COMMANDS }),
+          ).toHaveCount(0)
+          await expectCameraFrames(journey)
+          expect(fixture.sim.writes).toEqual([])
+          expect(new Set(fixture.sim.requests)).toEqual(
+            new Set(['POST /detail']),
+          )
+        },
+      )
+    })
+
+    test(`flashforge: qualified ${model} applies signed commands once each`, async ({
+      browser,
+    }) => {
+      test.setTimeout(budget)
+      await withJourney(
+        { browser, flashforgeQualified: true, printerModel: model },
+        async (journey, fixture) => {
+          const row = await open(journey)
+          const { sim } = fixture
+          const send = operator(journey)
+          await send.lifecycle(
+            row,
+            'Pausar',
+            'Confirmar pausa',
+            'Impressão pausada. O Connector confirmou a pausa.',
+          )
+          await reported(row, 'Pausada')
+          await send.lifecycle(
+            row,
+            'Retomar',
+            'Confirmar retomada',
+            'Impressão retomada. O Connector confirmou a retomada.',
+          )
+          await reported(row, 'Imprimindo')
+          const set = (label: string, choice: string, value: string) =>
+            send.extended(row, label, async (block) => {
+              await block.locator('select').selectOption(choice)
+              await block.locator('input').fill(value)
+            })
+          await set('Definir temperatura', 'extruder', '200')
+          expect(sim.detail.rightTargetTemp).toBe(200)
+          await set('Definir temperatura', 'bed', '65')
+          expect(sim.detail.platTargetTemp).toBe(65)
+          await set('Definir ventilador', 'part', '40')
+          expect(sim.detail.coolingFanSpeed).toBe(40)
+          const camera = (choice: string, message?: string) =>
+            send.extended(
+              row,
+              'Controlar transmissão da câmera',
+              (block) => block.locator('select').selectOption(choice),
+              message,
+            )
+          // The camera stays on while the print runs.
+          await camera(
+            'off',
+            'A câmera não pode ser desligada durante uma impressão, para não interromper o monitoramento remoto.',
+          )
+          expect(sim.detail.cameraStreamUrl).not.toBe('')
+          await send.lifecycle(
+            row,
+            'Cancelar',
+            'Confirmar cancelamento',
+            'Impressão cancelada. O Connector confirmou o cancelamento.',
+          )
+          await reported(row, 'Ociosa')
+          await camera('off')
+          expect(sim.detail.cameraStreamUrl).toBe('')
+          await camera('on')
+          expect(sim.detail.cameraStreamUrl).not.toBe('')
+          expect(sim.writes).toEqual([
+            job('pause'),
+            job('continue'),
+            control('temperatureCtl_cmd', { rightNozzle: 200 }),
+            control('temperatureCtl_cmd', { platform: 65 }),
+            control('printerCtl_cmd', { coolingFan: 40 }),
+            job('cancel'),
+            control('streamCtrl_cmd', { action: 'close' }),
+            control('streamCtrl_cmd', { action: 'open' }),
+          ])
+        },
+      )
+    })
+  }
 
   test('flashforge: qualified AD5X applies lifecycle, slot record and slot load', async ({
     browser,

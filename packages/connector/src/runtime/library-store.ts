@@ -10,6 +10,7 @@ import {
   rename,
   statfs,
   unlink,
+  utimes,
   writeFile,
 } from 'node:fs/promises'
 import { isAbsolute, join, resolve, sep } from 'node:path'
@@ -469,8 +470,11 @@ export async function createLibraryStore(
       deduplicated = (await hashFile(target).catch(() => '')) === sha256
       repaired = !deduplicated
     }
-    if (deduplicated) await unlink(temp)
-    else {
+    if (deduplicated) {
+      // Renew the orphan grace while the server records the reused blob.
+      await utimes(target, new Date(now), new Date(now))
+      await unlink(temp)
+    } else {
       const others = stored.filter((file) => file.sha256 !== sha256)
       const plan = evictionPlan(others, size, sha256)
       const fits = usedOf(others) + size <= settings.quotaBytes

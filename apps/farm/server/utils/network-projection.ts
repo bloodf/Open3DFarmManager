@@ -6,6 +6,7 @@ interface ConnectorHealth {
   version: string
   uptimeMs: number
   queueBacklog: number
+  refusedRecords?: number
   storage: 'healthy' | 'degraded'
   rtcScope: 'loopback' | 'lan' | 'disabled'
 }
@@ -80,6 +81,9 @@ function parseConnectorHealth(health: unknown): {
           version: connector.version.slice(0, 64),
           uptimeMs: connector.uptimeMs as number,
           queueBacklog: connector.queueBacklog as number,
+          ...((num(connector.refusedRecords) ?? 0) > 0
+            ? { refusedRecords: connector.refusedRecords as number }
+            : {}),
           storage,
           rtcScope,
         }

@@ -291,8 +291,6 @@ async function runConnectorAgentOnce(
     capacity: 0,
     credentialExpired: false,
   }
-  /** Records dropped since start because the server refused them. */
-  let refusedRecords = 0
   function diagnostic(value: AgentDiagnostic) {
     if (value.kind === 'drain-loss') {
       logger.warn('queue-loss', { ...value })
@@ -544,7 +542,7 @@ async function runConnectorAgentOnce(
             totals.credentialExpired || clock.now() >= credential.expires_at,
           storageDegraded: queue.storageDegraded,
           storageLost: queue.storageLost,
-          refusedRecords,
+          refusedRecords: queue.refusedRecords,
           rtc: rtcBackend,
         }),
         onError: fail,
@@ -604,6 +602,10 @@ async function runConnectorAgentOnce(
           version: connectorVersionMetadata.connectorVersion,
           uptimeMs: Math.floor(performance.now() - startedAt),
           queueBacklog: queue.depth,
+          // Absent while zero, so a healthy heartbeat keeps its shape.
+          ...(queue.refusedRecords
+            ? { refusedRecords: queue.refusedRecords }
+            : {}),
           storage: queue.storageDegraded ? 'degraded' : 'healthy',
           rtcScope:
             !lookupId || rtcBackend.mode !== 'direct'
@@ -1161,11 +1163,10 @@ async function runConnectorAgentOnce(
             attemptSignal,
             () => diagnostic({ kind: 'telemetry-entry-dropped' }),
             (records) => {
-              refusedRecords += records
               diagnostic({
                 kind: 'telemetry-batch-refused',
                 records,
-                total: refusedRecords,
+                total: queue.refusedRecords,
               })
             },
           )
@@ -1340,7 +1341,7 @@ async function runConnectorAgentOnce(
         kind: 'agent-summary',
         ...totals,
         storageLost: queue.storageLost,
-        refusedRecords,
+        refusedRecords: queue.refusedRecords,
       })
     } catch (error) {
       fail(error)

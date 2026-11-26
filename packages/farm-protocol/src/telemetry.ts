@@ -33,6 +33,8 @@ export const HeartbeatHealth = z
       version: z.string().min(1).max(64),
       uptimeMs: counter,
       queueBacklog: counter,
+      /** Records the Connector dropped because the server refused them. */
+      refusedRecords: z.number().int().positive().optional(),
       storage: z.enum(['healthy', 'degraded']),
       rtcScope: z.enum(['loopback', 'lan', 'disabled']),
     }),

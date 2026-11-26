@@ -11,6 +11,10 @@ export type HalotWrite = 'pause' | 'resume' | 'cancel'
 export type HalotQualification = Readonly<{
   operation: HalotWrite
   model: string
+  /** Hardware-qualified additional starting states for resume. */
+  resumeFrom?: readonly string[]
+  /** Hardware-qualified stop-specific states; natural completion is excluded. */
+  cancelReached?: readonly string[]
 }>
 
 /** Empty on purpose. Neither the wire nor the runtime file can add an entry. */

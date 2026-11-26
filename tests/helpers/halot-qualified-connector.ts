@@ -20,7 +20,11 @@ await runConnectorAgent({
   dataDirectory: values['data-dir']!,
   credentialPath: values['credential-file']!,
   halotQualifiedWrites: (['pause', 'resume', 'cancel'] as const).map(
-    (operation) => ({ operation, model: 'HALOT-MAGE PRO' }),
+    (operation) => ({
+      operation,
+      model: 'HALOT-MAGE PRO',
+      ...(operation === 'cancel' ? { cancelReached: ['TEST_CANCELLED'] } : {}),
+    }),
   ),
   signal: controller.signal,
   onDiagnostic(diagnostic) {

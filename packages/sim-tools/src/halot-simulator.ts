@@ -38,7 +38,7 @@ export async function startHalotSimulator(
     /** The word a pause leads to; sources record both (see the protocol note). */
     pauseWord?: 'PRINT_PAUSE' | 'PRINT_STOP'
     /** The word a stop leads to; `PRINT_STOP` is how one source reads it. */
-    stopWord?: 'PRINT_END' | 'PRINT_STOP'
+    stopWord?: 'PRINT_END' | 'PRINT_STOP' | 'TEST_CANCELLED'
     port?: number
   } = {},
 ) {

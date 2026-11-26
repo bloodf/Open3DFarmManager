@@ -23,6 +23,7 @@ import { provisionAnycubicPrinter } from '../../packages/connector/src/control/p
 import { createAnycubicCollection } from '../../packages/connector/src/runtime/anycubic-collection.ts'
 import { createFarmSnapshotSource } from '../../packages/connector/src/runtime/farm-snapshot-provider.ts'
 import { createPauseDriverRouter } from '../../packages/connector/src/runtime/pause-driver-router.ts'
+import { createPrinterDetailSources } from '../../packages/connector/src/runtime/printer-detail-session.ts'
 import type { PrinterState } from '../../packages/farm-protocol/src/state.ts'
 import {
   ANYCUBIC_SIM_FIRMWARE,
@@ -177,6 +178,26 @@ test('a qualified pair never offers start, and light only on the S1 Max', () => 
     ).data.type
   assert.equal(lamp('20029'), 2)
   assert.equal(lamp('20024'), 3)
+})
+
+test('the listed models and the Kobra 3 get a detail feed, an unknown id none', () => {
+  const ids = ['20024', '20028', '20029', '20026']
+  const sources = createPrinterDetailSources({
+    assignments: [],
+    collection: {
+      version: 5,
+      printers: [],
+      allowedOrigins: [],
+      limits: {},
+      anycubic: {
+        printers: ids.map((modelId) => ({ printerKey: modelId, modelId })),
+      },
+    },
+  } as never)
+  assert.deepEqual(
+    ids.map((id) => sources.sourceFor(id) !== undefined),
+    [true, true, true, false],
+  )
 })
 
 test('report rules apply to the listed models only', () => {

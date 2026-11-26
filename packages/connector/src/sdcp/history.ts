@@ -85,6 +85,8 @@ type SharedSession = {
   retire(): void
 }
 const sessions = new Map<string, SharedSession>()
+/** Every connection not yet closed, including retired ones still being read. */
+const unclosed = new Set<SharedSession>()
 const SESSION_LIFETIME_MS = 10000
 const MAX_SESSIONS = 32
 
@@ -101,6 +103,7 @@ function openShared(key: string, endpoint: SdcpEndpoint): SharedSession {
   const closeIfUnused = () => {
     if (reads > 0 || (!retired && viewers.size > 0)) return
     evict()
+    unclosed.delete(shared)
     clearTimeout(timer)
     for (const [viewer, left] of viewers)
       viewer.removeEventListener('abort', left)
@@ -158,10 +161,11 @@ function historySession(endpoint: SdcpEndpoint) {
   ])
   let shared = sessions.get(key)
   if (shared) return shared
-  if (sessions.size >= MAX_SESSIONS)
+  if (unclosed.size >= MAX_SESSIONS)
     throw new Error('Too many SDCP history sessions')
   shared = openShared(key, endpoint)
   sessions.set(key, shared)
+  unclosed.add(shared)
   return shared
 }
 

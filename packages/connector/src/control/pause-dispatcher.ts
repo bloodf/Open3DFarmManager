@@ -386,7 +386,8 @@ export function createPauseDispatcher(config: {
   const observations = new WeakMap<PrinterBinding, ControlObservation>()
   const observationVersions = new WeakMap<PrinterBinding, object>()
   const observationGenerations = new WeakMap<PrinterBinding, number>()
-  const slots = new Set<string>()
+  /** The command holding each assignment; `verified` once its signature passed. */
+  const slots = new Map<string, { verified: boolean }>()
   /** Slots held only by a pre-claim readiness read: emergency stop takes them. */
   const probes = new Map<string, () => Promise<void>>()
   const stopAttempts = new Set<() => void>()
@@ -552,15 +553,16 @@ export function createPauseDispatcher(config: {
       let observationVersion: object | undefined
       let generationInstalled = false
       const assignmentId = mapping.assignment_id
-      // Stops authenticate independently while the readiness probe owns the slot.
-      const probe =
-        command.action === 'emergency_stop'
-          ? probes.get(assignmentId)
-          : undefined
-      if (!probe && (slots.size >= 8 || slots.has(assignmentId)))
+      // A stop takes its slot only after its own signature passes, so neither
+      // unverified commands nor other printers' commands can crowd it out.
+      const stop = command.action === 'emergency_stop'
+      if (!stop && (slots.size >= 8 || slots.has(assignmentId)))
         return Promise.resolve({ kind: 'rejected', reason: 'busy' })
-      let ownsSlot = !probe
-      if (ownsSlot) slots.add(assignmentId) // Keep the slot until asynchronous work settles.
+      const hold = { verified: false }
+      if (!stop) slots.set(assignmentId, hold) // Keep the slot until asynchronous work settles.
+      const releaseSlot = () => {
+        if (slots.get(assignmentId) === hold) slots.delete(assignmentId)
+      }
       let settleWork: () => void = () => {}
       const work = new Promise<void>((resolve) => {
         settleWork = resolve
@@ -572,7 +574,7 @@ export function createPauseDispatcher(config: {
       })
       const start = sample()
       if (!start) {
-        if (ownsSlot) slots.delete(assignmentId)
+        releaseSlot()
         settleWork()
         return Promise.resolve({ kind: 'rejected', reason: 'expired' })
       }
@@ -959,17 +961,26 @@ export function createPauseDispatcher(config: {
             finalize('rejected', denial, 'guard-denied')
             return
           }
-          if (probe) {
-            if (probes.get(assignmentId) === probe) await waitForProbe(probe)
-            if (terminal) return
-            denial = live()
-            if (denial || slots.has(assignmentId) || slots.size >= 8) {
+          if (stop) {
+            // A readiness probe only reads the printer: the stop takes its slot.
+            const probe = probes.get(assignmentId)
+            if (probe) {
+              await waitForProbe(probe)
+              if (terminal) return
+              denial = live()
+            }
+            // Only a verified holder keeps a stop out.
+            if (denial || slots.get(assignmentId)?.verified) {
               finalize('rejected', denial ?? 'busy', 'guard-denied')
               return
             }
-            slots.add(assignmentId)
-            ownsSlot = true
+            slots.set(assignmentId, hold)
+          } else if (slots.get(assignmentId) !== hold) {
+            // A verified stop took the slot while this command was unverified.
+            finalize('rejected', 'busy', 'guard-denied')
+            return
           }
+          hold.verified = true
           // `clear_hold` is a Connector journal write, whatever the driver.
           if (
             command.action !== 'clear_hold' &&
@@ -1317,7 +1328,7 @@ export function createPauseDispatcher(config: {
                 }
             }
           }
-          if (ownsSlot) slots.delete(assignmentId)
+          releaseSlot()
           slotFreed()
           clearTimeout(timer)
           if (terminal) resolveResult(terminal)

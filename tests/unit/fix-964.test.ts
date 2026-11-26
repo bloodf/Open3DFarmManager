@@ -8,7 +8,7 @@ import { vitestPostgresOptions } from '../helpers/vitest-postgres.ts'
 import { PostgresPrinterProfiles } from '../../apps/farm/server/storage/postgres-printer-profiles.ts'
 
 const state = vi.hoisted(() => ({
-  config: {} as Record<string, unknown>,
+  config: {} as Record<string, unknown> | undefined,
   account: '',
   profiles: undefined as any,
 }))
@@ -100,9 +100,17 @@ it.skipIf(!ready)(
       tokenTtlSeconds: 60,
       databaseUrl: db.connectionString,
     }
-    expect(await farmFleetMode(event, farm, printer)).toEqual({
-      mode: 'maintenance',
-    })
+    for (const enabled of [true, 'true', '1', 1]) {
+      state.config = { ...state.config, enabled }
+      expect(await farmFleetMode(event, farm, printer)).toEqual({
+        mode: 'maintenance',
+      })
+    }
+    // A typo must not fall back, even with the integration pool already open.
+    state.config = { ...state.config, enabled: 'ture' }
+    await expect(farmFleetMode(event, farm, printer)).rejects.toThrow(
+      'Configuração de autenticação de integrações inválida.',
+    )
     await closeIntegrationAuthRuntime()
     state.config = {
       enabled: true,
@@ -114,4 +122,68 @@ it.skipIf(!ready)(
       'Configuração de autenticação de integrações inválida.',
     )
   },
+)
+
+// These cases need no database, so they run even where PostgreSQL is missing.
+const invalidConfig = 'Configuração de autenticação de integrações inválida.'
+async function withStubProfiles(run: () => Promise<void>) {
+  const previous = state.profiles
+  state.profiles = { read: async () => ({ ok: true }) }
+  state.account = owner
+  try {
+    await run()
+  } finally {
+    state.profiles = previous
+  }
+}
+
+it.each([
+  undefined,
+  null,
+  {},
+  { enabled: undefined },
+  { enabled: null },
+  { enabled: '' },
+  { enabled: false },
+  { enabled: 'false' },
+  { enabled: '0' },
+  { enabled: 0 },
+])('falls back for an absent or disabled configuration: %j', (config) =>
+  withStubProfiles(async () => {
+    state.config = config as never
+    expect(await farmFleetMode(event, farm, printer)).toEqual({
+      mode: 'in-service',
+    })
+  }),
+)
+
+it.each([
+  { enabled: 'ture' },
+  { enabled: '1x' },
+  { enabled: 'yes' },
+  { enabled: 'TRUE' },
+  { enabled: ' false' },
+  { enabled: 2 },
+  { enabled: {} },
+  'true',
+])('rejects a malformed configuration instead of falling back: %j', (config) =>
+  withStubProfiles(async () => {
+    state.config = config as never
+    await expect(farmFleetMode(event, farm, printer)).rejects.toThrow(
+      invalidConfig,
+    )
+  }),
+)
+
+it.each([true, 'true', '1', 1])(
+  'takes the integration path when the flag is %j',
+  (enabled) =>
+    withStubProfiles(async () => {
+      // The incomplete configuration is only inspected on the integration path.
+      await closeIntegrationAuthRuntime()
+      state.config = { enabled }
+      await expect(farmFleetMode(event, farm, printer)).rejects.toThrow(
+        invalidConfig,
+      )
+    }),
 )

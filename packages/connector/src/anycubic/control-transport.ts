@@ -1,8 +1,5 @@
 import type { buildAnycubicCommand } from './commands.ts'
-import { connect as tlsConnect } from 'node:tls'
-import { createHash } from 'node:crypto'
 import { MqttClient } from 'mqtt'
-import { anycubicLanModel } from './models.ts'
 import { connectAnycubicTls } from './tls-trust.ts'
 
 export interface AnycubicControlTransportOptions {
@@ -64,7 +61,6 @@ export function createAnycubicControlTransport(
   )
     throw new Error('Invalid Anycubic transport options')
   const topic = `anycubic/anycubicCloud/v1/printer/public/${serial}/+/report`
-  const lanModel = anycubicLanModel(serial.split('/', 1)[0] ?? '')
   function matches(value: string) {
     const prefix = `anycubic/anycubicCloud/v1/printer/public/${serial}/`
     return (
@@ -87,19 +83,27 @@ export function createAnycubicControlTransport(
       let body = 0
       let header = true
       inflight = 0
+      // A client certificate stays held until the peer passes the CA and pin
+      // checks, which needs TLS 1.3 (see `connectAnycubicTls`).
+      const holdClientIdentity = !!(options.certPem && options.keyPem)
       const tlsOptions = {
         host,
         port,
         ca: options.caPem,
-        ...(options.certPem && options.keyPem
+        ...(holdClientIdentity
           ? { cert: options.certPem, key: options.keyPem }
           : {}),
-        minVersion: 'TLSv1.2' as const,
+        minVersion: holdClientIdentity
+          ? ('TLSv1.3' as const)
+          : ('TLSv1.2' as const),
       }
-      const pin = options.pinSha256?.toLowerCase()
-      const socket = lanModel
-        ? connectAnycubicTls(tlsOptions, pin)
-        : tlsConnect({ ...tlsOptions, rejectUnauthorized: !pin })
+      // Every model, Kobra 3 (20024) included: a configured CA and pin are
+      // both checked, and nothing is written before they pass.
+      const socket = connectAnycubicTls(
+        tlsOptions,
+        options.pinSha256?.toLowerCase(),
+        { holdClientIdentity },
+      )
       socket.prependListener('data', (chunk: Buffer) => {
         for (const byte of chunk) {
           if (body > 0) {
@@ -124,16 +128,6 @@ export function createAnycubicControlTransport(
           }
         }
       })
-      if (!lanModel && pin) {
-        socket.once('secureConnect', () => {
-          if (
-            createHash('sha256')
-              .update(socket.getPeerCertificate().raw)
-              .digest('hex') !== pin
-          )
-            socket.destroy(new Error('TLS pin mismatch'))
-        })
-      }
       return socket
     },
     {

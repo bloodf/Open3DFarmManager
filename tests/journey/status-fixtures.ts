@@ -3,12 +3,16 @@ import { join } from 'node:path'
 import { startQidiSimulator } from '../../packages/sim-tools/src/qidi-simulator.ts'
 import { startFlashforgeSimulator } from '../../packages/sim-tools/src/flashforge-simulator.ts'
 import { startPhrozenSimulator } from '../../packages/sim-tools/src/phrozen-simulator.ts'
+import {
+  HALOT_SIMULATOR_PASSWORD,
+  startHalotSimulator,
+} from '../../packages/sim-tools/src/halot-simulator.ts'
 import qidiData from '../fixtures/qidi/moonraker.json' with { type: 'json' }
 import { qidiVariant } from '../fixtures/qidi/variants.ts'
 import flashforgeData from '../fixtures/flashforge/detail.json' with { type: 'json' }
 import phrozenData from '../fixtures/phrozen/synthetic-revo-14k-v153.json' with { type: 'json' }
 
-export type StatusVendor = 'qidi' | 'flashforge' | 'phrozen'
+export type StatusVendor = 'qidi' | 'flashforge' | 'phrozen' | 'halot'
 
 export async function startStatusFixture(
   name: StatusVendor,
@@ -101,6 +105,43 @@ export async function startStatusFixture(
         online = true
       },
       close: simulator.close,
+    }
+  }
+  if (name === 'halot') {
+    const simulator = await startHalotSimulator()
+    simulator.beginPrint('part.cxdlpv4')
+    const origin = `ws://127.0.0.1:${simulator.port}`
+    const passwordFile = join(directory, 'halot-password.json')
+    await writeFile(
+      passwordFile,
+      JSON.stringify({ origin, password: HALOT_SIMULATOR_PASSWORD }),
+      { mode: 0o600 },
+    )
+    return {
+      origin,
+      binding: {
+        family: name,
+        origin,
+        passwordFile,
+        simulated: true,
+        expect: { model: model === 'Q1 Pro' ? 'HALOT-MAGE PRO' : model },
+      },
+      // Every frame the Connector sent, so a write cannot go unnoticed.
+      requests: {
+        get length() {
+          return simulator.received.length
+        },
+        [Symbol.iterator]: () =>
+          simulator.received.map(({ cmd }) => cmd)[Symbol.iterator](),
+      },
+      loseConnection: () => simulator.setFault('disconnect'),
+      recover: () => {
+        simulator.idle()
+        simulator.setFault()
+      },
+      close: simulator.close,
+      /** Synthetic printer, for the control journey's state assertions. */
+      halot: simulator,
     }
   }
   const data = structuredClone(phrozenData)

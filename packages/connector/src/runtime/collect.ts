@@ -32,6 +32,7 @@ import type {
 import { createKobraLinkRuntimeSubscription } from '../kobralink/runtime.ts'
 import { createFlashforgeCollection } from '../flashforge/collection.ts'
 import { createPhrozenCollection } from '../phrozen/collection.ts'
+import { createHalotCollection } from '../halot/collection.ts'
 import {
   createPhotonResinCollection,
   type PhotonResinSessions,
@@ -944,41 +945,37 @@ export async function collectIntoQueue(input: {
       }
     }
     if (config.version === 8) {
-      // A Phrozen printer with advertised controls also goes to telemetry, so
-      // the server can issue authority for them. Read-only stays live only.
-      const phrozen = (
-        binding: Parameters<typeof createPhrozenCollection>[0]['binding'],
+      // A Phrozen or HALOT printer with advertised controls also goes to
+      // telemetry, so the server can issue authority for them. Read-only stays
+      // live only.
+      const controllable = (
+        printerKey: string,
         options: Pick<
           Parameters<typeof createPhrozenCollection>[0],
-          | 'allowedOrigins'
-          | 'signal'
-          | 'timeoutMs'
-          | 'onObservation'
-          | 'onUnavailable'
-        >,
+          'onUnavailable'
+        > & { onObservation(value: RawPrinterObservation): void },
       ) => {
         let queued = false
-        return createPhrozenCollection({
-          ...options,
-          binding,
-          controllable: () => !!input.controlsFor?.(binding.printerKey)?.length,
-          onObservation(value) {
+        return {
+          controllable: () => !!input.controlsFor?.(printerKey)?.length,
+          onObservation(value: RawPrinterObservation) {
             options.onObservation(value)
-            if (value.printer.progress === undefined) return
+            const printer = value.printer as PrinterState
+            if (
+              printer.progress === undefined ||
+              !input.controlsFor?.(printerKey)?.length
+            )
+              return
             queued = true
-            onEvent({ kind: 'snapshot', printer: value.printer })
+            onEvent({ kind: 'snapshot', printer })
           },
-          onUnavailable(epoch) {
+          onUnavailable(epoch: number) {
             options.onUnavailable(epoch)
             if (!queued) return
             queued = false
-            onEvent({
-              kind: 'unavailable',
-              printerKey: binding.printerKey,
-              reason: 'stale',
-            })
+            onEvent({ kind: 'unavailable', printerKey, reason: 'stale' })
           },
-        })
+        }
       }
       for (const binding of config.drivers) {
         if (binding.family === 'anycubic-resin') {
@@ -1057,12 +1054,22 @@ export async function collectIntoQueue(input: {
             : binding.family === 'flashforge'
               ? createFlashforgeCollection({ ...options, binding })
               : binding.family === 'phrozen'
-                ? phrozen(binding, options)
-                : createQidiCollection({
+                ? createPhrozenCollection({
                     ...options,
+                    ...controllable(binding.printerKey, options),
                     binding,
-                    timeoutMs: Math.min(3000, options.timeoutMs),
                   })
+                : binding.family === 'halot'
+                  ? createHalotCollection({
+                      ...options,
+                      ...controllable(binding.printerKey, options),
+                      binding,
+                    })
+                  : createQidiCollection({
+                      ...options,
+                      binding,
+                      timeoutMs: Math.min(3000, options.timeoutMs),
+                    })
         subscriptions.push({ done: sub.done.catch(fail) })
       }
     }

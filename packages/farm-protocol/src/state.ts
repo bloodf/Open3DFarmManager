@@ -174,6 +174,8 @@ function printerStateSchema(legacy: boolean) {
           'firmware-shutdown',
           'flashforge-simulated',
           'flashforge-unqualified',
+          'halot-simulated',
+          'halot-unqualified',
           'phrozen-simulated',
           'phrozen-unqualified',
           'printer-fault',
@@ -315,6 +317,12 @@ function printerStateSchema(legacy: boolean) {
           value.state !== 'paused' &&
           (value.statusReason === 'anycubic-resin-simulated' ||
             value.statusReason === 'anycubic-resin-unqualified')) ||
+        // A resin printer reports layers only for a current job.
+        (value.identity?.vendor === 'Creality' &&
+          value.state !== 'printing' &&
+          value.state !== 'paused' &&
+          (value.statusReason === 'halot-simulated' ||
+            value.statusReason === 'halot-unqualified')) ||
         (value.statusReason === 'prusa-link-unqualified' &&
           value.identity?.vendor === 'Prusa' &&
           !value.controls?.length) ||

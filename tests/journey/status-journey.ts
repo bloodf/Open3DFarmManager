@@ -135,6 +135,10 @@ export function statusJourney(name: StatusVendor) {
           expect(new Set<string | number>([...fixture.requests])).toEqual(
             new Set(['POST /detail']),
           )
+        } else if (name === 'halot') {
+          expect(new Set<string | number>([...fixture.requests])).toEqual(
+            new Set(['VERSION_CHECK', 'GET_PRINT_STATUS']),
+          )
         } else {
           expect(new Set<string | number>([...fixture.requests])).toEqual(
             new Set([0]),

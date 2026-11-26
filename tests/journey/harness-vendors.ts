@@ -51,6 +51,7 @@ export type VendorName =
   | 'qidi'
   | 'flashforge'
   | 'phrozen'
+  | 'halot'
   | 'anycubic-resin'
 
 /** What a spec can do to the running simulated print. */
@@ -155,6 +156,8 @@ export const VENDOR_DESCRIPTIONS: Readonly<Record<VendorName, string>> = {
   qidi: 'Loopback Qidi status simulator',
   flashforge: 'Loopback Flashforge status simulator',
   phrozen: 'Loopback Phrozen status simulator',
+  halot:
+    'Loopback HALOT status simulator (packages/sim-tools), printing at 25 %',
   'anycubic-resin':
     'Loopback synthetic Photon P1 Max (packages/sim-tools), pinned TLS broker and FLV camera, printing at 25 %',
   formlabs: 'Loopback Formlabs PreForm status simulator',
@@ -378,7 +381,12 @@ export async function startVendorSimulator(
           assignment: { ...localAssignment(scope), backend: name },
         }
       }
-    } else if (name === 'qidi' || name === 'flashforge' || name === 'phrozen') {
+    } else if (
+      name === 'qidi' ||
+      name === 'flashforge' ||
+      name === 'phrozen' ||
+      name === 'halot'
+    ) {
       const fixture = await startStatusFixture(
         name,
         directory,

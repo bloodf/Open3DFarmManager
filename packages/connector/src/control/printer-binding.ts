@@ -2,6 +2,10 @@ import {
   Binding as PhrozenControlBinding,
   type PhrozenBinding,
 } from '../phrozen/config.ts'
+import {
+  Binding as HalotControlBinding,
+  type HalotBinding,
+} from '../halot/config.ts'
 import { KobraLinkRuntimeBinding } from '../kobralink/configuration.ts'
 import { AnycubicBinding } from '../config/anycubic.ts'
 import { KobraXBinding } from '../config/kobra-x.ts'
@@ -136,6 +140,7 @@ const SdcpAssignment = Assignment.omit({ moonraker_origin: true }).extend({
     'phrozen',
     'qidi',
     'anycubic-resin',
+    'halot',
   ]),
 })
 const readonlyBindings = new WeakMap<
@@ -197,6 +202,16 @@ export function readRuntimePrinterBinding(binding: PrinterBinding) {
       agent_id,
       printer_key,
       backend: 'phrozen' as const,
+    }
+  }
+  if (mapping && halotBindings.has(binding)) {
+    const { assignment_id, farm_id, agent_id, printer_key } = mapping
+    return {
+      assignment_id,
+      farm_id,
+      agent_id,
+      printer_key,
+      backend: 'halot' as const,
     }
   }
   if (mapping && flashforgeBindings.has(binding)) {
@@ -352,6 +367,32 @@ export function provisionPhrozenPrinter(
 export function readPhrozenPrinterBinding(binding: PrinterBinding) {
   return readPrinterBinding(binding)
     ? (phrozenBindings.get(binding) ?? null)
+    : null
+}
+
+const halotBindings = new WeakMap<PrinterBinding, Readonly<HalotBinding>>()
+/** Explicit local command opt-in; other HALOT handles stay read-only. */
+export function provisionHalotPrinter(
+  assignmentInput: unknown,
+  bindingInput: unknown,
+): PrinterBinding {
+  const local = Object.freeze(HalotControlBinding.parse(bindingInput))
+  const scope = Assignment.omit({ moonraker_origin: true }).parse(
+    assignmentInput,
+  )
+  if (scope.printer_key !== local.printerKey)
+    throw new Error('HALOT assignment mismatch')
+  const binding = new BoundPrinter()
+  bindings.set(binding, {
+    assignment: Object.freeze({ ...scope, moonraker_origin: '' }),
+    active: true,
+  })
+  halotBindings.set(binding, local)
+  return binding
+}
+export function readHalotPrinterBinding(binding: PrinterBinding) {
+  return readPrinterBinding(binding)
+    ? (halotBindings.get(binding) ?? null)
     : null
 }
 

@@ -332,6 +332,8 @@ const statusSourceLabel: Partial<
   'anycubic-resin-unqualified': 'não qualificada em hardware',
   'flashforge-simulated': simulatedSource,
   'flashforge-unqualified': unqualifiedSource,
+  'halot-simulated': simulatedSource,
+  'halot-unqualified': unqualifiedSource,
   'phrozen-simulated': simulatedSource,
   'phrozen-unqualified': unqualifiedSource,
   'qidi-simulated': simulatedSource,

@@ -75,6 +75,7 @@ import {
   readCrealityPrinterBinding,
   readFlashforgePrinterBinding,
   readPhrozenPrinterBinding,
+  readHalotPrinterBinding,
   readSdcpPrinterBinding,
 } from '../control/printer-binding.ts'
 import {
@@ -176,6 +177,10 @@ type AgentInput = {
     typeof import('./pause-control.ts').runPauseControl
   >[0]['phrozenQualifiedWrites']
   /** Test override only; the CLI never sets it. The shipped list is empty. */
+  halotQualifiedWrites?: Parameters<
+    typeof import('./pause-control.ts').runPauseControl
+  >[0]['halotQualifiedWrites']
+  /** Test override only; the CLI never sets it. The shipped list is empty. */
   anycubicQualifiedWrites?: Parameters<
     typeof import('./pause-control.ts').runPauseControl
   >[0]['anycubicQualifiedWrites']
@@ -230,7 +235,10 @@ async function runConnectorAgentOnce(
   const config = readAgentRuntimeConfig(
     input.configPath,
     readCredentialEnvelope(input.credentialPath, identity.fingerprint),
-    { phrozenQualifiedWrites: input.phrozenQualifiedWrites },
+    {
+      phrozenQualifiedWrites: input.phrozenQualifiedWrites,
+      halotQualifiedWrites: input.halotQualifiedWrites,
+    },
   )
   // One startup line whenever the operator widened the ICE bind beyond loopback.
   if (!isLoopbackBindAddress(config.rtc.bindAddress))
@@ -704,13 +712,14 @@ async function runConnectorAgentOnce(
               return []
             return controlsFor?.(id)
           },
-          // Only a Flashforge or Phrozen binding opted in to control
+          // Only a Flashforge, Phrozen or HALOT binding opted in to control
           // advertises any.
           readOnlyControlsFor: (id) => {
             const local = config.bindingFor(id)
             return local &&
               (readFlashforgePrinterBinding(local) ||
-                readPhrozenPrinterBinding(local))
+                readPhrozenPrinterBinding(local) ||
+                readHalotPrinterBinding(local))
               ? controlsFor?.(id)
               : []
           },
@@ -1085,6 +1094,7 @@ async function runConnectorAgentOnce(
           },
           ...(input.trustedKeys ? { trustedKeys: input.trustedKeys } : {}),
           phrozenQualifiedWrites: input.phrozenQualifiedWrites,
+          halotQualifiedWrites: input.halotQualifiedWrites,
           anycubicQualifiedWrites: input.anycubicQualifiedWrites,
           ...(input.resinCapabilities
             ? { resinCapabilities: input.resinCapabilities }

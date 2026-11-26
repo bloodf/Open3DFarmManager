@@ -204,6 +204,7 @@ function pauseExecutionClosure():
 }
 function fixtureMode() {
   const execution = process.env.SIGNALLING_HTTPS_PAUSE_EXECUTION_RTC_FIXTURE
+  const admissionOnly = process.env.SIGNALLING_HTTPS_PAUSE_ADMISSION_ONLY
   if (
     execution !== undefined &&
     (execution !== 'yes' ||
@@ -211,6 +212,16 @@ function fixtureMode() {
   )
     throw new Error(
       'Execution fixture requires the maintained pause RTC opt-in',
+    )
+  if (
+    admissionOnly !== undefined &&
+    (admissionOnly !== 'yes' ||
+      execution !== 'yes' ||
+      pauseExecutionClosure() !== 'standard' ||
+      process.env.SIGNALLING_HTTPS_RTC_REJECTION !== undefined)
+  )
+    throw new Error(
+      'Admission-only smoke requires the standard execution fixture',
     )
   const flags = [
     process.env.SIGNALLING_HTTPS_RTC_FIXTURE,
@@ -237,6 +248,8 @@ function fixtureMode() {
     pauseFixture: flags[1] === 'yes',
     pauseRtcFixture: flags[2] === 'yes',
     farmPause: farmPause === 'yes',
+    pauseExecution: execution === 'yes',
+    admissionOnly: admissionOnly === 'yes',
   }
 }
 const mode = process.argv[2]
@@ -327,7 +340,8 @@ if (mode === '--prepare-layer') {
   } = process.env
   if (!origin || !ca || !farmId || !owner || !admin || !password)
     throw new Error('Missing disposable acceptance fixture')
-  const { rtcFixture, pauseFixture, pauseRtcFixture } = fixtureMode()
+  const { rtcFixture, pauseFixture, pauseRtcFixture, admissionOnly } =
+    fixtureMode()
   const extensionPath = '../tests/helpers/signalling-authenticated-rtc.ts'
   const extensionModule:
     | { createAuthenticatedRtcFixtureExtension(): SignallingFixtureExtension }
@@ -378,11 +392,13 @@ if (mode === '--prepare-layer') {
             ? {
                 extension:
                   executionModule.createPauseExecutionRtcFixtureExtension({
+                    admissionOnly,
                     closure: pauseExecutionClosure(),
                     testReplay: true,
                     rejection: process.env.SIGNALLING_HTTPS_RTC_REJECTION,
                   }),
                 extensionKind: 'pause-execution-rtc' as const,
+                admissionOnly,
                 caPath: ca,
                 disconnectSignalling: requestProxyDisconnect,
               }
@@ -418,7 +434,14 @@ if (mode === '--prepare-layer') {
     process.env.SIGNALLING_HTTPS_DISPOSABLE !== 'yes'
   )
     throw new Error('Explicit disposable fixture required')
-  const { rtcFixture, pauseFixture, pauseRtcFixture, farmPause } = fixtureMode()
+  const {
+    rtcFixture,
+    pauseFixture,
+    pauseRtcFixture,
+    farmPause,
+    pauseExecution,
+    admissionOnly,
+  } = fixtureMode()
   const portText = process.env.SIGNALLING_HTTPS_PORT,
     port = Number(portText)
   const requestedLedger = process.env.SIGNALLING_HTTPS_LEDGER
@@ -485,6 +508,7 @@ if (mode === '--prepare-layer') {
     ...(pauseFixture || pauseRtcFixture || farmPause
       ? ['farm_pause_authority']
       : []),
+    ...(pauseExecution ? ['farm_connector_telemetry_writer'] : []),
   ] as const
   const roles = capabilities.map((_, index) => `${prefix}_${index}`)
   const secrets = roles.map(() => randomBytes(24).toString('hex'))
@@ -744,6 +768,19 @@ if (mode === '--prepare-layer') {
         NUXT_AUTH_DATABASE_URL: dbUrl(0),
         NUXT_PRINTER_ASSIGNMENTS_ENABLED: 'true',
         NUXT_PRINTER_ASSIGNMENTS_DATABASE_URL: dbUrl(8),
+        ...(pauseExecution
+          ? {
+              NUXT_CONNECTOR_TELEMETRY_ENABLED: 'true',
+              NUXT_CONNECTOR_TELEMETRY_DATABASE_URL: dbUrl(10),
+              NUXT_CONNECTOR_TELEMETRY_ORIGIN: origin,
+              NUXT_CONNECTOR_TELEMETRY_ISSUER: origin,
+              NUXT_CONNECTOR_TELEMETRY_AUDIENCE: audience,
+              NUXT_CONNECTOR_TELEMETRY_PUBLIC_KEY_REGISTRY_PATH: registry,
+              NUXT_CONNECTOR_TELEMETRY_TOKEN_TTL_SECONDS: '300',
+              NUXT_CONNECTOR_TELEMETRY_PROOF_TTL_MS: '8000',
+              NUXT_CONNECTOR_TELEMETRY_BODY_TIMEOUT_MS: '2000',
+            }
+          : {}),
         NUXT_PUBLIC_FLAGS_FARM_VIEW:
           process.env.SIGNALLING_HTTPS_FARM_PAGE === 'yes' ? 'true' : 'false',
         ...(pauseIssuer
@@ -850,6 +887,9 @@ if (mode === '--prepare-layer') {
                 'yes'
                   ? {
                       SIGNALLING_HTTPS_PAUSE_EXECUTION_RTC_FIXTURE: 'yes',
+                      ...(admissionOnly
+                        ? { SIGNALLING_HTTPS_PAUSE_ADMISSION_ONLY: 'yes' }
+                        : {}),
                       SIGNALLING_HTTPS_RTC_REJECTION:
                         process.env.SIGNALLING_HTTPS_RTC_REJECTION,
                       SIGNALLING_HTTPS_PAUSE_EXECUTION_ROW:

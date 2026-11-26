@@ -444,6 +444,7 @@ async function connectorChild(
     {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
+        NODE_DISABLE_COMPILE_CACHE: '1',
         NODE_OPTIONS: process.env.OPENFARM_NETWORK_GUARD_PRELOAD ?? '',
         ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}),
         NODE_EXTRA_CA_CERTS: input.caPath,
@@ -626,6 +627,7 @@ async function connectorChild(
 }
 
 export type PauseExecutionFixtureOptions = Readonly<{
+  admissionOnly?: boolean
   closure?:
     | 'standard'
     | 'revocation'
@@ -651,6 +653,8 @@ export function createPauseExecutionRtcFixtureExtension(
     options.rejection === undefined
       ? undefined
       : rtcRejectionKind(options.rejection)
+  if (options.admissionOnly && (closureMode !== 'standard' || rejection))
+    throw Error('Admission-only smoke requires standard control admission')
   let current:
     | {
         input: SignallingIdentityInput
@@ -927,7 +931,7 @@ export function createPauseExecutionRtcFixtureExtension(
           )
         }
 
-        // Authority issuance starts inside pause(); proofs precede that operation.
+        // Both peers establish proofs before the browser can finish admission.
         await Promise.all([
           until(
             observeNative,
@@ -942,6 +946,33 @@ export function createPauseExecutionRtcFixtureExtension(
             10000,
           ),
         ])
+
+        if (options.admissionOnly) {
+          const [native, browser] = await Promise.all([
+            until(
+              observeNative,
+              (v) => v.capabilityAccepted && !v.terminal && !v.failed,
+              input.signal,
+              10000,
+            ),
+            until(
+              observeBrowser,
+              (v) => v.admitted && !v.terminal && !v.failed,
+              input.signal,
+              10000,
+            ),
+          ])
+          assert.equal(browser.commandSent, false)
+          assert.equal(browser.commandHttpRequests, 0)
+          assert.equal(native.commandsReceived, 0)
+          assert.equal(native.prepareCalls, 0)
+          assert.equal(native.pausesObserved, 0)
+          await session.note(
+            'simulator-control-admission-verified; zero commands constructed or sent',
+          )
+          completed = true
+          return
+        }
 
         if (rejection) {
           const recordRejection = async (

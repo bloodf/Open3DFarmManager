@@ -380,6 +380,7 @@ export async function runSignallingHttpsAcceptance(input: {
   extension?: SignallingFixtureExtension
   extensionKind?:
     'rtc' | 'pause-authority' | 'pause-rtc' | 'pause-execution-rtc'
+  admissionOnly?: boolean
   signal?: AbortSignal
   disconnectSignalling?: () => Promise<void>
 }) {
@@ -598,11 +599,17 @@ export async function runSignallingHttpsAcceptance(input: {
           commandsExecuted: false,
         }
       if (input.extensionKind === 'pause-execution-rtc')
-        return {
-          pauseExecutionRtcFixtureCompleted: true,
-          syntheticMoonraker: true,
-          realKlipperAccepted: false,
-        }
+        return input.admissionOnly
+          ? {
+              pauseExecutionRtcAdmissionCompleted: true,
+              syntheticMoonraker: true,
+              commandsExecuted: false,
+            }
+          : {
+              pauseExecutionRtcFixtureCompleted: true,
+              syntheticMoonraker: true,
+              realKlipperAccepted: false,
+            }
       if (input.extensionKind === 'pause-rtc')
         return { pauseRtcFixtureCompleted: true, commandsExecuted: false }
       return {

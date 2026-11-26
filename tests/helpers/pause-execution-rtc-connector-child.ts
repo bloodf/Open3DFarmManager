@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { DatabaseSync } from 'node:sqlite'
 import { pathToFileURL } from 'node:url'
-import { generateKeyPairSync } from 'node:crypto'
+import { generateKeyPairSync, randomUUID } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -33,6 +33,8 @@ import { createPrinterBindingRegistry } from '../../packages/connector/src/contr
 import { createPauseDriverRouter } from '../../packages/connector/src/runtime/pause-driver-router.ts'
 import { pauseFixture } from '../../packages/connector/test/moonraker-pause-fixture.ts'
 import { PauseConnectorSignallingClient } from '../../packages/connector/src/cloud/pause-signalling-client.ts'
+import { createAuthenticatedTelemetrySender } from '../../packages/connector/src/cloud/authenticated-http-telemetry.ts'
+import type { TelemetryEvent } from '../../packages/farm-protocol/src/telemetry.ts'
 import { decodeCommandV2 } from '../../packages/farm-protocol/src/command-v2.ts'
 import type { ControlObservation } from '../../packages/connector/src/control/pause-dispatcher.ts'
 import type { PauseProofsReady } from '../../packages/connector/src/webrtc/pause-control-session.ts'
@@ -548,6 +550,38 @@ export async function run() {
             throw Error('Moonraker loopback fixture failed')
           }
           progress.advance('moonraker-ready')
+
+          const sendTelemetry = createAuthenticatedTelemetrySender({
+            endpoint: url.origin + '/api/connector/telemetry',
+            token: input.claim.device_token,
+            agentId: input.claim.agent_id,
+            farmId: input.claim.farm_id,
+            audience: input.credentialAudience,
+            timeoutMs: 5000,
+            identity,
+          })
+          const observedAt = Date.now()
+          const event: TelemetryEvent = {
+            kind: 'printer-state',
+            eventId: randomUUID(),
+            queuedAt: observedAt,
+            ageAtSendMs: 0,
+            state: {
+              printerKey: input.assignment.printerKey,
+              state: 'printing',
+              progress: 0.5,
+              observedAt,
+              controls: ['pause', 'resume', 'cancel'],
+            },
+          }
+          // Ingestion commits latest state in the same transaction as this event.
+          // Acknowledge it before opening the session that triggers issuance.
+          const accepted = await sendTelemetry(
+            JSON.stringify([event]),
+            aborted.signal,
+          )
+          if (!Array.isArray(accepted) || !accepted.includes(event.eventId))
+            throw Error('Simulator control telemetry was not committed')
 
           // Resolve assignment exclusively through local registry; never accept a URL from peer/IPC.
           const registry = createPrinterBindingRegistry({

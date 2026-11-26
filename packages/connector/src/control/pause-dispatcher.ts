@@ -68,6 +68,7 @@ const Observation = z.strictObject({
     'printing',
     'paused',
     'idle',
+    'finished',
     'cancelled',
     'error',
     'unknown',

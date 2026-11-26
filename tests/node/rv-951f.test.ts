@@ -3,26 +3,6 @@ import { readFileSync } from 'node:fs'
 import { registerHooks } from 'node:module'
 import test from 'node:test'
 
-const dispatcherSource = new URL(
-  '../../packages/connector/src/control/pause-dispatcher.ts',
-  import.meta.url,
-)
-
-test('the emergency stop preemption runs after signature and live scope checks', () => {
-  const source = readFileSync(dispatcherSource, 'utf8')
-  const dispatch = source.slice(source.indexOf('    dispatch(input:'))
-  const signatureCheck = dispatch.indexOf('!(await verifyCommandV2(')
-  const scopeCheck = dispatch.indexOf('denial = live()', signatureCheck)
-  const preemption = dispatch.match(
-    /await waitForProbe\(probe\)|return preempt\(\)/,
-  )
-
-  assert.match(dispatch, /!controlRoleAllowed\(cap.role, command.action\)/)
-  assert.ok(signatureCheck >= 0)
-  assert.ok(scopeCheck > signatureCheck)
-  assert.ok(preemption?.index !== undefined && preemption.index > scopeCheck)
-})
-
 test('the Connector denies clear_hold even when the operator capability lists it', async (t) => {
   const capabilityModule = new URL(
     '../../packages/farm-protocol/src/pause-capability.ts',
@@ -61,4 +41,54 @@ test('the Connector denies clear_hold even when the operator capability lists it
   )
   assert.deepEqual(result, { kind: 'rejected', reason: 'scope' })
   assert.equal(connector.claims(), 0)
+})
+
+test('an invalid emergency stop cannot abort another user’s readiness probe', async (t) => {
+  const { encodeCommandV2 } =
+    await import('../../packages/farm-protocol/src/command-v2.ts')
+  const { held } = await import('../helpers/restart-hold-dispatch.ts')
+  const { createV2Authority, nodeSigner } =
+    await import('../helpers/command-v2-dispatch.ts')
+  const { f, c } = await held(t, ['firmware_restart'])
+  const other = await createV2Authority(await nodeSigner())
+  other.ids.account_id = 'account_2'
+  for (const field of ['farm_id', 'agent_id', 'assignment_id'] as const)
+    other.ids[field] = f.authority.ids[field]
+  Object.assign(other.binding, {
+    farm_id: other.ids.farm_id,
+    agent_id: other.ids.agent_id,
+    assignment_id: other.ids.assignment_id,
+    account_id: other.ids.account_id,
+    connector_public_key_spki: f.authority.binding.connector_public_key_spki,
+    connector_fingerprint: f.authority.binding.connector_fingerprint,
+  })
+  other.connector = f.authority.connector
+  const handle = await c.d.admitAs(other)
+  c.d.advance(5000)
+  const command = other.command(
+    {
+      action: 'emergency_stop',
+      purpose: 'printer-control',
+    },
+    Math.floor(c.d.now()),
+  )
+  // The first browser's key cannot sign commands for the second browser.
+  const invalid = encodeCommandV2(await f.authority.signer.signCommand(command))
+  const reading = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<void>()
+  f.printer.hang = true
+  f.printer.reading = reading.resolve
+  f.printer.holdPrepareOpen = release.promise
+  const pause = c.send('pause')
+  try {
+    await reading.promise
+    assert.deepEqual(await c.d.dispatch(invalid, handle), {
+      kind: 'rejected',
+      reason: 'signature',
+    })
+  } finally {
+    release.resolve()
+  }
+  assert.equal(await pause, 'applied:applied')
+  assert.deepEqual(f.sent, ['firmware_restart', 'pause'])
 })

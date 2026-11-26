@@ -49,6 +49,14 @@ export interface ConnectorRelayOptions {
     identity: ConnectorIdentity,
     report: { quotaBytes: number; usedBytes: number },
   ): Promise<boolean>
+  /**
+   * Runs `discard` only while no live record references the file, checked under
+   * the library locks (`PostgresLibrary.discardUnused`).
+   */
+  discardUnused?(
+    file: { farmId: string; sha256: string; agentId: string },
+    discard: () => Promise<void>,
+  ): Promise<void>
 }
 
 const MAX_STORAGE_REPORT_BYTES = 4096
@@ -137,10 +145,15 @@ export class ConnectorLibraryRelayHub
   private readonly pollMs: number
   private readonly authenticate: ConnectorRelayOptions['authenticate']
   private readonly recordStorage: ConnectorRelayOptions['recordStorage']
+  private readonly discardUnused: NonNullable<
+    ConnectorRelayOptions['discardUnused']
+  >
 
   constructor(options: ConnectorRelayOptions) {
     this.authenticate = options.authenticate
     this.recordStorage = options.recordStorage
+    this.discardUnused =
+      options.discardUnused ?? ((_file, discard) => discard())
     this.claimMs = options.claimMs ?? DEFAULT_CLAIM_MS
     this.runMs = options.runMs ?? DEFAULT_RUN_MS
     this.pollMs = options.pollMs ?? LIBRARY_RELAY_POLL_MS
@@ -170,11 +183,10 @@ export class ConnectorLibraryRelayHub
     const { streamed } = outcome
     if (streamed?.sha256 !== sha256 || streamed.size !== size) {
       if (created) {
-        await this.discard({
-          farmId: input.farmId,
-          agentId: input.agentId,
-          sha256,
-        }).catch(() => {})
+        // Neither the hash nor `created` is proven: a file a record points at
+        // stays. When that cannot be checked it is left to the retention sweep.
+        const file = { farmId: input.farmId, agentId: input.agentId, sha256 }
+        await this.discardUnused(file, () => this.discard(file)).catch(() => {})
       }
       throw new Error('O Conector retornou dados de integridade divergentes.')
     }

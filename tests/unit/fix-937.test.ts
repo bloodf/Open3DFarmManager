@@ -8,7 +8,7 @@ import { basename, dirname } from 'node:path'
 import { build } from 'esbuild'
 import type { Sql } from 'postgres'
 import { compileScript, parse } from 'vue/compiler-sfc'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
   catalogThrough,
   loadMigrationCatalog,
@@ -259,6 +259,23 @@ describe.skipIf(!postgresReady)('#937 migration 0128', () => {
   })
 })
 
+/** Google Chrome where installed; otherwise the helper's bundled Chromium. */
+async function pageBrowser() {
+  const options = { args: ['--disable-background-networking'] }
+  try {
+    return await launchBrowser(options)
+  } catch (error) {
+    if (!String(error).includes("distribution 'chrome' is not found"))
+      throw error
+    vi.stubEnv('OPENFARM_BROWSER', 'bundled')
+    try {
+      return await launchBrowser(options)
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  }
+}
+
 it('#937: the Integrações page lists the scope with its consent text', async () => {
   const bundle = await build({
     stdin: {
@@ -321,9 +338,7 @@ it('#937: the Integrações page lists the scope with its consent text', async (
       },
     },
   })
-  const browser = await launchBrowser({
-    args: ['--disable-background-networking'],
-  })
+  const browser = await pageBrowser()
   try {
     const page = await browser.newPage()
     page.setDefaultTimeout(5000)

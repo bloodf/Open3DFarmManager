@@ -41,13 +41,30 @@ test('scopes match the OpenAPI contract and the migration check', () => {
       .scopes,
   )
   assert.deepEqual([...INTEGRATION_SCOPES].sort(), declared.sort())
-  const scopesMigration = read(
-    'infra/db/migrations/0128_integration_emergency_scope.up.sql',
+  const inSql = (migration: string, length: number) => {
+    const list = [
+      ...read(`infra/db/migrations/${migration}.up.sql`).matchAll(
+        /ARRAY\[([^\]]+)\]::text\[\]/g,
+      ),
+    ]
+      .map((m) => m[1]!.match(/'([^']+)'/g)!.map((s) => s.slice(1, -1)))
+      .find((candidate) => candidate.length === length)
+    return [...(list ?? [])].sort()
+  }
+  // 0128 holds the current list; 0103 still holds everything before #937.
+  assert.deepEqual(
+    inSql('0128_integration_emergency_scope', declared.length),
+    declared.sort(),
   )
-  const inSql = [...scopesMigration.matchAll(/ARRAY\[([^\]]+)\]::text\[\]/g)]
-    .map((m) => m[1]!.match(/'([^']+)'/g)!.map((s) => s.slice(1, -1)))
-    .find((list) => list.length === declared.length)
-  assert.deepEqual([...(inSql ?? [])].sort(), declared.sort())
+  assert.deepEqual(
+    inSql('0103_integration_cofre3d_scopes_2', declared.length - 1),
+    declared.filter((scope) => scope !== 'control:emergency'),
+  )
+  assert.ok(
+    read(
+      'infra/db/migrations/0128_integration_emergency_scope.up.sql',
+    ).includes(`cardinality(scopes) BETWEEN 1 AND ${declared.length}`),
+  )
 })
 
 test('migration 0040 has a down file, passes the safety rules and stores no plaintext secret', () => {

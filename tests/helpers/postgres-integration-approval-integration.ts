@@ -441,8 +441,35 @@ export async function testPostgresIntegrationApproval(
     'API action targets carry only advertised stops when controls are stale or unaged',
   )
 
-  const stopGrant = await grant(['control:emergency'], true)
   const stopService = new IntegrationActionsService({ store: actionTargets })
+  // #937: control:extended no longer covers emergency stop.
+  const extendedGrant = await grant(['control:extended'], true)
+  assert.deepEqual(
+    await stopService.submit(
+      {
+        appId,
+        scopes: ['control:extended'],
+        grants: [
+          {
+            id: extendedGrant,
+            appId,
+            farmId: farm,
+            printerAssignmentId: printer,
+            scopes: ['control:extended'],
+            requiresApproval: true,
+            createdAt: 1,
+            disabledAt: null,
+            disabledReason: null,
+          },
+        ],
+      },
+      printer,
+      'stop-extended',
+      { action: 'emergency_stop', args: {} },
+    ),
+    { ok: false, problem: 'insufficient-scope' },
+  )
+  const stopGrant = await grant(['control:emergency'], true)
   const stop = await stopService.submit(
     {
       appId,

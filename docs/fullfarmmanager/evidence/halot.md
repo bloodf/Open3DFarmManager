@@ -2,7 +2,7 @@
 
 Sources read on 2026-11-26. Simulator results are not hardware evidence. OpenFarm has run nothing on a printer. Every HALOT catalog row stays unqualified.
 
-The wire protocol, its sources (H1 to H9) and their conflicts are in [the protocol note](../../protocols/halot.md). GPL-3.0 clients are among the public ones; the adapter uses wire facts only and contains no third-party code. The token test vectors and the simulator's token are values published by ResinDeck (MIT, [`test_halot.cpp`](https://github.com/alexandre-pansan/ResinDeck/blob/a00595a2e9146a4e62803fc857edde0e0e392bd8/core/tests/test_halot.cpp)). No dependency was added.
+The wire protocol, its sources (H1 to H9) and their conflicts are in [the protocol note](../../protocols/halot.md). H1 is proprietary software, read statically for interoperability; H5, H6 and H8 carry no license file; H2, H3 and H4 are MIT and H7 and H9 Apache-2.0. The adapter uses wire facts only and contains no third-party code. The token test vectors and the simulator's token are values published by ResinDeck (MIT, [`test_halot.cpp`](https://github.com/alexandre-pansan/ResinDeck/blob/a00595a2e9146a4e62803fc857edde0e0e392bd8/core/tests/test_halot.cpp)). No dependency was added.
 
 ## Models
 

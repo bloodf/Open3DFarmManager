@@ -24,7 +24,9 @@ test('v17 journal upgrades and retains prior actions; tool claims persist exact 
         "SELECT sql FROM sqlite_schema WHERE name='control_command_actions'",
       )
       .get()!.sql,
-  ).replace(",'set_tool_temperature'", '')
+  )
+    .replace(",'set_camera_stream','set_filament_slot'", '')
+    .replace(",'set_tool_temperature'", '')
   db.exec(
     `DROP TABLE control_command_restarts; DROP TABLE control_tool_temperature_args;DROP TABLE control_command_actions; ${sql}; INSERT INTO control_command_actions VALUES('retained','pause'); PRAGMA user_version=17`,
   )
@@ -90,7 +92,7 @@ test('v17 journal upgrades and retains prior actions; tool claims persist exact 
         },
         { tool: 2, target_c: 215 },
       )
-      assert.equal(read.prepare('PRAGMA user_version').get()?.user_version, 19)
+      assert.equal(read.prepare('PRAGMA user_version').get()?.user_version, 20)
     } finally {
       read.close()
     }

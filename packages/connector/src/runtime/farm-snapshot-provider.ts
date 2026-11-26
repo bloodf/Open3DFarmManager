@@ -137,6 +137,13 @@ export function createFarmSnapshotSource(input: {
     assignmentId: string,
   ) => readonly ExtendedControlAction[] | undefined
   localWebUiOriginFor?: (assignmentId: string) => string | undefined
+  /**
+   * Controls of a read-only-collected printer with a local command binding.
+   * `controlsFor` never applies to these vendors.
+   */
+  readOnlyControlsFor?: (
+    assignmentId: string,
+  ) => readonly ExtendedControlAction[] | undefined
 }) {
   if (input.assignmentRefs.length < 1 || input.assignmentRefs.length > 16)
     throw Error('Configured assignment bound')
@@ -285,13 +292,13 @@ export function createFarmSnapshotSource(input: {
         : undefined
       const provenance = entry.fieldObservedAtMonoMs
       const readOnly = readOnlyFamily(provenance)
-      // Phrozen reports progress only once the Connector advertises controls
-      // for it (a local opt-in on a qualified pair); otherwise it grants none.
+      // Phrozen without progress has no command binding yet to advertise:
+      // controls require progress (PrinterState).
       const controls = !readOnly
         ? input.controlsFor?.(ref.assignmentId)
-        : readOnly === 'phrozen' && entry.printer.progress !== undefined
-          ? (input.controlsFor?.(ref.assignmentId) ?? [])
-          : []
+        : readOnly === 'phrozen' && entry.printer.progress === undefined
+          ? []
+          : (input.readOnlyControlsFor?.(ref.assignmentId) ?? [])
       const advertisedControls =
         controls !== undefined ? { controls: [...controls] } : {}
       const {
@@ -323,7 +330,8 @@ export function createFarmSnapshotSource(input: {
           if (stamp + 5000 <= now) delete printer[field]
           else if (
             field === 'alarms' ||
-            'anycubic' in entry.fieldObservedAtMonoMs
+            'anycubic' in entry.fieldObservedAtMonoMs ||
+            'flashforge' in entry.fieldObservedAtMonoMs
           )
             wakeAt = Math.min(wakeAt, stamp + 5000)
           else until = Math.min(until, stamp + 5000)

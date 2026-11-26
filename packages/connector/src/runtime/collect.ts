@@ -1019,13 +1019,18 @@ export async function collectIntoQueue(input: {
           subscriptions.push({ done: sub.done.catch(fail) })
           continue
         }
+        // A Flashforge binding opted in to control also queues telemetry: the
+        // command issuer grants only controls the Connector advertised there.
+        const commands = binding.family === 'flashforge' && binding.control
         const options = {
           allowedOrigins: config.allowedOrigins,
           signal,
           timeoutMs: Math.min(30000, config.limits.requestTimeoutMs),
-          onObservation: (value: RawPrinterObservation) =>
-            input.onRawObservation?.(value),
-          onUnavailable: (epoch: number) =>
+          onObservation: (value: RawPrinterObservation) => {
+            input.onRawObservation?.(value)
+            if (commands) onEvent({ kind: 'snapshot', printer: value.printer })
+          },
+          onUnavailable: (epoch: number) => {
             input.onRawUnavailable?.({
               printerKey: binding.printerKey,
               epoch,
@@ -1037,7 +1042,14 @@ export async function collectIntoQueue(input: {
                       simulated: binding.simulated,
                     },
                   }),
-            }),
+            })
+            if (commands)
+              onEvent({
+                kind: 'unavailable',
+                printerKey: binding.printerKey,
+                reason: 'stale',
+              })
+          },
         }
         const sub =
           binding.family === 'prusa-link'

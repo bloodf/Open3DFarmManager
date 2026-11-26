@@ -42,7 +42,7 @@ export function openFixedPhrozenControl(input: {
   signal: AbortSignal
   pollMs?: number
   /** Local composition only; the shipped list is empty. */
-  qualifiedWrites?: readonly PhrozenQualification[] | undefined
+  phrozenQualifiedWrites?: readonly PhrozenQualification[] | undefined
 }) {
   const local = readPhrozenPrinterBinding(input.binding)
   const mapping = readPrinterBinding(input.binding)
@@ -130,7 +130,7 @@ export function openFixedPhrozenControl(input: {
     )
       throw refuse('state', 'Phrozen control unavailable')
     const { model, firmware } = adapter!.identity
-    if (!phrozenWriteQualified(model, firmware, input.qualifiedWrites))
+    if (!phrozenWriteQualified(model, firmware, input.phrozenQualifiedWrites))
       throw refuse(
         'unsupported-action',
         `Phrozen writes are not qualified for ${model} firmware ${firmware}`,

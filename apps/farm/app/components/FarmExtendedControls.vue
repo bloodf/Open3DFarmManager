@@ -5,13 +5,16 @@ import { controlActionAvailability, type Clock } from '../utils/farm-control.ts'
 import {
   advertisedExtended,
   buildExtendedArgs,
+  buildFilamentSlotArgs,
   buildToolTemperatureArgs,
   extendedLabel,
+  slotMaterials,
   speedModeOptions,
   toolHeaterOptions,
   unsupportedExtended,
   type FarmExtendedAction,
 } from '../utils/farm-control-extended.ts'
+import { filamentTrays } from '../utils/farm-macros.ts'
 const props = defineProps<{
   row: FarmRow
   keys: FarmKeyState
@@ -28,13 +31,28 @@ const emit = defineEmits<{
     event: Event,
   ): void
 }>()
+const stationSlots = computed(() =>
+  filamentTrays(props.row.observation?.state).filter((tray) => tray.station),
+)
 const actions = computed(() =>
   advertisedExtended(props.row.observation?.state.controls).filter(
     (action) =>
-      action !== 'set_tool_temperature' ||
-      (props.row.observation?.state.toolHeaters?.length ?? 0) > 0,
+      (action !== 'set_tool_temperature' ||
+        (props.row.observation?.state.toolHeaters?.length ?? 0) > 0) &&
+      (action !== 'set_filament_slot' || stationSlots.value.length > 0),
   ),
 )
+const slotForm = reactive({ tray: '', material: '', color: '#ffffff' })
+const slotArgs = computed(() =>
+  stationSlots.value.some((tray) => String(tray.id) === slotForm.tray)
+    ? buildFilamentSlotArgs(slotForm.tray, slotForm.material, slotForm.color)
+    : undefined,
+)
+function submitSlot(event: Event) {
+  const action = 'set_filament_slot'
+  if (slotArgs.value && available(action) && !props.commandInFlight)
+    emit('action', action, slotArgs.value, event)
+}
 const unsupported = computed(() =>
   unsupportedExtended(props.row.observation?.state.controls),
 )
@@ -43,6 +61,7 @@ const choices = reactive<Record<string, string>>({
   set_fan: 'part',
   set_light: 'on',
   set_speed: 'standard',
+  set_camera_stream: 'on',
 })
 const toolHeaters = computed(() =>
   toolHeaterOptions(props.row.observation?.state.toolHeaters),
@@ -167,6 +186,60 @@ function submit(action: FarmExtendedAction, event: Event) {
           step="1"
           :disabled="!available(action) || commandInFlight"
       /></label>
+      <label v-if="action === 'set_camera_stream'"
+        >Transmissão da câmera
+        <select
+          v-model="choices[action]"
+          :disabled="!available(action) || commandInFlight"
+        >
+          <option value="on">Ligar</option>
+          <option value="off">Desligar</option>
+        </select></label
+      >
+      <template v-if="action === 'set_filament_slot'">
+        <label
+          >Compartimento
+          <select
+            v-model="slotForm.tray"
+            :disabled="!available(action) || commandInFlight"
+          >
+            <option value="">Escolha um compartimento</option>
+            <option
+              v-for="item in stationSlots"
+              :key="item.id"
+              :value="String(item.id)"
+            >
+              {{ item.label }}
+            </option>
+          </select></label
+        >
+        <label
+          >Material
+          <select
+            v-model="slotForm.material"
+            :disabled="!available(action) || commandInFlight"
+          >
+            <option value="">Escolha um material</option>
+            <option v-for="name in slotMaterials" :key="name" :value="name">
+              {{ name }}
+            </option>
+          </select></label
+        >
+        <label
+          >Cor do filamento
+          <input
+            v-model="slotForm.color"
+            type="color"
+            :disabled="!available(action) || commandInFlight"
+        /></label>
+        <button
+          type="button"
+          :disabled="!available(action) || commandInFlight || !slotArgs"
+          @click="submitSlot($event)"
+        >
+          {{ extendedLabel(action) }}
+        </button>
+      </template>
       <label v-if="action === 'set_light'"
         >Luz
         <select
@@ -193,7 +266,9 @@ function submit(action: FarmExtendedAction, event: Event) {
         </select></label
       >
       <button
-        v-if="action !== 'set_tool_temperature'"
+        v-if="
+          action !== 'set_tool_temperature' && action !== 'set_filament_slot'
+        "
         type="button"
         :class="{ emergency: action === 'emergency_stop' }"
         :disabled="

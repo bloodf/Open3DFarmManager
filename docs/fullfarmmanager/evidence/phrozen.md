@@ -68,7 +68,7 @@ What a signed-in user can reach. Every write is gated on `PHROZEN_QUALIFIED_WRIT
 Refused at runtime, with the reason:
 
 - **Start (128).** A resin file starts only as a validated library version, and `resin-artifacts.ts` has no Phrozen format or printer profile. The adapter's start has no runtime caller.
-- **Video (386).** Enabling the stream writes to the printer, so it needs a signed command, and a camera session admission is not one. Elegoo switches its SDCP stream with the signed `power` action and an `sdcp-rtsp` camera source, both tied to an SDCP binding. No Phrozen equivalent is wired and no camera source was added. The adapter's video calls have no runtime caller.
+- **Video (386).** Enabling the stream writes to the printer, so it needs a signed command, and a camera session admission is not one. The protocol has a signed `set_camera_stream` action (used by Flashforge), and Elegoo switches its SDCP stream with the signed `power` action and an `sdcp-rtsp` camera source. Neither is wired for Phrozen and no camera source was added. The adapter's video calls have no runtime caller.
 - **Task usage (321).** There is nowhere to put it: the server accepts only `manual` resin entries and `PrinterState` has no resin volume field. `openPhrozenResinAccounting` has no runtime caller.
 
 The web file page accepts only `.gcode` and `.3mf`, so no browser user can pick a Phrozen file to send yet. The transfer path is exercised by `tests/journey/phrozen.spec.ts` without a browser.

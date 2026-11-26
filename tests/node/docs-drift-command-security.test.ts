@@ -143,6 +143,8 @@ const SAMPLE_ARGS: Record<ExtendedControlAction, Record<string, unknown>> = {
   set_fan: { fan: 'part', percent: 0 },
   home: { axes: ['x'] },
   set_light: { on: true },
+  set_camera_stream: { on: true },
+  set_filament_slot: { tray: 0, material: 'PLA', color: '#FFFFFF' },
   set_speed: { level: 'standard' },
   start_print: { file: 'a.gcode' },
   start_library_print: { sha256: SHA },
@@ -300,9 +302,16 @@ test('every journey path named in DRIVER-EVIDENCE.md exists', () => {
 test('journey operations are not overclaimed', () => {
   // These specs only watch status through a connection loss. phrozen.spec.ts
   // also drives a test-only qualified pair and has its own exact wording.
-  const statusOnly = ['flashforge', 'formlabs', 'qidi', 'sdcp'].map(
+  const statusOnly = ['formlabs', 'qidi', 'sdcp'].map(
     (name) => `${name}.spec.ts`,
   )
+  // flashforge.spec.ts also drives commands; each row names exactly its own.
+  const flashforge: Record<string, string> = {
+    'Flashforge Adventurer 5M Pro':
+      'status loss/recovery; shipped build: camera frames, no command or write; test-only qualification: pause, resume, nozzle, bed, part fan, camera off/on, cancel',
+    'Flashforge AD5X':
+      'test-only qualification: pause, cancel, slot record, slot load, repeated slot record refusal',
+  }
   for (const row of table(evidence, 'Brand', 'Model')) {
     const [brand, model, adapter, , , spec, run, operations] = row
     const label = `${brand} ${model}`
@@ -333,6 +342,8 @@ test('journey operations are not overclaimed', () => {
         'read-only status, connection loss and recovery; with a test-only qualification: signed pause, resume and cancel',
         label,
       )
+    else if (brand === 'Flashforge')
+      assert.equal(operations, flashforge[model!], label)
     else if (statusOnly.includes(spec!))
       assert.equal(
         operations,

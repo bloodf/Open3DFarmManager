@@ -34,6 +34,8 @@ export function actionsForControlRole(
         'start_library_print',
         'confirm_collection',
         'clear_hold',
+        'set_camera_stream',
+        'set_filament_slot',
       ].includes(action),
   ),
 ): ExtendedControlAction[] {

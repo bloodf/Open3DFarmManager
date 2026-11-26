@@ -1,4 +1,18 @@
 import { DriverRefusalError } from '../control/driver-refusal.ts'
+import {
+  FLASHFORGE_LOAD_WINDOW_MS,
+  flashforgeUnqualifiedMessage,
+  openFixedFlashforgeControl,
+} from '../flashforge/control-driver.ts'
+import {
+  FLASHFORGE_CONTROLS,
+  FLASHFORGE_QUALIFIED_WRITES,
+  flashforgeWritesQualified,
+  type FlashforgeQualification,
+} from '../flashforge/qualification.ts'
+import { readFlashforgeCredentials } from '../flashforge/config.ts'
+import { createFlashforgeAdapter } from '../flashforge/index.ts'
+import { readFlashforgePrinterBinding } from '../control/printer-binding.ts'
 import type { PhotonResinSessions } from '../anycubic-resin/collection.ts'
 import {
   openFixedPhotonResinControl,
@@ -154,6 +168,11 @@ export function createPauseDriverRouter(config: {
   photonResinQualifiedWrites?: readonly PhotonResinQualification[] | undefined
   /** SDCP camera stream state and qualification; absent means no video. */
   sdcpVideo?: SdcpVideo | undefined
+  /**
+   * Replaces the shipped Flashforge write qualification list, which is empty.
+   * For simulator tests; production composition never sets it.
+   */
+  flashforgeQualifiedWrites?: readonly FlashforgeQualification[]
   observe(
     binding: PrinterBinding,
     observation: ControlObservation | null,
@@ -176,12 +195,28 @@ export function createPauseDriverRouter(config: {
   const sdcpQualified = config.sdcpQualifiedStarts ?? SDCP_QUALIFIED_STARTS
   const phrozenQualified =
     config.phrozenQualifiedWrites ?? PHROZEN_QUALIFIED_WRITES
+  const flashforgeFirmware = new WeakMap<PrinterBinding, string>()
+  const flashforgeQualified =
+    config.flashforgeQualifiedWrites ?? FLASHFORGE_QUALIFIED_WRITES
   // KobraLink bindings are read-only handles with no command mapping, so they
   // resolve to no binding here and advertise nothing.
   function controls(binding: PrinterBinding): readonly ExtendedControlAction[] {
     const mapping = readPrinterBinding(binding)
     if (!mapping) return []
     if (readKobraLinkPrinterBinding(binding)) return KOBRALINK_CONTROLS
+    const flashforge = readFlashforgePrinterBinding(binding)
+    if (flashforge) {
+      // Every write waits for a qualified pair; unknown firmware is not one.
+      const firmware = flashforgeFirmware.get(binding)
+      return firmware !== undefined &&
+        flashforgeWritesQualified(
+          flashforge.expect.model,
+          firmware,
+          flashforgeQualified,
+        )
+        ? FLASHFORGE_CONTROLS[flashforge.expect.model]
+        : []
+    }
     const creality = readCrealityPrinterBinding(binding)
     if (creality)
       return creality.cfsFeed
@@ -270,6 +305,8 @@ export function createPauseDriverRouter(config: {
           phrozen.expect.model,
           phrozen.expect.firmware,
         )
+      if (readFlashforgePrinterBinding(binding) && !controls(binding).length)
+        return flashforgeUnqualifiedMessage()
       if (readPhotonResinPrinterBinding(binding))
         return RESIN_LIBRARY_START_MESSAGE
       const sdcp = readSdcpPrinterBinding(binding)
@@ -289,6 +326,10 @@ export function createPauseDriverRouter(config: {
       )
     },
     resultWindowMs(binding: PrinterBinding, action: ExtendedControlAction) {
+      if (readFlashforgePrinterBinding(binding))
+        return action === 'load_filament'
+          ? FLASHFORGE_LOAD_WINDOW_MS
+          : undefined
       return readKobraXPrinterBinding(binding)
         ? kobraXResultWindowMs(action)
         : undefined
@@ -317,8 +358,31 @@ export function createPauseDriverRouter(config: {
           // A failed firmware read cannot establish start qualification.
         }
       }
+      const flashforge = readFlashforgePrinterBinding(binding)
+      // Firmware is only worth asking for when the model has a qualified pair.
+      if (
+        flashforge &&
+        flashforgeQualified.some(
+          (pair) => pair.model === flashforge.expect.model,
+        )
+      ) {
+        flashforgeFirmware.delete(binding)
+        try {
+          const origin = new URL(flashforge.origin)
+          const status = await createFlashforgeAdapter({
+            host: origin.hostname,
+            port: Number(origin.port),
+            ...readFlashforgeCredentials(flashforge),
+          }).readStatus(signal)
+          if (status.model === flashforge.expect.model)
+            flashforgeFirmware.set(binding, status.firmware)
+        } catch {
+          // A failed firmware read cannot establish write qualification.
+        }
+      }
       if (
         readPrinterBinding(binding) &&
+        !flashforge &&
         !readKobraLinkPrinterBinding(binding) &&
         !readBambuPrinterBinding(binding) &&
         !readCrealityPrinterBinding(binding) &&
@@ -388,23 +452,25 @@ export function createPauseDriverRouter(config: {
       >
       try {
         fixed = (
-          readKobraLinkPrinterBinding(binding)
-            ? openFixedKobraLinkControl
-            : readKobraXPrinterBinding(binding)
-              ? openFixedKobraXControl
-              : readAnycubicPrinterBinding(binding)
-                ? openFixedAnycubicControl
-                : readPhrozenPrinterBinding(binding)
-                  ? openFixedPhrozenControl
-                  : readPhotonResinPrinterBinding(binding)
-                    ? openFixedPhotonResinControl
-                    : readSdcpPrinterBinding(binding)
-                      ? openFixedSdcpControl
-                      : readCrealityPrinterBinding(binding)
-                        ? openFixedCrealityControl
-                        : readBambuPrinterBinding(binding)
-                          ? openFixedBambuControl
-                          : openFixedMoonrakerPause
+          readFlashforgePrinterBinding(binding)
+            ? openFixedFlashforgeControl
+            : readKobraLinkPrinterBinding(binding)
+              ? openFixedKobraLinkControl
+              : readKobraXPrinterBinding(binding)
+                ? openFixedKobraXControl
+                : readAnycubicPrinterBinding(binding)
+                  ? openFixedAnycubicControl
+                  : readPhrozenPrinterBinding(binding)
+                    ? openFixedPhrozenControl
+                    : readPhotonResinPrinterBinding(binding)
+                      ? openFixedPhotonResinControl
+                      : readSdcpPrinterBinding(binding)
+                        ? openFixedSdcpControl
+                        : readCrealityPrinterBinding(binding)
+                          ? openFixedCrealityControl
+                          : readBambuPrinterBinding(binding)
+                            ? openFixedBambuControl
+                            : openFixedMoonrakerPause
         )({
           binding,
           fetch: config.kobraLinkFetch,
@@ -414,10 +480,11 @@ export function createPauseDriverRouter(config: {
           connectionGeneration: generation,
           objects: moonrakerObjects.get(binding),
           qualifiedStarts: config.sdcpQualifiedStarts,
-          qualifiedWrites: config.phrozenQualifiedWrites,
+          phrozenQualifiedWrites: config.phrozenQualifiedWrites,
           photonResinSessions: config.photonResinSessions,
           photonResinQualifiedWrites: config.photonResinQualifiedWrites,
           video: config.sdcpVideo,
+          qualifiedWrites: config.flashforgeQualifiedWrites,
           gcodeConsole: config.gcodeConsole?.(binding) === true,
           clock: config.clock,
           observeRun,

@@ -140,6 +140,12 @@ export function amsTrayIndex(slot: string): number | undefined {
   return ht ? Number(ht[1]) : undefined
 }
 
+/** Index of a material station tray (`ifs:0` to `ifs:3`, Flashforge AD5X). */
+export function stationTrayIndex(slot: string): number | undefined {
+  const station = /^ifs:([0-3])$/.exec(slot)
+  return station ? Number(station[1]) : undefined
+}
+
 /** The slot name as shown to people: AMS trays, ACE slots, holders, external. */
 export function farmSlotLabel(slot: string): string {
   const tray = amsTrayIndex(slot)
@@ -147,6 +153,8 @@ export function farmSlotLabel(slot: string): string {
     return tray >= 128
       ? `AMS HT ${tray - 127}`
       : `AMS ${Math.floor(tray / 4) + 1}, bandeja ${(tray % 4) + 1}`
+  const station = stationTrayIndex(slot)
+  if (station !== undefined) return `Compartimento ${station + 1}`
   // The second external holder of a dual-extruder Bambu printer.
   if (slot === 'external:254') return 'Bobina externa 2'
   const kobra = /^(-1|0):([0-3])$/.exec(slot)

@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import type { ChildProcess } from 'node:child_process'
 
+type FixtureRequest = 'upgrade-drop' | 'pause-telemetry-ready'
+
 let initialized = false
 let broken = false
-let pending: { id: string; finish(error?: Error): void } | undefined
+let pending:
+  { id: string; kind: FixtureRequest; finish(error?: Error): void } | undefined
 function initializeClient() {
   if (initialized) return
   initialized = true
@@ -13,7 +16,7 @@ function initializeClient() {
       !value ||
       typeof value !== 'object' ||
       !('kind' in value) ||
-      value.kind !== 'upgrade-drop-result' ||
+      value.kind !== `${pending.kind}-result` ||
       !('id' in value) ||
       value.id !== pending.id ||
       !('ok' in value) ||
@@ -32,7 +35,10 @@ function initializeClient() {
     pending?.finish(new Error('Fixture IPC disconnected'))
   })
 }
-export function requestProxyDisconnect(): Promise<void> {
+function requestFixtureAction(
+  kind: FixtureRequest,
+  timeoutMs: number,
+): Promise<void> {
   initializeClient()
   if (!process.send || !process.connected || broken || pending)
     return Promise.reject(new Error('Fixture IPC unavailable or busy'))
@@ -42,9 +48,10 @@ export function requestProxyDisconnect(): Promise<void> {
       broken = true
       pending?.finish(new Error('Fixture IPC timeout'))
       if (process.connected) process.disconnect()
-    }, 5000)
+    }, timeoutMs)
     pending = {
       id,
+      kind,
       finish(error) {
         clearTimeout(timer)
         pending = undefined
@@ -52,23 +59,27 @@ export function requestProxyDisconnect(): Promise<void> {
         else resolve()
       },
     }
-    process.send!(
-      { kind: 'upgrade-drop', id },
-      undefined,
-      undefined,
-      (error: Error | null) => {
-        if (error) {
-          broken = true
-          pending?.finish(new Error('Fixture IPC send failed'))
-        }
-      },
-    )
+    process.send!({ kind, id }, undefined, undefined, (error: Error | null) => {
+      if (error) {
+        broken = true
+        pending?.finish(new Error('Fixture IPC send failed'))
+      }
+    })
   })
+}
+
+export function requestProxyDisconnect(): Promise<void> {
+  return requestFixtureAction('upgrade-drop', 5000)
+}
+
+export function requestPauseTelemetryReady(): Promise<void> {
+  return requestFixtureAction('pause-telemetry-ready', 12000)
 }
 
 export function serveProxyDisconnect(
   child: ChildProcess,
   disconnect: () => Promise<void>,
+  waitForPauseTelemetry?: () => Promise<void>,
 ): void {
   let busy = false
   const seen = new Set<string>()
@@ -77,7 +88,8 @@ export function serveProxyDisconnect(
       !value ||
       typeof value !== 'object' ||
       !('kind' in value) ||
-      value.kind !== 'upgrade-drop' ||
+      (value.kind !== 'upgrade-drop' &&
+        !(value.kind === 'pause-telemetry-ready' && waitForPauseTelemetry)) ||
       !('id' in value) ||
       typeof value.id !== 'string' ||
       !/^[0-9a-f-]{36}$/.test(value.id) ||
@@ -89,14 +101,15 @@ export function serveProxyDisconnect(
       child.kill('SIGTERM')
       return
     }
-    const id = value.id
+    const { id, kind } = value
     busy = true
     seen.add(id)
-    void disconnect()
+    const action = kind === 'upgrade-drop' ? disconnect : waitForPauseTelemetry!
+    void action()
       .then(() => {
         if (!child.connected || !child.send)
           throw new Error('Fixture IPC disconnected')
-        child.send({ kind: 'upgrade-drop-result', id, ok: true }, (error) => {
+        child.send({ kind: `${kind}-result`, id, ok: true }, (error) => {
           if (error) child.kill('SIGTERM')
         })
       })

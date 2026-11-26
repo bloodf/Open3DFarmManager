@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto'
 import type { SpoolmanSnapshot } from '../../packages/connector/src/runtime/spoolman-provider.ts'
 import type { RawMoonrakerObservation } from '../../packages/connector/src/moonraker/subscription.ts'
 import { createFarmSnapshotSource } from '../../packages/connector/src/runtime/farm-snapshot-provider.ts'
+import { connectorVersionMetadata } from '../../packages/connector/src/status/version.ts'
+import { MAX_RTC_APPLICATION_BYTES } from '../../packages/connector/src/webrtc/rtc-proof-inbox.ts'
 import type {
   FarmSnapshotProvider,
   CompleteFarmSnapshot,
@@ -488,6 +490,14 @@ test('spool mirror rides on snapshots: bounded, sorted, stale-aware and omitted 
   }
 })
 
+const wireHeader = {
+  t: 'snapshot',
+  seq: 1024,
+  ...connectorVersionMetadata,
+  rtcScope: 'loopback',
+  storage: 'degraded',
+}
+
 function* crowded() {
   // Printer sets that fit alone but leave little room for spools.
   for (let count = 4; count <= 16; count++)
@@ -497,8 +507,7 @@ function* crowded() {
         (_, i) => `${String(i).padStart(2, '0')}${'k'.repeat(length - 2)}`,
       )
       const size = JSON.stringify({
-        t: 'snapshot',
-        seq: 1024,
+        ...wireHeader,
         printers: keys.map((printerKey) => ({
           printerKey,
           state: 'printing',
@@ -519,13 +528,12 @@ function emitWithSpools(keys: string[]) {
     assert.ok(last)
     const bytes = new TextEncoder().encode(
       JSON.stringify({
-        t: 'snapshot',
-        seq: 1024,
+        ...wireHeader,
         printers: last.printers,
         ...(last.inventory ? { inventory: last.inventory } : {}),
       }),
     ).byteLength
-    assert.ok(bytes <= 2048)
+    assert.ok(bytes <= MAX_RTC_APPLICATION_BYTES)
     return last.inventory
   } finally {
     f.source.close()
@@ -539,8 +547,10 @@ test('crowded frames drop spools to fit with an honest total', () => {
   assert.equal(inv.total, 30)
   assert.ok(inv.spools.length > 0 && inv.spools.length < 8)
 })
-test('inventory is omitted when even zero spools cannot fit, printers still flow', () => {
-  const full = [...crowded()].find((c) => c.size >= 1990 && c.size <= 2048)
+test('inventory leaves room for first-frame metadata and degraded storage', () => {
+  const full = [...crowded()].find(
+    (c) => c.size >= 1990 && c.size <= MAX_RTC_APPLICATION_BYTES,
+  )
   assert.ok(full)
   assert.equal(emitWithSpools(full.keys), undefined)
 })

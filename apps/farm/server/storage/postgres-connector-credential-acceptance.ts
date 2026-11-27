@@ -452,40 +452,6 @@ export class PostgresConnectorCredentialAcceptance {
           )
             return deny
           if (now < firstNow || now < slot.observed_at) return deny
-          if (now < slot.next_attempt_at)
-            return busy(slot.next_attempt_at - now)
-          // Bound active cryptographic transactions across processes in this database, without per-request rows.
-          if (!admitted) {
-            const admission =
-              await tx`SELECT n FROM generate_series(0,31) n WHERE pg_try_advisory_xact_lock(1870014,n) LIMIT 1`
-            if (!admission.length) return busy(1000)
-          }
-          const publicKey = this.config.publicKeys.get(credential.kid)
-          if (!publicKey) return deny
-          let claims: Awaited<ReturnType<typeof verifyConnectorCredential>>
-          try {
-            claims = await verifyConnectorCredential({
-              token: request.token,
-              issuer: this.config.issuer,
-              audience: this.config.audience,
-              publicKeys: new Map([[credential.kid, publicKey]]),
-              ttlSeconds: this.config.ttlSeconds,
-              nowSeconds: Math.floor(now / 1000),
-              agentId: request.agentId,
-              farmId: request.farmId,
-              publicKeySpki: enrollment.public_key_spki,
-            })
-          } catch {
-            return deny
-          }
-          const verifiedAt = readNow()
-          if (verifiedAt < now) return deny
-          if (credential.expires_at * 1000 <= verifiedAt) {
-            await expireCredential(verifiedAt)
-            return deny
-          }
-          await tx`UPDATE ${table} SET observed_at=${verifiedAt},next_attempt_at=${verifiedAt + 1000} WHERE ${proofWhere}`
-          if (!matchesCredential(claims, credential)) return deny
           const tokenHash = createHash('sha256')
             .update(request.token)
             .digest('base64url')
@@ -535,19 +501,93 @@ export class PostgresConnectorCredentialAcceptance {
           const expireProof = async (observedAt: number) => {
             await tx`UPDATE ${table} SET observed_at=${observedAt},status='expired',consumed_at=${observedAt} WHERE ${proofWhere} AND status='pending'`
           }
+          // A telemetry proof is checked against the slot's current challenge
+          // before it may touch the shared cooldown. A superseded proof (a
+          // later issuance, such as an interactive admission, moved the slot
+          // to a newer generation) or a lapsed current one is denied here: it
+          // neither waits for nor advances next_attempt_at, takes no admission
+          // lock and leaves the failure counter alone, so it cannot consume
+          // time reserved for the interactive proof that now owns the slot.
+          // Every other proof, including a replay of a challenge this slot
+          // already consumed, keeps the full path below unchanged.
+          if (completion && operation.kind === 'telemetry' && proof?.success) {
+            if (proof.data.challenge.generation < slot.generation) return deny
+            if (
+              slot.status === 'pending' &&
+              sameContext &&
+              slot.expires_at !== null &&
+              now >= slot.expires_at &&
+              canonicalize(proof.data.challenge) ===
+                canonicalize(challengeFor(slot))
+            ) {
+              await expireProof(now)
+              return deny
+            }
+          }
+          if (now < slot.next_attempt_at)
+            return busy(slot.next_attempt_at - now)
+          // Bound active cryptographic transactions across processes in this database, without per-request rows.
+          if (!admitted) {
+            const admission =
+              await tx`SELECT n FROM generate_series(0,31) n WHERE pg_try_advisory_xact_lock(1870014,n) LIMIT 1`
+            if (!admission.length) return busy(1000)
+          }
+          const publicKey = this.config.publicKeys.get(credential.kid)
+          if (!publicKey) return deny
+          let claims: Awaited<ReturnType<typeof verifyConnectorCredential>>
+          try {
+            claims = await verifyConnectorCredential({
+              token: request.token,
+              issuer: this.config.issuer,
+              audience: this.config.audience,
+              publicKeys: new Map([[credential.kid, publicKey]]),
+              ttlSeconds: this.config.ttlSeconds,
+              nowSeconds: Math.floor(now / 1000),
+              agentId: request.agentId,
+              farmId: request.farmId,
+              publicKeySpki: enrollment.public_key_spki,
+            })
+          } catch {
+            return deny
+          }
+          const verifiedAt = readNow()
+          if (verifiedAt < now) return deny
+          if (credential.expires_at * 1000 <= verifiedAt) {
+            await expireCredential(verifiedAt)
+            return deny
+          }
+          await tx`UPDATE ${table} SET observed_at=${verifiedAt},next_attempt_at=${verifiedAt + 1000} WHERE ${proofWhere}`
+          if (!matchesCredential(claims, credential)) return deny
           if (!completion) {
             if (
               slot.status === 'pending' &&
               slot.expires_at !== null &&
               verifiedAt < slot.expires_at
-            )
-              return sameContext
-                ? retainIdentity({
-                    ok: true,
-                    kind: 'challenge',
-                    challenge: challengeFor(slot),
-                  })
-                : busy(slot.expires_at - verifiedAt)
+            ) {
+              if (sameContext)
+                return retainIdentity({
+                  ok: true,
+                  kind: 'challenge',
+                  challenge: challengeFor(slot),
+                })
+              // One slot serves every proof of this credential. Telemetry
+              // uploads keep it pending for most of each second, so a WebRTC
+              // admission waiting for that challenge to lapse can miss its
+              // own deadline. An interactive (generic) issuance therefore
+              // retires a pending telemetry challenge. That challenge then
+              // fails closed under this row lock: its proof finds the slot
+              // expired, nothing was committed for it, and the Connector
+              // keeps the batch for a later upload. Telemetry never retires
+              // another challenge, and generic challenges never replace each
+              // other.
+              if (
+                operation.kind !== 'generic' ||
+                this.config.purpose === 'telemetry-ingestion' ||
+                slot.proof_version !== 2
+              )
+                return busy(slot.expires_at - verifiedAt)
+              await expireProof(verifiedAt)
+            }
             if (slot.generation >= Number.MAX_SAFE_INTEGER) return deny
             const expiresAt = Math.min(
               verifiedAt + this.config.proofTtlMs,

@@ -21,6 +21,7 @@ import { DriverRefusalError } from '../control/driver-refusal.ts'
 import { readHalotPassword } from './config.ts'
 import {
   halotControls,
+  HALOT_QUALIFIED_WRITES,
   halotUnqualifiedMessage,
   HALOT_START_MESSAGE,
   type HalotQualification,
@@ -49,20 +50,16 @@ const OPERATIONS: Record<
   },
   resume: {
     command: 'PRINT_PAUSE',
-    from: ['PRINT_PAUSE', 'PRINT_STOP'],
+    from: ['PRINT_PAUSE'],
     reached: ['PRINT_PROCESSING'],
   },
   // PRINT_STOP may mean paused, so it never confirms a stop.
   cancel: {
     command: 'PRINT_STOP',
     from: ['PRINT_PROCESSING', 'PRINT_PAUSE', 'PRINT_STOP'],
-    reached: ['PRINT_END', 'PRINT_GENERAL'],
+    reached: [],
   },
 }
-
-// An unconfirmed write holds every later one to that printer until the
-// Connector restarts: a late pause followed by another would resume the job.
-const held = new WeakSet<PrinterBinding>()
 
 /** Inside the dispatcher's result window. */
 const CONFIRM_TIMEOUT_MS = 4000
@@ -183,24 +180,35 @@ export function openFixedHalotControl(input: {
       readHalotPrinterBinding(input.binding) !== local
     )
       throw refuse('state', 'HALOT control unavailable')
-    if (held.has(input.binding))
-      throw refuse(
-        'state',
-        'HALOT uncertain result unacknowledged',
-        'O resultado do comando anterior não foi confirmado. Confira a impressora e reinicie o Connector.',
-      )
     attempted = true
     try {
       await refresh()
     } catch {
       throw refuse('state', 'HALOT status is unavailable')
     }
-    if (filename !== preparedFile || !operation.from.includes(wire))
+    const qualification = (
+      input.halotQualifiedWrites ?? HALOT_QUALIFIED_WRITES
+    ).find((entry) => entry.model === model && entry.operation === name)
+    const from =
+      name === 'resume'
+        ? (qualification?.resumeFrom ?? operation.from)
+        : operation.from
+    const reached =
+      name === 'cancel'
+        ? (qualification?.cancelReached ?? []).filter(
+            (word) =>
+              word !== 'PRINT_END' &&
+              word !== 'PRINT_GENERAL' &&
+              word !== 'PRINT_COMPLETE',
+          )
+        : operation.reached
+    if (filename !== preparedFile || !from.includes(wire))
       throw refuse('state', `HALOT ${name} does not apply to ${wire}`)
     let permitted: boolean | undefined
     const sent = session!.write(operation.command, () => {
       if (stopped || request.signal.aborted) return false
       sentMono = input.clock.monotonicNow()
+      // The dispatcher journal is the authoritative hold, including after rebinding.
       permitted = request.beforeSend()
       return permitted
     })
@@ -208,15 +216,13 @@ export function openFixedHalotControl(input: {
       if (permitted === false) throw failure()
       throw refuse('state', 'HALOT command was not sent')
     }
-    // Held from the send until a status reply confirms the effect.
-    held.add(input.binding)
     const deadline =
       performance.now() + (input.confirmTimeoutMs ?? CONFIRM_TIMEOUT_MS)
     // Reads only. A command is never sent again.
     for (;;) {
       await refresh()
       if (
-        operation.reached.includes(wire) &&
+        reached.includes(wire) &&
         // A stopped job keeps its name or none; another name is another job.
         (filename === preparedFile || (name === 'cancel' && !filename))
       )
@@ -227,7 +233,6 @@ export function openFixedHalotControl(input: {
         signal: controller.signal,
       })
     }
-    held.delete(input.binding)
     confirmed = name
     await refresh()
     return { acknowledged: true }

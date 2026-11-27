@@ -108,7 +108,7 @@ export async function startStatusFixture(
     }
   }
   if (name === 'halot') {
-    const simulator = await startHalotSimulator()
+    const simulator = await startHalotSimulator({ stopWord: 'TEST_CANCELLED' })
     simulator.beginPrint('part.cxdlpv4')
     const origin = `ws://127.0.0.1:${simulator.port}`
     const passwordFile = join(directory, 'halot-password.json')

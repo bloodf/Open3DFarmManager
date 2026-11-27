@@ -46,22 +46,25 @@ By model:
 
 ## Operations
 
-| Operation      | Evidence                               | Connector behavior                                                                                                                     |
-| -------------- | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Status         | H1, H2, H4, H5                         | Poll every second. State, file name, layers, progress and remaining time.                                                              |
-| Pause, resume  | H2, H4, H5, H7 (`PRINT_PAUSE` toggles) | Not qualified. With a qualification: sent once, only from the matching state and for the job seen at preparation; confirmed by status. |
-| Stop           | H2, H4, H5, H7                         | Not qualified. With a qualification: sent once for an active job; confirmed only by `PRINT_END` or `PRINT_GENERAL`.                    |
-| Upload         | H4, H5, H6                             | Not implemented: H5 finds it deletes files already on the printer, and sources disagree on its replies.                                |
-| Start          | H4, H8                                 | Not implemented: no validated resin file format in OpenFarm, and H5 finds no direct start in the CL-60 handler.                        |
-| Print settings | H2, H5                                 | Not implemented.                                                                                                                       |
+| Operation      | Evidence                               | Connector behavior                                                                                                                                        |
+| -------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Status         | H1, H2, H4, H5                         | Poll every second. State, file name, layers, progress and remaining time.                                                                                 |
+| Pause, resume  | H2, H4, H5, H7 (`PRINT_PAUSE` toggles) | Not qualified. With a qualification: sent once, only from the matching state and for the job seen at preparation; confirmed by status.                    |
+| Stop           | H2, H4, H5, H7                         | Not qualified. With a qualification: sent once for an active job. Confirmation requires evidence specific to a stop and consistent with the prepared job. |
+| Upload         | H4, H5, H6                             | Not implemented: H5 finds it deletes files already on the printer, and sources disagree on its replies.                                                   |
+| Start          | H4, H8                                 | Not implemented: no validated resin file format in OpenFarm, and H5 finds no direct start in the CL-60 handler.                                           |
+| Print settings | H2, H5                                 | Not implemented.                                                                                                                                          |
 
-`HALOT_QUALIFIED_WRITES` in `packages/connector/src/halot/qualification.ts` is empty. Neither the runtime file nor the wire can add an entry. An unconfirmed write blocks every later one to that printer until the Connector restarts, because a late pause followed by another would resume the job.
+`HALOT_QUALIFIED_WRITES` in `packages/connector/src/halot/qualification.ts` is empty. Neither the runtime file nor the wire can add an entry. The Connector journal holds further writes to the printer after an unconfirmed write, including after a restart or binding rebuild. The hold is released by `clear_hold` after reconciliation. An uncertain command is never resent automatically.
 
 ## What owner hardware must show before a write is qualified
 
 1. Which token form the printer accepts, and its firmware version.
-2. The `printStatus` words after pause, resume and stop. A resume or stop confirmation that never arrives leaves the command uncertain.
+2. The `printStatus` words after pause, resume, stop and natural completion. Record the model's verified resume states in `resumeFrom` and stop-specific confirmation states in `cancelReached`. The default resume state is `PRINT_PAUSE`. Include `PRINT_STOP` in `resumeFrom` only if owner hardware shows it means paused on that model and firmware. `PRINT_END`, `PRINT_GENERAL` and `PRINT_COMPLETE` can follow natural completion and cannot confirm a stop. A missing or ambiguous confirmation leaves the command uncertain.
 3. That `PRINT_PAUSE` on a paused job resumes it, and does nothing on an idle printer.
+4. How the Connector can verify it still targets the intended physical printer after an IP change or reassignment. Test with a second HALOT that accepts the same password. Both units can return the same version and accept the same token. [Issue #967](https://github.com/bloodf/Open3DFarmManager/issues/967)
+
+Add a qualification entry only after owner hardware evidence meets all four requirements for the model and firmware, including the IP reassignment check.
 
 ## Simulator
 
@@ -69,4 +72,5 @@ By model:
 
 - `tests/node/halot-protocol.test.ts`: tokens, session, status words, configuration, loss and recovery.
 - `tests/node/halot-runtime.test.ts`: empty list, guarded writes, runtime file.
+- `tests/node/fix-967.test.ts`: single-send latch, stop confirmation, journal holds across rebinding, and model-specific resume states.
 - `tests/journey/halot.spec.ts`: browser read-only status with loss and recovery; with a test-only qualification, signed pause, resume and cancel.

@@ -140,7 +140,7 @@ if (journeyEnabled()) {
       expect(await lifecycle('Cancelar', 'Confirmar cancelamento')).toContain(
         'confirmou',
       )
-      expect(halot.machine.printStatus).toBe('PRINT_END')
+      expect(halot.machine.printStatus).toBe('TEST_CANCELLED')
       expect(halot.writes()).toEqual([
         'PRINT_PAUSE',
         'PRINT_PAUSE',

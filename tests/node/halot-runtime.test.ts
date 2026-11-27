@@ -32,6 +32,10 @@ const OFFERED = ['pause', 'resume', 'cancel'] as const
 const QUALIFIED: HalotQualification[] = OFFERED.map((operation) => ({
   operation,
   model: MODEL,
+  ...(operation === 'resume'
+    ? { resumeFrom: ['PRINT_PAUSE', 'PRINT_STOP'] }
+    : {}),
+  ...(operation === 'cancel' ? { cancelReached: ['TEST_CANCELLED'] } : {}),
 }))
 
 async function printer(
@@ -161,13 +165,16 @@ test('only the qualified operations of the declared model are offered', async (t
 
 test('pause, resume and stop are sent once and confirmed by status', async (t) => {
   for (const pauseWord of ['PRINT_PAUSE', 'PRINT_STOP'] as const) {
-    const { sim, binding } = await printer(t, { pauseWord })
+    const { sim, binding } = await printer(t, {
+      pauseWord,
+      stopWord: 'TEST_CANCELLED',
+    })
     assert.deepEqual(await attempt(binding, 'pause'), { acknowledged: true })
     assert.equal(sim.machine.printStatus, pauseWord)
     assert.deepEqual(await attempt(binding, 'resume'), { acknowledged: true })
     assert.equal(sim.machine.printStatus, 'PRINT_PROCESSING')
     assert.deepEqual(await attempt(binding, 'cancel'), { acknowledged: true })
-    assert.equal(sim.machine.printStatus, 'PRINT_END')
+    assert.equal(sim.machine.printStatus, 'TEST_CANCELLED')
     assert.deepEqual(sim.writes(), ['PRINT_PAUSE', 'PRINT_PAUSE', 'PRINT_STOP'])
   }
 })
@@ -204,7 +211,7 @@ test('a denied write guard sends nothing', async (t) => {
   assert.deepEqual(sim.writes(), [])
 })
 
-test('an unapplied command stays uncertain and holds later writes', async (t) => {
+test('an unapplied command stays uncertain and is sent only once', async (t) => {
   const { sim, binding } = await printer(t)
   sim.setFault('ignore')
   await assert.rejects(
@@ -214,25 +221,15 @@ test('an unapplied command stays uncertain and holds later writes', async (t) =>
       /uncertain/.test((error as Error).message),
   )
   assert.deepEqual(sim.writes(), ['PRINT_PAUSE'])
-  // A second toggle could undo a late first one, even once the printer answers.
-  sim.setFault()
-  for (const action of OFFERED)
-    await assert.rejects(attempt(binding, action), refusal('state'), action)
-  assert.deepEqual(sim.writes(), ['PRINT_PAUSE'])
 })
 
-test('PRINT_STOP may mean paused, so it never confirms a stop', async (t) => {
-  const { sim, binding } = await printer(t, { stopWord: 'PRINT_STOP' })
-  await assert.rejects(
-    attempt(binding, 'cancel'),
-    (error: unknown) =>
-      !(error instanceof DriverRefusalError) &&
-      /uncertain/.test((error as Error).message),
-  )
+test('a natural finish does not confirm a stop', async (t) => {
+  const { sim, binding } = await printer(t)
+  await assert.rejects(attempt(binding, 'cancel'), /uncertain/)
   assert.deepEqual(sim.writes(), ['PRINT_STOP'])
 })
 
-test('a write whose link drops before confirmation is held too', async (t) => {
+test('a write whose link drops before confirmation is uncertain', async (t) => {
   const { sim, binding } = await printer(t)
   await assert.rejects(
     attempt(binding, 'cancel', () => {
@@ -241,8 +238,6 @@ test('a write whose link drops before confirmation is held too', async (t) => {
     }),
     (error: unknown) => !(error instanceof DriverRefusalError),
   )
-  sim.setFault()
-  await assert.rejects(attempt(binding, 'cancel'), refusal('state'))
   assert.deepEqual(sim.writes(), ['PRINT_STOP'])
 })
 
@@ -338,4 +333,18 @@ test('the runtime file reads a printer read-only until opted in and qualified', 
   )
   await writeFile(local.passwordFile, '{}', { mode: 0o600 })
   await assert.rejects(read(config), /Invalid private HALOT password file/)
+})
+
+test('PRINT_STOP is not a default stop confirmation', async (t) => {
+  const { sim, binding } = await printer(t, { stopWord: 'PRINT_STOP' })
+  const qualified = QUALIFIED.map((entry) =>
+    entry.operation === 'cancel'
+      ? { operation: 'cancel' as const, model: MODEL }
+      : entry,
+  )
+  await assert.rejects(
+    attempt(binding, 'cancel', () => true, qualified),
+    /uncertain/,
+  )
+  assert.deepEqual(sim.writes(), ['PRINT_STOP'])
 })

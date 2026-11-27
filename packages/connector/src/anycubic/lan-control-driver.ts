@@ -24,6 +24,7 @@ import {
   readPrinterBinding,
   type PrinterBinding,
 } from '../control/printer-binding.ts'
+import { isAnycubicFaultCode } from './alerts.ts'
 import {
   buildAnycubicControlCommand,
   anycubicControls,
@@ -185,6 +186,27 @@ export async function readAnycubicFirmware(
   }
 }
 
+/**
+ * An `info/report` whose job says it was cancelled or stopped without a fault
+ * code (`stoped` with one is a job the printer ended itself, see `alerts.ts`).
+ */
+function reportsCancelledJob(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false
+  const envelope = value as { code?: unknown; data?: unknown }
+  const data = envelope.data as { project?: unknown } | null | undefined
+  const project =
+    data?.project && typeof data.project === 'object'
+      ? (data.project as { state?: unknown; code?: unknown })
+      : undefined
+  const state = project?.state
+  if (state === 'canceled' || state === 'cancelled') return true
+  return (
+    (state === 'stoped' || state === 'stopped') &&
+    !isAnycubicFaultCode(envelope.code) &&
+    !isAnycubicFaultCode(project?.code)
+  )
+}
+
 export function openQualifiedAnycubicControl(input: {
   binding: PrinterBinding
   connectionGeneration: number
@@ -330,7 +352,12 @@ export function openQualifiedAnycubicControl(input: {
       }
       const decoded = decodeAnycubicReport(payload, local.modelId)
       const state = 'state' in decoded ? decoded.state : undefined
+      // Only the printer's own word ends a cancel. `idle` alone is also what a
+      // job that just finished looks like, so it leaves the outcome unknown.
+      const cancelled =
+        action === 'cancel' && attempted && reportsCancelledJob(value)
       if (
+        !cancelled &&
         state !== 'printing' &&
         state !== 'paused' &&
         state !== 'idle' &&
@@ -344,12 +371,11 @@ export function openQualifiedAnycubicControl(input: {
         connectionGeneration: input.connectionGeneration,
         sequence: ++sequence,
         ready: true,
-        printState:
-          state === 'printing' || state === 'paused' || state === 'finished'
+        printState: cancelled
+          ? 'cancelled'
+          : state === 'printing' || state === 'paused' || state === 'finished'
             ? state
-            : state === 'idle' && action === 'cancel' && attempted
-              ? 'cancelled'
-              : 'idle',
+            : 'idle',
         readyObservedMono: now,
         printStateObservedMono: now,
         receivedMono: now,

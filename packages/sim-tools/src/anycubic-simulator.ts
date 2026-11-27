@@ -269,6 +269,18 @@ export async function startAnycubicSimulator({
       (lifecycle === 'printing' || lifecycle === 'paused')
     ) {
       stopTimer()
+      // Synthetic, never captured: the job reads `canceled` once before the
+      // printer reads `free`, the explicit evidence a cancel needs (a bare
+      // `free` is also what a job that just finished looks like).
+      if (online)
+        brokerRef?.control.publish(
+          reportTopic,
+          envelope('info', 'report', {
+            version: firmware,
+            state: 'busy',
+            project: { state: 'canceled', progress },
+          }),
+        )
       lifecycle = 'idle'
     } else if (!['pause', 'resume', 'stop'].includes(raw.action))
       throw new Error('Invalid request')
